@@ -286,6 +286,35 @@ class InteractionHistoryImportServiceTest {
     }
 
     @Test
+    void manualReviewResolvesStrongAmbiguityWithoutOverridingUnrelatedEvidence() {
+        HistoryImportRequest first = activityRequest(
+            "manual-ambiguous", "Reviewed ambiguity", "2026-01-01T00:00:00Z");
+        HistoryImportRequest second = activityRequest(
+            "manual-conflict", "Conflicting selection", "2026-01-02T00:00:00Z");
+        HistoryImportRequest request = new HistoryImportRequest(
+            List.of(first.getRows().getFirst(), second.getRows().getFirst()),
+            first.getMapping(),
+            Map.of(0, PERSON_ID, 1, PERSON_ID),
+            null);
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(PERSON_ID)))
+            .thenReturn(List.of(person(PERSON_ID, WORKSPACE_ID)));
+        queuePreview(List.of(
+            response(List.of(
+                candidate(PERSON_ID, true, DuplicateMatchStrength.STRONG),
+                candidate(102, true, DuplicateMatchStrength.STRONG)), false),
+            strongResponse(102)),
+            PROOF);
+
+        HistoryImportPreviewResult preview = service.previewActivities(request);
+
+        assertEquals(1, preview.toCreate());
+        assertEquals(1, preview.needsReview());
+        assertEquals("ready", preview.rows().getFirst().status());
+        assertEquals(PERSON_ID, preview.rows().getFirst().participantId());
+        assertEquals("needs_review", preview.rows().get(1).status());
+    }
+
+    @Test
     void validatesBoundsFutureDatesAndStrictTaskValuesBeforeWriting() {
         List<Map<String, String>> tooManyRows = new ArrayList<>();
         Map<String, String> row = Map.of(

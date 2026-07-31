@@ -20,13 +20,25 @@ function isRunFixture(value: unknown): value is RunFixture {
         || typeof value.email !== "string"
         || typeof value.workspaceId !== "number"
         || typeof value.companyName !== "string"
+        || typeof value.ambiguityEmail !== "string"
+        || typeof value.ambiguityEmailJa !== "string"
         || !isRecord(contacts)
         || !isRecord(companies)
         || !isRecord(deals)
         || !isRecord(activities)) {
         return false;
     }
-    return ["peek", "edit", "activity", "search", "archive"]
+    return [
+        "peek",
+        "edit",
+        "activity",
+        "search",
+        "archive",
+        "ambiguityPrimary",
+        "ambiguitySecondary",
+        "ambiguityPrimaryJa",
+        "ambiguitySecondaryJa",
+    ]
         .every((key) => isSeededRecord(contacts[key]))
         && isSeededRecord(companies.primary)
         && isSeededRecord(companies.archive)

@@ -3,7 +3,7 @@
 The frontend has two test layers, both living in `frontend/`:
 
 - **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
-- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving eleven critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
+- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving thirteen critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
 
 ## Running locally
 
@@ -40,7 +40,7 @@ The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` a
 
 1. `POST /api/auth/register` with a unique per-run username. Under the dev profile this single call **registers, logs in, creates a default workspace, and marks the email verified**, returning `JSESSIONID` (HttpOnly session) and `connex_workspace` (tenant selector) cookies.
 2. The API request context's cookies are persisted as project-scoped Playwright **storage state** (`test/e2e/.artifacts/{desktop,mobile}/storage-state.json`, gitignored), so desktop and phone runs never share an authenticated tenant.
-3. Seed data (a company, five contacts, a pipeline/stage, three deals) is created through the API. Writes need the CSRF token from `GET /api/auth/csrf` (register/login are exempt) and are pinned to the tenant with `X-Workspace-Id`.
+3. Seed data (a company, five isolated flow contacts, separate EN/JA two-contact exact-match collisions, a pipeline/stage, and three deals) is created through the API. Writes need the CSRF token from `GET /api/auth/csrf` (register/login are exempt) and are pinned to the tenant with `X-Workspace-Id`.
 4. Seeded ids/names go into `test/e2e/.artifacts/{desktop,mobile}/run.json`, which specs select from `testInfo.project.name` via `test/e2e/support/fixtures.ts`.
 
 Because each browser project registers a **fresh user and workspace**, desktop and phone runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).
@@ -108,7 +108,7 @@ bash gradlew seedData -PseederProfile=small -PseederSeed=853 -PseederWorkspaces=
 
 Then boot the backend against that same schema. Every seeded user's password is `seeder-password`; treat any schema the seeder touched as compromised for authentication.
 
-## The eleven flows
+## The thirteen flows
 
 | Spec | Flow |
 | --- | --- |
@@ -121,6 +121,8 @@ Then boot the backend against that same schema. Every seeded user's password is 
 | `analytics.spec.ts` | range/granularity switching updates URL, pressed state, offered grains, and panels (#866 surface) |
 | `search.spec.ts` | toolbar search finds a seeded contact and opens its record |
 | `import-preflight.spec.ts` | CSV preview exposes exact and ambiguous duplicate-review decisions before commit |
+| `interaction-history-import.spec.ts` | EN/JA desktop/phone historical activity import and replay suppression |
+| `wave2-evaluator.spec.ts` | EN/JA desktop/phone CSV ambiguity review → evidence-backed insight → safe action, with three identical submissions |
 | `archive-records.spec.ts` | contact/company archive visibility and restore round trips through the record browser |
 | `mobile-record-lists.spec.ts` | Pixel-width contacts/companies/deals/tasks use list rows, mobile sheets filter/sort, and the stored desktop mode survives the forced phone presentation |
 

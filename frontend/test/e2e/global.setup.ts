@@ -8,7 +8,49 @@ import {
     storageStatePath,
     tenantScopeForProject,
 } from "../../playwright.config";
-import { csrfBootstrap, activeWorkspaceId, registerUser, seeder, type RunFixture } from "./support/api";
+import {
+    csrfBootstrap,
+    activeWorkspaceId,
+    registerUser,
+    seeder,
+    type RunFixture,
+    type SeededRecord,
+    type Seeder,
+} from "./support/api";
+
+async function createAmbiguityPair(
+    seed: Seeder,
+    companyId: unknown,
+    email: string,
+    primary: SeededRecord,
+    secondary: SeededRecord,
+): Promise<{ primary: SeededRecord; secondary: SeededRecord }> {
+    const createdPrimary = await seed.post("/api/persons", {
+        name: primary.name,
+        email,
+        title: "Evaluator",
+        companyId,
+    });
+    const review = await seed.post("/api/duplicate-preflight/persons", {
+        name: secondary.name,
+        emails: [email],
+        phones: [],
+    });
+    if (typeof review.reviewToken !== "string") {
+        throw new Error("Duplicate preflight did not return an evaluator review token");
+    }
+    const createdSecondary = await seed.post("/api/persons", {
+        name: secondary.name,
+        email,
+        title: "Evaluator",
+        companyId,
+        duplicateReviewToken: review.reviewToken,
+    });
+    return {
+        primary: { id: Number(createdPrimary.id), name: primary.name },
+        secondary: { id: Number(createdSecondary.id), name: secondary.name },
+    };
+}
 
 /**
  * Provisions an isolated tenant for this run: registers a fresh user (which, under the dev
@@ -48,6 +90,10 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
             activity: { id: 0, name: contactNames.activity },
             search: { id: 0, name: contactNames.search },
             archive: { id: 0, name: contactNames.archive },
+            ambiguityPrimary: { id: 0, name: `Evaluator Primary ${runId}` },
+            ambiguitySecondary: { id: 0, name: `Evaluator Secondary ${runId}` },
+            ambiguityPrimaryJa: { id: 0, name: `Evaluator Primary JA ${runId}` },
+            ambiguitySecondaryJa: { id: 0, name: `Evaluator Secondary JA ${runId}` },
         },
         companies: {
             primary: { id: 0, name: `Acme Rocket Co ${runId}` },
@@ -60,6 +106,8 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
             evidence: { id: 0, name: `Evidence Call ${runId}` },
         },
         companyName: `Acme Rocket Co ${runId}`,
+        ambiguityEmail: `evaluator.${runId}@acme-rocket.example.com`,
+        ambiguityEmailJa: `evaluator.ja.${runId}@acme-rocket.example.com`,
     };
 
     await registerUser(api, fixture);
@@ -91,6 +139,25 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
         });
         fixture.contacts[key] = { id: Number(person.id), name };
     }
+
+    const ambiguityEn = await createAmbiguityPair(
+        seed,
+        company.id,
+        fixture.ambiguityEmail,
+        fixture.contacts.ambiguityPrimary,
+        fixture.contacts.ambiguitySecondary,
+    );
+    fixture.contacts.ambiguityPrimary = ambiguityEn.primary;
+    fixture.contacts.ambiguitySecondary = ambiguityEn.secondary;
+    const ambiguityJa = await createAmbiguityPair(
+        seed,
+        company.id,
+        fixture.ambiguityEmailJa,
+        fixture.contacts.ambiguityPrimaryJa,
+        fixture.contacts.ambiguitySecondaryJa,
+    );
+    fixture.contacts.ambiguityPrimaryJa = ambiguityJa.primary;
+    fixture.contacts.ambiguitySecondaryJa = ambiguityJa.secondary;
 
     const pipeline = await seed.post("/api/pipelines", { name: "E2E Pipeline" });
     const stage = await seed.post(`/api/pipelines/${pipeline.id}/stages`, {
