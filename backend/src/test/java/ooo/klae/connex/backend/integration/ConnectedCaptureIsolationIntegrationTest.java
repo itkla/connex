@@ -31,10 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.ProviderCapturedInteraction;
 import ooo.klae.connex.backend.beans.ProviderCapturedParticipant;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -60,6 +62,7 @@ class ConnectedCaptureIsolationIntegrationTest {
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private OrganizationMapper organizationMapper;
     @Autowired private ProviderCaptureMapper captureMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
@@ -150,9 +153,15 @@ class ConnectedCaptureIsolationIntegrationTest {
 
     private Workspace newWorkspace() {
         String suffix = suffix();
+        Organization organization = new Organization();
+        organization.setName("Capture " + suffix);
+        organization.setSlug("capture-" + suffix);
+        organizationMapper.insert(organization);
+
         Workspace workspace = new Workspace();
+        workspace.setOrgId(organization.getId());
         workspace.setName("Capture " + suffix);
-        workspace.setSlug("capture-" + suffix);
+        workspace.setSlug("capture-workspace-" + suffix);
         workspaceMapper.insert(workspace);
         return workspace;
     }
