@@ -257,7 +257,11 @@ for (const locale of ["en", "ja"] as const) {
         });
 
         await page.goto("/dashboard");
-        await page.getByRole("button", {
+        const mobileNavigation = page.getByRole("navigation", {
+            name: message(locale, "common", "MobileNav.barLabel"),
+            exact: true,
+        });
+        await mobileNavigation.getByRole("button", {
             name: message(locale, "actions", "Actions.quickCreate.trigger"),
             exact: true,
         }).click();
@@ -319,7 +323,11 @@ test.describe("manual business-card fallback", () => {
         });
 
         await page.goto("/dashboard");
-        await page.getByRole("button", {
+        const mobileNavigation = page.getByRole("navigation", {
+            name: message("ja", "common", "MobileNav.barLabel"),
+            exact: true,
+        });
+        await mobileNavigation.getByRole("button", {
             name: message("ja", "actions", "Actions.quickCreate.trigger"),
             exact: true,
         }).click();
