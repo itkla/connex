@@ -588,11 +588,13 @@ public class InteractionHistoryImportService {
             needsReview(row, "Selected participant is unavailable in this workspace");
             return;
         }
-        boolean conflictingStrongCandidate = response.candidates().stream()
-            .anyMatch(candidate ->
-                candidate.strength() == DuplicateMatchStrength.STRONG
-                    && candidate.recordId() != manualId);
-        if (response.truncated() || conflictingStrongCandidate) {
+        List<DuplicateCandidateDto> strongCandidates = response.candidates().stream()
+            .filter(candidate -> candidate.strength() == DuplicateMatchStrength.STRONG)
+            .toList();
+        boolean selectedMatchesStrongEvidence = strongCandidates.stream()
+            .anyMatch(candidate -> candidate.recordId() == manualId);
+        if (response.truncated()
+                || (!strongCandidates.isEmpty() && !selectedMatchesStrongEvidence)) {
             needsReview(row, "Selected participant conflicts with supplied identity evidence");
             return;
         }

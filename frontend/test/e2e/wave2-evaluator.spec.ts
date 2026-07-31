@@ -44,7 +44,8 @@ for (const locale of ["en", "ja"] as const) {
     test(`completes the Wave 2 evaluator journey in ${locale} @mobile`, async ({ page }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
         const target = fixture.contacts.ambiguityPrimary;
-        const sourceId = `wave2-evaluator-${locale}-${testInfo.project.name}`;
+        const sourceId =
+            `wave2-evaluator-${locale}-${testInfo.project.name}-${testInfo.retry}`;
         const importSubject = locale === "ja" ? "評価用の履歴ミーティング" : "Evaluator history meeting";
         const actionSubject = locale === "ja" ? "評価後のフォローアップ" : "Post-insight follow-up";
         const fileName = `wave2-evaluator-${locale}.csv`;
