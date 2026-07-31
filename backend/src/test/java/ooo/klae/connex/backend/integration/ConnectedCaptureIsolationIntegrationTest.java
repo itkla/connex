@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 
 /**
  * Exercises capture review and purge through the real security, tenant, service, and SQL layers.
@@ -106,6 +107,21 @@ class ConnectedCaptureIsolationIntegrationTest {
                 .session(outsiderSession))
             .andExpect(status().isForbidden());
 
+        mockMvc.perform(delete(
+                "/api/account/connections/google/captured-data")
+                .header("X-Workspace-Id", ownerWorkspace.getId())
+                .session(ownerSession)
+                .with(csrf()))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code")
+                .value("RECENT_AUTHENTICATION_REQUIRED"));
+
+        ownerSession.setAttribute(
+            SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
+            System.currentTimeMillis());
+        ownerSession.setAttribute(
+            SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR,
+            owner.getId());
         mockMvc.perform(delete(
                 "/api/account/connections/google/captured-data")
                 .header("X-Workspace-Id", ownerWorkspace.getId())
