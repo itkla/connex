@@ -12,21 +12,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -36,6 +41,7 @@ import ooo.klae.connex.backend.beans.ProviderCapturedInteraction;
 import ooo.klae.connex.backend.beans.ProviderCapturedParticipant;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -53,7 +59,7 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
     "connex.connected-capture.scheduling-enabled=true",
     "connex.connected-capture.google.enabled=true"
 })
-@Transactional
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ConnectedCaptureIsolationIntegrationTest {
     private static final String PASSWORD = "Capture-Isolation-Pw1!";
     private static final DateTimeFormatter MYSQL_DATETIME =
@@ -62,11 +68,16 @@ class ConnectedCaptureIsolationIntegrationTest {
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private ProviderCaptureMapper captureMapper;
+    @Autowired private ProviderCapturePurgeService purgeService;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
 
+    private final List<Integer> organizationIds = new ArrayList<>();
+    private final List<Integer> workspaceIds = new ArrayList<>();
+    private final List<Integer> userIds = new ArrayList<>();
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -75,6 +86,27 @@ class ConnectedCaptureIsolationIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .addFilters(springSecurityFilterChain)
             .build();
+    }
+
+    @AfterEach
+    void cleanCommittedFixtures() {
+        for (int workspaceId : workspaceIds.reversed()) {
+            for (int userId : userIds.reversed()) {
+                purgeService.purge(workspaceId, userId, "google");
+            }
+            jdbcTemplate.update(
+                "DELETE FROM workspace_member WHERE workspace_id = ?",
+                workspaceId);
+            jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
+        }
+        for (int organizationId : organizationIds.reversed()) {
+            jdbcTemplate.update(
+                "DELETE FROM organization WHERE id = ?",
+                organizationId);
+        }
+        for (int userId : userIds.reversed()) {
+            jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", userId);
+        }
     }
 
     @Test
@@ -157,12 +189,14 @@ class ConnectedCaptureIsolationIntegrationTest {
         organization.setName("Capture " + suffix);
         organization.setSlug("capture-" + suffix);
         organizationMapper.insert(organization);
+        organizationIds.add(organization.getId());
 
         Workspace workspace = new Workspace();
         workspace.setOrgId(organization.getId());
         workspace.setName("Capture " + suffix);
         workspace.setSlug("capture-workspace-" + suffix);
         workspaceMapper.insert(workspace);
+        workspaceIds.add(workspace.getId());
         return workspace;
     }
 
@@ -175,6 +209,7 @@ class ConnectedCaptureIsolationIntegrationTest {
         user.setPasswordHash(passwordEncoder.encode(PASSWORD));
         user.setTimezone("UTC");
         userMapper.insert(user);
+        userIds.add(user.getId());
         workspaceMapper.addMember(
             workspace.getId(), user.getId(), "member");
         return user;
