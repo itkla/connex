@@ -48,6 +48,8 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
             activity: { id: 0, name: contactNames.activity },
             search: { id: 0, name: contactNames.search },
             archive: { id: 0, name: contactNames.archive },
+            ambiguityPrimary: { id: 0, name: `Evaluator Primary ${runId}` },
+            ambiguitySecondary: { id: 0, name: `Evaluator Secondary ${runId}` },
         },
         companies: {
             primary: { id: 0, name: `Acme Rocket Co ${runId}` },
@@ -60,6 +62,7 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
             evidence: { id: 0, name: `Evidence Call ${runId}` },
         },
         companyName: `Acme Rocket Co ${runId}`,
+        ambiguityEmail: `evaluator.${runId}@acme-rocket.example.com`,
     };
 
     await registerUser(api, fixture);
@@ -91,6 +94,30 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
         });
         fixture.contacts[key] = { id: Number(person.id), name };
     }
+
+    const ambiguityPrimary = await seed.post("/api/persons", {
+        name: fixture.contacts.ambiguityPrimary.name,
+        email: fixture.ambiguityEmail,
+        title: "Evaluator",
+        companyId: company.id,
+    });
+    fixture.contacts.ambiguityPrimary.id = Number(ambiguityPrimary.id);
+    const ambiguityReview = await seed.post("/api/duplicate-preflight/persons", {
+        name: fixture.contacts.ambiguitySecondary.name,
+        emails: [fixture.ambiguityEmail],
+        phones: [],
+    });
+    if (typeof ambiguityReview.reviewToken !== "string") {
+        throw new Error("Duplicate preflight did not return an evaluator review token");
+    }
+    const ambiguitySecondary = await seed.post("/api/persons", {
+        name: fixture.contacts.ambiguitySecondary.name,
+        email: fixture.ambiguityEmail,
+        title: "Evaluator",
+        companyId: company.id,
+        duplicateReviewToken: ambiguityReview.reviewToken,
+    });
+    fixture.contacts.ambiguitySecondary.id = Number(ambiguitySecondary.id);
 
     const pipeline = await seed.post("/api/pipelines", { name: "E2E Pipeline" });
     const stage = await seed.post(`/api/pipelines/${pipeline.id}/stages`, {
