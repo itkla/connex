@@ -11,7 +11,8 @@ migration-discipline part of #87 §9 / #102).
 
 - **SemVer**, one product version per release, stamped as a **version-locked backend + frontend + OCR
   image set** (see [RELEASE.md](RELEASE.md)). The components are never upgraded independently, even
-  when a deployment leaves optional OCR disabled; the running backend version is at `GET /api/version`.
+  when a low-resource deployment explicitly opts out of OCR; the running backend version is at
+  `GET /api/version`.
 - On-prem and air-gapped installs verify the tag-bound release manifest and pin its exact image
   digests. Registry version and SHA tags are convenience pointers and are never the deployment
   integrity boundary.
@@ -69,9 +70,11 @@ migration-discipline part of #87 §9 / #102).
 4. **Pin and pull the complete target set** — verify the exact tag-bound `release-manifest.json` as
    documented in [RELEASE.md](RELEASE.md), then set `CONNEX_BACKEND_DIGEST`,
    `CONNEX_FRONTEND_DIGEST`, and `CONNEX_OCR_DIGEST` in the mode-0600 `deploy/.env` to the 64
-   lowercase hexadecimal characters after `sha256:` for each image. Run `docker compose pull` and
-   require the backend, frontend, and optional OCR digest to be locally available before starting
-   the target version.
+   lowercase hexadecimal characters after `sha256:` for each image. Run `docker compose pull`.
+   Low-resource deployments using the documented OCR opt-out must additionally run
+   `docker compose --profile ocr pull ocr` while keeping the persisted `COMPOSE_PROFILES` value
+   empty. Require the backend, frontend, and OCR digest to be locally available before starting the
+   target version so every deployment stages the complete signed image set.
 5. **Normalize object-volume ownership when required** — the backend runtime identity is permanently
    `10001:10001`. Before the first upgrade from a preview image that used a dynamic UID/GID, run the
    following idempotent preflight while writers remain stopped:
@@ -86,14 +89,17 @@ migration-discipline part of #87 §9 / #102).
    '
    ```
 
-6. **Start the data plane with ingress closed** — leave Caddy stopped. Start the database, optional
+6. **Start the data plane with ingress closed** — leave Caddy stopped. Start the database, default
    OCR service, and backend first, and require Compose health before touching the old frontend
    container:
 
    ```bash
-   docker compose up -d --wait --wait-timeout 300 db backend
-   docker compose --profile ocr up -d --wait --wait-timeout 300 ocr backend  # only when OCR is enabled
+   docker compose up -d --wait --wait-timeout 300 db ocr backend
    ```
+
+   For an existing deployment that uses the documented low-resource OCR opt-out, start only
+   `db backend`; do not add `--profile ocr` ad hoc because `COMPOSE_PROFILES` is the persistent
+   operator contract.
 
    Flyway and the normal-startup legacy-reference guard finish before backend health becomes ready.
    If legacy references remain, the backend fails and the old frontend container is left intact so
@@ -117,7 +123,8 @@ migration-discipline part of #87 §9 / #102).
    docker compose ps
    ```
 
-   Require the target version, the expected business-card capabilities, healthy OCR when enabled,
+   Require the target version, the expected business-card capabilities, healthy OCR unless the
+   deployment uses the explicit low-resource opt-out,
    exact configured image digests, and stable running containers on a second probe. Smoke a private
    media download with an authenticated test session.
 8. **Publish ingress last** — only after every internal check passes, start Caddy and run the external

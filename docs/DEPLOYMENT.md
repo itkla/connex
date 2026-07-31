@@ -17,10 +17,10 @@ browser-facing backend URL. Internally the frontend still talks to `backend:8080
 ```
 browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ───▶ db:3306
                        └─ everything else    ─▶ frontend:3000
-                                                    backend ──▶ ocr:8090 (optional profile)
+                                                    backend ──▶ ocr:8090 (default profile)
 ```
 
-The opt-in OCR service is reachable only on the private Compose network. Docker Engine 28's isolated
+The default OCR service is reachable only on the private Compose network. Docker Engine 28's isolated
 gateway mode prevents the OCR-only container from reaching the host or external networks. It accepts
 authenticated raw JPEG/PNG/WebP bytes from the backend, returns bounded recognized lines, and has no Caddy route.
 Paddle models are fetched from pinned BOS artifacts with SHA-256 verification while the image is
@@ -60,14 +60,11 @@ openssl rand -hex 32      # CONNEX_AUDIT_INTEGRITY_HMAC_SECRET
 openssl rand -hex 32      # CONNEX_OCR_SERVICE_TOKEN
 ```
 
-Business-card scanning is disabled by default so deployments that cannot spare the OCR sidecar's
-resources do not start it. Paddle's current CPU wheel also requires AVX support;
-the sidecar exits cleanly and scanning remains unavailable when that requirement is not met. To
-enable it, set `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=true`, keep
-`CONNEX_OCR_BASE_URL=http://ocr:8090`, set
+Business-card scanning and the private OCR sidecar are enabled by default in every supported
+deployment template. Keep `CONNEX_OCR_BASE_URL=http://ocr:8090`, set
 `CONNEX_OCR_PLAIN_HTTP_PRIVATE_HOST=ocr` to bind plaintext transport to that single-label service
 on Compose's isolated `ocr_internal` network, generate a unique 32+ character
-`CONNEX_OCR_SERVICE_TOKEN`, and set `COMPOSE_PROFILES=ocr` in `.env`:
+`CONNEX_OCR_SERVICE_TOKEN`, and leave `COMPOSE_PROFILES=ocr` in `.env`:
 
 ```bash
 docker compose pull
@@ -75,11 +72,15 @@ docker compose up -d
 ```
 
 The same token is supplied to the backend through `.env` and to the OCR container by Compose.
-Leaving `COMPOSE_PROFILES` empty does not start the sidecar. Keeping the profile in `.env` ensures
-ordinary `pull`, `up`, `stop`, and migration commands continue to include OCR. Leaving local scanning
-disabled or losing OCR readiness moves eligible users to the configured-provider fallback; without an
-enabled organization provider and `AI_USE`, automatic extraction remains unavailable while manual
-image retention and reviewed import remain available when private storage is ready. Losing
+Paddle's current CPU wheel requires AVX support, and the default sidecar reserves up to two CPUs and
+2 GiB of memory. A deployment that lacks AVX or cannot spare those resources must set both
+`COMPOSE_PROFILES=` and `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=false`; the empty profile omits the
+sidecar, while the disabled feature flag prevents the backend from waiting for it. Keep the default
+profile in `.env` otherwise so ordinary `pull`, `up`, `stop`, and migration commands continue to
+include OCR. Using the explicit opt-out or losing OCR readiness moves eligible users to the
+configured-provider fallback; without an enabled organization provider and `AI_USE`, automatic
+extraction remains unavailable while manual image retention and reviewed import remain available
+when private storage is ready. Losing
 private binary-storage readiness disables both scanning and import. The OCR container is capped at two
 CPUs, 2 GiB memory, 128 processes, one concurrent inference, and eight bounded HTTP handlers by
 default (`CONNEX_OCR_MAX_REQUEST_HANDLERS`). Excess concurrent inference receives `429`, excess

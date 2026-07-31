@@ -37,6 +37,9 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
+import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -59,6 +62,7 @@ class PersonServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
+    @Autowired DuplicatePreflightService duplicatePreflightService;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
 
@@ -226,6 +230,174 @@ class PersonServiceTest extends AbstractServiceTest {
             "business-card:02a25a23-70af-4f8e-a64a-6cfc5f8c69be",
             provenance.get("source_row_ref"));
         assertNull(provenance.get("purpose_of_use_code"));
+    }
+
+    @Test
+    void businessCardReuseAcceptsOnlyTheExactCurrentOwnedStrongCandidate() {
+        Person draft = personDraft(null);
+        Person created = personService.create(draft);
+        PersonDuplicatePreflightRequest request = duplicateRequest(created);
+        DuplicatePreflightResponse review = duplicatePreflightService.preflightPerson(request);
+
+        Person reused = personService.requireBusinessCardReuseTarget(
+            created.getId(), request, review.reviewToken());
+
+        assertEquals(created.getId(), reused.getId());
+    }
+
+    @Test
+    void businessCardReuseRejectsStaleReviewWithoutUpdatingTheContact() {
+        Person draft = personDraft(null);
+        Person created = personService.create(draft);
+        PersonDuplicatePreflightRequest request = duplicateRequest(created);
+        String staleToken = duplicatePreflightService.preflightPerson(request).reviewToken();
+        Person update = personDraft(null);
+        update.setName(created.getName());
+        update.setEmail("changed-" + unique() + "@example.com");
+        update.setTitle(created.getTitle());
+        personService.update(created.getId(), update);
+
+        ConflictException exception = assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                created.getId(), request, staleToken));
+
+        assertEquals(businessCardReuseConflictMessage(), exception.getMessage());
+        assertEquals(
+            update.getEmail(),
+            personMapper.getPersonById(workspace.getId(), created.getId()).getEmail());
+    }
+
+    @Test
+    void businessCardReuseRejectsAmbiguousStrongCandidates() {
+        String email = "ambiguous-" + unique() + "@example.com";
+        Person first = personDraft(null);
+        first.setEmail(email);
+        Person createdFirst = personService.create(first);
+        Person second = personDraft(null);
+        second.setEmail(email);
+        personService.create(second);
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            createdFirst.getName(), List.of(email), List.of());
+        DuplicatePreflightResponse review = duplicatePreflightService.preflightPerson(request);
+
+        assertEquals(2, review.candidates().size());
+        assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                createdFirst.getId(), request, review.reviewToken()));
+    }
+
+    @Test
+    void businessCardReuseRejectsTruncatedCandidates() {
+        String email = "truncated-" + unique() + "@example.com";
+        Person selectedDraft = personDraft(null);
+        selectedDraft.setEmail(email);
+        Person selected = personService.create(selectedDraft);
+        for (int index = 1; index < 51; index += 1) {
+            Person draft = personDraft(null);
+            draft.setEmail(email);
+            personService.create(draft);
+        }
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            null, List.of(email), List.of());
+        DuplicatePreflightResponse review = duplicatePreflightService.preflightPerson(request);
+
+        assertTrue(review.truncated());
+        assertEquals(50, review.candidates().size());
+        assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                selected.getId(), request, review.reviewToken()));
+    }
+
+    @Test
+    void businessCardReuseRejectsWeakNameOnlyCandidate() {
+        Person draft = personDraft(null);
+        draft.setEmail(null);
+        Person created = personService.create(draft);
+        PersonDuplicatePreflightRequest request = duplicateRequest(created);
+        DuplicatePreflightResponse review = duplicatePreflightService.preflightPerson(request);
+
+        assertEquals(1, review.candidates().size());
+        assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                created.getId(), request, review.reviewToken()));
+    }
+
+    @Test
+    void businessCardReuseRejectsArchivedAndRestrictedTargets() {
+        Person archivedDraft = personDraft(null);
+        Person archived = personService.create(archivedDraft);
+        PersonDuplicatePreflightRequest archivedRequest = duplicateRequest(archived);
+        String archivedToken =
+            duplicatePreflightService.preflightPerson(archivedRequest).reviewToken();
+        personService.archive(archived.getId());
+
+        ConflictException archivedFailure = assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                archived.getId(), archivedRequest, archivedToken));
+
+        Person restrictedDraft = personDraft(null);
+        Person restricted = personService.create(restrictedDraft);
+        PersonDuplicatePreflightRequest restrictedRequest = duplicateRequest(restricted);
+        String restrictedToken =
+            duplicatePreflightService.preflightPerson(restrictedRequest).reviewToken();
+        personService.updateProcessingRestrictions(restricted.getId(), true, false);
+
+        ConflictException restrictedFailure = assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                restricted.getId(), restrictedRequest, restrictedToken));
+
+        assertEquals(businessCardReuseConflictMessage(), archivedFailure.getMessage());
+        assertEquals(businessCardReuseConflictMessage(), restrictedFailure.getMessage());
+    }
+
+    @Test
+    void businessCardReuseRejectsSharedForeignAndMissingTargetsWithoutAnExistenceOracle() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        workspaceMapper.addMember(ownerWorkspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, ownerWorkspace.getId());
+        Person shared = personService.create(personDraft(null));
+        authenticateAs(currentUser, workspace.getId());
+        shareMapper.sharePerson(
+            shared.getId(),
+            ownerWorkspace.getId(),
+            workspace.getId(),
+            currentUser.getId(),
+            false);
+        PersonDuplicatePreflightRequest request = duplicateRequest(shared);
+        String reviewToken = "a".repeat(64);
+
+        ConflictException sharedFailure = assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                shared.getId(), request, reviewToken));
+        ConflictException missingFailure = assertThrows(
+            ConflictException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                Integer.MAX_VALUE, request, reviewToken));
+
+        assertEquals(businessCardReuseConflictMessage(), sharedFailure.getMessage());
+        assertEquals(businessCardReuseConflictMessage(), missingFailure.getMessage());
+    }
+
+    @Test
+    void businessCardReuseRequiresActiveWorkspacePermission() {
+        Person created = personService.create(personDraft(null));
+        PersonDuplicatePreflightRequest request = duplicateRequest(created);
+        String reviewToken = duplicatePreflightService.preflightPerson(request).reviewToken();
+        User outsider = newUser();
+        workspaceMapper.removeMember(workspace.getId(), outsider.getId());
+        authenticateAs(outsider, workspace.getId());
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> personService.requireBusinessCardReuseTarget(
+                created.getId(), request, reviewToken));
     }
 
     @Test
@@ -747,6 +919,17 @@ class PersonServiceTest extends AbstractServiceTest {
         person.setTitle("Engineer");
         person.setCompany(company);
         return person;
+    }
+
+    private static PersonDuplicatePreflightRequest duplicateRequest(Person person) {
+        return new PersonDuplicatePreflightRequest(
+            person.getName(),
+            person.getEmail() == null ? List.of() : List.of(person.getEmail()),
+            person.getPhone() == null ? List.of() : List.of(person.getPhone()));
+    }
+
+    private static String businessCardReuseConflictMessage() {
+        return "Existing contact is no longer eligible for business-card reuse; review duplicates again";
     }
 
     private Company companyInWorkspace(Workspace target) {

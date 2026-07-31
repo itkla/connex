@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -23,8 +24,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
 import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.BusinessCardContactRequest;
+import ooo.klae.connex.backend.dto.BusinessCardImportDisposition;
 import ooo.klae.connex.backend.dto.BusinessCardImportResponse;
 import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
+import ooo.klae.connex.backend.dto.BusinessCardPersonAction;
 import ooo.klae.connex.backend.services.BusinessCardService;
 
 @ExtendWith(MockitoExtension.class)
@@ -69,8 +72,57 @@ class BusinessCardControllerTest {
                 "companyAction", "", "application/json",
                 "{\"type\":\"existing\",\"companyId\":7}"
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        when(businessCardService.importCard(any(), any(), any(), any()))
-                .thenReturn(new BusinessCardImportResponse(null, null, null));
+        MockMultipartFile personAction = new MockMultipartFile(
+                "personAction", "", "application/json",
+                "{\"type\":\"create\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(businessCardService.importCard(any(), any(), any(), any(), any()))
+                .thenReturn(new BusinessCardImportResponse(
+                    null, null, null, BusinessCardImportDisposition.CREATED));
+
+        mockMvc.perform(multipart("/api/business-cards/import")
+                        .file(image)
+                        .file(contact)
+                        .file(personAction)
+                        .file(companyAction)
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contact").isEmpty())
+                .andExpect(jsonPath("$.attachment").isEmpty())
+                .andExpect(jsonPath("$.company").isEmpty())
+                .andExpect(jsonPath("$.disposition").value("created"));
+
+        ArgumentCaptor<BusinessCardContactRequest> contactCaptor =
+                ArgumentCaptor.forClass(BusinessCardContactRequest.class);
+        ArgumentCaptor<BusinessCardCompanyAction> actionCaptor =
+                ArgumentCaptor.forClass(BusinessCardCompanyAction.class);
+        ArgumentCaptor<BusinessCardPersonAction> personActionCaptor =
+                ArgumentCaptor.forClass(BusinessCardPersonAction.class);
+        verify(businessCardService).importCard(
+                any(), contactCaptor.capture(), personActionCaptor.capture(), actionCaptor.capture(),
+                org.mockito.ArgumentMatchers.eq(IDEMPOTENCY_KEY));
+        org.junit.jupiter.api.Assertions.assertEquals("Ada Lovelace", contactCaptor.getValue().name());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                new BusinessCardPersonAction.Create(), personActionCaptor.getValue());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                new BusinessCardCompanyAction.Existing(7), actionCaptor.getValue());
+    }
+
+    @Test
+    void importDefaultsMissingLegacyPersonActionToCreate() throws Exception {
+        MockMultipartFile image = new MockMultipartFile(
+                "image", "card.jpg", "image/jpeg", new byte[] {1, 2, 3});
+        MockMultipartFile contact = new MockMultipartFile(
+                "contact", "", "application/json",
+                "{\"name\":\"Ada Lovelace\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        MockMultipartFile companyAction = new MockMultipartFile(
+                "companyAction", "", "application/json",
+                "{\"type\":\"none\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(businessCardService.importCard(any(), any(), any(), any(), any()))
+                .thenReturn(new BusinessCardImportResponse(
+                        null, null, null, BusinessCardImportDisposition.CREATED));
 
         mockMvc.perform(multipart("/api/business-cards/import")
                         .file(image)
@@ -78,20 +130,15 @@ class BusinessCardControllerTest {
                         .file(companyAction)
                         .header("Idempotency-Key", IDEMPOTENCY_KEY))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.contact").isEmpty())
-                .andExpect(jsonPath("$.attachment").isEmpty())
-                .andExpect(jsonPath("$.company").isEmpty());
+                .andExpect(jsonPath("$.disposition").value("created"));
 
-        ArgumentCaptor<BusinessCardContactRequest> contactCaptor =
-                ArgumentCaptor.forClass(BusinessCardContactRequest.class);
-        ArgumentCaptor<BusinessCardCompanyAction> actionCaptor =
-                ArgumentCaptor.forClass(BusinessCardCompanyAction.class);
+        ArgumentCaptor<BusinessCardPersonAction> actionCaptor =
+                ArgumentCaptor.forClass(BusinessCardPersonAction.class);
         verify(businessCardService).importCard(
-                any(), contactCaptor.capture(), actionCaptor.capture(),
+                any(), any(), actionCaptor.capture(), any(),
                 org.mockito.ArgumentMatchers.eq(IDEMPOTENCY_KEY));
-        org.junit.jupiter.api.Assertions.assertEquals("Ada Lovelace", contactCaptor.getValue().name());
         org.junit.jupiter.api.Assertions.assertEquals(
-                new BusinessCardCompanyAction.Existing(7), actionCaptor.getValue());
+                new BusinessCardPersonAction.Create(), actionCaptor.getValue());
     }
 
     @Test
@@ -102,13 +149,40 @@ class BusinessCardControllerTest {
                 "contact", "", "text/plain", "{\"name\":\"Ada Lovelace\"}".getBytes());
         MockMultipartFile companyAction = new MockMultipartFile(
                 "companyAction", "", "text/plain", "{\"type\":\"none\"}".getBytes());
+        MockMultipartFile personAction = new MockMultipartFile(
+                "personAction", "", "text/plain", "{\"type\":\"create\"}".getBytes());
 
         mockMvc.perform(multipart("/api/business-cards/import")
                         .file(image)
                         .file(contact)
+                        .file(personAction)
                         .file(companyAction)
                         .header("Idempotency-Key", IDEMPOTENCY_KEY))
                 .andExpect(status().isUnsupportedMediaType());
+    }
+
+    @Test
+    void importRejectsExistingPersonWithoutAValidReviewToken() throws Exception {
+        MockMultipartFile image = new MockMultipartFile(
+                "image", "card.jpg", "image/jpeg", new byte[] {1, 2, 3});
+        MockMultipartFile contact = new MockMultipartFile(
+                "contact", "", "application/json", "{\"name\":\"Ada Lovelace\"}".getBytes());
+        MockMultipartFile personAction = new MockMultipartFile(
+                "personAction", "", "application/json",
+                "{\"type\":\"existing\",\"personId\":31}".getBytes());
+        MockMultipartFile companyAction = new MockMultipartFile(
+                "companyAction", "", "application/json", "{\"type\":\"none\"}".getBytes());
+
+        mockMvc.perform(multipart("/api/business-cards/import")
+                .file(image)
+                .file(contact)
+                .file(personAction)
+                .file(companyAction)
+                .header("Idempotency-Key", IDEMPOTENCY_KEY))
+            .andExpect(status().isBadRequest());
+
+        verify(businessCardService, never()).importCard(
+            any(), any(), any(), any(), any());
     }
 
     @Test
@@ -119,10 +193,13 @@ class BusinessCardControllerTest {
                 "contact", "", "application/json", "{\"name\":\"Ada Lovelace\"}".getBytes());
         MockMultipartFile companyAction = new MockMultipartFile(
                 "companyAction", "", "application/json", "{\"type\":\"none\"}".getBytes());
+        MockMultipartFile personAction = new MockMultipartFile(
+                "personAction", "", "application/json", "{\"type\":\"create\"}".getBytes());
 
         mockMvc.perform(multipart("/api/business-cards/import")
                         .file(image)
                         .file(contact)
+                        .file(personAction)
                         .file(companyAction))
                 .andExpect(status().isBadRequest());
     }
@@ -130,7 +207,8 @@ class BusinessCardControllerTest {
     @Test
     void importStatusUsesTheOpaqueIdempotencyHeader() throws Exception {
         when(businessCardService.importStatus(IDEMPOTENCY_KEY))
-            .thenReturn(new BusinessCardImportResponse(null, null, null));
+            .thenReturn(new BusinessCardImportResponse(
+                null, null, null, BusinessCardImportDisposition.CREATED));
 
         mockMvc.perform(get("/api/business-cards/import")
                 .header("Idempotency-Key", IDEMPOTENCY_KEY))

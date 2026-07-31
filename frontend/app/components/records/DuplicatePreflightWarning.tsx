@@ -40,6 +40,7 @@ export default function DuplicatePreflightWarning({
     acknowledged = false,
     onAcknowledgedChange,
     onRetry,
+    personResolution,
 }: {
     id?: string;
     kind: DuplicatePreflightKind;
@@ -48,6 +49,11 @@ export default function DuplicatePreflightWarning({
     acknowledged?: boolean;
     onAcknowledgedChange?: (checked: boolean) => void;
     onRetry?: () => void;
+    personResolution?: {
+        selected: 'existing' | 'create' | null;
+        disabled?: boolean;
+        onSelectedChange: (selected: 'existing' | 'create') => void;
+    };
 }) {
     const t = useTranslations('DuplicateWarning');
 
@@ -114,7 +120,42 @@ export default function DuplicatePreflightWarning({
                     {t('truncated')}
                 </p>
             )}
-            {onAcknowledgedChange && !response.truncated && (
+            {personResolution && !response.truncated ? (
+                <div className="grid gap-1.5" role="group" aria-label={t('cardResolution')}>
+                    <Button
+                        type="button"
+                        variant={personResolution.selected === 'existing' ? 'secondary' : 'outline'}
+                        size="sm"
+                        className="h-auto justify-start px-3 py-2 text-left"
+                        aria-pressed={personResolution.selected === 'existing'}
+                        disabled={personResolution.disabled}
+                        onClick={() => personResolution.onSelectedChange('existing')}
+                    >
+                        <span className="grid gap-0.5">
+                            <span>{t('useExisting')}</span>
+                            <span className="text-xs font-normal text-muted-foreground">
+                                {t('useExistingDescription')}
+                            </span>
+                        </span>
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={personResolution.selected === 'create' ? 'secondary' : 'outline'}
+                        size="sm"
+                        className="h-auto justify-start px-3 py-2 text-left"
+                        aria-pressed={personResolution.selected === 'create'}
+                        disabled={personResolution.disabled}
+                        onClick={() => personResolution.onSelectedChange('create')}
+                    >
+                        <span className="grid gap-0.5">
+                            <span>{t('createSeparate')}</span>
+                            <span className="text-xs font-normal text-muted-foreground">
+                                {t('createSeparateDescription')}
+                            </span>
+                        </span>
+                    </Button>
+                </div>
+            ) : onAcknowledgedChange && !response.truncated ? (
                 <label className="flex items-start gap-2 text-xs text-foreground">
                     <Checkbox
                         checked={acknowledged}
@@ -123,7 +164,7 @@ export default function DuplicatePreflightWarning({
                     />
                     <span>{t('acknowledge')}</span>
                 </label>
-            )}
+            ) : null}
         </section>
     );
 }

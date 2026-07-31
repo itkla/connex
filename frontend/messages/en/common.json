@@ -197,6 +197,11 @@
     "truncated": "More visible matches were omitted. Refine the details before continuing.",
     "shared": "Shared · review only",
     "acknowledge": "I reviewed these matches and still want to create a new record.",
+    "cardResolution": "Choose how to save this business card",
+    "useExisting": "Use existing contact",
+    "useExistingDescription": "Attach this card to the matched contact without replacing their details.",
+    "createSeparate": "Create separate contact",
+    "createSeparateDescription": "Keep this scan as a new contact after reviewing the exact match.",
     "strength": {
       "STRONG": "Exact identity",
       "WEAK": "Exact name"

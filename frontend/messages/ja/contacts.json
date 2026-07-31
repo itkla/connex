@@ -76,6 +76,7 @@
     "filterNoCompany": "会社なし",
     "entityLabel": "コンタクト",
     "toastContactCreated": "コンタクトを作成しました",
+    "toastCardAttached": "名刺を添付しました",
     "toastFailedCreate": "コンタクトを作成できませんでした",
     "toastNoChangesToSave": "保存する変更はありません",
     "toastNameRequiredForX": "「{name}」には名前が必要です",
@@ -243,7 +244,7 @@
     "dialogTitle": "新規コンタクト",
     "description": "コンタクトに人物を追加します。追加したコンタクトは組織内の全ユーザーで共有されます。",
     "businessCard": "名刺",
-    "businessCardDescription": "名刺を撮影するか、JPEG・PNG・WebP画像を選択して、すべての項目を確認してください。自動読み取りは、利用可能な場合はこのConnexインスタンス内で処理されます。利用できない場合は、メタデータを除去した画像が組織で設定されたAIプロバイダーに送信されることがあります。作成すると、メタデータを除去した画像がコンタクトに保存されます。",
+    "businessCardDescription": "名刺を撮影するか、JPEG・PNG・WebP画像を選択して、すべての項目を確認してください。自動読み取りは、利用可能な場合はこのConnexインスタンス内で処理されます。利用できない場合は、メタデータを除去した画像が組織で設定されたAIプロバイダーに送信されることがあります。完了すると、メタデータを除去した画像がコンタクトに保存されます。",
     "cardAvailabilityLoading": "名刺機能を確認しています…",
     "scanBusinessCard": "名刺をスキャン",
     "scanCard": "カメラで撮影",
@@ -303,8 +304,10 @@
     "cardImportRecoveryContinueManually": "別のコンタクトを手動で作成",
     "cardImportCloseAndReconcile": "閉じて後で確認",
     "cardImportRecovered": "以前の名刺登録からコンタクトが作成されていました。",
+    "cardImportRecoveredExisting": "以前の名刺登録から既存のコンタクトに名刺が添付されていました。",
     "cardImportRecoveryGone": "以前の名刺登録の結果を確認できません。再試行する前にコンタクトを確認してください。",
     "cardImportRecoveredAvatarPending": "以前のコンタクトは作成されましたが、選択したプロフィール写真はアップロードされていません。コンタクトを開き、写真をもう一度選択してください。",
+    "cardImportRecoveredExistingAvatarPending": "以前の名刺は添付されましたが、選択したプロフィール写真は反映されていません。既存のコンタクトを開き、写真をもう一度選択してください。",
     "cardAvatarUploadFailed": "コンタクトは作成されましたが、プロフィール写真を追加できませんでした。",
     "cardCompanyChoice": "会社をどのように扱いますか？",
     "cardUseExistingCompany": "{name} に関連付ける",
@@ -327,7 +330,8 @@
     "noCompaniesFound": "会社が見つかりません。",
     "cancel": "キャンセル",
     "create": "作成",
-    "createFromCard": "名刺から作成"
+    "createFromCard": "名刺から作成",
+    "attachCard": "名刺を添付"
   },
   "ContactsNewTaskDialog": {
     "triggerTitle": "タスクを追加",

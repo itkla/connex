@@ -345,7 +345,6 @@ jobs:
           TOKEN="$(openssl rand -hex 32)"
           PASSWORD="BenchmarkAa1!$(openssl rand -hex 16)"
           sed -i 's/^CONNEX_HTTP_PORT=.*/CONNEX_HTTP_PORT=18088/' .env
-          sed -i 's/^CONNEX_BUSINESS_CARD_SCANNING_ENABLED=.*/CONNEX_BUSINESS_CARD_SCANNING_ENABLED=true/' .env
           sed -i 's/^CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=120/' .env
           sed -i 's/^CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=120/' .env
           sed -i "s/^CONNEX_BACKEND_DIGEST=.*/CONNEX_BACKEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-backend.json)/" .env
@@ -353,7 +352,6 @@ jobs:
           sed -i "s/^CONNEX_OCR_DIGEST=.*/CONNEX_OCR_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-ocr.json)/" .env
           sed -i "s/^CONNEX_OCR_SERVICE_TOKEN=.*/CONNEX_OCR_SERVICE_TOKEN=${TOKEN}/" .env
           printf '%s\n' \
-            'COMPOSE_PROFILES=ocr' \
             'CONNEX_BOOTSTRAP_ENABLED=true' \
             'CONNEX_BOOTSTRAP_USERNAME=benchmark' \
             'CONNEX_BOOTSTRAP_EMAIL=benchmark@example.test' \

@@ -197,6 +197,11 @@
     "truncated": "表示可能な候補がほかにもあります。続行する前に情報を絞り込んでください。",
     "shared": "共有中・確認のみ",
     "acknowledge": "候補を確認したうえで、新しいレコードを作成します。",
+    "cardResolution": "この名刺の保存方法を選択",
+    "useExisting": "既存のコンタクトを使用",
+    "useExistingDescription": "既存の情報を上書きせず、この名刺を一致したコンタクトに添付します。",
+    "createSeparate": "別のコンタクトを作成",
+    "createSeparateDescription": "完全一致を確認したうえで、この名刺を新しいコンタクトとして保存します。",
     "strength": {
       "STRONG": "識別情報が完全一致",
       "WEAK": "名前が完全一致"

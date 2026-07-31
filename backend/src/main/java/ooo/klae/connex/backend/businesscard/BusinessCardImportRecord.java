@@ -5,8 +5,8 @@ import java.time.LocalDateTime;
 /**
  * Tenant-scoped idempotency state for one confirmed business-card import.
  *
- * @param requestFingerprint deterministic SHA-256 of the validated image and reviewed request
- * @param personId created contact identifier, once complete
+ * @param requestFingerprint versioned digest of the validated image and reviewed request
+ * @param personId created or reused contact identifier, once complete
  * @param attachmentId retained card attachment identifier, once complete
  * @param companyId linked company identifier, when applicable
  * @param expiresAt earliest time at which the idempotency state may be retired

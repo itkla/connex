@@ -27,8 +27,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.businesscard.BusinessCardImportRecord;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -36,6 +39,8 @@ class BusinessCardImportRequestMapperTest {
     private static final int USER_ID = 9;
 
     @Autowired private BusinessCardImportRequestMapper mapper;
+    @Autowired private PersonMapper personMapper;
+    @Autowired private AttachmentMapper attachmentMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PlatformTransactionManager transactionManager;
 
@@ -66,6 +71,54 @@ class BusinessCardImportRequestMapperTest {
         assertEquals(31, record.personId());
         assertEquals(41, record.attachmentId());
         assertEquals(17, record.companyId());
+    }
+
+    @Test
+    @Transactional
+    void distinctKeysAssociateTwoAttachmentsWithOneReusedPerson() {
+        int workspaceId = workspaceId();
+        Person person = new Person();
+        person.setWorkspaceId(workspaceId);
+        person.setName("Reused business-card contact");
+        personMapper.insert(person);
+        Attachment firstAttachment = attachment(
+            workspaceId, person.getId(), "first-" + UUID.randomUUID());
+        Attachment secondAttachment = attachment(
+            workspaceId, person.getId(), "second-" + UUID.randomUUID());
+        attachmentMapper.insert(firstAttachment);
+        attachmentMapper.insert(secondAttachment);
+        String firstRequestId = requestId();
+        String secondRequestId = requestId();
+
+        assertEquals(1, claim(
+            workspaceId, firstRequestId, fingerprint((byte) 1)));
+        assertEquals(1, mapper.complete(
+            workspaceId,
+            firstRequestId,
+            person.getId(),
+            firstAttachment.getId(),
+            null));
+        assertEquals(1, claim(
+            workspaceId, secondRequestId, fingerprint((byte) 2)));
+        assertEquals(1, mapper.complete(
+            workspaceId,
+            secondRequestId,
+            person.getId(),
+            secondAttachment.getId(),
+            null));
+
+        BusinessCardImportRecord first = mapper.get(workspaceId, firstRequestId);
+        BusinessCardImportRecord second = mapper.get(workspaceId, secondRequestId);
+        assertNotNull(first);
+        assertNotNull(second);
+        assertEquals(person.getId(), first.personId());
+        assertEquals(person.getId(), second.personId());
+        assertEquals(firstAttachment.getId(), first.attachmentId());
+        assertEquals(secondAttachment.getId(), second.attachmentId());
+        assertEquals(
+            2,
+            attachmentMapper.getByEntity(
+                workspaceId, "person", person.getId()).size());
     }
 
     @Test
@@ -441,6 +494,21 @@ class BusinessCardImportRequestMapperTest {
         byte[] fingerprint = new byte[32];
         Arrays.fill(fingerprint, value);
         return fingerprint;
+    }
+
+    private static Attachment attachment(
+            int workspaceId,
+            int personId,
+            String token) {
+        Attachment attachment = new Attachment();
+        attachment.setWorkspaceId(workspaceId);
+        attachment.setEntityType("person");
+        attachment.setEntityId(personId);
+        attachment.setFileName("business-card.jpg");
+        attachment.setUrl("/api/attachments/content/" + token);
+        attachment.setContentType("image/jpeg");
+        attachment.setSize(3L);
+        return attachment;
     }
 
     private static void await(CountDownLatch latch) {

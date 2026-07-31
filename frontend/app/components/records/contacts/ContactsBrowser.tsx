@@ -357,15 +357,18 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
-            const newContact = businessCard
-                ? (await importBusinessCard(businessCard)).contact
-                : await createContact({
+            const imported = businessCard
+                ? await importBusinessCard(businessCard)
+                : null;
+            const newContact = imported?.contact
+                ?? await createContact({
                     ...newContactPayload,
                     duplicateReviewToken: duplicateReviewToken ?? undefined,
                 });
             if (!isCurrent()) return;
+            const reusedContact = imported?.disposition === 'reused';
             let avatarUploadFailed = false;
-            if (imageFile) {
+            if (imageFile && !reusedContact) {
                 try {
                     await uploadContactPicture(newContact.id, imageFile);
                 } catch {
@@ -377,11 +380,11 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
             let finalized = false;
             return {
                 avatarUploadFailed,
-                avatarUploaded: imageFile != null && !avatarUploadFailed,
+                avatarUploaded: imageFile != null && !reusedContact && !avatarUploadFailed,
                 finalize: () => {
                     if (finalized || !isCurrent()) return;
                     finalized = true;
-                    toastSuccess(t('toastContactCreated'));
+                    toastSuccess(t(reusedContact ? 'toastCardAttached' : 'toastContactCreated'));
                     setCreationSucceeded(true);
                     invalidateNewContactClose();
                     const closeGeneration = newContactGenerationRef.current;

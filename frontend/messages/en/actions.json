@@ -80,6 +80,7 @@
       "companyCreated": "Company created",
       "companyLogoUploadFailed": "The company was created, but its logo couldn't be uploaded. Add it from the company profile.",
       "personCreated": "Contact created",
+      "businessCardAttached": "Business card attached",
       "dealCreated": "Deal created",
       "createFailed": "Couldn't create. Please try again.",
       "linkedRecordLoadFailed": "Couldn't load the linked record. Please try again.",
