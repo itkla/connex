@@ -4,14 +4,51 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    - cron: '23 19 * * 0'
 
 permissions:
   contents: read
 
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  classify:
+    name: Classify security impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      action_pins: ${{ steps.classify.outputs.action_pins }}
+      frontend_audit: ${{ steps.classify.outputs.frontend_audit }}
+      ocr_audit: ${{ steps.classify.outputs.ocr_audit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Select the required security surfaces
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: >-
+          python3 .github/scripts/classify-ci-changes.py
+          --event-name "$GITHUB_EVENT_NAME"
+          --base-sha "$BASE_SHA"
+          --head-sha "$HEAD_SHA"
+          --output "$GITHUB_OUTPUT"
+          --summary "$GITHUB_STEP_SUMMARY"
+
   action-pins:
     name: Workflow action pin policy
+    needs: classify
+    if: needs.classify.outputs.action_pins == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -28,6 +65,8 @@ jobs:
         run: python .github/scripts/check-action-pins.py
       - name: Regression-test action pin policy
         run: python .github/scripts/test_action_pins.py
+      - name: Regression-test CI change classification
+        run: python .github/scripts/test_ci_change_classification.py
       - name: Regression-test release delivery invariants
         run: python .github/scripts/test_release_workflow.py
       - name: Regression-test release artifact verification
@@ -35,15 +74,17 @@ jobs:
 
   secret-scan:
     name: Secret scan (gitleaks)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - name: gitleaks
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
           set -euo pipefail
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
@@ -67,7 +108,10 @@ jobs:
 
   frontend-audit:
     name: Frontend dependency audit
+    needs: classify
+    if: needs.classify.outputs.frontend_audit == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
@@ -87,7 +131,10 @@ jobs:
 
   ocr-audit:
     name: OCR dependency audit
+    needs: classify
+    if: needs.classify.outputs.ocr_audit == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -103,6 +150,7 @@ jobs:
   dependency-review:
     name: Dependency review (PR)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -113,6 +161,7 @@ jobs:
   gradle-dependency-graph:
     name: Submit Gradle dependency graph
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'push'
     permissions:
       contents: write
@@ -125,3 +174,42 @@ jobs:
       - uses: gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92
         with:
           build-root-directory: backend
+
+  required:
+    name: Security — required
+    if: always()
+    needs:
+      - classify
+      - action-pins
+      - secret-scan
+      - frontend-audit
+      - ocr-audit
+      - dependency-review
+      - gradle-dependency-graph
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every selected security job to succeed
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          ACTION_PINS_RESULT: ${{ needs.action-pins.result }}
+          SECRET_SCAN_RESULT: ${{ needs.secret-scan.result }}
+          FRONTEND_AUDIT_RESULT: ${{ needs.frontend-audit.result }}
+          OCR_AUDIT_RESULT: ${{ needs.ocr-audit.result }}
+          DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+          GRADLE_GRAPH_RESULT: ${{ needs.gradle-dependency-graph.result }}
+        run: |
+          set -euo pipefail
+          for result in \
+            "$CLASSIFY_RESULT" \
+            "$ACTION_PINS_RESULT" \
+            "$SECRET_SCAN_RESULT" \
+            "$FRONTEND_AUDIT_RESULT" \
+            "$OCR_AUDIT_RESULT" \
+            "$DEPENDENCY_REVIEW_RESULT" \
+            "$GRADLE_GRAPH_RESULT"; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::required security dependency concluded: $result"; exit 1 ;;
+            esac
+          done
