@@ -40,7 +40,7 @@ The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` a
 
 1. `POST /api/auth/register` with a unique per-run username. Under the dev profile this single call **registers, logs in, creates a default workspace, and marks the email verified**, returning `JSESSIONID` (HttpOnly session) and `connex_workspace` (tenant selector) cookies.
 2. The API request context's cookies are persisted as project-scoped Playwright **storage state** (`test/e2e/.artifacts/{desktop,mobile}/storage-state.json`, gitignored), so desktop and phone runs never share an authenticated tenant.
-3. Seed data (a company, five isolated flow contacts, an intentional two-contact exact-match collision, a pipeline/stage, and three deals) is created through the API. Writes need the CSRF token from `GET /api/auth/csrf` (register/login are exempt) and are pinned to the tenant with `X-Workspace-Id`.
+3. Seed data (a company, five isolated flow contacts, separate EN/JA two-contact exact-match collisions, a pipeline/stage, and three deals) is created through the API. Writes need the CSRF token from `GET /api/auth/csrf` (register/login are exempt) and are pinned to the tenant with `X-Workspace-Id`.
 4. Seeded ids/names go into `test/e2e/.artifacts/{desktop,mobile}/run.json`, which specs select from `testInfo.project.name` via `test/e2e/support/fixtures.ts`.
 
 Because each browser project registers a **fresh user and workspace**, desktop and phone runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).

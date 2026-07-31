@@ -18,6 +18,8 @@ export type RunFixture = {
         archive: SeededRecord;
         ambiguityPrimary: SeededRecord;
         ambiguitySecondary: SeededRecord;
+        ambiguityPrimaryJa: SeededRecord;
+        ambiguitySecondaryJa: SeededRecord;
     };
     companies: {
         primary: SeededRecord;
@@ -31,6 +33,7 @@ export type RunFixture = {
     };
     companyName: string;
     ambiguityEmail: string;
+    ambiguityEmailJa: string;
 };
 
 type CsrfBootstrap = { token: string; headerName: string };

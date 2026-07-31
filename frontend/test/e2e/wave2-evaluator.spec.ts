@@ -43,13 +43,21 @@ async function uploadForReview(
 for (const locale of ["en", "ja"] as const) {
     test(`completes the Wave 2 evaluator journey in ${locale} @mobile`, async ({ page }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
-        const target = fixture.contacts.ambiguityPrimary;
+        const target = locale === "en"
+            ? fixture.contacts.ambiguityPrimary
+            : fixture.contacts.ambiguityPrimaryJa;
+        const alternate = locale === "en"
+            ? fixture.contacts.ambiguitySecondary
+            : fixture.contacts.ambiguitySecondaryJa;
+        const ambiguityEmail = locale === "en"
+            ? fixture.ambiguityEmail
+            : fixture.ambiguityEmailJa;
         const sourceId =
             `wave2-evaluator-${locale}-${testInfo.project.name}-${testInfo.retry}`;
         const importSubject = locale === "ja" ? "評価用の履歴ミーティング" : "Evaluator history meeting";
         const actionSubject = locale === "ja" ? "評価後のフォローアップ" : "Post-insight follow-up";
         const fileName = `wave2-evaluator-${locale}.csv`;
-        const csv = activityCsv(fixture.ambiguityEmail, sourceId, importSubject);
+        const csv = activityCsv(ambiguityEmail, sourceId, importSubject);
 
         await useLocale(page, locale);
         await uploadForReview(page, locale, csv, fileName);
@@ -64,11 +72,11 @@ for (const locale of ["en", "ja"] as const) {
             name: message(locale, "importExport", "importExport.history.candidateLabel"),
         });
         await expect(candidateList.getByText(
-            fixture.contacts.ambiguityPrimary.name,
+            target.name,
             { exact: true },
         )).toBeVisible();
         await expect(candidateList.getByText(
-            fixture.contacts.ambiguitySecondary.name,
+            alternate.name,
             { exact: true },
         )).toBeVisible();
         const importButton = page.getByRole("button", {
