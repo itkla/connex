@@ -32,8 +32,14 @@ type RecordReturnSelection = {
     userId: number;
     workspaceId: number;
     selectedIds: number[];
+    scrollTop: number;
     navigationId: string;
     createdAt: number;
+};
+
+export type RestoredRecordSelection = {
+    ids: number[];
+    scrollTop: number;
 };
 
 function isRecordReturnContext(value: unknown): value is RecordReturnContext {
@@ -69,6 +75,10 @@ function isRecordReturnSelection(value: unknown): value is RecordReturnSelection
         && value.selectedIds.length > 0
         && value.selectedIds.length <= MAX_RETURN_SELECTION_SIZE
         && value.selectedIds.every(isPositiveSafeInteger)
+        && 'scrollTop' in value
+        && typeof value.scrollTop === 'number'
+        && Number.isFinite(value.scrollTop)
+        && value.scrollTop >= 0
         && 'navigationId' in value
         && typeof value.navigationId === 'string'
         && value.navigationId.length > 0
@@ -159,12 +169,14 @@ export function recordDetailNavigationPath(
         const selectedIds = normalizeSelection(selection);
         if (selectedIds && selection) {
             const navigationId = window.crypto.randomUUID();
+            const scrollTop = document.querySelector<HTMLElement>('[data-app-main]')?.scrollTop ?? 0;
             const returnSelection: RecordReturnSelection = {
                 collection,
                 returnTo,
                 userId: selection.userId,
                 workspaceId: selection.workspaceId,
                 selectedIds,
+                scrollTop,
                 navigationId,
                 createdAt,
             };
@@ -210,7 +222,7 @@ export function consumeRecordReturnSelection(
     collection: RecordCollection,
     userId: number,
     workspaceId: number,
-): number[] | null {
+): RestoredRecordSelection | null {
     let raw: string | null;
     try {
         raw = window.sessionStorage.getItem(RETURN_SELECTION_KEY);
@@ -238,7 +250,10 @@ export function consumeRecordReturnSelection(
             return null;
         }
         clearRecordReturnHistoryMarker();
-        return [...new Set(selection.selectedIds)];
+        return {
+            ids: [...new Set(selection.selectedIds)],
+            scrollTop: selection.scrollTop,
+        };
     } catch {
         return null;
     }

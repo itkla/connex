@@ -26,6 +26,9 @@ describe('record return paths', () => {
         location.pathname = '/records/contacts';
         location.search = '?view=table&page=2&peek=person%3A42';
         history.state = null;
+        vi.stubGlobal('document', {
+            querySelector: () => ({ scrollTop: 417 }),
+        });
         vi.stubGlobal('window', {
             crypto: {
                 randomUUID: () => 'a4c0f631-e34a-4e6c-b6f8-14f133e3df49',
@@ -97,7 +100,10 @@ describe('record return paths', () => {
             ids: [42, 17, 42],
         });
 
-        expect(consumeRecordReturnSelection('contacts', 7, 11)).toEqual([42, 17]);
+        expect(consumeRecordReturnSelection('contacts', 7, 11)).toEqual({
+            ids: [42, 17],
+            scrollTop: 417,
+        });
         expect(consumeRecordReturnSelection('contacts', 7, 11)).toBeNull();
     });
 

@@ -36,9 +36,20 @@ export function useRecordReturnSelection(
         const scope = `${collection}:${userId}:${activeWorkspaceId}`;
         if (restoredScopeRef.current === scope) return;
         restoredScopeRef.current = scope;
-        const restoredIds = consumeRecordReturnSelection(collection, userId, activeWorkspaceId);
-        if (!restoredIds) return;
-        setSelectedIds(new Set(restoredIds.filter((id) => availableIds.has(id))));
+        const restored = consumeRecordReturnSelection(collection, userId, activeWorkspaceId);
+        if (!restored) return;
+        setSelectedIds(new Set(restored.ids.filter((id) => availableIds.has(id))));
+        let secondFrame: number | null = null;
+        const firstFrame = window.requestAnimationFrame(() => {
+            secondFrame = window.requestAnimationFrame(() => {
+                const scrollRoot = document.querySelector<HTMLElement>('[data-app-main]');
+                if (scrollRoot) scrollRoot.scrollTop = restored.scrollTop;
+            });
+        });
+        return () => {
+            window.cancelAnimationFrame(firstFrame);
+            if (secondFrame !== null) window.cancelAnimationFrame(secondFrame);
+        };
     }, [activeWorkspaceId, availableIds, collection, ready, setSelectedIds, userId]);
 
     return useMemo(() => {
