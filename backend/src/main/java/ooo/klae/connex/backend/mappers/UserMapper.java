@@ -18,6 +18,10 @@ public interface UserMapper {
     List<User> getAllUsers();
     /** Current display labels for the requested control-plane user ids. */
     List<UserDisplayNameDto> getDisplayNamesByIds(@Param("ids") List<Integer> ids);
+    /** Current display labels for requested active members of one workspace. */
+    List<UserDisplayNameDto> getActiveWorkspaceMemberDisplayNamesByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
     /** Current display references for requested active members of one workspace. */
     List<UserReferenceDto> getActiveWorkspaceMemberReferencesByIds(
         @Param("workspaceId") int workspaceId,
