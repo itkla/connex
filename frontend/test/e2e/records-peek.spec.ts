@@ -21,6 +21,7 @@ test.describe("records browse and peek", () => {
         await expect(peek).toBeVisible();
         await expect(peek.getByText(contact.name).first()).toBeVisible();
         await expect(page).toHaveURL(new RegExp(`peek=person%3A${contact.id}`));
+        const peekUrl = page.url();
 
         await peek.getByRole("button", { name: "Open record" }).click();
         await expect(page).toHaveURL(new RegExp(`/records/contacts/${contact.id}`));
@@ -28,7 +29,7 @@ test.describe("records browse and peek", () => {
         expect(new URL(page.url()).searchParams.get("returnTo")).toContain(`peek=person%3A${contact.id}`);
 
         await page.getByRole("link", { name: message("en", "contacts", "ContactsPage.allContacts") }).first().click();
-        await expect(page).toHaveURL(new RegExp("sort=name.*dir=asc.*page=1.*size=10"));
+        await expect(page).toHaveURL(peekUrl);
         await expect(peek).toBeVisible();
         await expect(row.getByRole("checkbox")).toBeChecked();
         await expect.poll(
