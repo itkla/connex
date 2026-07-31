@@ -131,6 +131,15 @@ for (const locale of ["en", "ja"] as const) {
         for (let replay = 1; replay <= 2; replay += 1) {
             await uploadForReview(page, locale, csv, fileName);
             await expect(page.getByLabel(
+                `${message(locale, "importExport", "importExport.history.counts.review")}: 1`,
+            )).toBeVisible();
+            await targetCandidate.getByRole("button", {
+                name: message(locale, "importExport", "importExport.history.useContact"),
+            }).click();
+            await page.getByRole("button", {
+                name: message(locale, "importExport", "importExport.history.refresh"),
+            }).click();
+            await expect(page.getByLabel(
                 `${message(locale, "importExport", "importExport.history.counts.imported")}: 1`,
             )).toBeVisible();
             await expect(page.getByLabel(
