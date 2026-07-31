@@ -10,7 +10,7 @@ test.describe("records browse and peek", () => {
         await page.setViewportSize({ width: 1024, height: 420 });
         await page.goto(listUrl);
 
-        const row = page.getByRole("row").filter({ hasText: contact.name });
+        const row = page.locator(`[data-record-row-id="${contact.id}"]`);
         await expect(row).toBeVisible();
         await row.getByRole("checkbox").check();
         await row.scrollIntoViewIfNeeded();
@@ -31,7 +31,7 @@ test.describe("records browse and peek", () => {
         await page.getByRole("link", { name: message("en", "contacts", "ContactsPage.allContacts") }).first().click();
         await expect(page).toHaveURL(peekUrl);
         await expect(peek).toBeVisible();
-        await expect(row.getByRole("checkbox")).toBeChecked();
+        await expect(row.locator('[data-slot="checkbox"]')).toHaveAttribute("data-state", "checked");
         await expect.poll(
             () => page.locator("[data-app-main]").evaluate((main) => main.scrollTop),
         ).toBe(listScrollTop);
