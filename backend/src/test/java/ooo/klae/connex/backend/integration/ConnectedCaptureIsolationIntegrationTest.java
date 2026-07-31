@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -155,13 +156,19 @@ class ConnectedCaptureIsolationIntegrationTest {
         ownerSession.setAttribute(
             SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR,
             owner.getId());
-        mockMvc.perform(delete(
+        MvcResult purgeResult = mockMvc.perform(delete(
                 "/api/account/connections/google/captured-data")
                 .header("X-Workspace-Id", ownerWorkspace.getId())
                 .session(ownerSession)
                 .with(csrf()))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.active").value(false));
+            .andReturn();
+        String purgeBody = purgeResult.getResponse().getContentAsString();
+        assertEquals(
+            HttpStatus.OK.value(),
+            purgeResult.getResponse().getStatus(),
+            () -> "exception=" + purgeResult.getResolvedException()
+                + ", body=" + purgeBody);
+        jsonPath("$.active").value(false).match(purgeResult);
 
         assertEquals(
             0,
