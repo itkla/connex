@@ -2,11 +2,13 @@
 
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import RecordReturnLink from '@/app/components/records/RecordReturnLink';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import type { DealRisk, RelationshipTemperature } from '@/app/lib/types';
+import { easeOut, instant } from '@/app/lib/motion';
 import { cn } from '@/lib/utils';
 
 /**
@@ -28,6 +30,7 @@ export default function RecordStickyContext({
     risk?: DealRisk | null;
 }) {
     const [visible, setVisible] = useState(false);
+    const reduce = useReducedMotion() ?? false;
 
     useEffect(() => {
         const anchor = document.getElementById(anchorId);
@@ -47,12 +50,15 @@ export default function RecordStickyContext({
             data-record-sticky-context
             data-visible={visible}
         >
-            <div
+            <motion.div
+                initial={false}
+                animate={{ opacity: visible ? 1 : 0, y: visible ? 0 : -8 }}
+                transition={reduce ? instant : { duration: 0.15, ease: easeOut }}
                 aria-hidden={!visible}
                 inert={!visible}
                 className={cn(
-                    'pointer-events-none -translate-y-2 opacity-0 transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:translate-y-0 motion-reduce:transition-opacity',
-                    visible && 'pointer-events-auto translate-y-0 opacity-100',
+                    'pointer-events-none',
+                    visible && 'pointer-events-auto',
                 )}
             >
                 <div className="flex items-center gap-3 rounded-xl border border-border bg-background/95 px-3 py-2 shadow-sm backdrop-blur">
@@ -67,7 +73,7 @@ export default function RecordStickyContext({
                     {temperature ? <TemperaturePill temp={temperature} /> : null}
                     {risk ? <DealRiskPill risk={risk} /> : null}
                 </div>
-            </div>
+            </motion.div>
         </div>
     );
 }

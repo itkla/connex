@@ -263,6 +263,8 @@
   "DealsEditSheet": {
     "nameRequired": "名前は必須です",
     "pipelineStageRequired": "パイプラインとステージは必須です",
+    "stagesLoadFailed": "ステージを読み込めませんでした",
+    "retry": "再試行",
     "dealUpdated": "案件を更新しました",
     "failedToSave": "保存できませんでした"
   },

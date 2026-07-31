@@ -46,6 +46,7 @@ export default function EditDealSheet({
     const [isSaving, setIsSaving] = useState(false);
     const [pipelineOptions, setPipelineOptions] = useState(pipelines);
     const [stageOptionsByPipeline, setStageOptionsByPipeline] = useState(stagesByPipeline);
+    const [stageLoadRevision, setStageLoadRevision] = useState(0);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
     const pipelinesLoaded = useRef(false);
 
@@ -87,11 +88,19 @@ export default function EditDealSheet({
                     }));
                 }
             })
-            .catch(() => undefined);
+            .catch(() => {
+                if (cancelled) return;
+                toastError(t('stagesLoadFailed'), {
+                    action: {
+                        label: t('retry'),
+                        onClick: () => setStageLoadRevision((current) => current + 1),
+                    },
+                });
+            });
         return () => {
             cancelled = true;
         };
-    }, [open, draft.pipeline, stageOptionsByPipeline]);
+    }, [open, draft.pipeline, stageOptionsByPipeline, stageLoadRevision, t]);
 
     const saveEdits = async () => {
         if (!draft.name.trim()) {

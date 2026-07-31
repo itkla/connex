@@ -17,6 +17,7 @@ const MAX_RETURN_SELECTION_SIZE = 1000;
 type RecordReturnContext = {
     detailPath: string;
     returnTo: string;
+    navigationId: string;
     createdAt: number;
 };
 
@@ -49,8 +50,31 @@ function isRecordReturnContext(value: unknown): value is RecordReturnContext {
         && typeof value.detailPath === 'string'
         && 'returnTo' in value
         && typeof value.returnTo === 'string'
+        && 'navigationId' in value
+        && typeof value.navigationId === 'string'
+        && value.navigationId.length > 0
+        && value.navigationId.length <= 128
         && 'createdAt' in value
         && typeof value.createdAt === 'number';
+}
+
+function clearHistoryContextAfterTraversal(navigationId: string): void {
+    window.addEventListener('popstate', () => {
+        try {
+            const raw = window.sessionStorage.getItem(RETURN_CONTEXT_KEY);
+            if (!raw) return;
+            const context: unknown = JSON.parse(raw);
+            if (isRecordReturnContext(context) && context.navigationId === navigationId) {
+                window.sessionStorage.removeItem(RETURN_CONTEXT_KEY);
+            }
+        } catch {
+            try {
+                window.sessionStorage.removeItem(RETURN_CONTEXT_KEY);
+            } catch {
+                return;
+            }
+        }
+    }, { once: true });
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
@@ -159,16 +183,18 @@ export function recordDetailNavigationPath(
     const returnTo = `${window.location.pathname}${window.location.search}`;
     const href = recordDetailPath(collection, id, returnTo);
     const createdAt = Date.now();
+    const navigationId = window.crypto.randomUUID();
     const context: RecordReturnContext = {
         detailPath: new URL(href, window.location.origin).pathname,
         returnTo,
+        navigationId,
         createdAt,
     };
     try {
         window.sessionStorage.setItem(RETURN_CONTEXT_KEY, JSON.stringify(context));
+        clearHistoryContextAfterTraversal(navigationId);
         const selectedIds = normalizeSelection(selection);
         if (selectedIds && selection) {
-            const navigationId = window.crypto.randomUUID();
             const scrollTop = document.querySelector<HTMLElement>('[data-app-main]')?.scrollTop ?? 0;
             const returnSelection: RecordReturnSelection = {
                 collection,
@@ -203,10 +229,12 @@ export function consumeRecordHistoryReturn(returnTo: string): boolean {
 
     try {
         const context: unknown = JSON.parse(raw);
+        const age = isRecordReturnContext(context) ? Date.now() - context.createdAt : -1;
         const matches = isRecordReturnContext(context)
             && context.detailPath === window.location.pathname
             && context.returnTo === returnTo
-            && Date.now() - context.createdAt <= RETURN_CONTEXT_MAX_AGE_MS;
+            && age >= 0
+            && age <= RETURN_CONTEXT_MAX_AGE_MS;
         if (matches) {
             window.sessionStorage.removeItem(RETURN_CONTEXT_KEY);
             return true;

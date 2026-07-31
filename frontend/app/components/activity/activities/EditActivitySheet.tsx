@@ -292,7 +292,13 @@ export default function EditActivitySheet({
                                     imageUrl: person.imageUrl,
                                 }))}
                                 onInputValueChange={personSearch.onInputValueChange}
-                                emptyLabel={personSearch.loading ? t('searching') : t('noPersonFound')}
+                                emptyLabel={
+                                    personSearch.loading
+                                        ? t('searching')
+                                        : personSearch.error
+                                            ? t('personSearchFailed')
+                                            : t('noPersonFound')
+                                }
                             />
                         </div>
 
@@ -312,7 +318,13 @@ export default function EditActivitySheet({
                                     label: deal.name,
                                 }))}
                                 onInputValueChange={dealSearch.onInputValueChange}
-                                emptyLabel={dealSearch.loading ? t('searching') : t('noDealFound')}
+                                emptyLabel={
+                                    dealSearch.loading
+                                        ? t('searching')
+                                        : dealSearch.error
+                                            ? t('dealSearchFailed')
+                                            : t('noDealFound')
+                                }
                             />
                         </div>
 

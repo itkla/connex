@@ -9,6 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { useMemo } from 'react';
 
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import type {
@@ -65,6 +66,10 @@ export default function RelationshipEvidencePanel({
 }) {
     const t = useTranslations('RelationshipEvidence');
     const locale = useLocale();
+    const number = useMemo(
+        () => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }),
+        [locale],
+    );
 
     if (!evidence) {
         return (
@@ -79,7 +84,6 @@ export default function RelationshipEvidencePanel({
 
     const { temperature, totals, coverage } = evidence;
     const hasHistory = totals.contributorCount > 0 && Boolean(temperature.lastTouchAt);
-    const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
 
     return (
         <section aria-label={t('title')} className="mt-6 overflow-hidden rounded-2xl border border-border bg-card">

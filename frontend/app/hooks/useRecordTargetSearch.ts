@@ -48,6 +48,7 @@ function useRecordTargetSearch<T extends RecordTarget>(
         () => idsKey ? idsKey.split(',').map(Number) : [],
         [idsKey],
     );
+    const stableIdSet = useMemo(() => new Set(stableIds), [stableIds]);
 
     useEffect(() => {
         if (!enabled) return;
@@ -71,14 +72,14 @@ function useRecordTargetSearch<T extends RecordTarget>(
                     if (controller.signal.aborted) return;
                     setTargets((current) => mergeTargets(
                         hydrated,
-                        current.filter((target) => stableIds.includes(target.id)),
+                        current.filter((target) => stableIdSet.has(target.id)),
                         seeds,
                         page.items,
                     ));
                 })
                 .catch((nextError: unknown) => {
                     if (controller.signal.aborted) return;
-                    setTargets((current) => current.filter((target) => stableIds.includes(target.id)));
+                    setTargets((current) => current.filter((target) => stableIdSet.has(target.id)));
                     setError(nextError);
                 })
                 .finally(() => {
@@ -89,7 +90,7 @@ function useRecordTargetSearch<T extends RecordTarget>(
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [enabled, query, stableIds, seeds, loadPage, loadById]);
+    }, [enabled, query, stableIds, stableIdSet, seeds, loadPage, loadById]);
 
     return { targets, loading, error, onInputValueChange: setQuery };
 }

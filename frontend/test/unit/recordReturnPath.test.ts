@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    consumeRecordHistoryReturn,
     consumeRecordReturnSelection,
     recordDetailNavigationPath,
     recordDetailPath,
@@ -9,6 +10,7 @@ import {
 
 describe('record return paths', () => {
     const values = new Map<string, string>();
+    const popstateListeners: Array<() => void> = [];
     const location = {
         pathname: '/records/contacts',
         search: '?view=table&page=2&peek=person%3A42',
@@ -23,6 +25,7 @@ describe('record return paths', () => {
 
     beforeEach(() => {
         values.clear();
+        popstateListeners.length = 0;
         location.pathname = '/records/contacts';
         location.search = '?view=table&page=2&peek=person%3A42';
         history.state = null;
@@ -30,6 +33,9 @@ describe('record return paths', () => {
             querySelector: () => ({ scrollTop: 417 }),
         });
         vi.stubGlobal('window', {
+            addEventListener: (type: string, listener: () => void) => {
+                if (type === 'popstate') popstateListeners.push(listener);
+            },
             crypto: {
                 randomUUID: () => 'a4c0f631-e34a-4e6c-b6f8-14f133e3df49',
             },
@@ -116,6 +122,17 @@ describe('record return paths', () => {
         location.search = '?view=table&page=3&peek=person%3A42';
 
         expect(consumeRecordReturnSelection('contacts', 7, 11)).toBeNull();
+    });
+
+    it('clears browser-backed return context after history traversal', () => {
+        const detail = recordDetailNavigationPath('contacts', 42);
+        expect(values.has('connex:record-return-context')).toBe(true);
+
+        for (const listener of popstateListeners.splice(0)) listener();
+        location.pathname = '/records/contacts/42';
+        location.search = new URL(detail, location.origin).search;
+
+        expect(consumeRecordHistoryReturn('/records/contacts')).toBe(false);
     });
 
     it('rejects the same URL reached through a different history entry', () => {

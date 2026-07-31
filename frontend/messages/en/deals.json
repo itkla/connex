@@ -263,6 +263,8 @@
   "DealsEditSheet": {
     "nameRequired": "Name is required",
     "pipelineStageRequired": "Pipeline and stage are required",
+    "stagesLoadFailed": "Couldn't load stages",
+    "retry": "Retry",
     "dealUpdated": "Deal updated",
     "failedToSave": "Failed to save"
   },
