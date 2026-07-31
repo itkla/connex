@@ -4,23 +4,48 @@ on:
   push:
     branches: [main]
   pull_request:
-    paths:
-      - 'deploy/**'
-      - 'backend/**'
-      - 'ocr/**'
-      - '.github/workflows/deploy-smoke.yml'
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-smoke-${{ github.workflow }}-${{ github.head_ref || github.sha }}
-  cancel-in-progress: true
+  group: deploy-smoke-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  classify:
+    name: Classify deployment impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      compose: ${{ steps.classify.outputs.compose }}
+      profile_boot: ${{ steps.classify.outputs.profile_boot }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Select the required deployment surfaces
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: >-
+          python3 .github/scripts/classify-ci-changes.py
+          --event-name "$GITHUB_EVENT_NAME"
+          --base-sha "$BASE_SHA"
+          --head-sha "$HEAD_SHA"
+          --output "$GITHUB_OUTPUT"
+          --summary "$GITHUB_STEP_SUMMARY"
+
   compose-config:
     name: Validate compose bundle
+    needs: classify
+    if: needs.classify.outputs.compose == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: docker compose config defaults to OCR with an explicit opt-out
@@ -63,7 +88,10 @@ jobs:
 
   profile-boot:
     name: Boot every deployment profile
+    needs: classify
+    if: needs.classify.outputs.profile_boot == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       mysql:
         image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
@@ -122,4 +150,25 @@ jobs:
             kill "$PID" 2>/dev/null || true
             wait "$PID" 2>/dev/null || true
             sleep 3
+          done
+
+  required:
+    name: Deploy — required
+    if: always()
+    needs: [classify, compose-config, profile-boot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every selected deployment job to succeed
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          COMPOSE_RESULT: ${{ needs.compose-config.result }}
+          PROFILE_BOOT_RESULT: ${{ needs.profile-boot.result }}
+        run: |
+          set -euo pipefail
+          for result in "$CLASSIFY_RESULT" "$COMPOSE_RESULT" "$PROFILE_BOOT_RESULT"; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::required deployment dependency concluded: $result"; exit 1 ;;
+            esac
           done
