@@ -12,6 +12,7 @@ import { classifyStage } from './dealOutcome';
 import { getCompaniesByIds, getDealBoard, getDealRisks, moveDeal } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import type { Company, Deal, DealFilterParams, DealRisk, Pipeline, Stage } from '@/app/lib/types';
+import type { RecordReturnSelectionSnapshot } from '@/app/lib/recordReturnPath';
 
 interface DealsKanbanProps {
     deals: Deal[];
@@ -34,6 +35,7 @@ interface DealsKanbanProps {
     currentUserId: number;
     revision: number;
     reduce: boolean;
+    returnSelection?: RecordReturnSelectionSnapshot;
 }
 
 const RISK_BATCH_SIZE = 100;
@@ -84,6 +86,7 @@ export default function DealsKanban({
     currentUserId,
     revision,
     reduce,
+    returnSelection,
 }: DealsKanbanProps) {
     const t = useTranslations('DealsKanban');
 
@@ -278,9 +281,10 @@ export default function DealsKanban({
                 risk={boardRisks.get(deal.id)}
                 onQuickEdit={() => onQuickEdit(deal)}
                 onDelete={() => onDelete(deal)}
+                returnSelection={returnSelection}
             />
         ),
-        [boardRisks, onQuickEdit, onDelete, resolvedCompanyById],
+        [boardRisks, onQuickEdit, onDelete, resolvedCompanyById, returnSelection],
     );
 
     const onMove = useCallback(

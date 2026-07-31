@@ -37,6 +37,7 @@ import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
@@ -153,7 +154,6 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Company>({ items: NO_ITEMS, storageKey: 'companies:view', searchFields });
-
     const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
     const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
     const evaluable = useMemo(() => evaluableSegmentDefinition(definition), [definition]);
@@ -226,6 +226,13 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         reload,
         patchItem,
     } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams, { urlSync: true });
+    const returnSelection = useRecordReturnSelection(
+        'companies',
+        selectedIds,
+        setSelectedIds,
+        companies,
+        !loading,
+    );
 
     const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
     const selectedCompanyIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
@@ -628,7 +635,11 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
     const viewSelected = () => {
         const returnTo = `${window.location.pathname}${window.location.search}`;
         if (selectedCompanies.length === 1) {
-            router.push(recordDetailNavigationPath('companies', selectedCompanies[0].id));
+            router.push(recordDetailNavigationPath(
+                'companies',
+                selectedCompanies[0].id,
+                returnSelection,
+            ));
         } else {
             selectedCompanies.forEach((company) =>
                 window.open(recordDetailPath('companies', company.id, returnTo), '_blank'));
@@ -822,7 +833,12 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
         [columns, customColumns],
     );
     const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('company', mergedColumns, { lockedKey: sortKey });
-    const peek = useRecordPeekController('company', companies, effectiveDisplayMode !== 'grid');
+    const peek = useRecordPeekController(
+        'company',
+        companies,
+        effectiveDisplayMode !== 'grid',
+        returnSelection,
+    );
 
     const recordRef = useCallback(
         (company: Company): ActiveRecordRef => ({ type: 'company', id: company.id, label: company.name }),
@@ -1037,6 +1053,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                                 readOnly={showArchived}
                                 removeIntent={showArchived ? 'restore' : 'archive'}
+                                returnSelection={returnSelection}
                             />
                         )}
                         renderListRow={(item) => (

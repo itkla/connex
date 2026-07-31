@@ -35,6 +35,7 @@ import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
@@ -104,7 +105,6 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
-
     const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
     const setShowArchived = useCallback((next: boolean) => {
         setFilterState((current) => {
@@ -147,6 +147,13 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
         reload,
         patchItem,
     } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams, { urlSync: true });
+    const returnSelection = useRecordReturnSelection(
+        'contacts',
+        selectedIds,
+        setSelectedIds,
+        contacts,
+        !loading,
+    );
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
 
@@ -531,7 +538,11 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
     const viewSelected = () => {
         const returnTo = `${window.location.pathname}${window.location.search}`;
         if (selectedContacts.length === 1) {
-            router.push(recordDetailNavigationPath('contacts', selectedContacts[0].id));
+            router.push(recordDetailNavigationPath(
+                'contacts',
+                selectedContacts[0].id,
+                returnSelection,
+            ));
         } else {
             selectedContacts.forEach((contact) =>
                 window.open(recordDetailPath('contacts', contact.id, returnTo), '_blank'));
@@ -687,7 +698,12 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
     const { density, setDensity } = useRecordDensity();
     const mergedColumns = useMemo(() => [...columns, ...customColumns], [columns, customColumns]);
     const { visibleColumns, toggles, setColumnVisible, resetColumns, hiddenCount } = useColumnVisibility('person', mergedColumns, { lockedKey: sortKey });
-    const peek = useRecordPeekController('person', contacts, effectiveDisplayMode !== 'grid');
+    const peek = useRecordPeekController(
+        'person',
+        contacts,
+        effectiveDisplayMode !== 'grid',
+        returnSelection,
+    );
 
     const recordRef = useCallback(
         (contact: Contact): ActiveRecordRef => ({ type: 'person', id: contact.id, label: contact.name }),
@@ -884,6 +900,7 @@ export default function ContactsBrowser({ savedViews, defaultView }: { savedView
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                                 readOnly={showArchived}
                                 removeIntent={showArchived ? 'restore' : 'archive'}
+                                returnSelection={returnSelection}
                             />
                         )}
                         renderListRow={(item) => (

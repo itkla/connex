@@ -22,7 +22,10 @@ import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import { type Company, type Deal, type DealRisk } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 import DealRiskPill from './DealRiskPill';
-import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
+import {
+    recordDetailNavigationPath,
+    type RecordReturnSelectionSnapshot,
+} from '@/app/lib/recordReturnPath';
 
 interface DealKanbanCardProps {
     deal: Deal;
@@ -30,6 +33,7 @@ interface DealKanbanCardProps {
     risk?: DealRisk | null;
     onQuickEdit?: () => void;
     onDelete?: () => void;
+    returnSelection?: RecordReturnSelectionSnapshot;
 }
 
 /**
@@ -38,11 +42,18 @@ interface DealKanbanCardProps {
  * for the list view — reusing it inside a column overflows and overlaps its text.
  * The column already encodes the stage, so stage/pipeline are omitted here.
  */
-export default function DealKanbanCard({ deal, company, risk, onQuickEdit, onDelete }: DealKanbanCardProps) {
+export default function DealKanbanCard({
+    deal,
+    company,
+    risk,
+    onQuickEdit,
+    onDelete,
+    returnSelection,
+}: DealKanbanCardProps) {
     const router = useRouter();
     const t = useTranslations('DealsCard');
     const locale = useLocale();
-    const open = () => router.push(recordDetailNavigationPath('deals', deal.id));
+    const open = () => router.push(recordDetailNavigationPath('deals', deal.id, returnSelection));
     const closed = isDealClosed(deal);
     const statusLabel = closed ? t('statusClosed') : t('statusOpen');
 

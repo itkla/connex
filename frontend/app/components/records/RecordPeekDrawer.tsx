@@ -32,6 +32,7 @@ import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActi
 import {
     recordDetailNavigationPath,
     type RecordCollection,
+    type RecordReturnSelectionSnapshot,
 } from '@/app/lib/recordReturnPath';
 import { formatCurrency, formatRelativeTime } from '@/app/lib/utils';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
@@ -48,6 +49,7 @@ type Props = {
     hasPrev: boolean;
     hasNext: boolean;
     position: { index: number; total: number } | null;
+    returnSelection?: RecordReturnSelectionSnapshot;
 };
 
 type PeekData =
@@ -67,7 +69,17 @@ const PEEK_COLLECTIONS = {
  * states; the loaded record is published to the action registry so add-note/task/activity and
  * copy-link light up and prefill. Prev/next steps through the visible order.
  */
-function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPrev, hasNext, position }: Props) {
+function RecordPeekDrawer({
+    target,
+    browserType,
+    onClose,
+    onPrev,
+    onNext,
+    hasPrev,
+    hasNext,
+    position,
+    returnSelection,
+}: Props) {
     const t = useTranslations('RecordPeek');
     const actionsT = useTranslations('Actions');
     const locale = useLocale();
@@ -139,7 +151,11 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
 
     const openFull = () => {
         if (!target) return;
-        router.push(recordDetailNavigationPath(PEEK_COLLECTIONS[target.type], target.id));
+        router.push(recordDetailNavigationPath(
+            PEEK_COLLECTIONS[target.type],
+            target.id,
+            returnSelection,
+        ));
     };
 
     return (

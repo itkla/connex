@@ -25,7 +25,10 @@ import { type Company, type Deal, type DealRisk, type Pipeline, type Stage } fro
 import { isDealClosed } from './dealOutcome';
 import DealRiskPill from './DealRiskPill';
 import { Suspense } from 'react';
-import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
+import {
+    recordDetailNavigationPath,
+    type RecordReturnSelectionSnapshot,
+} from '@/app/lib/recordReturnPath';
 
 interface DealCardProps {
     deal: Deal;
@@ -35,17 +38,27 @@ interface DealCardProps {
     risk?: DealRisk | null;
     onQuickEdit?: () => void;
     onDelete?: () => void;
+    returnSelection?: RecordReturnSelectionSnapshot;
 }
 
 function dealStatus(deal: Deal): 'open' | 'closed' {
     return isDealClosed(deal) ? 'closed' : 'open';
 }
 
-export default function DealCard({ deal, company, pipeline, stage, risk, onQuickEdit, onDelete }: DealCardProps) {
+export default function DealCard({
+    deal,
+    company,
+    pipeline,
+    stage,
+    risk,
+    onQuickEdit,
+    onDelete,
+    returnSelection,
+}: DealCardProps) {
     const router = useRouter();
     const t = useTranslations('DealsCard');
     const locale = useLocale();
-    const open = () => router.push(recordDetailNavigationPath('deals', deal.id));
+    const open = () => router.push(recordDetailNavigationPath('deals', deal.id, returnSelection));
     const status = dealStatus(deal);
     const statusLabel = status === 'closed' ? t('statusClosed') : t('statusOpen');
 
