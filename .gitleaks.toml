@@ -10,6 +10,7 @@ regexes = [
   '''= "-----BEGIN PRIVATE KEY-----";''',
   '''CONNEX_DB_ROOT_PASSWORD=''',
   '''CONNEX_DB_PASSWORD=''',
+  '''CONNEX_OCR_SERVICE_TOKEN=connex-eval-ocr-local-only-token''',
   '''CONNEX_DB_PASSWORD: ci-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-root''',
   '''MYSQL_ROOT_PASSWORD: ci-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-root''',
   '''-pci-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-root''',
