@@ -30,6 +30,15 @@ public interface UserMapper {
     User getUserByIdForShare(int id);
     Integer lockById(int id);
     Integer lockByIdForShare(int id);
+    boolean isAccountDeletionReserved(int id);
+    boolean isAccountDeletionReservationOwner(
+        @Param("id") int id, @Param("owner") String owner);
+    int reserveAccountDeletion(
+        @Param("id") int id, @Param("owner") String owner);
+    int renewAccountDeletionReservation(
+        @Param("id") int id, @Param("owner") String owner);
+    int clearAccountDeletionReservation(
+        @Param("id") int id, @Param("owner") String owner);
     User getUserByUsername(String username);
     User getUserByEmail(String email);
     /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */

@@ -4,12 +4,14 @@ Tracking companion to the 1.0 release program (umbrella epic [#848](https://gith
 
 Update the Status column in place as items move; the wave issues reference this file rather than duplicating it.
 
+Wave 3 code completion does not wait for human or external-provider actions. Those close conditions were explicitly transferred to Wave 5 and #868 on 2026-07-30. Connected capture therefore remains default-off and unauthorized for partner or public ingestion until the applicable release gate passes.
+
 | # | Blocker | Gates | Status |
 |---|---------|-------|--------|
-| 1 | Legal counsel engagement (APPI) | Wave 3 submission, Wave 4 legal-effective | Not started |
+| 1 | Legal counsel engagement (APPI) | Wave 5/public release gate | Not started |
 | 2 | Corporate entity facts | Item 1; legal pages | Not started |
-| 3 | Google OAuth verification + CASA Tier 2 | Wave 3 *production enablement* only | Not started |
-| 4 | Microsoft publisher verification | Wave 3 production enablement (MS provider) | Not started |
+| 3 | Google OAuth verification + CASA Tier 2 | Wave 5/public release gate | Not started |
+| 4 | Microsoft publisher verification | Wave 5/public release gate | Not started |
 | 5 | Penetration-test procurement | Wave 5 execution | Not started |
 | 6 | Staging root actions | Wave 0 close-out (mitigated) | Pending |
 | 7 | Backup-retention decision | Wave 1 (design input) | **Decided: 30-day rolling + PITR (2026-07-25)** |
@@ -20,7 +22,7 @@ Update the Status column in place as items move; the wave issues reference this 
 
 ## 1. Legal counsel engagement (APPI)
 
-**Why it blocks:** four public pages (`/privacy`, `/legal`, `/disclosure`, `/tokushoho`) carry draft status, and the DPA template is not executable. Google's restricted-scope review (item 3) evaluates the **published** privacy policy — so counsel must finish **before** that submission, not in parallel.
+**Why it blocks public release:** four public pages (`/privacy`, `/legal`, `/disclosure`, `/tokushoho`) carry draft status, and the DPA template is not executable. Google's restricted-scope review (item 3) evaluates the **published** privacy policy — so counsel must finish **before** that submission, not in parallel.
 
 **Action:** sign an engagement letter with JP counsel and hand over the punch list below.
 
@@ -43,7 +45,7 @@ Update the Status column in place as items move; the wave issues reference this 
 
 ## 3. Google OAuth verification + CASA Tier 2
 
-**Why it blocks:** `gmail.readonly` is a **restricted** scope: OAuth verification plus an annual CASA Tier 2 third-party security assessment (month-scale). `calendar.readonly` is sensitive-scope (verification, no CASA).
+**Why it blocks public release:** `gmail.readonly` is a **restricted** scope: OAuth verification plus an annual CASA Tier 2 third-party security assessment (month-scale). `calendar.readonly` is sensitive-scope (verification, no CASA).
 
 **What it does NOT block:** engineering. All sync is built and QA'd against an unverified app in test-user mode (≤100 allow-listed test users) and ships **flag-gated**. Verification is a production-enablement switch, not a code dependency — 1.0 ships either way.
 
@@ -51,7 +53,7 @@ Update the Status column in place as items move; the wave issues reference this 
 
 ## 4. Microsoft publisher verification
 
-**Why it blocks:** production Microsoft Graph mail/calendar consent for external tenants requires a verified publisher (MPN account). Materially lighter than item 3.
+**Why it blocks public release:** production Microsoft Graph mail/calendar consent for external tenants requires a verified publisher (MPN account). Materially lighter than item 3.
 
 **Action:** register the Entra app, complete publisher verification, record on #855. Dev-tenant engineering proceeds meanwhile.
 

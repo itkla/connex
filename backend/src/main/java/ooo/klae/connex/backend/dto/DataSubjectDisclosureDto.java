@@ -18,6 +18,7 @@ public class DataSubjectDisclosureDto {
     private List<TagDto> tags;
     private List<CustomFieldValueDto> customFieldValues;
     private List<ActivityDto> activities;
+    private List<ProviderCaptureEvidenceDto> providerCaptureEvidence;
     private List<NoteDto> notes;
     private List<TaskDto> tasks;
     private List<AttachmentDto> attachments;
@@ -104,6 +105,32 @@ public class DataSubjectDisclosureDto {
         private Integer dealId;
         private Integer createdById;
         private LocalDateTime timestamp;
+    }
+
+    @Data
+    public static class ProviderCaptureEvidenceDto {
+        private long interactionId;
+        private int workspaceId;
+        private String provider;
+        private String stream;
+        private String providerSourceId;
+        private String providerConversationId;
+        private String interactionType;
+        private String subject;
+        private String body;
+        private LocalDateTime occurredAt;
+        private LocalDateTime endedAt;
+        private String visibility;
+        private String admissionStatus;
+        private String admittedFieldsJson;
+        private String materialExclusionsJson;
+        private LocalDateTime capturedAt;
+        private long participantId;
+        private String participantRole;
+        private String participantDisplayName;
+        private String participantEmail;
+        private String participantMatchState;
+        private String participantHeldReason;
     }
 
     @Data

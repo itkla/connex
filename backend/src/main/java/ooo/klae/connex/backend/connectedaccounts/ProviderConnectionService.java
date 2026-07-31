@@ -13,7 +13,6 @@ import java.util.Map;
 import jakarta.servlet.http.HttpSession;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -23,14 +22,17 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.ProviderConnection;
+import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCaptureConnectionStateService;
 import ooo.klae.connex.backend.dto.ProviderConnectionDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Manages a user's own connections to external mail/calendar providers (#60 WS1): authorize-URL
@@ -55,18 +57,25 @@ public class ProviderConnectionService {
 
     private final ProviderConnectionMapper connectionMapper;
     private final ConnectedAccountProviders providers;
-    private final UserProviderSecretCipher secretCipher;
     private final ProviderTokenClient tokenClient;
+    private final ProviderCredentialPersistence credentialPersistence;
+    private final ProviderConnectionLifecycleService lifecycleService;
+    private final ProviderConnectionMutation connectionMutation;
     private final WorkspaceService workspaceService;
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final MailProperties mailProperties;
     private final ObjectMapper objectMapper;
+    private final TenantWorkScope tenantWorkScope;
+    private final ProviderCaptureConnectionStateService captureConnectionStateService;
 
     /** The current user's connections, masked for display. */
     public List<ProviderConnectionDto> getForCurrentUser() {
         int userId = workspaceService.getCurrentUserId();
-        return connectionMapper.getByUserId(userId).stream().map(ProviderConnectionDto::from).toList();
+        return tenantWorkScope.unrouted(
+            () -> connectionMapper.getByUserId(userId).stream()
+                .map(ProviderConnectionDto::from)
+                .toList());
     }
 
     /**
@@ -91,10 +100,8 @@ public class ProviderConnectionService {
      * code server-side, stores the encrypted token bundle under the user scope, and upserts the
      * connection row. Returns the browser redirect target (always the trusted app base URL).
      *
-     * <p>Deliberately not one transaction: the code exchange is an external call that must not
-     * hold a pooled connection, and the secret write + row upsert are each atomic on their own.
-     * A crash between them leaves only an orphaned secret that the next reconnect overwrites
-     * (the secret store upserts per user + purpose).
+     * <p>The external code exchange completes before the control-catalog credential transaction,
+     * so provider latency never holds a database transaction.
      */
     public String completeCallback(String provider, String code, String state, String providerError) {
         requireEnabled(provider);
@@ -136,89 +143,63 @@ public class ProviderConnectionService {
             return connectionsUrl("error", "no_offline_access");
         }
 
-        String reference = secretCipher.encryptTokenBundle(provider, userId, bundleJson(tokens));
-        ProviderConnection existing = connectionMapper.getByUserAndProvider(userId, provider);
-        ProviderConnection connection = existing == null ? new ProviderConnection() : existing;
-        connection.setUserId(userId);
-        connection.setProvider(provider);
-        connection.setStatus("connected");
-        connection.setProviderAccountEmail(emailFromIdToken(tokens.idToken()));
-        connection.setGrantedScopes(tokens.scope() == null ? providers.scopes(provider) : tokens.scope());
-        connection.setCredentialRef(reference);
-        connection.setErrorCode(null);
-        if (existing == null) {
-            connectionMapper.insert(connection);
-        } else {
-            connectionMapper.update(connection);
-        }
+        boolean created = tenantWorkScope.unrouted(
+            () -> {
+                ProviderAccountIdentity identity =
+                    accountIdentityFromIdToken(provider, tokens.idToken());
+                return credentialPersistence.storeConnection(
+                    userId,
+                    provider,
+                    tokens,
+                    identity.accountId(),
+                    identity.email(),
+                    tokens.scope() == null ? providers.scopes(provider) : tokens.scope());
+            });
+        captureConnectionStateService.reconcile(userId, provider);
         auditService.record("user.connection.connect", "user", userId, provider,
-            (existing == null ? "Connected a " : "Reconnected a ") + provider + " account", null);
+            (created ? "Connected a " : "Reconnected a ") + provider + " account", null);
         return connectionsUrl("connected", provider);
     }
 
     /** Pauses an active connection; sync workstreams must skip paused connections. */
-    @Transactional
     public ProviderConnectionDto pause(String provider) {
         return transition(provider, "connected", "paused", "user.connection.pause", "Paused");
     }
 
     /** Resumes a paused connection. */
-    @Transactional
     public ProviderConnectionDto resume(String provider) {
         return transition(provider, "paused", "connected", "user.connection.resume", "Resumed");
     }
 
     /**
-     * Disconnects: best-effort revocation at the provider, removal of the connection row, and
-     * deletion of the stored token bundle. Step-up gated — this destroys a durable credential.
-     *
-     * <p>Deliberately not one transaction: revocation reads the bundle through the secret store,
-     * whose own transactional failure (e.g. a dangling reference) would poison an enclosing
-     * transaction even when caught — and local disconnection must never be blocked by a broken
-     * secret. Row-then-secret ordering means a crash in between leaves only an invisible orphaned
-     * secret, never a row pointing at a deleted credential.
+     * Starts a durable disconnect that stops claims, purges every tenant catalog, attempts
+     * provider revocation, and only then destroys the generation-bound local credential.
+     * Step-up is required because this removes both retained content and durable access.
      */
     public void disconnect(String provider) {
         int userId = workspaceService.getCurrentUserId();
         sessionSecurityService.requireRecentAuthentication(userId);
-        ProviderConnection connection = require(userId, provider);
-        revokeBestEffort(provider, userId, connection);
-        connectionMapper.delete(userId, provider);
-        if (connection.getCredentialRef() != null) {
-            secretCipher.deleteTokenBundleReference(provider, userId, connection.getCredentialRef());
+        requireSupported(provider);
+        ProviderConnection connection = tenantWorkScope.unrouted(
+            () -> connectionMutation.beginDisconnect(userId, provider));
+        if (!lifecycleService.process(connection)) {
+            throw new ConflictException(
+                "Provider disconnect cleanup is pending; retry after the current purge finishes");
         }
         auditService.record("user.connection.disconnect", "user", userId, provider,
-            "Disconnected the " + provider + " account", null);
+            "Started disconnect and purge for the " + provider + " account", null);
     }
 
     private ProviderConnectionDto transition(String provider, String from, String to,
             String auditAction, String verb) {
         int userId = workspaceService.getCurrentUserId();
-        ProviderConnection connection = require(userId, provider);
-        if (!from.equals(connection.getStatus())) {
-            throw new BadRequestException("Connection is " + connection.getStatus() + ", not " + from);
-        }
-        connection.setStatus(to);
-        connectionMapper.update(connection);
+        requireSupported(provider);
+        ProviderConnectionDto result = tenantWorkScope.unrouted(
+            () -> connectionMutation.transition(userId, provider, from, to));
+        captureConnectionStateService.reconcile(userId, provider);
         auditService.record(auditAction, "user", userId, provider,
             verb + " the " + provider + " connection", null);
-        return ProviderConnectionDto.from(connectionMapper.getByUserAndProvider(userId, provider));
-    }
-
-    private void revokeBestEffort(String provider, int userId, ProviderConnection connection) {
-        String revokeUri = providers.revokeUri(provider);
-        if (revokeUri == null || connection.getCredentialRef() == null) {
-            return;
-        }
-        try {
-            JsonNode bundle = objectMapper.readTree(
-                secretCipher.decryptTokenBundle(provider, userId, connection.getCredentialRef()));
-            if (bundle.hasNonNull("refreshToken")) {
-                tokenClient.revoke(revokeUri, bundle.get("refreshToken").asString());
-            }
-        } catch (RuntimeException e) {
-            log.warn("Best-effort revocation for {} connection failed: {}", provider, e.getClass().getSimpleName());
-        }
+        return result;
     }
 
     private Map<String, String> exchangeForm(String provider, String code) {
@@ -232,41 +213,63 @@ public class ProviderConnectionService {
         return form;
     }
 
-    private String bundleJson(ProviderTokenResponse tokens) {
-        Map<String, Object> bundle = new LinkedHashMap<>();
-        bundle.put("refreshToken", tokens.refreshToken());
-        bundle.put("accessToken", tokens.accessToken());
-        if (tokens.expiresIn() != null) {
-            bundle.put("accessTokenExpiresAt", Instant.now().plusSeconds(tokens.expiresIn()).toString());
-        }
-        if (tokens.scope() != null) {
-            bundle.put("scope", tokens.scope());
-        }
-        bundle.put("obtainedAt", Instant.now().toString());
-        return objectMapper.writeValueAsString(bundle);
-    }
-
     /**
      * Extracts the account email from the id token for display. The token was received directly
      * from the provider's token endpoint over TLS in the same exchange, so decoding its payload
      * without signature verification is acceptable for non-authorizing display metadata — it is
      * never used to authenticate or link accounts.
      */
-    private String emailFromIdToken(String idToken) {
-        if (idToken == null) {
-            return null;
+    private ProviderAccountIdentity accountIdentityFromIdToken(
+            String provider, String idToken) {
+        if (idToken == null || idToken.isBlank()) {
+            throw new ProviderTokenException(
+                "identity_missing", "Provider token response omitted the account identity");
         }
         try {
             String[] parts = idToken.split("\\.", -1);
             if (parts.length < 2) {
-                return null;
+                throw new ProviderTokenException(
+                    "identity_malformed", "Provider account identity is malformed");
             }
             JsonNode claims = objectMapper.readTree(
                 new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8));
-            return claims.hasNonNull("email") ? claims.get("email").asString() : null;
+            String audience = textClaim(claims, "aud");
+            if (!providers.client(provider).getClientId().equals(audience)) {
+                throw new ProviderTokenException(
+                    "identity_audience_mismatch",
+                    "Provider account identity was issued for a different client");
+            }
+            String subject = textClaim(claims, "sub");
+            String issuer = textClaim(claims, "iss");
+            if (subject == null || issuer == null) {
+                throw new ProviderTokenException(
+                    "identity_missing", "Provider account identity is incomplete");
+            }
+            String accountId = provider + ":" + issuer + ":" + subject;
+            String email = null;
+            for (String claim : List.of("email", "preferred_username", "upn")) {
+                if (claims.hasNonNull(claim)
+                        && claims.get(claim).isString()
+                        && !claims.get(claim).asString().isBlank()) {
+                    email = claims.get(claim).asString();
+                    break;
+                }
+            }
+            return new ProviderAccountIdentity(accountId, email);
+        } catch (ProviderTokenException exception) {
+            throw exception;
         } catch (RuntimeException e) {
-            return null;
+            throw new ProviderTokenException(
+                "identity_malformed", "Provider account identity is malformed", e);
         }
+    }
+
+    private static String textClaim(JsonNode claims, String field) {
+        return claims.hasNonNull(field)
+                && claims.get(field).isString()
+                && !claims.get(field).asString().isBlank()
+            ? claims.get(field).asString()
+            : null;
     }
 
     private boolean consumePendingState(String provider, String state) {
@@ -294,15 +297,6 @@ public class ProviderConnectionService {
         }
         return MessageDigest.isEqual(
             parts[0].getBytes(StandardCharsets.UTF_8), sha256(state).getBytes(StandardCharsets.UTF_8));
-    }
-
-    private ProviderConnection require(int userId, String provider) {
-        requireSupported(provider);
-        ProviderConnection connection = connectionMapper.getByUserAndProvider(userId, provider);
-        if (connection == null) {
-            throw new ResourceNotFoundException("No " + provider + " connection");
-        }
-        return connection;
     }
 
     private void requireSupported(String provider) {
@@ -348,5 +342,8 @@ public class ProviderConnectionService {
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
         }
+    }
+
+    private record ProviderAccountIdentity(String accountId, String email) {
     }
 }

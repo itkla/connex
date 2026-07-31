@@ -131,6 +131,9 @@ public class DataSubjectDisclosureReadTransaction {
         disclosure.setCustomFieldValues(
             dataSubjectDisclosureMapper.findCustomFields(workspaceId, personId, workspaceIds));
         disclosure.setActivities(dataSubjectDisclosureMapper.findActivities(workspaceId, personId, workspaceIds));
+        disclosure.setProviderCaptureEvidence(
+            dataSubjectDisclosureMapper.findProviderCaptureEvidence(
+                workspaceId, personId, workspaceIds));
         disclosure.setNotes(dataSubjectDisclosureMapper.findNotes(workspaceId, personId, workspaceIds));
         disclosure.setTasks(dataSubjectDisclosureMapper.findTasks(workspaceId, personId, workspaceIds));
         disclosure.setAttachments(

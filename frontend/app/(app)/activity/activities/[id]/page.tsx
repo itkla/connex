@@ -17,6 +17,7 @@ import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import Rise from "@/app/components/motion/Rise";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
+import ProviderCaptureEvidence from "@/app/components/activity/ProviderCaptureEvidence";
 import { TYPE_META, normalizeType } from "@/app/components/activity/activities/activityTypeMeta";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -162,6 +163,10 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                         ) : null}
                     </dl>
                 </Rise>
+
+                {activity.captureEvidence ? (
+                    <ProviderCaptureEvidence evidence={activity.captureEvidence} />
+                ) : null}
 
                 <BacklinksPanel refType="activity" refId={activity.id} />
             </div>

@@ -225,13 +225,13 @@ class PersonMapperTest extends AbstractMapperTest {
         User author = newUser();
         addNote(normal, author, "workspace");
         addNote(suspended, author, "workspace");
-        personMapper.updateProcessingRestrictions(workspace.getId(), suspended.getId(), true, false);
-        personMapper.updateProcessingRestrictions(workspace.getId(), provisionCeased.getId(), false, true);
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
         dealMapper.addPerson(workspace.getId(), deal.getId(), suspended.getId(), "suspended");
         dealMapper.addPerson(workspace.getId(), deal.getId(), provisionCeased.getId(), "ceased");
+        personMapper.updateProcessingRestrictions(workspace.getId(), suspended.getId(), true, false);
+        personMapper.updateProcessingRestrictions(workspace.getId(), provisionCeased.getId(), false, true);
 
         List<Integer> processableIds = personMapper.getProcessablePersons(workspace.getId()).stream()
             .map(Person::getId).toList();
@@ -262,12 +262,10 @@ class PersonMapperTest extends AbstractMapperTest {
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
-        assertNotNull(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
-            .filter(dealPerson -> dealPerson.getPerson().getId() == suspended.getId())
-            .findFirst().orElseThrow().getPerson().getSuspendedAt());
-        assertNotNull(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
-            .filter(dealPerson -> dealPerson.getPerson().getId() == provisionCeased.getId())
-            .findFirst().orElseThrow().getPerson().getProvisionCeasedAt());
+        assertFalse(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+            .anyMatch(dealPerson -> dealPerson.getPerson().getId() == suspended.getId()));
+        assertFalse(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+            .anyMatch(dealPerson -> dealPerson.getPerson().getId() == provisionCeased.getId()));
     }
 
     /**

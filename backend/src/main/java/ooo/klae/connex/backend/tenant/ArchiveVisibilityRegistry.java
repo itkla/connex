@@ -246,6 +246,11 @@ public final class ArchiveVisibilityRegistry {
                 + "keyed by an already-authorised contact. The recent-moves feed projects the "
                 + "contact's own name and picture and is returned verbatim by EmploymentService, so "
                 + "its join carries the archive predicate itself.");
+        declare(entries, "ProviderCaptureMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
+            "Provider capture checks the retained person row only for processing restrictions and "
+                + "never projects identifying person or company fields; participant evidence stays "
+                + "reachable for lawful disclosure while restricted records remain ineligible for "
+                + "new provider-owned activity projections.");
         return Map.copyOf(entries);
     }
 

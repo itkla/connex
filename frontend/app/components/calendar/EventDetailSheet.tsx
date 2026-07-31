@@ -21,6 +21,7 @@ import type { Contact, Deal, RelationshipTemperature } from '@/app/lib/types';
 import { addDays, dayKeyOf, startOfDay, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_ICON, KIND_LABEL_KEY } from './constants';
 import { WARMTH_CHIP_CLASS, WARMTH_DOT_CLASS, WARMTH_LABEL_KEY, WARMTH_TREND_KEY } from './warmth';
+import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
 
 function linkedIds(event: CalendarEvent): { personId: number | null; dealId: number | null } {
     switch (event.kind) {
@@ -162,6 +163,12 @@ export default function EventDetailSheet({
                         )}
                     </div>
                 )}
+
+                {event.kind === 'activity' && event.raw.captureEvidence ? (
+                    <div className="px-4 py-3">
+                        <ProviderCaptureEvidence evidence={event.raw.captureEvidence} />
+                    </div>
+                ) : null}
 
                 {event.draggable && onReschedule && (
                     <div className="flex flex-col gap-2 px-4 py-3">

@@ -34,6 +34,14 @@ public class Activity {
     private User createdBy; // user who created the activity object
     private String timestamp;
     private List<EntityReference> references;
+    private boolean providerOwned;
+    private String providerName;
+    private String providerStream;
+    private String providerSourceId;
+    private String providerCapturedAt;
+    private String providerVisibility;
+    private String providerAdmittedFieldsJson;
+    private String providerMaterialExclusionsJson;
 
     public int getId() {
         return id;

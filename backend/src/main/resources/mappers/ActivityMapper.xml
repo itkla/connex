@@ -10,6 +10,15 @@
     <result property="subject"   column="subject"/>
     <result property="notes"     column="notes"/>
     <result property="timestamp" column="timestamp"/>
+    <result property="providerOwned" column="provider_owned"/>
+    <result property="providerName" column="provider_name"/>
+    <result property="providerStream" column="provider_stream"/>
+    <result property="providerSourceId" column="provider_source_id"/>
+    <result property="providerCapturedAt" column="provider_captured_at"/>
+    <result property="providerVisibility" column="provider_visibility"/>
+    <result property="providerAdmittedFieldsJson" column="provider_admitted_fields_json"/>
+    <result property="providerMaterialExclusionsJson"
+            column="provider_material_exclusions_json"/>
     <association property="person" javaType="Person">
       <id property="id" column="person_id"/>
     </association>
@@ -22,7 +31,10 @@
   </resultMap>
 
   <sql id="activityColumns">
-    id, workspace_id, type, subject, notes, person_id, deal_id, created_by_id, timestamp
+    id, workspace_id, type, subject, notes, person_id, deal_id, created_by_id, timestamp,
+    provider_owned, provider_name, provider_stream, provider_source_id,
+    provider_captured_at, provider_visibility, provider_admitted_fields_json,
+    provider_material_exclusions_json
   </sql>
 
   <select id="getAllActivities" resultMap="ActivityResult">
@@ -340,7 +352,9 @@
   </select>
 
   <select id="countCreatedAnywhere" resultType="int">
-    SELECT COUNT(*) FROM activity WHERE created_by_id = #{userId} FOR UPDATE
+    SELECT COUNT(*) FROM activity
+    WHERE created_by_id = #{userId} AND provider_owned = FALSE
+    FOR UPDATE
   </select>
 
 </mapper>

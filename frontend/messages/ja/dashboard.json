@@ -24,6 +24,11 @@
     "recentNotes": "最近のノート",
     "notifications": "通知",
     "quickActions": "クイックアクション",
+    "captureAttention": {
+      "title": "連携データの取り込みに対応が必要です",
+      "description": "優先度の高い人物確認またはプロバイダーの問題を解決し、関係性の根拠を最新に保ちます。",
+      "action": "{provider}: 確認 {reviews}件 · 対応 {interventions}件"
+    },
     "analyticsKpis": "主要指標",
     "revenueTrend": "売上トレンド",
     "winRate": "受注率",

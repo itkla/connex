@@ -4,22 +4,42 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.ProviderConnectionMapper">
 
   <resultMap id="ProviderConnectionResult" type="ProviderConnection">
-    <id     property="id"                   column="id"/>
-    <result property="userId"               column="user_id"/>
-    <result property="provider"             column="provider"/>
-    <result property="status"               column="status"/>
+    <id property="id" column="id"/>
+    <result property="userId" column="user_id"/>
+    <result property="provider" column="provider"/>
+    <result property="status" column="status"/>
     <result property="providerAccountEmail" column="provider_account_email"/>
-    <result property="grantedScopes"        column="granted_scopes"/>
-    <result property="credentialRef"        column="credential_ref"/>
-    <result property="lastSyncAt"           column="last_sync_at"/>
-    <result property="errorCode"            column="error_code"/>
-    <result property="createdAt"            column="created_at"/>
-    <result property="updatedAt"            column="updated_at"/>
+    <result property="providerAccountId" column="provider_account_id"/>
+    <result property="grantedScopes" column="granted_scopes"/>
+    <result property="credentialRef" column="credential_ref"/>
+    <result property="credentialGeneration" column="credential_generation"/>
+    <result property="accessTokenExpiresAt" column="access_token_expires_at"/>
+    <result property="refreshLeaseOwner" column="refresh_lease_owner"/>
+    <result property="refreshLeaseUntil" column="refresh_lease_until"/>
+    <result property="disconnectingAt" column="disconnecting_at"/>
+    <result property="disconnectAttemptAt" column="disconnect_attempt_at"/>
+    <result property="captureReconcileRequired" column="capture_reconcile_required"/>
+    <result property="captureReconcileAfterWorkspaceId"
+        column="capture_reconcile_after_workspace_id"/>
+    <result property="captureReconcileLeaseOwner" column="capture_reconcile_lease_owner"/>
+    <result property="captureReconcileLeaseUntil" column="capture_reconcile_lease_until"/>
+    <result property="captureReconcileNextAttemptAt"
+        column="capture_reconcile_next_attempt_at"/>
+    <result property="captureReconcileFailures" column="capture_reconcile_failures"/>
+    <result property="lastSyncAt" column="last_sync_at"/>
+    <result property="errorCode" column="error_code"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
   <sql id="cols">
-    id, user_id, provider, status, provider_account_email, granted_scopes, credential_ref,
-    last_sync_at, error_code, created_at, updated_at
+    id, user_id, provider, status, provider_account_email, provider_account_id,
+    granted_scopes, credential_ref,
+    credential_generation, access_token_expires_at, refresh_lease_owner, refresh_lease_until,
+    disconnecting_at, disconnect_attempt_at, capture_reconcile_required,
+    capture_reconcile_after_workspace_id, capture_reconcile_lease_owner,
+    capture_reconcile_lease_until, capture_reconcile_next_attempt_at,
+    capture_reconcile_failures, last_sync_at, error_code, created_at, updated_at
   </sql>
 
   <select id="getByUserId" resultMap="ProviderConnectionResult">
@@ -33,11 +53,70 @@
     WHERE user_id = #{userId} AND provider = #{provider}
   </select>
 
+  <select id="getByUserAndProviderForUpdate" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection
+    WHERE user_id = #{userId} AND provider = #{provider}
+    FOR UPDATE
+  </select>
+
+  <select id="getByUserAndProviderForShare" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection
+    WHERE user_id = #{userId} AND provider = #{provider}
+    FOR SHARE
+  </select>
+
+  <select id="getById" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection WHERE id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection WHERE id = #{id} FOR UPDATE
+  </select>
+
+  <select id="getByIdForShare" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection WHERE id = #{id} FOR SHARE
+  </select>
+
+  <select id="findDisconnecting" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection
+    WHERE status IN ('disconnecting', 'purge_failed')
+      AND (
+        capture_reconcile_lease_until IS NULL
+        OR capture_reconcile_lease_until &lt; UTC_TIMESTAMP(6)
+      )
+      AND (
+        capture_reconcile_next_attempt_at IS NULL
+        OR capture_reconcile_next_attempt_at &lt;= UTC_TIMESTAMP(6)
+      )
+    ORDER BY COALESCE(disconnect_attempt_at, disconnecting_at), id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findCaptureReconcileDue" resultMap="ProviderConnectionResult">
+    SELECT <include refid="cols"/> FROM provider_connection
+    WHERE capture_reconcile_required = TRUE
+      AND status NOT IN ('disconnecting', 'purge_failed')
+      AND (
+        capture_reconcile_lease_until IS NULL
+        OR capture_reconcile_lease_until &lt; UTC_TIMESTAMP(6)
+      )
+      AND (
+        capture_reconcile_next_attempt_at IS NULL
+        OR capture_reconcile_next_attempt_at &lt;= UTC_TIMESTAMP(6)
+      )
+    ORDER BY capture_reconcile_next_attempt_at, id
+    LIMIT #{limit}
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO provider_connection (
-      user_id, provider, status, provider_account_email, granted_scopes, credential_ref, error_code
+      user_id, provider, status, provider_account_email, provider_account_id,
+      granted_scopes, credential_ref, credential_generation, access_token_expires_at,
+      capture_reconcile_required, capture_reconcile_after_workspace_id, error_code
     ) VALUES (
-      #{userId}, #{provider}, #{status}, #{providerAccountEmail}, #{grantedScopes}, #{credentialRef}, #{errorCode}
+      #{userId}, #{provider}, #{status}, #{providerAccountEmail}, #{providerAccountId},
+      #{grantedScopes}, #{credentialRef}, #{credentialGeneration}, #{accessTokenExpiresAt},
+      #{captureReconcileRequired}, #{captureReconcileAfterWorkspaceId}, #{errorCode}
     )
   </insert>
 
@@ -45,11 +124,171 @@
     UPDATE provider_connection SET
       status = #{status},
       provider_account_email = #{providerAccountEmail},
+      provider_account_id = #{providerAccountId},
       granted_scopes = #{grantedScopes},
       credential_ref = #{credentialRef},
+      credential_generation = #{credentialGeneration},
+      access_token_expires_at = #{accessTokenExpiresAt},
+      refresh_lease_owner = #{refreshLeaseOwner},
+      refresh_lease_until = #{refreshLeaseUntil},
+      disconnecting_at = #{disconnectingAt},
+      disconnect_attempt_at = #{disconnectAttemptAt},
+      capture_reconcile_required = #{captureReconcileRequired},
+      capture_reconcile_after_workspace_id = #{captureReconcileAfterWorkspaceId},
+      capture_reconcile_lease_owner = #{captureReconcileLeaseOwner},
+      capture_reconcile_lease_until = #{captureReconcileLeaseUntil},
+      capture_reconcile_next_attempt_at = #{captureReconcileNextAttemptAt},
+      capture_reconcile_failures = #{captureReconcileFailures},
       error_code = #{errorCode}
     WHERE user_id = #{userId} AND provider = #{provider}
   </update>
+
+  <update id="beginDisconnect">
+    UPDATE provider_connection
+    SET status = 'disconnecting',
+        credential_generation = credential_generation + 1,
+        disconnecting_at = UTC_TIMESTAMP(6),
+        disconnect_attempt_at = NULL,
+        capture_reconcile_required = TRUE,
+        capture_reconcile_after_workspace_id = 0,
+        capture_reconcile_lease_owner = NULL,
+        capture_reconcile_lease_until = NULL,
+        capture_reconcile_next_attempt_at = NULL,
+        capture_reconcile_failures = 0,
+        refresh_lease_owner = NULL,
+        refresh_lease_until = NULL,
+        error_code = NULL
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+      AND status IN ('connected', 'paused', 'error', 'revoked', 'purge_failed')
+  </update>
+
+  <update id="claimDisconnectAttempt">
+    UPDATE provider_connection
+    SET disconnect_attempt_at = UTC_TIMESTAMP(6)
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND status IN ('disconnecting', 'purge_failed')
+      AND (
+        disconnect_attempt_at IS NULL
+        OR disconnect_attempt_at &lt; DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 10 MINUTE)
+      )
+  </update>
+
+  <select id="isDisconnectGeneration" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM provider_connection
+      WHERE id = #{id}
+        AND credential_generation = #{generation}
+        AND status IN ('disconnecting', 'purge_failed')
+    )
+  </select>
+
+  <update id="markPurgeFailed">
+    UPDATE provider_connection
+    SET status = 'purge_failed',
+        error_code = #{errorCode},
+        disconnect_attempt_at = UTC_TIMESTAMP(6)
+    WHERE id = #{id} AND credential_generation = #{generation}
+  </update>
+
+  <update id="claimRefreshLease">
+    UPDATE provider_connection
+    SET refresh_lease_owner = #{owner},
+        refresh_lease_until = #{until}
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND status = 'connected'
+      AND (refresh_lease_until IS NULL OR refresh_lease_until &lt; #{now})
+  </update>
+
+  <update id="completeRefresh">
+    UPDATE provider_connection
+    SET credential_ref = #{credentialRef},
+        access_token_expires_at = #{expiresAt},
+        refresh_lease_owner = NULL,
+        refresh_lease_until = NULL,
+        error_code = NULL
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND refresh_lease_owner = #{owner}
+  </update>
+
+  <update id="failRefresh">
+    UPDATE provider_connection
+    SET status = 'error',
+        error_code = #{errorCode},
+        refresh_lease_owner = NULL,
+        refresh_lease_until = NULL
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND refresh_lease_owner = #{owner}
+  </update>
+
+  <update id="releaseRefreshLease">
+    UPDATE provider_connection
+    SET error_code = #{errorCode},
+        refresh_lease_owner = NULL,
+        refresh_lease_until = NULL
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND status = 'connected'
+      AND refresh_lease_owner = #{owner}
+  </update>
+
+  <update id="claimCaptureReconcile">
+    UPDATE provider_connection
+    SET capture_reconcile_lease_owner = #{owner},
+        capture_reconcile_lease_until = #{until}
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND capture_reconcile_required = TRUE
+      AND (
+        capture_reconcile_next_attempt_at IS NULL
+        OR capture_reconcile_next_attempt_at &lt;= #{now}
+      )
+      AND (
+        capture_reconcile_lease_until IS NULL
+        OR capture_reconcile_lease_until &lt; #{now}
+      )
+  </update>
+
+  <update id="advanceCaptureReconcile">
+    UPDATE provider_connection
+    SET capture_reconcile_required = NOT #{complete},
+        capture_reconcile_after_workspace_id =
+          CASE WHEN #{complete} THEN 0 ELSE #{afterWorkspaceId} END,
+        capture_reconcile_lease_owner = NULL,
+        capture_reconcile_lease_until = NULL,
+        capture_reconcile_next_attempt_at =
+          CASE WHEN #{complete} THEN NULL ELSE DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) END,
+        capture_reconcile_failures = 0
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND capture_reconcile_required = TRUE
+      AND capture_reconcile_lease_owner = #{owner}
+  </update>
+
+  <update id="releaseCaptureReconcile">
+    UPDATE provider_connection
+    SET capture_reconcile_lease_owner = NULL,
+        capture_reconcile_lease_until = NULL,
+        capture_reconcile_next_attempt_at =
+          DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE),
+        capture_reconcile_failures = capture_reconcile_failures + 1
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND capture_reconcile_required = TRUE
+      AND capture_reconcile_lease_owner = #{owner}
+  </update>
+
+  <delete id="deleteGeneration">
+    DELETE FROM provider_connection
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND status IN ('disconnecting', 'purge_failed')
+  </delete>
 
   <delete id="delete">
     DELETE FROM provider_connection WHERE user_id = #{userId} AND provider = #{provider}

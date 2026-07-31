@@ -19,6 +19,12 @@ public enum Capability {
     /** Per-user Microsoft connected accounts (mail/calendar OAuth). */
     CONNECTED_ACCOUNTS_MICROSOFT,
 
+    /** Google mail/calendar ingestion. */
+    CONNECTED_CAPTURE_GOOGLE,
+
+    /** Microsoft mail/calendar ingestion. */
+    CONNECTED_CAPTURE_MICROSOFT,
+
     /** Instance-managed mail transport. */
     MANAGED_MAIL,
 

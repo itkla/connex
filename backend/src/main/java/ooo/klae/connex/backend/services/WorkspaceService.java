@@ -213,7 +213,6 @@ public class WorkspaceService {
         workspace.setName(name.trim());
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
-        userOffboardingService.prepareFreshMembership(workspace.getId(), ownerUserId);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
         notificationStateVersionService.markChanged(ownerUserId);
         auditService.record("org.workspace.create", "organization", orgId, workspace.getName(),
@@ -330,6 +329,9 @@ public class WorkspaceService {
     public Set<Permission> permissionsFor(int workspaceId, int userId) {
         if (systemActor.is(userId)) {
             return systemActor.permissions();
+        }
+        if (userMapper.isAccountDeletionReserved(userId)) {
+            return EnumSet.noneOf(Permission.class);
         }
         Integer roleId = workspaceMapper.getMemberRoleId(workspaceId, userId);
         if (roleId != null) {

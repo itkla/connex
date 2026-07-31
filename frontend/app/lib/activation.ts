@@ -49,6 +49,8 @@ export type ActivationCounts = {
     stages: number;
     members: number;
     connectedAccounts: number;
+    connectedCaptureReady: number;
+    connectedCaptureAvailable: boolean;
     /** Whether the instance offers mailbox connections at all; the step is hidden when it does not. */
     connectedAccountsAvailable: boolean;
     canImportContacts: boolean;
@@ -260,7 +262,9 @@ export function buildActivationSteps(counts: ActivationCounts): ActivationStep[]
     if (counts.connectedAccountsAvailable) {
         steps.push({
             id: 'connections',
-            done: counts.connectedAccounts > 0,
+            done: counts.connectedCaptureAvailable
+                ? counts.connectedCaptureReady > 0
+                : counts.connectedAccounts > 0,
             required: false,
             actionId: null,
             href: '/account/connections',

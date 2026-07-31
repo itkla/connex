@@ -33,6 +33,9 @@ public class CapabilitiesController {
                 new ConnectedAccounts(
                         capabilityRegistry.isAvailable(Capability.CONNECTED_ACCOUNTS_GOOGLE),
                         capabilityRegistry.isAvailable(Capability.CONNECTED_ACCOUNTS_MICROSOFT)),
+                new ConnectedCapture(
+                        capabilityRegistry.isAvailable(Capability.CONNECTED_CAPTURE_GOOGLE),
+                        capabilityRegistry.isAvailable(Capability.CONNECTED_CAPTURE_MICROSOFT)),
                 capabilityRegistry.isAvailable(Capability.MANAGED_MAIL),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT));
@@ -44,6 +47,7 @@ public class CapabilitiesController {
      * @param sso whether organization SSO is available
      * @param socialLogin available social-login providers
      * @param connectedAccounts available connected-account providers
+     * @param connectedCapture authorized capture providers
      * @param mailManaged whether instance-managed mail is enabled
      * @param businessCardScanning whether local OCR and durable card retention are ready
      * @param businessCardImport whether reviewed source-image import and retention are ready
@@ -52,6 +56,7 @@ public class CapabilitiesController {
             boolean sso,
             SocialLogin socialLogin,
             ConnectedAccounts connectedAccounts,
+            ConnectedCapture connectedCapture,
             boolean mailManaged,
             boolean businessCardScanning,
             boolean businessCardImport) {
@@ -73,5 +78,14 @@ public class CapabilitiesController {
      * @param microsoft whether Microsoft connected accounts are available
      */
     public record ConnectedAccounts(boolean google, boolean microsoft) {
+    }
+
+    /**
+     * Connected-capture provider availability.
+     *
+     * @param google whether Google capture is authorized
+     * @param microsoft whether Microsoft capture is authorized
+     */
+    public record ConnectedCapture(boolean google, boolean microsoft) {
     }
 }

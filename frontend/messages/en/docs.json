@@ -3252,6 +3252,48 @@
                     }
                 ]
             },
+            "connected-capture": {
+                "title": "Connected account capture",
+                "description": "Control which provider interactions become relationship evidence.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "Connecting Google or Microsoft gives Connex custody of a read-only provider connection. It does not start capture. Open Account, then Connections, and save a capture policy for each provider you want to use.",
+                            "Policies are scoped to the active workspace. Your policy can be narrowed by workspace and operator controls, but those controls can never be widened from the account page."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What you control",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Sources and history",
+                                "description": "Choose calendar, received mail, sent mail, and a history window up to 180 days. New policies start at 90 days."
+                            },
+                            {
+                                "title": "Metadata and bodies",
+                                "description": "Metadata-only capture is the default. Message bodies require both workspace permission and your explicit choice."
+                            },
+                            {
+                                "title": "Participant review",
+                                "description": "Unmatched or ambiguous participants stay in a review queue. Attach, create through duplicate preflight, or ignore them."
+                            },
+                            {
+                                "title": "Approval and evidence",
+                                "description": "Review-first policies hold resolved items for approval. Captured activities show provider provenance and remain read-only."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Purge and disconnect have different scopes",
+                        "body": "Purge removes captured content and derived evidence from the active workspace. Disconnect purges this provider's captured data from every workspace before deleting the credential. Metadata-only audit records remain."
+                    }
+                ]
+            },
             "audit-logs": {
                 "title": "Audit logs",
                 "description": "A tamper-evident history of actions taken in the workspace.",

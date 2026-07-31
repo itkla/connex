@@ -12,6 +12,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useMemo } from 'react';
 
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
 import type {
     RelationshipEvidence,
     RelationshipEvidenceContributor,
@@ -147,6 +148,12 @@ export default function RelationshipEvidencePanel({
                                                 <p className="text-xs text-muted-foreground">
                                                     {formatDateTime(contributor.occurredAt, locale)}
                                                 </p>
+                                                {contributor.captureEvidence ? (
+                                                    <ProviderCaptureEvidence
+                                                        evidence={contributor.captureEvidence}
+                                                        compact
+                                                    />
+                                                ) : null}
                                             </div>
                                             <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                                                 {number.format(contributor.decayedContribution)}

@@ -187,6 +187,7 @@ export const docsCategories: DocCategory[] = [
             { slug: "members-and-roles", icon: UserGroupIcon },
             { slug: "rules-and-automation", icon: BoltIcon },
             { slug: "notification-settings", icon: BellIcon },
+            { slug: "connected-capture", icon: EnvelopeIcon },
             { slug: "audit-logs", icon: ClipboardDocumentListIcon },
         ],
     },

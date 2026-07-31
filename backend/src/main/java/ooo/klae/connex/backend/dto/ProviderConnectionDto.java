@@ -7,12 +7,12 @@ import ooo.klae.connex.backend.beans.ProviderConnection;
  * token material — only presence ({@code hasCredential}) and display metadata.
  *
  * @param provider             google | microsoft
- * @param status               connected | paused | error | revoked
+ * @param status               connected, paused, error, revoked, disconnecting, or purge_failed
  * @param providerAccountEmail account identity reported by the provider (display only)
  * @param grantedScopes        space-delimited scopes granted at consent
  * @param hasCredential        whether a token bundle is stored
- * @param lastSyncAt           last successful sync; null until sync workstreams ship
- * @param errorCode            machine-readable reason when status = error
+ * @param lastSyncAt           last successful legacy connection sync, when available
+ * @param errorCode            machine-readable connection or purge failure reason
  * @param createdAt            when first connected
  * @param updatedAt            last state change
  */

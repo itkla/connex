@@ -250,6 +250,7 @@ export type RelationshipEvidenceContributor = {
     occurredAt: string;
     baseWeight: number;
     decayedContribution: number;
+    captureEvidence?: CapturedActivityEvidence | null;
 };
 
 export type RelationshipEvidence = {
@@ -811,6 +812,7 @@ export type Activity = {
     timestamp?: string;
     /** Server-resolved @/# references parsed from `notes`; read-only, drives chip rendering. */
     references?: NoteReference[];
+    captureEvidence?: CapturedActivityEvidence | null;
 };
 
 export type DealSummary = {
@@ -3023,6 +3025,7 @@ export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
     connectedAccounts: { google: boolean; microsoft: boolean };
+    connectedCapture: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
     businessCardScanning: boolean;
     businessCardImport: boolean;
@@ -3030,7 +3033,13 @@ export type InstanceCapabilities = {
 
 export type ConnectedAccountProvider = 'google' | 'microsoft';
 
-export type ProviderConnectionStatus = 'connected' | 'paused' | 'error' | 'revoked';
+export type ProviderConnectionStatus =
+    | 'connected'
+    | 'paused'
+    | 'error'
+    | 'revoked'
+    | 'disconnecting'
+    | 'purge_failed';
 
 /** A user's OAuth connection to an external mail/calendar provider (masked, no token material). */
 export type ProviderConnection = {
@@ -3043,6 +3052,177 @@ export type ProviderConnection = {
     errorCode?: string | null;
     createdAt: string;
     updatedAt: string;
+};
+
+export type CaptureStream = 'calendar' | 'mail_inbox' | 'mail_sent';
+
+export type CaptureHealthStatus =
+    | 'idle'
+    | 'queued'
+    | 'backfilling'
+    | 'syncing'
+    | 'retrying'
+    | 'intervention_required'
+    | 'paused'
+    | 'purging';
+
+export type CaptureAdmissionMode = 'manual' | 'review' | 'automatic';
+
+export type ProviderCapturePolicy = {
+    enabled: boolean;
+    calendar: boolean;
+    mailInbox: boolean;
+    mailSent: boolean;
+    backfillDays: number;
+    includeBodies: boolean;
+    admissionMode: CaptureAdmissionMode;
+    reviewBeforeCapture: boolean;
+    excludedPeople: string[];
+    excludedConversations: string[];
+    version: number;
+    updatedAt: string | null;
+};
+
+export type WorkspaceCapturePolicy = {
+    allowed: boolean;
+    calendar: boolean;
+    mailInbox: boolean;
+    mailSent: boolean;
+    maxBackfillDays: number;
+    bodyCaptureAllowed: boolean;
+    reviewRequired: boolean;
+    excludePrivateEvents: boolean;
+    excludeInternalOnly: boolean;
+    excludedDomains: string[];
+    version: number;
+    updatedAt: string | null;
+};
+
+export type EffectiveCapturePolicy = {
+    enabled: boolean;
+    calendar: boolean;
+    mailInbox: boolean;
+    mailSent: boolean;
+    backfillDays: number;
+    includeBodies: boolean;
+    admissionMode: CaptureAdmissionMode;
+    restrictionCodes: string[];
+};
+
+export type CaptureStreamState = {
+    stream: CaptureStream;
+    status: CaptureHealthStatus;
+    processedItems: number;
+    estimatedItems: number | null;
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    nextAttemptAt: string | null;
+    errorCode: string | null;
+};
+
+export type CaptureDisclosures = {
+    scopes: string[];
+    admittedFields: string[];
+    materialExclusions: string[];
+    visibility: string[];
+    retention: string[];
+};
+
+export type CapturePurgeStatus = 'idle' | 'disconnecting' | 'purge_failed';
+
+export type CapturePurgeState = {
+    active: boolean;
+    status: CapturePurgeStatus;
+    errorCode: string | null;
+};
+
+export type ProviderCaptureOverview = {
+    provider: ConnectedAccountProvider;
+    userPolicy: ProviderCapturePolicy;
+    workspacePolicy: WorkspaceCapturePolicy;
+    effectivePolicy: EffectiveCapturePolicy;
+    streams: CaptureStreamState[];
+    reviewCount: number;
+    pendingApprovalCount: number;
+    activationReady: boolean;
+    disclosures: CaptureDisclosures;
+    purge: CapturePurgeState;
+};
+
+export type CaptureOverview = {
+    providers: ProviderCaptureOverview[];
+};
+
+export type CaptureReviewAction = 'attach' | 'create' | 'ignore';
+
+export type CaptureReviewHeldReason =
+    | 'no_match'
+    | 'multiple_matches'
+    | 'invalid_identity'
+    | 'restricted_person'
+    | 'approval_required';
+
+export type CaptureReviewCandidate = {
+    personId: number;
+    name: string;
+};
+
+export type CaptureReviewItem = {
+    id: number;
+    version: number;
+    interactionId: number;
+    interactionVersion: number;
+    provider: ConnectedAccountProvider;
+    stream: CaptureStream;
+    interactionType: string;
+    subject: string | null;
+    occurredAt: string;
+    participantRole: string;
+    displayName: string | null;
+    email: string | null;
+    matchState: string;
+    heldReason: CaptureReviewHeldReason;
+    candidates: CaptureReviewCandidate[];
+    allowedActions: CaptureReviewAction[];
+};
+
+export type CaptureReviewPage = {
+    items: CaptureReviewItem[];
+    total: number;
+    page: number;
+    size: number;
+};
+
+export type CaptureReviewDecision =
+    | {
+        action: 'attach';
+        personId: number;
+        rememberExact: boolean;
+        version: number;
+    }
+    | {
+        action: 'create';
+        contact: CreateContactPayload;
+        duplicateReviewToken: string;
+        rememberExact: boolean;
+        version: number;
+    }
+    | {
+        action: 'ignore';
+        rememberExact: boolean;
+        version: number;
+    };
+
+export type CapturedActivityEvidence = {
+    provider: ConnectedAccountProvider;
+    stream: CaptureStream;
+    sourceId: string;
+    capturedAt: string;
+    captureAsOf: string;
+    visibility: string;
+    admittedFields: string[];
+    materialExclusions: string[];
+    editable: false;
 };
 
 export type BusinessCardAvailability = {

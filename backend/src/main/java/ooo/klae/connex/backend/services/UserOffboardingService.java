@@ -29,6 +29,8 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
+import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 
 /**
  * Service-layer replacement for the database-level fan-out that account
@@ -36,12 +38,10 @@ import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPl
  * control plane must never depend on org-data constraints, so the guard that
  * mirrored ON DELETE RESTRICT and the cleanup that mirrored ON DELETE
  * CASCADE / SET NULL live here instead. Every statement is deliberately
- * cross-workspace: authored content and references survive in workspaces the
- * user has already left. This class is the seam where Phase 4 (#313) will
- * iterate per-org catalogs instead of one shared schema — note that the
- * caller's single-transaction atomicity (and the guard's gap-lock
- * serialization) hold only while everything shares one database; the Phase 4
- * rewrite must redesign the caller's atomicity model, not just this class.
+ * cross-workspace within the currently routed tenant catalog: authored content
+ * and references survive in workspaces the user has already left. Account
+ * deletion routes this boundary once per distinct catalog and retains an
+ * owner-bound control-plane reservation across those transactions.
  */
 @Service
 @RequiredArgsConstructor
@@ -81,6 +81,7 @@ public class UserOffboardingService {
     private final WorkspaceMapper workspaceMapper;
     private final NotificationStateVersionService notificationStateVersionService;
     private final WorkflowOffboardingService workflowOffboardingService;
+    private final ProviderCapturePurgeService providerCapturePurgeService;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -132,6 +133,10 @@ public class UserOffboardingService {
      */
     public void prepareFreshMembership(int workspaceId, int userId) {
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
+            providerCapturePurgeService.purge(
+                workspaceId, userId, ConnectedAccountProviders.GOOGLE);
+            providerCapturePurgeService.purge(
+                workspaceId, userId, ConnectedAccountProviders.MICROSOFT);
             savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
@@ -155,6 +160,10 @@ public class UserOffboardingService {
      * @param userId the departing member
      */
     public void detachMemberContent(int workspaceId, int userId) {
+        providerCapturePurgeService.purge(
+            workspaceId, userId, ConnectedAccountProviders.GOOGLE);
+        providerCapturePurgeService.purge(
+            workspaceId, userId, ConnectedAccountProviders.MICROSOFT);
         notificationMapper.lockRecipientMemberships(userId);
         savedViewPreferenceMapper.deletePinsForUser(workspaceId, userId);
         savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);

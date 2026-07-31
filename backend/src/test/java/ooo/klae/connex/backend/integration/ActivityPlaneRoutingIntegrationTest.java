@@ -73,7 +73,12 @@ class ActivityPlaneRoutingIntegrationTest {
             statement.execute("CREATE TABLE " + scratchCatalog + ".activity ("
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, type VARCHAR(32) NOT NULL, "
                 + "subject VARCHAR(255) NOT NULL, notes TEXT NULL, person_id INT NULL, deal_id INT NULL, "
-                + "created_by_id INT NOT NULL, timestamp DATETIME NOT NULL)");
+                + "created_by_id INT NOT NULL, timestamp DATETIME NOT NULL, "
+                + "provider_owned BOOLEAN NOT NULL DEFAULT FALSE, provider_name VARCHAR(32) NULL, "
+                + "provider_stream VARCHAR(32) NULL, provider_source_id VARCHAR(512) NULL, "
+                + "provider_captured_at DATETIME(6) NULL, provider_visibility VARCHAR(32) NULL, "
+                + "provider_admitted_fields_json JSON NULL, "
+                + "provider_material_exclusions_json JSON NULL)");
             insertFixtures(connection);
         } catch (SQLException exception) {
             assumeTrue(false, "Cannot prepare scratch catalog " + scratchCatalog + " ("

@@ -51,7 +51,9 @@ public class HttpProviderTokenClient implements ProviderTokenClient {
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
-                throw new ProviderTokenException("exchange_rejected",
+                boolean retryable = response.statusCode() == 429
+                    || response.statusCode() >= 500;
+                throw new ProviderTokenException("exchange_rejected", retryable,
                     "Token endpoint returned status " + response.statusCode());
             }
             JsonNode body;
@@ -71,10 +73,12 @@ public class HttpProviderTokenClient implements ProviderTokenClient {
                 textOrNull(body, "scope"),
                 textOrNull(body, "id_token"));
         } catch (IOException e) {
-            throw new ProviderTokenException("exchange_unreachable", "Token endpoint unreachable", e);
+            throw new ProviderTokenException(
+                "exchange_unreachable", true, "Token endpoint unreachable", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new ProviderTokenException("exchange_interrupted", "Token exchange interrupted", e);
+            throw new ProviderTokenException(
+                "exchange_interrupted", true, "Token exchange interrupted", e);
         }
     }
 

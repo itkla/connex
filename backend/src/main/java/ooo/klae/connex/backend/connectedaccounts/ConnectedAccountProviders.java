@@ -3,7 +3,10 @@ package ooo.klae.connex.backend.connectedaccounts;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
@@ -104,6 +107,33 @@ public class ConnectedAccountProviders {
             case MICROSOFT -> MICROSOFT_SCOPES;
             default -> throw new IllegalArgumentException("Unsupported provider: " + provider);
         };
+    }
+
+    /** Whether the provider reported the least-privilege grant required for a capture stream. */
+    public boolean hasCaptureScope(
+            String provider, String grantedScopes, String stream) {
+        if (grantedScopes == null || grantedScopes.isBlank()) {
+            return false;
+        }
+        Set<String> granted = java.util.Arrays.stream(
+                grantedScopes.trim().split("\\s+"))
+            .map(value -> value.toLowerCase(Locale.ROOT))
+            .collect(Collectors.toUnmodifiableSet());
+        String required = switch (provider + ":" + stream) {
+            case GOOGLE + ":calendar" ->
+                "https://www.googleapis.com/auth/calendar.readonly";
+            case GOOGLE + ":mail_inbox", GOOGLE + ":mail_sent" ->
+                "https://www.googleapis.com/auth/gmail.readonly";
+            case MICROSOFT + ":calendar" -> "calendars.read";
+            case MICROSOFT + ":mail_inbox", MICROSOFT + ":mail_sent" -> "mail.read";
+            default -> null;
+        };
+        if (required == null) {
+            return false;
+        }
+        return granted.contains(required)
+            || granted.stream().anyMatch(
+                value -> value.endsWith("/" + required));
     }
 
     /**

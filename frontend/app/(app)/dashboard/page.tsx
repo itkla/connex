@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
@@ -6,6 +7,7 @@ import {
     BriefcaseIcon,
     BuildingOffice2Icon,
     FunnelIcon,
+    InboxStackIcon,
     UsersIcon,
 } from '@heroicons/react/24/outline';
 
@@ -15,6 +17,7 @@ import {
     getActivityVolumeFromCookie,
     getAllStagesResultFromCookie,
     getCapabilitiesResultFromCookie,
+    getCaptureOverviewResultFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompanyById,
@@ -50,8 +53,6 @@ import type {
     ActivityVolumeBucket,
     Attachment,
     AttachmentFacets,
-    Company,
-    Contact,
     Count,
     DashboardWidgetType,
     Deal,
@@ -191,6 +192,8 @@ async function loadActivationExtras(cookie: string | null): Promise<{
     data: {
         members: number;
         connectedAccounts: number;
+        connectedCaptureReady: number;
+        connectedCaptureAvailable: boolean;
         connectedAccountsAvailable: boolean;
         canImportContacts: boolean;
         canImportCompanies: boolean;
@@ -214,10 +217,15 @@ async function loadActivationExtras(cookie: string | null): Promise<{
     const effectivePermissions = effectivePermissionsResult.data;
     const connectedAccountsAvailable =
         capabilities.connectedAccounts.google || capabilities.connectedAccounts.microsoft;
+    const connectedCaptureAvailable =
+        capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft;
     const connectionsResult = connectedAccountsAvailable
         ? await getProviderConnectionsResultFromCookie(cookie)
         : { ok: true as const, data: [] };
-    if (!connectionsResult.ok) {
+    const captureResult = connectedCaptureAvailable
+        ? await getCaptureOverviewResultFromCookie(cookie)
+        : { ok: true as const, data: { providers: [] } };
+    if (!connectionsResult.ok || !captureResult.ok) {
         return { ok: false };
     }
     return {
@@ -227,7 +235,11 @@ async function loadActivationExtras(cookie: string | null): Promise<{
             connectedAccounts: connectionsResult.data.filter(
                 (connection) => connection.status === 'connected',
             ).length,
-            connectedAccountsAvailable,
+            connectedCaptureReady: captureResult.data.providers.filter(
+                (provider) => provider.activationReady,
+            ).length,
+            connectedCaptureAvailable,
+            connectedAccountsAvailable: connectedAccountsAvailable || connectedCaptureAvailable,
             canImportContacts: effectivePermissions.includes('PERSON_CREATE'),
             canImportCompanies: effectivePermissions.includes('COMPANY_CREATE'),
             canCreateActivities: effectivePermissions.includes('ACTIVITY_CREATE'),
@@ -249,7 +261,7 @@ export default async function Dashboard() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [contacts, deals, pipelinesResult, stagesResult, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
+    const [contacts, deals, pipelinesResult, stagesResult, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals, captureOverviewResult] =
         await Promise.all([
             getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getDealsPage({ page: 1, size: 100 }, init).then((response) => response.items),
@@ -279,6 +291,7 @@ export default async function Dashboard() {
             getUpcomingActivityCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
             getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
             getDealClosingSoonFromCookie(cookie, 7, 6).catch(() => [] as Deal[]),
+            getCaptureOverviewResultFromCookie(cookie),
         ]);
 
     const introSuggestions = introSuggestionsResult.ok ? introSuggestionsResult.data : [];
@@ -296,6 +309,26 @@ export default async function Dashboard() {
     const contactsPage = contactsPageResult.ok
         ? contactsPageResult.data
         : { items: [], total: 0 };
+    const captureAttention: Array<{
+        provider: string;
+        reviews: number;
+        interventions: number;
+    }> = [];
+    if (captureOverviewResult.ok) {
+        for (const provider of captureOverviewResult.data.providers) {
+            const reviews = provider.reviewCount + provider.pendingApprovalCount;
+            const interventions = provider.streams.filter(
+                (stream) => stream.status === 'intervention_required',
+            ).length;
+            if (reviews > 0 || interventions > 0) {
+                captureAttention.push({
+                    provider: provider.provider,
+                    reviews,
+                    interventions,
+                });
+            }
+        }
+    }
 
     const relatedCompanyIds = new Set(
         closingSoonDeals.flatMap((deal) => deal.company == null ? [] : [deal.company]),
@@ -377,6 +410,8 @@ export default async function Dashboard() {
         : {
             members: 0,
             connectedAccounts: 0,
+            connectedCaptureReady: 0,
+            connectedCaptureAvailable: false,
             connectedAccountsAvailable: false,
             canImportContacts: false,
             canImportCompanies: false,
@@ -502,6 +537,47 @@ export default async function Dashboard() {
                             canCreateFollowUp={activationCounts.canCreateTasks}
                         />
                     </Rise>
+                ) : null}
+                {captureAttention.length > 0 ? (
+                    <section
+                        className="rounded-2xl border border-warning/40 bg-warning/5 p-5"
+                        aria-labelledby="capture-attention-title"
+                    >
+                        <div className="flex items-start gap-3">
+                            <InboxStackIcon
+                                className="mt-0.5 size-5 shrink-0 text-warning"
+                                aria-hidden
+                            />
+                            <div className="min-w-0 flex-1">
+                                <h2
+                                    id="capture-attention-title"
+                                    className="text-sm font-semibold text-foreground"
+                                >
+                                    {t('captureAttention.title')}
+                                </h2>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    {t('captureAttention.description')}
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    {captureAttention.map((provider) => (
+                                        <Link
+                                            key={provider.provider}
+                                            href={`/account/connections?provider=${provider.provider}&panel=${provider.reviews > 0 ? 'reviews' : 'policy'}`}
+                                            className="rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-accent"
+                                        >
+                                            {t('captureAttention.action', {
+                                                provider: provider.provider === 'google'
+                                                    ? 'Google'
+                                                    : 'Microsoft',
+                                                reviews: provider.reviews,
+                                                interventions: provider.interventions,
+                                            })}
+                                        </Link>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
                 ) : null}
                 <Rise delay={activationVisible ? 0.18 : 0.09}>
                     <DashboardGrid

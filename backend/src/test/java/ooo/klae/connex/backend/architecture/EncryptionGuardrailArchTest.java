@@ -259,7 +259,10 @@ class EncryptionGuardrailArchTest {
         Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#AesGcm", 3),
         Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#SecretStore", 2),
         Map.entry("ooo/klae/connex/backend/connectedaccounts/UserProviderSecretCipher.java#SecretStore", 1),
-        Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderConnectionService.java#UserProviderSecretCipher", 1));
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderConnectionLifecyclePersistence.java#UserProviderSecretCipher", 1),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderConnectionLifecycleService.java#UserProviderSecretCipher", 1),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderCredentialPersistence.java#UserProviderSecretCipher", 1),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderCredentialService.java#UserProviderSecretCipher", 1));
 
     private static final Map<String, Integer> APPROVED_SECRET_PURPOSE_REFERENCES = Map.of(
         "ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 3,
@@ -298,6 +301,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/LoginDto.java#password",
         "ooo/klae/connex/backend/dto/MailConfigRequest.java#password",
         "ooo/klae/connex/backend/dto/PasskeyRegistrationOptionsRequest.java#currentPassword",
+        "ooo/klae/connex/backend/dto/ProviderCaptureReviewRequest.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/RegisterDto.java#password",
         "ooo/klae/connex/backend/dto/RegistrationVerificationConfirmDto.java#token",
         "ooo/klae/connex/backend/dto/ResetPasswordRequest.java#token",
