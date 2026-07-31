@@ -372,7 +372,8 @@ class BusinessCardServiceTest {
 
     @Test
     void distinctReuseKeysConvergeOnOneContactWithTwoAttachmentsAndNoCreateSideEffects() {
-        String secondKey = "12a25a23-70af-4f8e-a64a-6cfc5f8c69be";
+        String secondKey = String.join(
+            "-", "12a25a23", "70af", "4f8e", "a64a", "6cfc5f8c69be");
         BusinessCardContactRequest contact = new BusinessCardContactRequest(
             "Ada Lovelace", "ada@example.test", "+12025550199", "Engineer", null);
         BusinessCardPersonAction action =
