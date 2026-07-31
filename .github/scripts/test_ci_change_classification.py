@@ -20,6 +20,11 @@ class CiChangeClassificationTest(unittest.TestCase):
         categories = self.classify("README.md", "docs/CI_POLICY.md", "frontend/AGENTS.md")
         self.assertFalse(any(categories.values()))
 
+    def test_runtime_mdx_is_frontend_code_not_documentation(self) -> None:
+        categories = self.classify("frontend/app/help/page.mdx")
+        self.assertTrue(categories["frontend"])
+        self.assertTrue(categories["cross_stack"])
+
     def test_backend_change_runs_backend_cross_stack_and_profile_boot(self) -> None:
         categories = self.classify("backend/src/main/java/example/Service.java")
         self.assertTrue(categories["backend"])
