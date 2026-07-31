@@ -6,6 +6,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -161,6 +162,7 @@ class ConnectedCaptureIsolationIntegrationTest {
                 .header("X-Workspace-Id", ownerWorkspace.getId())
                 .session(ownerSession)
                 .with(csrf()))
+            .andDo(print())
             .andReturn();
         String purgeBody = purgeResult.getResponse().getContentAsString();
         assertEquals(
