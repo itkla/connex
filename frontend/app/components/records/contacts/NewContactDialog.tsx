@@ -372,9 +372,8 @@ export function NewContactForm({
         submissionPendingRef.current = true;
         setSubmissionPending(true);
         onSubmissionPendingChangeRef.current?.(true);
-        void (async () => {
-            try {
-                await acknowledgeRecoveredImport(controller.signal);
+        void acknowledgeRecoveredImport(controller.signal)
+            .then(() => {
                 if (controller.signal.aborted
                     || !activeRef.current
                     || acknowledgmentGenerationRef.current !== generation) return;
@@ -393,20 +392,22 @@ export function NewContactForm({
                 }
                 router.refresh();
                 onCancelRef.current();
-            } catch {
+            })
+            .catch(() => {
                 if (controller.signal.aborted
                     || !activeRef.current
                     || acknowledgmentGenerationRef.current !== generation) return;
                 recoveredImportHandledRef.current = null;
                 toastError(t('cardImportRecoveryFailed'));
-            } finally {
-                if (acknowledgmentGenerationRef.current === generation) {
+            })
+            .finally(() => {
+                if (!controller.signal.aborted
+                    && acknowledgmentGenerationRef.current === generation) {
                     submissionPendingRef.current = false;
                     setSubmissionPending(false);
                     onSubmissionPendingChangeRef.current?.(false);
                 }
-            }
-        })();
+            });
         return () => controller.abort();
     }, [acknowledgeRecoveredImport, active, recoveredImport, recoveredImportToken, router, t]);
 
@@ -625,6 +626,16 @@ export function NewContactForm({
         businessCard.retryRecovery();
     };
 
+    const handleCardFileSelected = (file: File) => {
+        setPersonResolutionSelection(null);
+        businessCard.selectFile(file);
+    };
+
+    const handleDiscardCardImage = () => {
+        setPersonResolutionSelection(null);
+        businessCard.discardCardImage();
+    };
+
     const duplicatePreflightBlocked = reusablePersonCandidate
         ? currentPersonResolution == null
         : duplicatePreflight.blocked;
@@ -695,7 +706,7 @@ export function NewContactForm({
                             <BusinessCardScanTrigger
                                 hasFile={businessCard.file != null}
                                 disabled={formPending || recoveryBlocked || businessCard.requiresExactImportRetry}
-                                onFileSelected={businessCard.selectFile}
+                                onFileSelected={handleCardFileSelected}
                                 onSelectionPendingChange={(pending) => {
                                     cardSelectionPendingRef.current = pending;
                                     setCardSelectionPending(pending);
@@ -739,10 +750,10 @@ export function NewContactForm({
                             onRetryScan={businessCard.retryScan}
                             onRemove={businessCard.companyMode === 'create' && !reuseExistingPerson
                                 ? undefined
-                                : businessCard.discardCardImage}
+                                : handleDiscardCardImage}
                             onDiscardImage={businessCard.companyMode === 'create' && !reuseExistingPerson
                                 ? undefined
-                                : businessCard.discardCardImage}
+                                : handleDiscardCardImage}
                         />
                     ) : null}
 

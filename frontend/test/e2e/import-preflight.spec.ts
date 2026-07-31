@@ -142,6 +142,21 @@ test.describe("manual duplicate review", () => {
         await expect(page.getByRole("button", { name: /Create separate contact/ })).toBeVisible();
         await page.getByRole("button", { name: /Use existing contact/ }).click();
         await expect(page.getByRole("button", { name: "Attach card" })).toBeEnabled();
+
+        await page.getByRole("button", { name: "Remove business card" }).click();
+        await scan.locator("..").locator('input[type="file"]').last().setInputFiles({
+            name: "replacement-card.png",
+            mimeType: "image/png",
+            buffer: Buffer.from(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZKmcAAAAASUVORK5CYII=",
+                "base64",
+            ),
+        });
+
+        await expect(page.getByRole("button", { name: "Create from card" })).toBeDisabled();
+        await expect(page.getByRole("button", { name: /Use existing contact/ })).toBeVisible();
+        await page.getByRole("button", { name: /Use existing contact/ }).click();
+        await expect(page.getByRole("button", { name: "Attach card" })).toBeEnabled();
     });
 
     test("reviews an OCR-created company before business-card import", async ({ page }, testInfo) => {
