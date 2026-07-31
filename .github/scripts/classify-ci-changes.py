@@ -31,11 +31,27 @@ ROOT_METADATA = {
     "LICENSE.txt",
 }
 
+DOCUMENTATION_BASENAMES = {
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "README.mdx",
+    "SECURITY.md",
+}
+
 FRONTEND_DEPENDENCY_FILES = {
     "frontend/.npmrc",
+    "frontend/bun.lock",
+    "frontend/bun.lockb",
+    "frontend/npm-shrinkwrap.json",
+    "frontend/package-lock.json",
     "frontend/package.json",
     "frontend/pnpm-lock.yaml",
     "frontend/pnpm-workspace.yaml",
+    "frontend/yarn.lock",
 }
 
 OCR_DEPENDENCY_FILES = {
@@ -50,9 +66,12 @@ def empty_categories() -> dict[str, bool]:
 
 
 def is_documentation(path: str) -> bool:
+    pure_path = PurePosixPath(path)
     if path.startswith("docs/"):
         return True
-    return PurePosixPath(path).suffix.lower() in {".md", ".mdx", ".rst"}
+    if len(pure_path.parts) == 1 and pure_path.suffix.lower() in {".md", ".mdx", ".rst"}:
+        return True
+    return pure_path.name in DOCUMENTATION_BASENAMES
 
 
 def is_production_backend_path(path: str) -> bool:
