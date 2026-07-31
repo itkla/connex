@@ -1,9 +1,9 @@
-import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getEntityCustomFieldsFromCookie, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
-import { type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
+import { type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -27,23 +27,31 @@ import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPane
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
+import RelationshipEvidencePanel from "@/app/components/records/RelationshipEvidencePanel";
+import RecordStickyContext from "@/app/components/records/RecordStickyContext";
+import RecordReturnLink from "@/app/components/records/RecordReturnLink";
+import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
 
-export default async function ContactPage({ params }: { params: { id: number } }) {
-    const { id } = await params;
+type ContactPageProps = {
+    params: Promise<{ id: number }>;
+    searchParams: Promise<{ returnTo?: string | string[] }>;
+};
+
+export default async function ContactPage({ params, searchParams }: ContactPageProps) {
+    const [{ id }, query] = await Promise.all([params, searchParams]);
+    const returnPath = resolveRecordReturnPath("contacts", query.returnTo);
     const cookieStore = await cookies();
     const cookie = cookieStore.toString();
     const activeWorkspaceCookie = cookieStore.get("connex_workspace")?.value;
     const activeWorkspaceId = activeWorkspaceCookie ? Number(activeWorkspaceCookie) : null;
     const init = { headers: { cookie } } as const;
 
-    const [t, locale, contact, currentUser, allTags, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
+    const [t, locale, contact, currentUser, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),
-        getContacts({}, init).catch(() => [] as Contact[]),
-        getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
         getContextNotifications("person", id, init).catch(() => ({
             items: [],
@@ -55,6 +63,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getContactConnections(id, init).catch(() => [] as PersonConnection[]),
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
         getEntityCustomFieldsFromCookie("person", id, cookie),
+        getContactEvidence(id, init).catch(() => null),
     ]);
     if (!contact) {
         notFound();
@@ -72,39 +81,44 @@ export default async function ContactPage({ params }: { params: { id: number } }
         && Number.isFinite(activeWorkspaceId)
         && contact.workspaceId === activeWorkspaceId;
 
-    const interactionUserIds = Array.from(new Set<number>([
+    const interactionUserIds = new Set<number>([
         ...activities.map((a) => a.createdById),
         ...notes.map((n) => n.author),
         ...tasks.map((t) => t.assignedToId),
-    ].filter((v): v is number => typeof v === "number")));
-
-    const interactionUsers: User[] = (
-        await Promise.all(interactionUserIds.map((uid) => getUserById(uid, init).catch(() => null)))
-    ).filter((u): u is User => u !== null);
-
+    ].filter((v): v is number => typeof v === "number"));
+    const userIds = new Set(interactionUserIds);
+    if (contact.ownerId != null) userIds.add(contact.ownerId);
+    const relatedUsers = await getUserReferences([...userIds], init).catch(() => []);
+    const interactionUsers = relatedUsers.filter((user) => interactionUserIds.has(user.id));
     const owner = contact.ownerId != null
-        ? interactionUsers.find((u) => u.id === contact.ownerId)
-            ?? await getUserById(contact.ownerId, init).catch(() => null)
+        ? relatedUsers.find((user) => user.id === contact.ownerId) ?? null
         : null;
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+                <RecordStickyContext
+                    anchorId="contact-record-identity"
+                    backHref={returnPath}
+                    backLabel={t("allContacts")}
+                    name={contact.name}
+                    temperature={evidence?.temperature}
+                />
                 <Rise>
                     <div className="flex flex-row justify-between">
-                        <Link
-                            href="/records/contacts"
+                        <RecordReturnLink
+                            href={returnPath}
                             className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
                         >
                             <ArrowLeftIcon className="h-4 w-4" />
                             <span>{t("allContacts")}</span>
-                        </Link>
+                        </RecordReturnLink>
                     </div>
 
                     <CrumbLabel value={contact.name} />
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
                     <RecentRecordBridge type="person" id={contact.id} label={contact.name} />
-                    <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
+                    <header id="contact-record-identity" className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <ContactAvatar contact={contact} type="xlarge" />
                             <div className="flex flex-col gap-2">
@@ -167,7 +181,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                                         {user.profilePictureUrl ? (
                                                             <AvatarImage
                                                                 src={user.profilePictureUrl}
-                                                                alt={user.displayName || user.username}
+                                                                alt={user.displayName || user.username || ""}
                                                             />
                                                         ) : (
                                                             <AvatarFallback>
@@ -178,7 +192,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                                 </Link>
                                             </TooltipTrigger>
                                             <TooltipContent side="bottom" align="center">
-                                                {user.displayName || user.username}
+                                                {user.displayName || user.username || ""}
                                             </TooltipContent>
                                         </Tooltip>
                                     ))}
@@ -191,8 +205,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         <ContactActionsMenu
                             contact={contact}
                             currentUserId={currentUser.id}
-                            persons={allPersons}
-                            deals={allDeals}
+                            dealSeeds={deals}
                         />
                     </div>
                     <EntityNotificationBanner
@@ -202,6 +215,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         contextId={id}
                         initialStateVersion={notificationPage.stateVersion}
                     />
+                    <RelationshipEvidencePanel evidence={evidence} />
                 </Rise>
 
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -349,7 +363,6 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 <ContactConnections
                                     contactId={contact.id}
                                     contactName={contact.name}
-                                    contacts={allPersons}
                                     initialConnections={connections}
                                     initialIntroPath={introPath}
                                 />
@@ -363,8 +376,8 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                         activities={activities}
                                         notes={notes}
                                         users={interactionUsers}
-                                        persons={allPersons}
-                                        deals={allDeals}
+                                        persons={[contact]}
+                                        deals={deals}
                                         currentUserId={currentUser.id}
                                         companyId={contact.companyId ?? contact.company?.id ?? null}
                                     />

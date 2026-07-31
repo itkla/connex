@@ -4,6 +4,9 @@
     "levelMedium": "中リスク",
     "levelLow": "低リスク",
     "panelTitle": "リスクの兆候",
+    "unavailable": "リスクの根拠を一時的に取得できません。",
+    "clear": "有効な決定論的リスクの兆候はありません。",
+    "assessedAt": "評価日時: {date}",
     "factorCloseOverdue": "予定成約日を{days}日超過しています",
     "factorClosingSoonQuiet": "あと{days}日で成約予定ですが、最近の活動がありません",
     "factorStalled": "{days}日間、活動の記録がありません",
@@ -260,6 +263,8 @@
   "DealsEditSheet": {
     "nameRequired": "名前は必須です",
     "pipelineStageRequired": "パイプラインとステージは必須です",
+    "stagesLoadFailed": "ステージを読み込めませんでした",
+    "retry": "再試行",
     "dealUpdated": "案件を更新しました",
     "failedToSave": "保存できませんでした"
   },

@@ -103,9 +103,9 @@ export default function NewDealActivityDialog({
     }
 
     useEffect(() => {
-        // get all contacts from the company associated with the deal
-        getCompanyPeople(deal.company ?? 0).then(setContacts).catch(() => setContacts([]));
-    }, []);
+        if (!open || deal.company == null) return;
+        getCompanyPeople(deal.company).then(setContacts).catch(() => setContacts([]));
+    }, [deal.company, open]);
 
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 

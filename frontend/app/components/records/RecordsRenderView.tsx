@@ -567,6 +567,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                 />
                                 <button
                                     type="button"
+                                    data-record-row-id={item.id}
                                     onClick={open}
                                     disabled={!onRowClick && !detailPath}
                                     className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-2 text-left outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-brand disabled:cursor-default"
@@ -742,6 +743,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                 const row = (
                                     <tr
                                         key={item.id}
+                                        data-record-row-id={item.id}
                                         ref={(el) => {
                                             if (el) rowRefs.current.set(item.id, el);
                                             else rowRefs.current.delete(item.id);

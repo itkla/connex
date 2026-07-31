@@ -1,6 +1,6 @@
 'use client';
 
-import { WheelEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
@@ -13,8 +13,13 @@ import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, C
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
 import UserAvatar from '@/app/components/records/users/UserAvatar';
-import { getDealCollaborators, replaceDealCollaborators, updateDealOwner } from '@/app/lib/api';
-import { type User } from '@/app/lib/types';
+import {
+    getActiveWorkspaceMembers,
+    getDealCollaborators,
+    replaceDealCollaborators,
+    updateDealOwner,
+} from '@/app/lib/api';
+import { type User, type WorkspaceMember } from '@/app/lib/types';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { cn } from '@/lib/utils';
 
@@ -23,20 +28,32 @@ const comboInputClass =
 const comboLeadIconClass =
     'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand';
 
+type TeamMember = Pick<
+    WorkspaceMember,
+    'id' | 'username' | 'displayName' | 'email' | 'profilePictureUrl'
+>;
+
+function mergeMembers(...groups: TeamMember[][]): TeamMember[] {
+    const byId = new Map<number, TeamMember>();
+    for (const group of groups) {
+        for (const member of group) byId.set(member.id, member);
+    }
+    return [...byId.values()].sort((left, right) =>
+        left.displayName.localeCompare(right.displayName));
+}
+
 export default function DealTeamDialog({
     open,
     onOpenChange,
     dealId,
     initialOwnerId,
     initialCollaborators,
-    users,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     dealId: number;
     initialOwnerId?: number | null;
     initialCollaborators: User[];
-    users: User[];
 }) {
     const t = useTranslations('Notifications');
     const router = useRouter();
@@ -44,6 +61,9 @@ export default function DealTeamDialog({
     const [collaboratorIds, setCollaboratorIds] = useState(() => initialCollaborators.map((user) => user.id));
     const [saving, setSaving] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [members, setMembers] = useState<TeamMember[]>(initialCollaborators);
+    const [membersLoaded, setMembersLoaded] = useState(false);
+    const [membersFailed, setMembersFailed] = useState(false);
 
     const wasOpen = useRef(open);
     useEffect(() => {
@@ -56,8 +76,34 @@ export default function DealTeamDialog({
         wasOpen.current = open;
     }, [open, initialOwnerId, initialCollaborators]);
 
-    const selectedOwner = users.find((user) => user.id === ownerId) ?? null;
-    const candidates = users.filter((user) => user.id !== ownerId);
+    useEffect(() => {
+        if (!open || membersLoaded) return;
+        let cancelled = false;
+        getActiveWorkspaceMembers()
+            .then((activeMembers) => {
+                if (!cancelled) {
+                    setMembers(mergeMembers(
+                        initialCollaborators,
+                        activeMembers.filter((member) => member.status === 'active'),
+                    ));
+                    setMembersFailed(false);
+                    setMembersLoaded(true);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setMembers(initialCollaborators);
+                    setMembersFailed(true);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, initialCollaborators, membersLoaded]);
+
+    const membersLoading = open && !membersLoaded && !membersFailed;
+    const selectedOwner = members.find((user) => user.id === ownerId) ?? null;
+    const candidates = members.filter((user) => user.id !== ownerId);
     const selectedCount = candidates.filter((user) => collaboratorIds.includes(user.id)).length;
     const status = resolveDialogStatus({ isLoading: saving, isSuccess: success });
 
@@ -108,11 +154,11 @@ export default function DealTeamDialog({
                     <div className="grid gap-5">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="deal-owner">{t('owner')}</Label>
-                            <Combobox
-                                items={users}
-                                itemToStringLabel={(u: User) => u.displayName}
+                            <Combobox<TeamMember>
+                                items={members}
+                                itemToStringLabel={(u: TeamMember) => u.displayName}
                                 value={selectedOwner}
-                                onValueChange={(u) => setOwnerId((u as User | null)?.id ?? null)}
+                                onValueChange={(u: TeamMember | null) => setOwnerId(u?.id ?? null)}
                             >
                                 <ComboboxInput id="deal-owner" placeholder={t('unassigned')} showClear className={comboInputClass}>
                                     <InputGroupAddon align="inline-start">
@@ -121,8 +167,10 @@ export default function DealTeamDialog({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noUsers')}</ComboboxEmpty>
-                                        {users.map((u) => (
+                                        <ComboboxEmpty>
+                                            {membersLoading ? t('loadingMembers') : t('noUsers')}
+                                        </ComboboxEmpty>
+                                        {members.map((u) => (
                                             <ComboboxItem key={u.id} value={u}>
                                                 {u.displayName}
                                             </ComboboxItem>

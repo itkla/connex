@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
@@ -38,28 +38,34 @@ import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
 import NewDealActivityDialog from '@/app/components/records/deals/NewDealActivityDialog';
 import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
+import {
+    useContactTargetSearch,
+    useDealTargetSearch,
+} from '@/app/hooks/useRecordTargetSearch';
 
 import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
 import { type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
+
+const EMPTY_CONTACTS: Contact[] = [];
+const EMPTY_DEALS: Deal[] = [];
+const EMPTY_USERS: User[] = [];
 
 export default function DealActionsMenu({
     deal,
     pipelines,
     stagesByPipeline,
     currentUserId,
-    persons = [],
-    deals = [],
-    users = [],
-    collaborators = [],
+    personSeeds = EMPTY_CONTACTS,
+    dealSeeds = EMPTY_DEALS,
+    collaborators = EMPTY_USERS,
 }: {
     deal: Deal;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
-    persons?: Contact[];
-    deals?: Deal[];
-    users?: User[];
+    personSeeds?: Contact[];
+    dealSeeds?: Deal[];
     collaborators?: User[];
 }) {
     const router = useRouter();
@@ -73,6 +79,14 @@ export default function DealActionsMenu({
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+    const stableDealSeeds = useMemo(
+        () => dealSeeds.some((candidate) => candidate.id === deal.id)
+            ? dealSeeds
+            : [deal, ...dealSeeds],
+        [deal, dealSeeds],
+    );
+    const personSearch = useContactTargetSearch(noteOpen, [], personSeeds);
+    const dealSearch = useDealTargetSearch(noteOpen, [deal.id], stableDealSeeds);
 
     const closed = isDealClosed(deal);
 
@@ -259,7 +273,6 @@ export default function DealActionsMenu({
                 dealId={deal.id}
                 initialOwnerId={deal.ownerId}
                 initialCollaborators={collaborators}
-                users={users}
             />
 
             <NewDealActivityDialog
@@ -284,10 +297,14 @@ export default function DealActionsMenu({
                 open={noteOpen}
                 onOpenChange={setNoteOpen}
                 note={null}
-                persons={persons}
-                deals={deals.length > 0 ? deals : [deal]}
+                persons={personSearch.contacts}
+                deals={dealSearch.deals}
                 defaultDeal={deal}
                 currentUserId={currentUserId}
+                onPersonQueryChange={personSearch.onInputValueChange}
+                onDealQueryChange={dealSearch.onInputValueChange}
+                personOptionsLoading={personSearch.loading}
+                dealOptionsLoading={dealSearch.loading}
             />
 
             <DeleteRecordDialog

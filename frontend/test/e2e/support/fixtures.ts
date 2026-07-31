@@ -14,19 +14,24 @@ function isRunFixture(value: unknown): value is RunFixture {
     if (!isRecord(value)) {
         return false;
     }
-    const { contacts, companies } = value;
+    const { contacts, companies, deals, activities } = value;
     if (typeof value.username !== "string"
         || typeof value.password !== "string"
         || typeof value.email !== "string"
         || typeof value.workspaceId !== "number"
         || typeof value.companyName !== "string"
         || !isRecord(contacts)
-        || !isRecord(companies)) {
+        || !isRecord(companies)
+        || !isRecord(deals)
+        || !isRecord(activities)) {
         return false;
     }
     return ["peek", "edit", "activity", "search", "archive"]
         .every((key) => isSeededRecord(contacts[key]))
-        && isSeededRecord(companies.archive);
+        && isSeededRecord(companies.primary)
+        && isSeededRecord(companies.archive)
+        && isSeededRecord(deals.primary)
+        && isSeededRecord(activities.evidence);
 }
 
 /** Loads and validates the fixture owned by the current browser project. */

@@ -23,6 +23,7 @@ import {
     getContactIntroPath,
     removeContactConnection,
 } from '@/app/lib/api';
+import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import type { Contact, IntroPath, PersonConnection } from '@/app/lib/types';
 
 const TYPES = ['knows', 'colleague', 'former_colleague', 'friend'] as const;
@@ -40,13 +41,11 @@ const TYPE_KEYS: Record<string, string> = {
 export default function ContactConnections({
     contactId,
     contactName,
-    contacts,
     initialConnections,
     initialIntroPath,
 }: {
     contactId: number;
     contactName: string;
-    contacts: Contact[];
     initialConnections: PersonConnection[];
     initialIntroPath: IntroPath;
 }) {
@@ -56,10 +55,15 @@ export default function ContactConnections({
     const [selected, setSelected] = useState<Contact | null>(null);
     const [type, setType] = useState<string>('knows');
     const [busy, setBusy] = useState(false);
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const contactSearch = useContactTargetSearch(pickerOpen, [selected?.id]);
 
     const candidates = useMemo(
-        () => contacts.filter((c) => c.id !== contactId && !connections.some((x) => x.personId === c.id)),
-        [contacts, contactId, connections],
+        () => contactSearch.contacts.filter(
+            (contact) => contact.id !== contactId
+                && !connections.some((connection) => connection.personId === contact.id),
+        ),
+        [contactSearch.contacts, contactId, connections],
     );
 
     const typeLabel = (key: string) => (TYPE_KEYS[key] ? t(TYPE_KEYS[key]) : key);
@@ -170,8 +174,11 @@ export default function ContactConnections({
                 <div className="min-w-0 flex-1">
                     <Combobox
                         items={candidates}
+                        filter={null}
                         itemToStringLabel={(c: Contact) => c.name}
                         value={selected}
+                        onOpenChange={setPickerOpen}
+                        onInputValueChange={contactSearch.onInputValueChange}
                         onValueChange={(c) => setSelected((c as Contact | null) ?? null)}
                     >
                         <ComboboxInput
@@ -180,7 +187,13 @@ export default function ContactConnections({
                         />
                         <ComboboxContent className="pointer-events-auto">
                             <ComboboxList>
-                                <ComboboxEmpty>{t('noContacts')}</ComboboxEmpty>
+                                <ComboboxEmpty>
+                                    {contactSearch.loading
+                                        ? t('searching')
+                                        : contactSearch.error
+                                          ? t('searchFailed')
+                                          : t('noContacts')}
+                                </ComboboxEmpty>
                                 {candidates.map((c) => (
                                     <ComboboxItem key={c.id} value={c}>
                                         {c.name}

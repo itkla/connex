@@ -52,21 +52,13 @@ export default function NewDealTaskDialog({
     const [assignedToId, setAssignedToId] = useState(currentUserId);
     const [contactId, setContactId] = useState('');
     const [contacts, setContacts] = useState<Contact[]>([]);
-    const [companyId, setCompanyId] = useState('');
-    const [loadingContacts, setLoadingContacts] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const reset = () => {
         setDescription('');
         setDueDate('');
         setAssignedToId(currentUserId);
         setContactId('');
-        setCompanyId('');
     };
-
-    // async function loadCompanyPeople() {
-    //     const people = await getCompanyPeople(deal.company);
-    //     setContacts(people);
-    // }
 
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -103,13 +95,12 @@ export default function NewDealTaskDialog({
     }
 
     useEffect(() => {
+        if (!open) return;
         getUsers().then(setUsers).catch(() => setUsers([]));
-
-        // get all contacts from the company associated with the deal
-        getCompanyPeople(deal.company ?? 0).then(setContacts).catch(() => setContacts([]));
-    }, []);
-
-    // console.log('contacts', contacts);
+        if (deal.company != null) {
+            getCompanyPeople(deal.company).then(setContacts).catch(() => setContacts([]));
+        }
+    }, [deal.company, open]);
 
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 

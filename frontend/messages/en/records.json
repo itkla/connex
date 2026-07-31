@@ -383,6 +383,41 @@
     "close": "Close",
     "toastFailed": "Couldn't move the deals"
   },
+  "RelationshipEvidence": {
+    "title": "Relationship evidence",
+    "subtitle": "The dated interactions behind this relationship signal.",
+    "unavailable": "Evidence is temporarily unavailable. No relationship claim is shown.",
+    "noHistory": "No eligible interaction history is available for this relationship yet.",
+    "lastTouch": "Last eligible touch",
+    "sourceCount": "Evidence sources",
+    "sourceCountValue": "{count, plural, one {# source} other {# sources}}",
+    "decay": "Predicted decay",
+    "goesColdAt": "Cold by {date}",
+    "noDecayDate": "No active decay date",
+    "sources": "Strongest sources",
+    "sourceType": {
+      "note": "Workspace note",
+      "task": "Task"
+    },
+    "activityType": "Activity: {type}",
+    "activityKind": {
+      "call": "Call",
+      "email": "Email",
+      "meeting": "Meeting",
+      "note": "Note",
+      "other": "Other"
+    },
+    "attribution": {
+      "directPerson": "Sources are linked directly to this contact.",
+      "presentDayCompany": "Company evidence includes contacts currently at this company and deals currently linked to it.",
+      "touchTimeCompany": "Company evidence uses the contact’s employer at touch time and each deal’s current company."
+    },
+    "omitted": "{count, plural, one {# additional eligible source is included in the score} other {# additional eligible sources are included in the score}}.",
+    "limited": "Limited evidence. At least {minimum} eligible sources are required for a higher-confidence reading.",
+    "privateNotesExcluded": "{count, plural, one {# of your private notes is excluded} other {# of your private notes are excluded}} from this score.",
+    "asOf": "Calculated {date} with model {version}.",
+    "unknownModel": "unknown"
+  },
   "RecordPeek": {
     "type_company": "Company",
     "type_person": "Contact",

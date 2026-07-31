@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -22,13 +23,17 @@ import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UpdateLocaleDto;
 import ooo.klae.connex.backend.dto.UpdateTimezoneDto;
 import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.dto.UserReferenceDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.util.PageBounds;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 
 import jakarta.validation.Valid;
@@ -55,6 +60,27 @@ public class UserController {
     @GetMapping
     public List<UserDto> getAllUsers() {
         return userService.getAllUsers().stream().map(UserDto::from).toList();
+    }
+
+    /** Returns bounded display labels for requested active members of the current workspace. */
+    @GetMapping("/references")
+    public List<UserReferenceDto> getUserReferences(
+            @RequestParam(required = false) List<Integer> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BadRequestException("ids are required for user references");
+        }
+        if (ids.size() > PageBounds.MAX_SIZE) {
+            throw new BadRequestException(
+                "At most " + PageBounds.MAX_SIZE + " user references may be requested");
+        }
+        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
+        for (Integer id : ids) {
+            if (id == null || id < 1) {
+                throw new BadRequestException("ids must be positive integers");
+            }
+            normalized.add(id);
+        }
+        return userService.getActiveWorkspaceMemberReferences(List.copyOf(normalized));
     }
 
     /**

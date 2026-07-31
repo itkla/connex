@@ -8,7 +8,7 @@ import { useTranslations } from 'next-intl';
 
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { updateDeal } from '@/app/lib/api';
+import { getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
 import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
 function toDraft(d: Deal): DealDraft {
@@ -44,13 +44,63 @@ export default function EditDealSheet({
     const t = useTranslations('DealsEditSheet');
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
     const [isSaving, setIsSaving] = useState(false);
+    const [pipelineOptions, setPipelineOptions] = useState(pipelines);
+    const [stageOptionsByPipeline, setStageOptionsByPipeline] = useState(stagesByPipeline);
+    const [stageLoadRevision, setStageLoadRevision] = useState(0);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
+    const pipelinesLoaded = useRef(false);
 
     const wasOpen = useRef(open);
     useEffect(() => {
         if (open && !wasOpen.current) setDraft(toDraft(deal));
         wasOpen.current = open;
     }, [open, deal]);
+
+    useEffect(() => {
+        if (!open || pipelinesLoaded.current) return;
+        let cancelled = false;
+        getPipelines()
+            .then((loaded) => {
+                if (!cancelled) {
+                    setPipelineOptions((current) => {
+                        const byId = new Map(current.map((pipeline) => [pipeline.id, pipeline]));
+                        for (const pipeline of loaded) byId.set(pipeline.id, pipeline);
+                        return [...byId.values()];
+                    });
+                    pipelinesLoaded.current = true;
+                }
+            })
+            .catch(() => undefined);
+        return () => {
+            cancelled = true;
+        };
+    }, [open]);
+
+    useEffect(() => {
+        if (!open || !draft.pipeline || stageOptionsByPipeline[draft.pipeline]) return;
+        let cancelled = false;
+        getStagesByPipelineId(draft.pipeline)
+            .then((loaded) => {
+                if (!cancelled) {
+                    setStageOptionsByPipeline((current) => ({
+                        ...current,
+                        [draft.pipeline]: loaded,
+                    }));
+                }
+            })
+            .catch(() => {
+                if (cancelled) return;
+                toastError(t('stagesLoadFailed'), {
+                    action: {
+                        label: t('retry'),
+                        onClick: () => setStageLoadRevision((current) => current + 1),
+                    },
+                });
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, draft.pipeline, stageOptionsByPipeline, stageLoadRevision, t]);
 
     const saveEdits = async () => {
         if (!draft.name.trim()) {
@@ -97,8 +147,8 @@ export default function EditDealSheet({
             selectedDeals={[deal]}
             drafts={{ [deal.id]: draft }}
             updateDraft={(_id, patch) => setDraft((prev) => ({ ...prev, ...patch }))}
-            pipelines={pipelines}
-            stagesByPipeline={stagesByPipeline}
+            pipelines={pipelineOptions}
+            stagesByPipeline={stageOptionsByPipeline}
             isSaving={isSaving}
             saveEdits={saveEdits}
             customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="deal" entityId={deal.id} />}

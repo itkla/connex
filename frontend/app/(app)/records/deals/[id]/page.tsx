@@ -12,7 +12,6 @@ import {
     getActivitiesForDeal,
     getAttachmentsFromCookie,
     getCompanyById,
-    getContactById,
     getContacts,
     getCurrentUserFromCookie,
     getEntityCustomFieldsFromCookie,
@@ -25,25 +24,24 @@ import {
     getDealPeople,
     getDealRisk,
     getDealStageHistory,
-    getDeals,
     getNotesForDeal,
-    getPipelines,
+    getPipelineById,
     getStagesByPipelineId,
     getTagsForDeal,
     getTasksForDeal,
-    getUsers,
+    getUserReferences,
 } from '@/app/lib/api';
 import {
     type Activity,
     type Contact,
-    type Deal,
+    type DealPerson,
     type DealStageHistory,
     type Note,
-    type Pipeline,
     type Stage,
     type Tag,
     type Task,
     type User,
+    type UserReference,
 } from '@/app/lib/types';
 import {
     formatCompactCurrency,
@@ -76,18 +74,42 @@ import DealDocuments from '@/app/components/records/deals/DealDocuments';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
+import RecordStickyContext from '@/app/components/records/RecordStickyContext';
+import RecordReturnLink from '@/app/components/records/RecordReturnLink';
+import { resolveRecordReturnPath } from '@/app/lib/recordReturnPath';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-type DealPersonRef = { person: number; role: string | null };
 type ResolvedDealPerson = { person: Contact; role: string | null };
 
-export default async function DealPage({ params }: { params: { id: number } }) {
-    const { id } = await params;
+type DealPageProps = {
+    params: Promise<{ id: number }>;
+    searchParams: Promise<{ returnTo?: string | string[] }>;
+};
+
+export default async function DealPage({ params, searchParams }: DealPageProps) {
+    const [{ id }, query] = await Promise.all([params, searchParams]);
+    const returnPath = resolveRecordReturnPath('deals', query.returnTo);
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
 
-    const [t, locale, deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk, stageHistory] =
+    const [
+        t,
+        locale,
+        deal,
+        currentUser,
+        activities,
+        notes,
+        tasks,
+        tags,
+        peopleRefs,
+        attachments,
+        notificationPage,
+        collaborators,
+        customFields,
+        risk,
+        stageHistory,
+    ] =
         await Promise.all([
             getTranslations('DealsPage'),
             getLocale(),
@@ -97,11 +119,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getNotesForDeal(id, init).catch(() => [] as Note[]),
             getTasksForDeal(id, init).catch(() => [] as Task[]),
             getTagsForDeal(id, init).catch(() => [] as Tag[]),
-            getDealPeople(id, init).catch(() => []) as Promise<unknown>,
-            getPipelines(init).catch(() => [] as Pipeline[]),
-            getContacts({}, init).catch(() => [] as Contact[]),
-            getDeals(init).catch(() => [] as Deal[]),
-            getUsers(init).catch(() => [] as User[]),
+            getDealPeople(id, init).catch(() => [] as DealPerson[]),
             getAttachmentsFromCookie("deal", id, cookie),
             getContextNotifications("deal", id, init).catch(() => ({
                 items: [],
@@ -118,39 +136,49 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     if (!deal) notFound();
     if (!currentUser) redirect('/auth/login');
 
-    const peopleRefs = peopleRaw as DealPersonRef[];
-
-    const lineItems = await getDealLineItemsFromCookie(deal.id, cookie)
-        .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } }));
-
-    const [documents, effectivePermissions] = await Promise.all([
+    const [lineItems, documents, effectivePermissions, company, dealContacts, pipeline, stages] = await Promise.all([
+        getDealLineItemsFromCookie(deal.id, cookie)
+            .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } })),
         getDealDocumentsFromCookie(deal.id, cookie).catch(() => []),
         getEffectivePermissionsFromCookie(cookie),
-    ]);
-
-    const [company, dealPeople, allStages] = await Promise.all([
         deal.company != null
             ? getCompanyById(deal.company, init).catch(() => null)
             : Promise.resolve(null),
-        Promise.all(
-            peopleRefs.map(async (ref): Promise<ResolvedDealPerson | null> => {
-                const contact = await getContactById(ref.person, init).catch(() => null);
-                return contact ? { person: contact, role: ref.role } : null;
-            }),
-        ).then((entries) => entries.filter((e): e is ResolvedDealPerson => e !== null)),
-        Promise.all(
-            allPipelines.map(async (p): Promise<[number, Stage[]]> => {
-                const s = await getStagesByPipelineId(p.id, init).catch(() => [] as Stage[]);
-                return [p.id, s];
-            }),
-        ),
+        getContacts({ dealId: id }, init).catch(() => [] as Contact[]),
+        deal.pipeline != null
+            ? getPipelineById(deal.pipeline, init).catch(() => null)
+            : Promise.resolve(null),
+        deal.pipeline != null
+            ? getStagesByPipelineId(deal.pipeline, init).catch(() => [] as Stage[])
+            : Promise.resolve([] as Stage[]),
     ]);
+    const roleByPersonId = new Map(peopleRefs.map((ref) => [ref.person, ref.role]));
+    const dealPeople: ResolvedDealPerson[] = dealContacts.map((person) => ({
+        person,
+        role: roleByPersonId.get(person.id) ?? null,
+    }));
 
-    const stagesByPipeline: Record<number, Stage[]> = Object.fromEntries(allStages);
-    const stages = deal.pipeline != null ? stagesByPipeline[deal.pipeline] ?? [] : [];
-
-    const pipeline = allPipelines.find((p) => p.id === deal.pipeline) ?? null;
+    const pipelines = pipeline ? [pipeline] : [];
+    const stagesByPipeline: Record<number, Stage[]> = pipeline
+        ? { [pipeline.id]: stages }
+        : {};
     const currentStage = stages.find((s) => s.id === deal.stage) ?? null;
+    const personSeeds = dealPeople.map(({ person }) => person);
+    const dealSeeds = [deal];
+    const knownUsers = new Map<number, UserReference>([
+        [currentUser.id, currentUser],
+        ...collaborators.map((user): [number, UserReference] => [user.id, user]),
+    ]);
+    const relatedUserIds = new Set<number>([
+        ...activities.map((activity) => activity.createdById),
+        ...tasks.map((task) => task.assignedToId),
+        ...notes.map((note) => note.author),
+        deal.ownerId,
+    ].filter((userId): userId is number => typeof userId === 'number'));
+    const missingUserIds = [...relatedUserIds].filter((userId) => !knownUsers.has(userId));
+    const fetchedUsers = await getUserReferences(missingUserIds, init).catch(() => []);
+    for (const user of fetchedUsers) knownUsers.set(user.id, user);
+    const relatedUsers = [...knownUsers.values()];
 
     const outcome: DealOutcome = dealOutcome(deal.won);
     const closed = outcome !== 'open';
@@ -180,20 +208,27 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+                <RecordStickyContext
+                    anchorId="deal-record-identity"
+                    backHref={returnPath}
+                    backLabel={t('allDeals')}
+                    name={deal.name}
+                    risk={risk}
+                />
                 <Rise>
                     <div className="flex flex-row justify-between">
-                        <Link
-                            href="/records/deals"
+                        <RecordReturnLink
+                            href={returnPath}
                             className="inline-flex w-fit items-center gap-2 text-base text-brand hover:text-brand-hover"
                         >
                             <ArrowLeftIcon className="h-4 w-4" />
                             <span>{t('allDeals')}</span>
-                        </Link>
+                        </RecordReturnLink>
                     </div>
 
                     <CrumbLabel value={deal.name} />
                     <RecentRecordBridge type="deal" id={deal.id} label={deal.name} />
-                    <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
+                    <header id="deal-record-identity" className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex flex-col gap-2 py-8">
                             <div className="flex flex-row flex-wrap items-center gap-3">
                                 <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{deal.name}</h1>
@@ -249,12 +284,11 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     <div className="mt-4 flex justify-end">
                         <DealActionsMenu
                             deal={deal}
-                            pipelines={allPipelines}
+                            pipelines={pipelines}
                             stagesByPipeline={stagesByPipeline}
                             currentUserId={currentUser.id}
-                            persons={allPersons}
-                            deals={allDeals}
-                            users={allUsers}
+                            personSeeds={personSeeds}
+                            dealSeeds={dealSeeds}
                             collaborators={collaborators}
                         />
                     </div>
@@ -466,7 +500,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                                 )}
                             </div>
 
-                            <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={allDeals} />
+                            <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
 
                             <div className="mt-6">
                                 <SectionLabelWithTooltip
@@ -485,9 +519,9 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                                         tasks={tasks}
                                         activities={activities}
                                         notes={notes}
-                                        users={allUsers}
-                                        persons={allPersons}
-                                        deals={allDeals}
+                                        users={relatedUsers}
+                                        persons={personSeeds}
+                                        deals={dealSeeds}
                                         currentUserId={currentUser.id}
                                         companyId={deal.company ?? null}
                                     />

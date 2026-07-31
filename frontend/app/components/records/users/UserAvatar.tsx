@@ -19,7 +19,13 @@ const TEXT_CLASS: Record<AvatarSize, string> = {
     "2xlarge": "text-5xl",
 };
 
-export default function UserAvatar({ user, type = "small" }: { user: User; type?: AvatarSize }) {
+export default function UserAvatar({
+    user,
+    type = "small",
+}: {
+    user: Pick<User, "displayName"> & Partial<Pick<User, "profilePictureUrl">>;
+    type?: AvatarSize;
+}) {
     const initial = user.displayName?.slice(0, 1).toUpperCase() || "?";
     return (
         <div className={cn("shrink-0 overflow-hidden rounded-full ring-1 ring-border", SIZE_CLASS[type])}>

@@ -18,7 +18,14 @@ export type RunFixture = {
         archive: SeededRecord;
     };
     companies: {
+        primary: SeededRecord;
         archive: SeededRecord;
+    };
+    deals: {
+        primary: SeededRecord;
+    };
+    activities: {
+        evidence: SeededRecord;
     };
     companyName: string;
 };

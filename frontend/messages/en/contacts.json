@@ -38,6 +38,8 @@
     "empty": "No connections yet.",
     "addPlaceholder": "Connect a contact…",
     "noContacts": "No contacts found",
+    "searching": "Searching contacts…",
+    "searchFailed": "Couldn't search contacts",
     "add": "Add connection",
     "remove": "Remove connection",
     "addFailed": "Couldn't add connection.",

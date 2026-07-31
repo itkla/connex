@@ -23,9 +23,9 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 
 import { ApiError, getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
 import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
@@ -72,25 +72,25 @@ export default function EditTaskSheet({
     const [users, setUsers] = useState<User[]>([]);
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    const dealSearch = useDealTargetSearch(open, [task.dealId], deals);
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
         if (!next) setDraft(toDraft(task));
     };
 
-    // TODO: merge these two useEffects, or better yet get rid of them lol
     useEffect(() => {
-        getUsers().then(setUsers).catch(() => setUsers([]));
-    }, []);
-
-    useEffect(() => {
-        if (!companyId) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            setContacts([]);
-            return;
-        }
-        getCompanyPeople(companyId).then(setContacts).catch(() => setContacts([]));
-    }, [companyId]);
+        if (!open) return;
+        Promise.all([
+            getUsers().catch(() => [] as User[]),
+            companyId != null
+                ? getCompanyPeople(companyId).catch(() => [] as Contact[])
+                : Promise.resolve([] as Contact[]),
+        ]).then(([nextUsers, nextContacts]) => {
+            setUsers(nextUsers);
+            setContacts(nextContacts);
+        });
+    }, [companyId, open]);
 
     const saveUpdates = async () => {
         if (!draft.description.trim()) {
@@ -179,27 +179,26 @@ export default function EditTaskSheet({
                                     label: contact.name,
                                     imageUrl: contact.imageUrl,
                                 }))}
+                                emptyLabel={t('noContactFound')}
                             />
                         </div>
 
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-deal">{t('dealLabel')}</Label>
-                            <Select
+                            <RecordSelect
                                 value={draft.dealId}
                                 onValueChange={(value) => setDraft((d) => ({ ...d, dealId: value }))}
-                            >
-                                <SelectTrigger id="task-deal" className={inputClass}>
-                                    <SelectValue placeholder={t('selectDealPlaceholder')} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none">{t('noDeal')}</SelectItem>
-                                    {deals.map((deal) => (
-                                        <SelectItem key={deal.id} value={deal.id.toString()}>
-                                            {deal.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                id="task-deal"
+                                placeholder={t('selectDealPlaceholder')}
+                                className={inputClass}
+                                noneOption={{ value: 'none', label: t('noDeal') }}
+                                options={dealSearch.deals.map((deal) => ({
+                                    id: deal.id,
+                                    label: deal.name,
+                                }))}
+                                onInputValueChange={dealSearch.onInputValueChange}
+                                emptyLabel={dealSearch.loading ? t('searching') : t('noDealFound')}
+                            />
                         </div>
 
                         <div className="grid gap-1.5">

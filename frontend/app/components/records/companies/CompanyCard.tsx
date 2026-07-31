@@ -16,6 +16,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { RecordActionMenuTrigger } from '@/app/components/records/RecordActionMenu';
 import type { RecordRemoveIntent } from '@/app/components/records/types';
 import { cn } from '@/lib/utils';
+import {
+    recordDetailNavigationPath,
+    type RecordReturnSelectionSnapshot,
+} from '@/app/lib/recordReturnPath';
 
 interface CompanyCardProps {
     company: Company;
@@ -27,6 +31,7 @@ interface CompanyCardProps {
     onDelete?: () => void;
     readOnly?: boolean;
     removeIntent?: RecordRemoveIntent;
+    returnSelection?: RecordReturnSelectionSnapshot;
 }
 
 export default function CompanyCard({
@@ -39,12 +44,17 @@ export default function CompanyCard({
     onDelete,
     readOnly = false,
     removeIntent = 'archive',
+    returnSelection,
 }: CompanyCardProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const router = useRouter();
     const t = useTranslations('CompaniesCard');
 
-    const open = () => router.push(`/records/companies/${company.id}`);
+    const open = () => router.push(recordDetailNavigationPath(
+        'companies',
+        company.id,
+        returnSelection,
+    ));
     const toggleExpand = () => {
         if (!isExpanded) onFirstExpand?.();
         setIsExpanded((prev) => !prev);

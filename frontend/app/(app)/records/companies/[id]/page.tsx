@@ -17,12 +17,13 @@ import {
     getCompanyPeople,
     getCompanyTags,
     getCompanyTimeline,
+    getCompanyEvidence,
     getCurrentUserFromCookie,
     getEntityCustomFieldsFromCookie,
     getTags,
-    getUsers,
+    getUserReferences,
 } from "@/app/lib/api";
-import { type Company, type Contact, type Deal, type Tag, type User } from "@/app/lib/types";
+import { type Company, type Contact, type Deal, type Tag } from "@/app/lib/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 
 import Rise from "@/app/components/motion/Rise";
@@ -39,9 +40,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
+import RelationshipEvidencePanel from "@/app/components/records/RelationshipEvidencePanel";
+import RecordStickyContext from "@/app/components/records/RecordStickyContext";
+import RecordReturnLink from "@/app/components/records/RecordReturnLink";
+import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
 
-export default async function CompanyPage({ params }: { params: { id: number } }) {
-    const { id } = await params;
+type CompanyPageProps = {
+    params: Promise<{ id: number }>;
+    searchParams: Promise<{ returnTo?: string | string[] }>;
+};
+
+export default async function CompanyPage({ params, searchParams }: CompanyPageProps) {
+    const [{ id }, query] = await Promise.all([params, searchParams]);
+    const returnPath = resolveRecordReturnPath("companies", query.returnTo);
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
 
@@ -56,9 +67,9 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         companyTags,
         engagement,
         timeline,
-        allUsers,
         attachments,
         customFields,
+        evidence,
     ] = await Promise.all([
         getTranslations("CompaniesDetail"),
         getLocale(),
@@ -70,9 +81,9 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         getCompanyTags(id, init).catch(() => [] as Tag[]),
         getCompanyEngagement(id, init),
         getCompanyTimeline(id, 100, init),
-        getUsers(init).catch(() => [] as User[]),
         getAttachmentsFromCookie("company", id, cookie),
         getEntityCustomFieldsFromCookie("company", id, cookie),
+        getCompanyEvidence(id, init).catch(() => null),
     ]);
 
     if (!company) {
@@ -84,24 +95,39 @@ export default async function CompanyPage({ params }: { params: { id: number } }
     }
 
     const { activities, tasks, notes } = timeline;
-    const relatedUserIds = new Set(engagement.relatedUserIds);
-    const interactionUsers = allUsers.filter((user) => relatedUserIds.has(user.id));
+    const relatedUserIds = new Set<number>([
+        ...engagement.relatedUserIds,
+        ...activities.map((activity) => activity.createdById),
+        ...tasks.map((task) => task.assignedToId),
+        ...notes.map((note) => note.author),
+        company.ownerId,
+    ].filter((userId): userId is number => typeof userId === "number"));
+    const relatedUsers = await getUserReferences([...relatedUserIds], init).catch(() => []);
+    const interactionUserIds = new Set(engagement.relatedUserIds);
+    const interactionUsers = relatedUsers.filter((user) => interactionUserIds.has(user.id));
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+                <RecordStickyContext
+                    anchorId="company-record-identity"
+                    backHref={returnPath}
+                    backLabel={t("backToAll")}
+                    name={company.name}
+                    temperature={evidence?.temperature}
+                />
                 <Rise>
-                    <Link
-                        href="/records/companies"
+                    <RecordReturnLink
+                        href={returnPath}
                         className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
                     >
                         <ArrowLeftIcon className="h-4 w-4" />
                         <span>{t("backToAll")}</span>
-                    </Link>
+                    </RecordReturnLink>
 
                     <CrumbLabel value={company.name} />
                     <RecentRecordBridge type="company" id={company.id} label={company.name} />
-                    <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
+                    <header id="company-record-identity" className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <CompanyAvatar company={company} type="2xlarge" />
                             <div className="flex flex-col gap-2">
@@ -144,7 +170,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                                         {user.profilePictureUrl ? (
                                                             <AvatarImage
                                                                 src={user.profilePictureUrl}
-                                                                alt={user.displayName || user.username}
+                                                                alt={user.displayName || user.username || ""}
                                                             />
                                                         ) : (
                                                             <AvatarFallback>
@@ -155,7 +181,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                                 </Link>
                                             </TooltipTrigger>
                                             <TooltipContent side="bottom" align="center">
-                                                {user.displayName || user.username}
+                                                {user.displayName || user.username || ""}
                                             </TooltipContent>
                                         </Tooltip>
                                     ))}
@@ -167,6 +193,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                     <div className="mt-4 flex justify-end">
                         <CompanyActionsMenu company={company} />
                     </div>
+                    <RelationshipEvidencePanel evidence={evidence} />
                 </Rise>
 
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -181,7 +208,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                 <InfoRow
                                     label={t("owner")}
                                     value={company.ownerId != null
-                                        ? allUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
+                                        ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
                                         : t("ownerUnassigned")}
                                 />
                                 <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
@@ -240,7 +267,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                         tasks={tasks}
                                         activities={activities}
                                         notes={notes}
-                                        users={allUsers}
+                                        users={relatedUsers}
                                         persons={people}
                                         deals={deals}
                                         currentUserId={currentUser.id}

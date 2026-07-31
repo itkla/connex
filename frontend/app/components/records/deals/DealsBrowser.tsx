@@ -41,6 +41,7 @@ import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
 import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
@@ -87,6 +88,10 @@ import {
     ApiError,
     isFieldError,
 } from '@/app/lib/api';
+import {
+    recordDetailNavigationPath,
+    recordDetailPath,
+} from '@/app/lib/recordReturnPath';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
@@ -466,6 +471,13 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         searchFields,
         restoreUrlQuery: true,
     });
+    const returnSelection = useRecordReturnSelection(
+        'deals',
+        selectedIds,
+        setSelectedIds,
+        deals,
+        !loadingPage,
+    );
     const [selectedBoardDeal, setSelectedBoardDeal] = useState<Deal | null>(null);
     const selectedDeals = useMemo(() => {
         if (pageSelectedDeals.length > 0) return pageSelectedDeals;
@@ -918,10 +930,16 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const onBulkSuccess = refreshRecords;
 
     const viewSelected = () => {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
         if (selectedDeals.length === 1) {
-            router.push(`/records/deals/${selectedDeals[0].id}`);
+            router.push(recordDetailNavigationPath(
+                'deals',
+                selectedDeals[0].id,
+                returnSelection,
+            ));
         } else {
-            selectedDeals.forEach((d) => window.open(`/records/deals/${d.id}`, '_blank'));
+            selectedDeals.forEach((deal) =>
+                window.open(recordDetailPath('deals', deal.id, returnTo), '_blank'));
         }
     };
 
@@ -1066,7 +1084,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const visibleDeals = deals;
 
     const { density, setDensity } = useRecordDensity();
-    const peek = useRecordPeekController('deal', visibleDeals, effectiveDisplayMode !== 'grid');
+    const peek = useRecordPeekController(
+        'deal',
+        visibleDeals,
+        effectiveDisplayMode !== 'grid',
+        returnSelection,
+    );
 
     const recordRef = useCallback(
         (deal: Deal): ActiveRecordRef => ({ type: 'deal', id: deal.id, label: deal.name }),
@@ -1545,6 +1568,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             currentUserId={currentUserId}
                             revision={dataRevision}
                             reduce={reduce}
+                            returnSelection={returnSelection}
                         />
                     ) : (
                         <RecordsRenderView<Deal>
@@ -1562,6 +1586,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     risk={riskByDealId.get(item.id)}
                                     onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                     onDelete={onDelete ? () => onDelete(item) : undefined}
+                                    returnSelection={returnSelection}
                                 />
                             )}
                             renderListRow={(item) => (

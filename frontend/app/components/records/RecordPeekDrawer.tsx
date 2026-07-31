@@ -26,10 +26,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useActionRecord, useActions } from '@/app/hooks/useActions';
 import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
-import { RECORD_PATHS } from '@/app/lib/actions/seedActions';
 import type { ActionId } from '@/app/lib/actions/types';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealSummary, getTasksForDeal } from '@/app/lib/api';
+import {
+    recordDetailNavigationPath,
+    type RecordCollection,
+    type RecordReturnSelectionSnapshot,
+} from '@/app/lib/recordReturnPath';
 import { formatCurrency, formatRelativeTime } from '@/app/lib/utils';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
@@ -45,6 +49,7 @@ type Props = {
     hasPrev: boolean;
     hasNext: boolean;
     position: { index: number; total: number } | null;
+    returnSelection?: RecordReturnSelectionSnapshot;
 };
 
 type PeekData =
@@ -52,13 +57,29 @@ type PeekData =
     | { kind: 'company'; company: Company; engagement: CompanyEngagement | null }
     | { kind: 'deal'; summary: DealSummary; tasks: Task[]; activities: Activity[] };
 
+const PEEK_COLLECTIONS = {
+    person: 'contacts',
+    company: 'companies',
+    deal: 'deals',
+} satisfies Record<PeekType, RecordCollection>;
+
 /**
  * Right-side (bottom-sheet on mobile) drawer that shows a triage summary of a company, person, or
  * deal without leaving the list. Content loads lazily per record with skeleton/error/not-found
  * states; the loaded record is published to the action registry so add-note/task/activity and
  * copy-link light up and prefill. Prev/next steps through the visible order.
  */
-function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPrev, hasNext, position }: Props) {
+function RecordPeekDrawer({
+    target,
+    browserType,
+    onClose,
+    onPrev,
+    onNext,
+    hasPrev,
+    hasNext,
+    position,
+    returnSelection,
+}: Props) {
     const t = useTranslations('RecordPeek');
     const actionsT = useTranslations('Actions');
     const locale = useLocale();
@@ -130,8 +151,11 @@ function RecordPeekDrawer({ target, browserType, onClose, onPrev, onNext, hasPre
 
     const openFull = () => {
         if (!target) return;
-        const base = RECORD_PATHS[target.type];
-        if (base) router.push(`${base}/${target.id}`);
+        router.push(recordDetailNavigationPath(
+            PEEK_COLLECTIONS[target.type],
+            target.id,
+            returnSelection,
+        ));
     };
 
     return (
