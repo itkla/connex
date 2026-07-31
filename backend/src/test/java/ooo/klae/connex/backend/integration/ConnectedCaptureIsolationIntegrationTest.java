@@ -6,7 +6,6 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -22,14 +21,12 @@ import jakarta.servlet.Filter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -65,8 +62,6 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ConnectedCaptureIsolationIntegrationTest {
-    private static final Logger log =
-        LoggerFactory.getLogger(ConnectedCaptureIsolationIntegrationTest.class);
     private static final String PASSWORD = "Capture-Isolation-Pw1!";
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -78,6 +73,7 @@ class ConnectedCaptureIsolationIntegrationTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private ProviderCaptureMapper captureMapper;
     @Autowired private ProviderCapturePurgeService purgeService;
+    @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
 
@@ -155,33 +151,17 @@ class ConnectedCaptureIsolationIntegrationTest {
                 .with(csrf()))
             .andExpect(status().isForbidden());
 
-        ownerSession.setAttribute(
-            SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
-            System.currentTimeMillis());
-        ownerSession.setAttribute(
-            SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR,
-            owner.getId());
-        MvcResult purgeResult = mockMvc.perform(delete(
+        MockHttpServletRequest stepUpRequest =
+            new MockHttpServletRequest(context.getServletContext());
+        stepUpRequest.setSession(ownerSession);
+        sessionSecurityService.markStepUp(stepUpRequest, owner.getId());
+        mockMvc.perform(delete(
                 "/api/account/connections/google/captured-data")
                 .header("X-Workspace-Id", ownerWorkspace.getId())
                 .session(ownerSession)
                 .with(csrf()))
-            .andDo(print())
-            .andReturn();
-        String purgeBody = purgeResult.getResponse().getContentAsString();
-        if (purgeResult.getResponse().getStatus() != HttpStatus.OK.value()) {
-            log.error(
-                "Capture purge diagnostic status={} exception={} body={}",
-                purgeResult.getResponse().getStatus(),
-                purgeResult.getResolvedException(),
-                purgeBody);
-        }
-        assertEquals(
-            HttpStatus.OK.value(),
-            purgeResult.getResponse().getStatus(),
-            () -> "exception=" + purgeResult.getResolvedException()
-                + ", body=" + purgeBody);
-        jsonPath("$.active").value(false).match(purgeResult);
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.active").value(false));
 
         assertEquals(
             0,
