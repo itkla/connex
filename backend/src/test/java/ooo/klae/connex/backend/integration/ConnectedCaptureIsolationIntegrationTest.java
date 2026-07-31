@@ -148,7 +148,7 @@ class ConnectedCaptureIsolationIntegrationTest {
                 "/api/account/connections/google/captured-data")
                 .header("X-Workspace-Id", ownerWorkspace.getId())
                 .session(ownerSession)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
 
         MockHttpServletRequest stepUpRequest =
@@ -159,7 +159,7 @@ class ConnectedCaptureIsolationIntegrationTest {
                 "/api/account/connections/google/captured-data")
                 .header("X-Workspace-Id", ownerWorkspace.getId())
                 .session(ownerSession)
-                .with(csrf()))
+                .with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.active").value(false));
 
