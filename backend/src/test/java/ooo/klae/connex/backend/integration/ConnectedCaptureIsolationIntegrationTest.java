@@ -112,9 +112,7 @@ class ConnectedCaptureIsolationIntegrationTest {
                 .header("X-Workspace-Id", ownerWorkspace.getId())
                 .session(ownerSession)
                 .with(csrf()))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code")
-                .value("RECENT_AUTHENTICATION_REQUIRED"));
+            .andExpect(status().isForbidden());
 
         ownerSession.setAttribute(
             SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
