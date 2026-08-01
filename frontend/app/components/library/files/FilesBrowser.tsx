@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import {
@@ -12,6 +13,7 @@ import {
     Bars3Icon,
     CheckIcon,
     EllipsisVerticalIcon,
+    FolderOpenIcon,
     LinkSlashIcon,
     Squares2X2Icon,
     TagIcon,
@@ -80,7 +82,7 @@ import FileActionsMenu from '@/app/components/library/files/FileActionsMenu';
 import FileGlyph from '@/app/components/library/files/FileGlyph';
 import OwnerChip from '@/app/components/library/files/OwnerChip';
 import IconLink from '@/app/components/library/files/IconLink';
-import EmptyState from '@/app/components/library/files/EmptyState';
+import { EmptyState } from '@/app/components/EmptyState';
 import FileDetailSheet from '@/app/components/library/files/FileDetailSheet';
 import FileTagChips from '@/app/components/library/files/FileTagChips';
 import { PageShell } from '@/app/components/PageShell';
@@ -468,7 +470,16 @@ export default function FilesBrowser() {
 
             {isEmptyLibrary ? (
                 <Rise delay={0.06}>
-                    <EmptyState t={t} />
+                    <EmptyState
+                        icon={FolderOpenIcon}
+                        title={t('emptyTitle')}
+                        body={t('emptyBody')}
+                        action={
+                            <Button asChild variant="brand">
+                                <Link href="/records/companies">{t('emptyCta')}</Link>
+                            </Button>
+                        }
+                    />
                 </Rise>
             ) : (
                 <>

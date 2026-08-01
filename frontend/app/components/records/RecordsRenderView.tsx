@@ -13,6 +13,7 @@ import {
     XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/app/components/EmptyState';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
     DropdownMenu,
@@ -511,19 +512,18 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         }
         return (
             <>
-                <div className="rounded-2xl border border-border bg-card px-6 py-16 text-center">
-                    <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-                        <InboxIcon className="size-6" />
-                    </div>
-                    <p className="mx-auto mt-4 max-w-sm text-sm font-medium text-muted-foreground">
-                        {filtersActive ? t('noResults') : t('emptyState')}
-                    </p>
-                    {filtersActive && onClearFilters && (
-                        <Button variant="outline" className="mt-5" onClick={onClearFilters}>
-                            {t('clearFilters')}
-                        </Button>
-                    )}
-                </div>
+                <EmptyState
+                    tone="muted"
+                    icon={InboxIcon}
+                    title={filtersActive ? t('noResults') : t('emptyState')}
+                    action={
+                        filtersActive && onClearFilters ? (
+                            <Button variant="outline" onClick={onClearFilters}>
+                                {t('clearFilters')}
+                            </Button>
+                        ) : undefined
+                    }
+                />
                 {selectionBar}
             </>
         );
