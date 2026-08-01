@@ -2,6 +2,8 @@ import { LockClosedIcon } from '@heroicons/react/24/outline';
 
 import PageState, { type PageStateAction } from '@/app/components/PageState';
 
+const NO_ACTIONS: ReadonlyArray<PageStateAction> = [];
+
 /**
  * 403 presentation for a resource the caller is authenticated for but not permitted to
  * see. Kept distinct from `NotFoundState` on purpose: telling a user "this doesn't
@@ -21,7 +23,7 @@ import PageState, { type PageStateAction } from '@/app/components/PageState';
 export default function AccessDenied({
     title,
     body,
-    actions = [],
+    actions = NO_ACTIONS,
 }: {
     title: string;
     body: string;

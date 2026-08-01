@@ -125,7 +125,10 @@ export default function SavedViewsBar({
     defaultView?: SavedView | null;
     /**
      * Set when the saved-view list could not be loaded. The bar then says so instead of rendering its
-     * tabs, because an unreadable saved-view list must not present as an empty one.
+     * tabs, because an unreadable saved-view list must not present as an empty one. It also suppresses
+     * silent application of the default view: with the tab strip and its "All" control hidden, an
+     * auto-applied default would filter the table with no visible way to see or clear it. An explicit
+     * {@code ?sv=} deep link is still honoured, since that is the user's own request.
      */
     unavailable?: boolean;
 }) {
@@ -150,7 +153,7 @@ export default function SavedViewsBar({
         writeSavedViewToUrl(pathname, view ? savedViewToken(view) : null);
     };
 
-    const initialRef = useRef({ onApply, defaultView, activeWorkspaceId, workspaces, runInWorkspace, pathname });
+    const initialRef = useRef({ onApply, defaultView, activeWorkspaceId, workspaces, runInWorkspace, pathname, unavailable });
     const resolvedRef = useRef(false);
     const lastNavigatedSvRef = useRef<string | null>(null);
     useEffect(() => {
@@ -159,7 +162,7 @@ export default function SavedViewsBar({
         const snapshot = new URLSearchParams(window.location.search);
         const sv = snapshot.get("sv");
         lastNavigatedSvRef.current = sv;
-        const { onApply: apply, defaultView: fallback, activeWorkspaceId: currentWorkspaceId, workspaces: available, pathname: path } = initialRef.current;
+        const { onApply: apply, defaultView: fallback, activeWorkspaceId: currentWorkspaceId, workspaces: available, pathname: path, unavailable: listUnavailable } = initialRef.current;
 
         const applyResolved = (view: SavedView) => {
             if (view.recordType !== recordType) {
@@ -173,7 +176,7 @@ export default function SavedViewsBar({
             writeSavedViewToUrl(path, savedViewToken(view));
         };
         const applyDefault = () => {
-            if (!fallback) return;
+            if (!fallback || listUnavailable) return;
             setViews((prev) => upsertView(prev, fallback));
             setActiveId(fallback.id);
             apply(fallback.config);

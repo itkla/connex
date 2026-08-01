@@ -41,6 +41,9 @@ import ActivityDialog from '@/app/components/activity/activities/ActivityDialog'
 
 const SWIPE_OFFSET = 40;
 
+const NO_FAILED_SOURCES: ReadonlyArray<CalendarSourceKey> = [];
+const NO_TRUNCATED_SOURCES: ReadonlyArray<CalendarTruncation> = [];
+
 /**
  * Direction-aware transition: `custom` is the nav direction. 1/-1 (prev/next period) slide
  * laterally; 0 (view change / day drill-in) scales in subtly so it reads as drilling into
@@ -84,8 +87,8 @@ export default function CalendarShell({
     notes,
     temperatures,
     currentUserId,
-    failedSources = [],
-    truncatedSources = [],
+    failedSources = NO_FAILED_SOURCES,
+    truncatedSources = NO_TRUNCATED_SOURCES,
     warmthFailed = false,
 }: CalendarShellProps) {
     const t = useTranslations('Calendar');
