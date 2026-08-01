@@ -33,7 +33,7 @@ export const RECORD_PATHS: Record<RecordType, string | null> = {
     person: "/records/contacts",
     deal: "/records/deals",
     task: "/activity/tasks",
-    activity: "/activity/all",
+    activity: "/activity/activities",
     note: "/activity/notes",
 };
 

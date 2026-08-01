@@ -73,7 +73,6 @@ type NavItem = {
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
-    disabled?: boolean;
     /** Overrides path-based active matching for hrefs that carry a query (e.g. pinned saved views). */
     active?: boolean;
 };
@@ -105,11 +104,10 @@ function useSections(): NavSection[] {
             activePaths: ["/dashboard", "/overview"],
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
-                { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon, disabled: false },
-                { label: t("navMap"), href: "/overview/map", icon: MapIcon, disabled: false },
-                { label: t("navIntroductions"), href: "/overview/introductions", icon: ArrowsRightLeftIcon, disabled: false },
-                { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon, disabled: false },
-                // { label: t("navInsights"), href: "/overview/insights", icon: ChartPieIcon, disabled: true },
+                { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon },
+                { label: t("navMap"), href: "/overview/map", icon: MapIcon },
+                { label: t("navIntroductions"), href: "/overview/introductions", icon: ArrowsRightLeftIcon },
+                { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon },
                 { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon }
             ]
         },
@@ -255,7 +253,7 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
     if (rail) {
         const link = (
             <Link
-                href={item.disabled ? "#" : item.href}
+                href={item.href}
                 aria-current={active ? "page" : undefined}
                 aria-label={item.label}
                 className="group flex justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand"
@@ -280,7 +278,7 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             </Link>
         );
         return (
-            <li className={item.disabled ? "pointer-events-none opacity-50" : ""}>
+            <li>
                 <Tooltip>
                     <TooltipTrigger asChild>{link}</TooltipTrigger>
                     <TooltipContent side="right">{item.label}</TooltipContent>
@@ -289,9 +287,9 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
         );
     }
     return (
-        <li className={item.disabled ? "opacity-50 disabled cursor-not-allowed" : ""}>
+        <li>
             <Link
-                href={item.disabled ? "#" : item.href}
+                href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={`group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${active
                     ? "text-brand-dark font-medium"
