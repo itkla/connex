@@ -43,8 +43,9 @@ export default async function ReportSnapshotPage({
         getEffectivePermissionsFromCookie(cookie),
     ]);
     if (!report || !snapshot) notFound();
-    if (report.config.widgets.some((widget) => widget.measure === 'attainment')
-            && !effectivePermissions.includes('GOAL_READ')) {
+    const showsAttainment = report.config.widgets.some((widget) => widget.measure === 'attainment')
+        || snapshot.computedResult.widgets.some((widget) => widget.measure === 'attainment');
+    if (showsAttainment && !effectivePermissions.includes('GOAL_READ')) {
         redirect('/overview/reports');
     }
 

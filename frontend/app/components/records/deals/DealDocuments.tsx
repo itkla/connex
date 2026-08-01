@@ -305,7 +305,7 @@ export default function DealDocuments({
                                                             <CheckCircleIcon className="size-4" />{t('markFinal')}
                                                         </DropdownMenuItem>
                                                     )}
-                                                    {doc.status === 'pending_approval' && canApprove && (
+                                                    {doc.status === 'pending_approval' && canApprove && !isRequester(doc) && (
                                                         <>
                                                             <DropdownMenuItem onSelect={() => openApprovalDialog(doc, 'approve')}>
                                                                 <CheckCircleIcon className="size-4" />{t('approve')}

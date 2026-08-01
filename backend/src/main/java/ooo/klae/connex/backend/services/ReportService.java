@@ -81,9 +81,10 @@ public class ReportService {
 
     private static final int MAX_CONFIG_BYTES = 131_072;
     private static final int MAX_SNAPSHOT_BYTES = 4_194_304;
-    private static final int MAX_SNAPSHOT_LIST_SIZE = 100;
     private static final int MAX_SNAPSHOTS_PER_REPORT = 100;
     private static final int MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE = 26;
+    private static final int MAX_SNAPSHOT_LIST_SIZE =
+            MAX_SNAPSHOTS_PER_REPORT + MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE;
     private static final int MAX_REPORTS_PER_WORKSPACE = 100;
     private static final int MAX_SNAPSHOTS_PER_WORKSPACE = 1_000;
     private static final long MAX_SNAPSHOT_BYTES_PER_WORKSPACE = 268_435_456;

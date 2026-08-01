@@ -274,6 +274,7 @@ export default function ReportDocumentBoard({
             if (activeSnapshotId === snapshot.id) {
                 setActiveSnapshotId(null);
                 setActiveSnapshot(null);
+                setLiveRequested(true);
             }
             toastSuccess(t('document.snapshotDeleted'));
             setSnapshotPendingDelete(null);
@@ -297,6 +298,7 @@ export default function ReportDocumentBoard({
         } catch (error) {
             if (snapshotRequestRef.current === requestId) {
                 setActiveSnapshotId(null);
+                setLiveRequested(true);
                 toastError(error instanceof Error ? error.message : t('common.requestFailed'));
             }
         }
