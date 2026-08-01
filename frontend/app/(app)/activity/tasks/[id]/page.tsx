@@ -1,5 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
@@ -57,10 +59,14 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     }
 
     const init = cookie ? { headers: { cookie }, cache: "no-store" as const } : undefined;
-    const task = await getTaskById(numericId, init).catch(() => null);
-    if (!task) {
+    const taskAccess = await loadRecord(() => getTaskById(numericId, init));
+    if (taskAccess.kind === "forbidden") {
+        return <AccessDeniedPage />;
+    }
+    if (taskAccess.kind === "missing") {
         notFound();
     }
+    const task = taskAccess.record;
 
     const [persons, deals, users, t, tTasks, locale] = await Promise.all([
         getContactsFromCookie(cookie),

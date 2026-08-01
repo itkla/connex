@@ -1,5 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ArrowLeftIcon, BriefcaseIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -54,10 +56,14 @@ export default async function ActivityDetailPage({
     }
 
     const init = cookie ? { headers: { cookie }, cache: "no-store" as const } : undefined;
-    const activity = await getActivityById(numericId, init).catch(() => null);
-    if (!activity) {
+    const activityAccess = await loadRecord(() => getActivityById(numericId, init));
+    if (activityAccess.kind === "forbidden") {
+        return <AccessDeniedPage />;
+    }
+    if (activityAccess.kind === "missing") {
         notFound();
     }
+    const activity = activityAccess.record;
 
     const [persons, deals, users, t, tPage, locale] = await Promise.all([
         getContactsFromCookie(cookie),

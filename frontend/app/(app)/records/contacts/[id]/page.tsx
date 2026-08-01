@@ -1,5 +1,7 @@
 import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import { loadRecord } from "@/app/lib/recordAccess";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
@@ -46,10 +48,10 @@ export default async function ContactPage({ params, searchParams }: ContactPageP
     const activeWorkspaceId = activeWorkspaceCookie ? Number(activeWorkspaceCookie) : null;
     const init = { headers: { cookie } } as const;
 
-    const [t, locale, contact, currentUser, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence] = await Promise.all([
+    const [t, locale, contactAccess, currentUser, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
-        getContactById(id, init) as Promise<Contact>,
+        loadRecord<Contact>(() => getContactById(id, init)),
         getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),
         getAttachmentsFromCookie("person", id, cookie),
@@ -65,9 +67,13 @@ export default async function ContactPage({ params, searchParams }: ContactPageP
         getEntityCustomFieldsFromCookie("person", id, cookie),
         getContactEvidence(id, init).catch(() => null),
     ]);
-    if (!contact) {
+    if (contactAccess.kind === "forbidden") {
+        return <AccessDeniedPage />;
+    }
+    if (contactAccess.kind === "missing") {
         notFound();
     }
+    const contact = contactAccess.record;
     if (!currentUser) {
         redirect('/auth/login');
     }

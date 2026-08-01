@@ -1,5 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import { loadRecord } from "@/app/lib/recordAccess";
 import { getCurrentUserFromCookie, getDocumentTemplateById } from "@/app/lib/api";
 import type { DocumentTemplate } from "@/app/lib/types";
 import TemplateBuilder from "@/app/components/library/documents/TemplateBuilder";
@@ -14,11 +16,16 @@ export default async function EditDocumentTemplatePage({ params }: { params: Pro
     }
 
     const init: RequestInit = { headers: cookie ? { cookie } : {}, cache: 'no-store' };
-    const template: DocumentTemplate | null = await getDocumentTemplateById(Number(id), init).catch(() => null);
+    const templateAccess = await loadRecord<DocumentTemplate>(
+        () => getDocumentTemplateById(Number(id), init),
+    );
 
-    if (!template) {
+    if (templateAccess.kind === 'forbidden') {
+        return <AccessDeniedPage />;
+    }
+    if (templateAccess.kind === 'missing') {
         notFound();
     }
 
-    return <TemplateBuilder template={template} />;
+    return <TemplateBuilder template={templateAccess.record} />;
 }

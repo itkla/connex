@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import { loadRecord } from "@/app/lib/recordAccess";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -59,7 +61,7 @@ export default async function CompanyPage({ params, searchParams }: CompanyPageP
     const [
         t,
         locale,
-        company,
+        companyAccess,
         currentUser,
         allTags,
         people,
@@ -73,7 +75,7 @@ export default async function CompanyPage({ params, searchParams }: CompanyPageP
     ] = await Promise.all([
         getTranslations("CompaniesDetail"),
         getLocale(),
-        getCompanyById(id, init) as Promise<Company>,
+        loadRecord<Company>(() => getCompanyById(id, init)),
         getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),
         getCompanyPeople(id, init).catch(() => [] as Contact[]),
@@ -86,9 +88,13 @@ export default async function CompanyPage({ params, searchParams }: CompanyPageP
         getCompanyEvidence(id, init).catch(() => null),
     ]);
 
-    if (!company) {
+    if (companyAccess.kind === "forbidden") {
+        return <AccessDeniedPage />;
+    }
+    if (companyAccess.kind === "missing") {
         notFound();
     }
+    const company = companyAccess.record;
     const websiteUrl = company.website ? (/^https?:\/\//i.test(company.website) ? company.website : `https://${company.website}`) : undefined;
     if (!currentUser) {
         redirect('/auth/login');

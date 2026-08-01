@@ -1,5 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import { loadRecord } from "@/app/lib/recordAccess";
 import {
     getContactsFromCookie,
     getCurrentUserFromCookie,
@@ -35,10 +37,14 @@ export default async function NoteEditorPage({
         if (!Number.isInteger(numericId)) {
             notFound();
         }
-        note = await getNoteById(numericId, init).catch(() => null);
-        if (!note) {
+        const noteAccess = await loadRecord(() => getNoteById(numericId, init));
+        if (noteAccess.kind === "forbidden") {
+            return <AccessDeniedPage />;
+        }
+        if (noteAccess.kind === "missing") {
             notFound();
         }
+        note = noteAccess.record;
     }
 
     const [persons, deals, users] = await Promise.all([
