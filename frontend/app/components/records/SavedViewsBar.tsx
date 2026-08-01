@@ -7,6 +7,7 @@ import {
     BookmarkIcon,
     BookmarkSlashIcon,
     EllipsisHorizontalIcon,
+    ExclamationTriangleIcon,
     LinkIcon,
     LockClosedIcon,
     PencilIcon,
@@ -115,12 +116,21 @@ export default function SavedViewsBar({
     currentConfig,
     onApply,
     defaultView,
+    unavailable = false,
 }: {
     recordType: SavedViewRecordType;
     initialViews: SavedView[];
     currentConfig: SavedViewConfig;
     onApply: (config: SavedViewConfig) => void;
     defaultView?: SavedView | null;
+    /**
+     * Set when the saved-view list could not be loaded. The bar then says so instead of rendering its
+     * tabs, because an unreadable saved-view list must not present as an empty one. It also suppresses
+     * silent application of the default view: with the tab strip and its "All" control hidden, an
+     * auto-applied default would filter the table with no visible way to see or clear it. An explicit
+     * {@code ?sv=} deep link is still honoured, since that is the user's own request.
+     */
+    unavailable?: boolean;
 }) {
     const t = useTranslations("SavedViews");
     const pathname = usePathname();
@@ -143,7 +153,7 @@ export default function SavedViewsBar({
         writeSavedViewToUrl(pathname, view ? savedViewToken(view) : null);
     };
 
-    const initialRef = useRef({ onApply, defaultView, activeWorkspaceId, workspaces, runInWorkspace, pathname });
+    const initialRef = useRef({ onApply, defaultView, activeWorkspaceId, workspaces, runInWorkspace, pathname, unavailable });
     const resolvedRef = useRef(false);
     const lastNavigatedSvRef = useRef<string | null>(null);
     useEffect(() => {
@@ -152,7 +162,7 @@ export default function SavedViewsBar({
         const snapshot = new URLSearchParams(window.location.search);
         const sv = snapshot.get("sv");
         lastNavigatedSvRef.current = sv;
-        const { onApply: apply, defaultView: fallback, activeWorkspaceId: currentWorkspaceId, workspaces: available, pathname: path } = initialRef.current;
+        const { onApply: apply, defaultView: fallback, activeWorkspaceId: currentWorkspaceId, workspaces: available, pathname: path, unavailable: listUnavailable } = initialRef.current;
 
         const applyResolved = (view: SavedView) => {
             if (view.recordType !== recordType) {
@@ -166,7 +176,7 @@ export default function SavedViewsBar({
             writeSavedViewToUrl(path, savedViewToken(view));
         };
         const applyDefault = () => {
-            if (!fallback) return;
+            if (!fallback || listUnavailable) return;
             setViews((prev) => upsertView(prev, fallback));
             setActiveId(fallback.id);
             apply(fallback.config);
@@ -383,6 +393,15 @@ export default function SavedViewsBar({
             return null;
         }
     };
+
+    if (unavailable) {
+        return (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground">
+                <ExclamationTriangleIcon className="size-4 shrink-0" aria-hidden="true" />
+                {t("loadFailed")}
+            </div>
+        );
+    }
 
     return (
         <div className="flex items-center gap-1 overflow-x-auto">

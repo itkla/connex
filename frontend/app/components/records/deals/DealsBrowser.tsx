@@ -248,7 +248,7 @@ function dealSegmentChipCondition(
     return condition;
 }
 
-export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; timezone: string; currentUserId: number }) {
+export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, savedViewsUnavailable, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean; timezone: string; currentUserId: number }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -1372,6 +1372,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         currentConfig={currentConfig}
                         onApply={applyView}
                         defaultView={defaultView}
+                        unavailable={savedViewsUnavailable}
                     />
                 </Rise>
 

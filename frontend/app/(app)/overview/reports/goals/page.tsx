@@ -3,10 +3,12 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
 import GoalsBoard from '@/app/components/reports/GoalsBoard';
+import AccessDeniedPage from '@/app/components/AccessDeniedPage';
+import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
 import {
     getActiveWorkspaceMembersResultFromCookie,
     getCurrentUserFromCookie,
-    getEffectivePermissionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
     getGoalsResultFromCookie,
 } from '@/app/lib/api';
 
@@ -20,8 +22,10 @@ export default async function GoalsPage() {
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
 
-    const effectivePermissions = await getEffectivePermissionsFromCookie(cookie);
-    if (!effectivePermissions.includes('GOAL_READ')) redirect('/overview/reports');
+    const permissionsResult = await getEffectivePermissionsResultFromCookie(cookie);
+    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
+    const effectivePermissions = permissionsResult.data;
+    if (!effectivePermissions.includes('GOAL_READ')) return <AccessDeniedPage />;
 
     const [goalsResult, ownersResult] = await Promise.all([
         getGoalsResultFromCookie(cookie),

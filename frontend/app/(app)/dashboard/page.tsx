@@ -13,7 +13,7 @@ import {
 
 import {
     getActiveWorkspaceMembersResultFromCookie,
-    getActivitiesPage,
+    getActivitiesPageResultFromCookie,
     getActivityVolumeFromCookie,
     getAllStagesResultFromCookie,
     getCapabilitiesResultFromCookie,
@@ -22,7 +22,6 @@ import {
     getAttachmentsPage,
     getCompanyById,
     getCompaniesPageResultFromCookie,
-    getContactsPage,
     getContactsPageResultFromCookie,
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
@@ -33,40 +32,33 @@ import {
     getDealPipelineValueFromCookie,
     getDealRevenueTimeseries,
     getDealStageDistribution,
-    getDealsPage,
+    getDealsPageResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getIntroSuggestionsResultFromCookie,
-    getNotesPage,
+    getNotesPageResultFromCookie,
     getNotifications,
     getPipelinesResultFromCookie,
     getProviderConnectionsResultFromCookie,
-    getRecentMovesFromCookie,
+    getRecentMovesResultFromCookie,
     getTaskSummaryFromCookie,
-    getTasksPage,
+    getTasksPageResultFromCookie,
     getUpcomingTasksFromCookie,
     getTeamLeaderboardFromCookie,
     getUpcomingActivityCountFromCookie,
     getUsers,
     getRelationshipDashboardResultFromCookie,
+    toResult,
 } from '@/app/lib/api';
 import type {
-    ActivityVolumeBucket,
-    Attachment,
     AttachmentFacets,
-    Count,
     DashboardWidgetType,
-    Deal,
     DealKpis,
     DealMetrics,
-    DealPipelineValue,
     DealRevenueSeries,
-    DealStageDistribution,
     NotificationPage,
-    Page,
     RelationshipDashboard,
     Task,
     TaskSummary as TaskSummaryCounts,
-    TeamLeaderboardEntry,
     User,
     WarmthSummary,
 } from '@/app/lib/types';
@@ -80,6 +72,7 @@ import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
 import RecentMoves from '@/app/components/dashboard/RecentMoves';
 import Rise from '@/app/components/motion/Rise';
+import SectionUnavailable from '@/app/components/SectionUnavailable';
 import TaskSummary from '@/app/components/dashboard/TaskSummary';
 import Timeline from '@/app/components/me/Timeline';
 import DashboardGrid from '@/app/components/dashboard/customize/DashboardGrid';
@@ -124,6 +117,8 @@ const EMPTY_DEAL_KPIS: DealKpis = {
     winRateSeries: [],
     avgCycleSeries: [],
 };
+
+const EMPTY_REVENUE_SERIES: DealRevenueSeries = { closed: [], projected: [] };
 
 const EMPTY_TASK_SUMMARY: TaskSummaryCounts = {
     todo: 0,
@@ -252,6 +247,7 @@ async function loadActivationExtras(cookie: string | null): Promise<{
 
 export default async function Dashboard() {
     const t = await getTranslations('DashboardPage');
+    const tUnavailable = await getTranslations('SectionUnavailable');
 
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
@@ -261,22 +257,20 @@ export default async function Dashboard() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [contacts, deals, pipelinesResult, stagesResult, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals, captureOverviewResult] =
+    const [contactsResult, dealsResult, pipelinesResult, stagesResult, tasksResult, upcomingTasks, activitiesResult, notesResult, users, recentFilesResult, fileFacetsResult, recentMovesResult, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolumeResult, leaderboardResult, taskSummaryResult, upcomingActivityCountResult, closingSoonCountResult, closingSoonDealsResult, captureOverviewResult] =
         await Promise.all([
-            getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
-            getDealsPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getContactsPageResultFromCookie(cookie, { page: 1, size: 100 }),
+            getDealsPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getPipelinesResultFromCookie(cookie),
             getAllStagesResultFromCookie(cookie),
-            getTasksPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getTasksPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getUpcomingTasksFromCookie(cookie, 4).catch(() => [] as Task[]),
-            getActivitiesPage({ page: 1, size: 100 }, init).then((response) => response.items),
-            getNotesPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getActivitiesPageResultFromCookie(cookie, { page: 1, size: 100 }),
+            getNotesPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getUsers(init).catch(() => [] as User[]),
-            getAttachmentsPage({ size: 6, sort: 'newest' }, init).catch(
-                () => ({ items: [], total: 0 }) as Page<Attachment>,
-            ),
-            getAttachmentFacets(init).catch(() => EMPTY_ATTACHMENT_FACETS),
-            getRecentMovesFromCookie(cookie),
+            toResult(getAttachmentsPage({ size: 6, sort: 'newest' }, init)),
+            toResult(getAttachmentFacets(init)),
+            getRecentMovesResultFromCookie(cookie),
             getIntroSuggestionsResultFromCookie(cookie, 4),
             getRelationshipDashboardResultFromCookie(cookie),
             getDashboardLayoutFromCookie(cookie),
@@ -285,15 +279,34 @@ export default async function Dashboard() {
             getDealMetricsResultFromCookie(cookie),
             getCompaniesPageResultFromCookie(cookie, { size: 1 }),
             getContactsPageResultFromCookie(cookie, { size: 1 }),
-            getActivityVolumeFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as ActivityVolumeBucket[]),
-            getTeamLeaderboardFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as TeamLeaderboardEntry[]),
-            getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
-            getUpcomingActivityCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
-            getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
-            getDealClosingSoonFromCookie(cookie, 7, 6).catch(() => [] as Deal[]),
+            toResult(getActivityVolumeFromCookie(cookie, DASHBOARD_RANGE)),
+            toResult(getTeamLeaderboardFromCookie(cookie, DASHBOARD_RANGE)),
+            toResult(getTaskSummaryFromCookie(cookie)),
+            toResult(getUpcomingActivityCountFromCookie(cookie, 7)),
+            toResult(getDealClosingSoonCountFromCookie(cookie, 7)),
+            toResult(getDealClosingSoonFromCookie(cookie, 7, 6)),
             getCaptureOverviewResultFromCookie(cookie),
         ]);
 
+    const contacts = contactsResult.ok ? contactsResult.data.items : [];
+    const deals = dealsResult.ok ? dealsResult.data.items : [];
+    const tasks = tasksResult.ok ? tasksResult.data.items : [];
+    const activities = activitiesResult.ok ? activitiesResult.data.items : [];
+    const notes = notesResult.ok ? notesResult.data.items : [];
+    const recentMoves = recentMovesResult.ok ? recentMovesResult.data : [];
+    const recentFiles = recentFilesResult.ok ? recentFilesResult.data : { items: [], total: 0 };
+    const fileFacets = fileFacetsResult.ok ? fileFacetsResult.data : EMPTY_ATTACHMENT_FACETS;
+    const activityVolume = activityVolumeResult.ok ? activityVolumeResult.data : [];
+    const leaderboard = leaderboardResult.ok ? leaderboardResult.data : [];
+    const taskSummary = taskSummaryResult.ok ? taskSummaryResult.data : EMPTY_TASK_SUMMARY;
+    const upcomingActivityCount = upcomingActivityCountResult.ok ? upcomingActivityCountResult.data : { count: 0 };
+    const closingSoonCount = closingSoonCountResult.ok ? closingSoonCountResult.data : { count: 0 };
+    const closingSoonDeals = closingSoonDealsResult.ok ? closingSoonDealsResult.data : [];
+    const timelineAvailable = contactsResult.ok
+        && dealsResult.ok
+        && tasksResult.ok
+        && activitiesResult.ok
+        && notesResult.ok;
     const introSuggestions = introSuggestionsResult.ok ? introSuggestionsResult.data : [];
     const relationshipDashboard = relationshipDashboardResult.ok
         ? relationshipDashboardResult.data
@@ -388,14 +401,21 @@ export default async function Dashboard() {
     const activationExtrasPromise = activationNeedsEvaluation ? loadActivationExtras(cookie) : null;
 
     const currency = dominantCurrency(dealMetrics);
-    const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
-        getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
-        getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
-        getDealRevenueTimeseries(currency, user.timezone, {}, init).catch(
-            () => ({ closed: [], projected: [] }) as DealRevenueSeries,
-        ),
-        getDealStageDistribution(currency, {}, init).catch(() => [] as DealStageDistribution[]),
+    const [dealKpisResult, pipelineValuesResult, revenueSeriesResult, stageDistributionResult] = await Promise.all([
+        toResult(getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE)),
+        toResult(getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE)),
+        toResult(getDealRevenueTimeseries(currency, user.timezone, {}, init)),
+        toResult(getDealStageDistribution(currency, {}, init)),
     ]);
+    const dealKpis = dealKpisResult.ok ? dealKpisResult.data : EMPTY_DEAL_KPIS;
+    const pipelineValues = pipelineValuesResult.ok ? pipelineValuesResult.data : [];
+    const revenueSeries = revenueSeriesResult.ok ? revenueSeriesResult.data : EMPTY_REVENUE_SERIES;
+    const stageDistribution = stageDistributionResult.ok ? stageDistributionResult.data : [];
+    const currencyKnown = dealMetricsResult.ok;
+    const kpisAvailable = currencyKnown && dealKpisResult.ok;
+    const revenueAvailable = currencyKnown && revenueSeriesResult.ok;
+    const pipelineValuesAvailable = currencyKnown && pipelineValuesResult.ok && pipelinesResult.ok;
+    const stageFunnelAvailable = currencyKnown && stageDistributionResult.ok && pipelinesResult.ok && stagesResult.ok;
 
     const companyWarmthItems: CompanyWarmthItem[] = relationshipDashboard.coolingCompanies.map(
         ({ company, temperature }) => ({ company, temp: temperature }),
@@ -452,33 +472,55 @@ export default async function Dashboard() {
     const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
         overview: (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" />
-                <OverviewCard index={1} label={t('contacts')} value={contactsPage.total} icon={UsersIcon} href="/records/contacts" />
-                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" />
-                <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" />
+                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" unavailable={!companiesPageResult.ok} unavailableLabel={tUnavailable('title')} />
+                <OverviewCard index={1} label={t('contacts')} value={contactsPage.total} icon={UsersIcon} href="/records/contacts" unavailable={!contactsPageResult.ok} unavailableLabel={tUnavailable('title')} />
+                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" unavailable={!dealMetricsResult.ok} unavailableLabel={tUnavailable('title')} />
+                <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" unavailable={!pipelinesResult.ok} unavailableLabel={tUnavailable('title')} />
             </div>
         ),
-        pipeline: <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />,
-        tasks: <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />,
-        atRiskDeals: (
+        pipeline: revenueAvailable
+            ? <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />
+            : <SectionUnavailable />,
+        tasks: taskSummaryResult.ok
+            ? <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />
+            : <SectionUnavailable />,
+        atRiskDeals: relationshipDashboardResult.ok ? (
             <AtRiskDeals items={atRiskDeals} truncated={relationshipDashboard.dealRisksTruncated} />
+        ) : (
+            <SectionUnavailable />
         ),
-        coolingRelationships: <CoolingRelationships items={coolingContacts} currentUserId={user.id} />,
-        recentMoves: <RecentMoves moves={recentMoves} />,
-        introOpportunities: <IntroOpportunities items={introSuggestions} />,
-        recentFiles: <RecentFiles files={recentFiles.items} total={fileFacets.total} totalSize={fileFacets.totalSize} />,
-        recentActivity: (
+        coolingRelationships: relationshipDashboardResult.ok
+            ? <CoolingRelationships items={coolingContacts} currentUserId={user.id} />
+            : <SectionUnavailable />,
+        recentMoves: recentMovesResult.ok ? <RecentMoves moves={recentMoves} /> : <SectionUnavailable />,
+        introOpportunities: introSuggestionsResult.ok
+            ? <IntroOpportunities items={introSuggestions} />
+            : <SectionUnavailable />,
+        recentFiles: recentFilesResult.ok && fileFacetsResult.ok
+            ? <RecentFiles files={recentFiles.items} total={fileFacets.total} totalSize={fileFacets.totalSize} />
+            : <SectionUnavailable />,
+        recentActivity: timelineAvailable ? (
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <Timeline tasks={tasks} activities={activities} notes={notes} users={users} persons={contacts} deals={deals} currentUserId={user.id} limit={8} />
             </div>
+        ) : (
+            <SectionUnavailable />
         ),
-        companyWarmth: <CompanyWarmth items={companyWarmthItems} />,
-        warmthDistribution: <WarmthDistribution summary={warmthSummary} />,
-        closingSoon: <ClosingSoonDeals items={closingSoonItems} />,
-        recentNotes: (
+        companyWarmth: relationshipDashboardResult.ok
+            ? <CompanyWarmth items={companyWarmthItems} />
+            : <SectionUnavailable />,
+        warmthDistribution: relationshipDashboardResult.ok
+            ? <WarmthDistribution summary={warmthSummary} />
+            : <SectionUnavailable />,
+        closingSoon: closingSoonDealsResult.ok
+            ? <ClosingSoonDeals items={closingSoonItems} />
+            : <SectionUnavailable />,
+        recentNotes: notesResult.ok ? (
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <NoteList notes={notes} />
             </div>
+        ) : (
+            <SectionUnavailable />
         ),
         notifications: (
             <NotificationsCard
@@ -493,21 +535,33 @@ export default async function Dashboard() {
                 <QuickCreate />
             </div>
         ),
-        analyticsKpis: <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />,
-        revenueTrend: chartCard(
-            <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
-        ),
-        winRate: chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />),
-        pipelineValue: chartCard(
-            <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,
-        ),
-        stageFunnel: chartCard(
-            <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />,
-        ),
-        activityVolume: chartCard(<ActivityVolume buckets={activityVolume} range={DASHBOARD_RANGE} />),
-        teamLeaderboard: chartCard(
-            <TeamLeaderboard users={users} standings={leaderboard} />,
-        ),
+        analyticsKpis: kpisAvailable
+            ? <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />
+            : <SectionUnavailable />,
+        revenueTrend: revenueAvailable
+            ? chartCard(
+                <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
+            )
+            : <SectionUnavailable />,
+        winRate: kpisAvailable
+            ? chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />)
+            : <SectionUnavailable />,
+        pipelineValue: pipelineValuesAvailable
+            ? chartCard(
+                <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,
+            )
+            : <SectionUnavailable />,
+        stageFunnel: stageFunnelAvailable
+            ? chartCard(
+                <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />,
+            )
+            : <SectionUnavailable />,
+        activityVolume: activityVolumeResult.ok
+            ? chartCard(<ActivityVolume buckets={activityVolume} range={DASHBOARD_RANGE} />)
+            : <SectionUnavailable />,
+        teamLeaderboard: leaderboardResult.ok
+            ? chartCard(<TeamLeaderboard users={users} standings={leaderboard} />)
+            : <SectionUnavailable />,
     };
 
     const initialWidgets = normalizeLayout(layoutResponse.response?.layout);
@@ -522,6 +576,11 @@ export default async function Dashboard() {
                         dueSoon={dueSoon}
                         closingSoon={closingSoon}
                         upcomingActivities={upcomingActivities}
+                        signalsUnavailable={
+                            !taskSummaryResult.ok
+                            || !closingSoonCountResult.ok
+                            || !upcomingActivityCountResult.ok
+                        }
                     />
                 </Rise>
                 {activationCounts && activationVisible ? (

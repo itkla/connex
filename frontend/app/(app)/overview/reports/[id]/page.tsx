@@ -3,9 +3,12 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
 import ReportDocumentBoard from '@/app/components/reports/ReportDocumentBoard';
+import AccessDeniedPage from '@/app/components/AccessDeniedPage';
+import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
+import { loadRecord } from '@/app/lib/recordAccess';
 import {
     getCurrentUserFromCookie,
-    getEffectivePermissionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
     getReport,
     getReportSnapshots,
 } from '@/app/lib/api';
@@ -24,15 +27,19 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [report, snapshots, effectivePermissions] = await Promise.all([
-        getReport(id, init).catch(() => null),
+    const [reportAccess, snapshots, permissionsResult] = await Promise.all([
+        loadRecord(() => getReport(id, init)),
         getReportSnapshots(id, init).catch((): ReportSnapshotSummary[] => []),
-        getEffectivePermissionsFromCookie(cookie),
+        getEffectivePermissionsResultFromCookie(cookie),
     ]);
-    if (!report) notFound();
+    if (reportAccess.kind === 'forbidden') return <AccessDeniedPage />;
+    if (reportAccess.kind === 'missing') notFound();
+    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
+    const report = reportAccess.record;
+    const effectivePermissions = permissionsResult.data;
     if (report.config.widgets.some((widget) => widget.measure === 'attainment')
             && !effectivePermissions.includes('GOAL_READ')) {
-        redirect('/overview/reports');
+        return <AccessDeniedPage />;
     }
 
     return (

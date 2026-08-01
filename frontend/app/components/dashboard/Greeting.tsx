@@ -28,6 +28,7 @@ export default async function Greeting({
     closingSoon,
     upcomingActivities,
     action,
+    signalsUnavailable = false,
 }: {
     user: User;
     overdueTasks: number;
@@ -35,6 +36,12 @@ export default async function Greeting({
     closingSoon: number;
     upcomingActivities: number;
     action?: React.ReactNode;
+    /**
+     * Set when the counts behind the day's summary could not be loaded. The banner then says so
+     * rather than reporting "nothing urgent", which would be a false all-clear when there may be
+     * overdue work we simply could not count.
+     */
+    signalsUnavailable?: boolean;
 }) {
     const t = await getTranslations('DashboardGreeting');
     const locale = await getLocale();
@@ -48,7 +55,9 @@ export default async function Greeting({
     const hasUpcoming = parts.length > 0;
 
     let status: React.ReactNode;
-    if (overdueTasks > 0) {
+    if (signalsUnavailable) {
+        status = <p className="text-sm text-muted-foreground">{t('summaryUnavailable')}</p>;
+    } else if (overdueTasks > 0) {
         status = (
             <Alert variant="destructive" className="w-fit max-w-md border-destructive/20 bg-destructive/5">
                 <ExclamationTriangleIcon />

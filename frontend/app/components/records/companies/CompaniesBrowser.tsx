@@ -135,7 +135,7 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
     };
 }
 
-export default function CompaniesBrowser({ savedViews, defaultView }: { savedViews: SavedView[]; defaultView: SavedView | null }) {
+export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
     const tf = useTranslations('Filters');
@@ -873,6 +873,7 @@ export default function CompaniesBrowser({ savedViews, defaultView }: { savedVie
                         currentConfig={currentConfig}
                         onApply={applyView}
                         defaultView={defaultView}
+                        unavailable={savedViewsUnavailable}
                     />
                 </Rise>
 

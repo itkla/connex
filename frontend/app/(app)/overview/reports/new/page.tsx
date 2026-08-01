@@ -3,10 +3,11 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
+import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
 import {
     getActiveWorkspaceMembersResultFromCookie,
     getCurrentUserFromCookie,
-    getEffectivePermissionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
     getPipelinesFromCookie,
     getReportTemplatesFromCookie,
     getTagsFromCookie,
@@ -27,14 +28,15 @@ export default async function NewReportPage({
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
     const { template: templateKey } = await searchParams;
-    const [templates, pipelines, ownersResult, tags, effectivePermissions] = await Promise.all([
+    const [templates, pipelines, ownersResult, tags, permissionsResult] = await Promise.all([
         getReportTemplatesFromCookie(cookie),
         getPipelinesFromCookie(cookie),
         getActiveWorkspaceMembersResultFromCookie(cookie),
         getTagsFromCookie(cookie).catch((): Tag[] => []),
-        getEffectivePermissionsFromCookie(cookie),
+        getEffectivePermissionsResultFromCookie(cookie),
     ]);
-    const canReadGoals = effectivePermissions.includes('GOAL_READ');
+    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
+    const canReadGoals = permissionsResult.data.includes('GOAL_READ');
     const template = templateKey
         ? templates.find((item) => item.key === templateKey && (canReadGoals || item.key !== 'quota-attainment'))
         : undefined;

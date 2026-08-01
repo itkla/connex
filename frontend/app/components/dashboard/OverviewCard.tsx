@@ -3,6 +3,15 @@ import { cn } from '@/lib/utils';
 import MotionCard from '@/app/components/dashboard/MotionCard';
 import CountUp from '@/app/components/dashboard/CountUp';
 
+/**
+ * Headline count tile for the dashboard overview row.
+ *
+ * When `unavailable` is set the tile shows a dash instead of a number: a failed total
+ * must not render as a confident zero, which on the most-read tile of the app reads as
+ * "you have no companies" rather than "we couldn't count them".
+ * @param unavailable whether the underlying total failed to load
+ * @param unavailableLabel localized text announced in place of the missing number
+ */
 export default function OverviewCard({
     label,
     value,
@@ -10,6 +19,8 @@ export default function OverviewCard({
     href,
     index = 0,
     className,
+    unavailable = false,
+    unavailableLabel,
 }: {
     label: string;
     value: number;
@@ -17,6 +28,8 @@ export default function OverviewCard({
     href?: string;
     index?: number;
     className?: string;
+    unavailable?: boolean;
+    unavailableLabel?: string;
 }) {
     return (
         <MotionCard
@@ -38,7 +51,14 @@ export default function OverviewCard({
             <span className="mt-4 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                 {label}
             </span>
-            <CountUp value={value} className="mt-1 text-4xl leading-none text-foreground tabular-nums" />
+            {unavailable ? (
+                <span className="mt-1 text-4xl leading-none text-muted-foreground tabular-nums">
+                    <span aria-hidden>&mdash;</span>
+                    {unavailableLabel ? <span className="sr-only">{unavailableLabel}</span> : null}
+                </span>
+            ) : (
+                <CountUp value={value} className="mt-1 text-4xl leading-none text-foreground tabular-nums" />
+            )}
         </MotionCard>
     );
 }

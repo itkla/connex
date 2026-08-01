@@ -622,6 +622,21 @@ async function resultWithCookie<T>(
     }
 }
 
+/**
+ * Wraps an in-flight request in the {@link CookieResult} shape, for fetchers that are
+ * already bound to their arguments and so cannot go through {@link resultWithCookie}.
+ * Lets a caller distinguish a failure from a legitimately empty payload without
+ * inventing a zeroed fallback.
+ * @param request the pending request
+ */
+export async function toResult<T>(request: Promise<T>): Promise<CookieResult<T>> {
+    try {
+        return { ok: true, data: await request };
+    } catch {
+        return { ok: false };
+    }
+}
+
 function buildQuery(params: Record<string, unknown>): string {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -673,6 +688,91 @@ async function getCompleteKnownPage<T>(
     return items;
 }
 
+/** Default per-source item cap for calendar reads. Five requests at the server's max page size. */
+export const CALENDAR_SOURCE_ITEM_CAP = 500;
+
+/**
+ * A bounded collection read: the items actually fetched, the server's reported total,
+ * and whether the cap cut the result short.
+ */
+export type CappedItems<T> = { items: T[]; total: number; truncated: boolean };
+
+/**
+ * Reads at most `cap` items from a paged endpoint.
+ *
+ * Unlike {@link getCompletePageItems}, which walks every page and so issues an
+ * unbounded number of serial requests on a large workspace, this stops at the cap and
+ * reports the truncation so the caller can disclose it. Callers must surface
+ * `truncated` — silently showing a partial collection as if it were the whole one is
+ * the failure mode this exists to prevent.
+ * @param fetchPage the paged endpoint to read
+ * @param cap maximum number of items to accumulate
+ */
+async function getCappedPageItems<T>(
+    fetchPage: (params: Types.PageParams, init: RequestInit) => Promise<Types.Page<T>>,
+    cap: number,
+    init: RequestInit = {},
+): Promise<CappedItems<T>> {
+    const items: T[] = [];
+    let total = 0;
+    for (let page = 1; items.length < cap; page += 1) {
+        const response = await fetchPage({ page, size: WORKSPACE_LIST_PAGE_SIZE }, init);
+        total = response.total;
+        if (response.items.length === 0) break;
+        items.push(...response.items);
+        if (items.length >= total) break;
+    }
+    const bounded = items.slice(0, cap);
+    return { items: bounded, total, truncated: total > bounded.length };
+}
+
+export function getTasksCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Task>>(
+        (init) => getCappedPageItems<Types.Task>(getTasksPage, cap, init),
+        cookie,
+    );
+}
+
+export function getActivitiesCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Activity>>(
+        (init) => getCappedPageItems<Types.Activity>(
+            (params, requestInit) => getActivitiesPage(params, requestInit),
+            cap,
+            init,
+        ),
+        cookie,
+    );
+}
+
+export function getNotesCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Note>>(
+        (init) => getCappedPageItems<Types.Note>(getNotesPage, cap, init),
+        cookie,
+    );
+}
+
+export function getContactsCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Contact>>(
+        (init) => getCappedPageItems<Types.Contact>(
+            (params, requestInit) => getContactsPage(params, requestInit),
+            cap,
+            init,
+        ),
+        cookie,
+    );
+}
+
+export function getDealsCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Deal>>(
+        (init) => getCappedPageItems<Types.Deal>(
+            (params, requestInit) => getDealsPage(params, requestInit),
+            cap,
+            init,
+        ),
+        cookie,
+    );
+}
+
 /** Complete, explicitly capped inputs for the relationship graph. */
 export async function getRelationshipMapData(init: RequestInit = {}) {
     const [companies, contacts, deals, activities, tasks, notes] = await Promise.all([
@@ -720,6 +820,12 @@ export class ApiError extends Error {
     code?: string;
     fieldErrors?: ApiFieldErrors;
     correlationId?: string;
+    /**
+     * True when the response carried no body. A bodyless 401/403 is how Spring Security signals an
+     * unauthenticated caller (expired or missing session), as opposed to a genuine authorization
+     * denial, which the backend answers with an explanatory body.
+     */
+    emptyBody?: boolean;
 
     constructor(
         message: string,
@@ -727,6 +833,7 @@ export class ApiError extends Error {
         code?: string,
         fieldErrors?: ApiFieldErrors,
         correlationId?: string,
+        emptyBody?: boolean,
     ) {
         super(message);
         this.name = "ApiError";
@@ -734,6 +841,7 @@ export class ApiError extends Error {
         this.code = code;
         this.fieldErrors = fieldErrors;
         this.correlationId = correlationId;
+        this.emptyBody = emptyBody;
     }
 }
 
@@ -822,7 +930,7 @@ async function getApiError(res: Response): Promise<ApiError> {
     const text = await res.text().catch(() => "");
 
     if (!text) {
-        return new ApiError(`Request failed (${res.status})`, res.status);
+        return new ApiError(`Request failed (${res.status})`, res.status, undefined, undefined, undefined, true);
     }
 
     try {
@@ -1432,6 +1540,13 @@ export function getTasksFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Task>((init) => getTasks(init), cookie);
 }
 
+export function getTasksPageResultFromCookie(
+    cookie: string | null,
+    params: Types.PageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Task>>((init) => getTasksPage(params, init), cookie);
+}
+
 /** Bounded due-date-ordered open-task preview for the dashboard. */
 export function getUpcomingTasksFromCookie(cookie: string | null, limit = 4) {
     return getJson<Types.Task[]>(`/api/tasks/upcoming${buildQuery({ limit })}`, withCookie(cookie));
@@ -1493,6 +1608,16 @@ export function getActivitiesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Activity>((init) => getActivities(init), cookie);
 }
 
+export function getActivitiesPageResultFromCookie(
+    cookie: string | null,
+    params: Types.ActivitiesPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Activity>>(
+        (init) => getActivitiesPage(params, init),
+        cookie,
+    );
+}
+
 export function createActivity(payload: Types.CreateActivityPayload, init: RequestInit = {}) {
     return postJson<Types.Activity>(`/api/activities`, payload, init);
 }
@@ -1527,6 +1652,13 @@ export function getWorkspaceNotes(init: RequestInit = {}) {
 
 export function getNotesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
+}
+
+export function getNotesPageResultFromCookie(
+    cookie: string | null,
+    params: Types.NotesPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Note>>((init) => getNotesPage(params, init), cookie);
 }
 
 export function getNoteById(id: number, init: RequestInit = {}) {
@@ -1959,6 +2091,10 @@ export function getRecentMovesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.JobMove>((init) => getRecentMoves(init), cookie);
 }
 
+export function getRecentMovesResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.JobMove[]>((init) => getRecentMoves(init), cookie);
+}
+
 export function getContactConnections(id: number, init: RequestInit = {}) {
     return getJson<Types.PersonConnection[]>(`/api/persons/${id}/connections`, init);
 }
@@ -2000,6 +2136,16 @@ export function getContactEvidence(id: number, init: RequestInit = {}) {
 export function getContactTemperaturesFromCookie(cookie: string | null, ids: number[]) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
     return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(ids, init), cookie);
+}
+
+export function getContactTemperaturesResultFromCookie(cookie: string | null, ids: number[]) {
+    if (ids.length === 0) {
+        return Promise.resolve({ ok: true as const, data: [] as Types.RelationshipTemperature[] });
+    }
+    return resultWithCookie<Types.RelationshipTemperature[]>(
+        (init) => getContactTemperatures(ids, init),
+        cookie,
+    );
 }
 
 export function getCoolingContactTemperaturesFromCookie(cookie: string | null, limit = 6) {
@@ -2359,6 +2505,13 @@ export function getDealBoard(pipelineId: number, init: RequestInit = {}) {
 
 export function getDealsFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Deal>((init) => getDeals(init), cookie);
+}
+
+export function getDealsPageResultFromCookie(
+    cookie: string | null,
+    params: Types.DealsPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Deal>>((init) => getDealsPage(params, init), cookie);
 }
 
 /**
@@ -3671,6 +3824,14 @@ export function getSavedViewsFromCookie(recordType: Types.SavedViewRecordType, c
     return safeWithCookie<Types.SavedView>((init) => getSavedViews(recordType, init), cookie);
 }
 
+/**
+ * Failure-aware saved-view fetch (see {@link resultWithCookie}), so an unreadable view list is not
+ * presented as a workspace with no saved views.
+ */
+export function getSavedViewsResultFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null) {
+    return resultWithCookie<Types.SavedView[]>((init) => getSavedViews(recordType, init), cookie);
+}
+
 export async function getSavedView(id: number, init: RequestInit = {}) {
     return fromSavedViewWire(await getJson<SavedViewWire>(`/api/saved-views/${id}`, { cache: "no-store", ...init }));
 }
@@ -3690,10 +3851,6 @@ export function deleteSavedView(id: number, init: RequestInit = {}) {
 export async function getSavedViewPins(init: RequestInit = {}) {
     const views = await getJson<SavedViewWire[]>(`/api/saved-views/pins`, { cache: "no-store", ...init });
     return views.map(fromSavedViewWire);
-}
-
-export function getSavedViewPinsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.SavedView>((init) => getSavedViewPins(init), cookie);
 }
 
 export async function pinSavedView(id: number, position?: number): Promise<void> {

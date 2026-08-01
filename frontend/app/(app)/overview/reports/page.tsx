@@ -3,9 +3,10 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
 import ReportsBoard from '@/app/components/reports/ReportsBoard';
+import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
 import {
     getCurrentUserFromCookie,
-    getEffectivePermissionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
     getReportsFromCookie,
     getReportTemplatesFromCookie,
 } from '@/app/lib/api';
@@ -20,11 +21,13 @@ export default async function ReportsPage() {
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
 
-    const [templates, reports, effectivePermissions] = await Promise.all([
+    const [templates, reports, permissionsResult] = await Promise.all([
         getReportTemplatesFromCookie(cookie),
         getReportsFromCookie(cookie),
-        getEffectivePermissionsFromCookie(cookie),
+        getEffectivePermissionsResultFromCookie(cookie),
     ]);
+    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
+    const effectivePermissions = permissionsResult.data;
 
     return (
         <ReportsBoard

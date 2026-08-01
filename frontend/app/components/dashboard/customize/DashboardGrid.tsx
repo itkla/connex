@@ -9,6 +9,8 @@ import {
     type SortableGridMessages,
 } from '@/app/components/layout/SortableGrid';
 import SortableGrid from '@/app/components/layout/SortableGrid';
+import SectionBoundary from '@/app/components/SectionBoundary';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { Button } from '@/components/ui/button';
 import {
     Drawer,
@@ -49,6 +51,7 @@ export default function DashboardGrid({
     const t = useTranslations('DashboardCustomize');
     const tp = useTranslations('DashboardPage');
     const reduce = useReducedMotion() ?? false;
+    const { activeWorkspaceId } = useWorkspace();
 
     const [widgets, setWidgets] = useState<DashboardWidgetInstance[]>(initialWidgets);
     const [editMode, setEditMode] = useState(false);
@@ -255,7 +258,7 @@ export default function DashboardGrid({
                             onToggleWidth={() => toggleWidth(widget.id)}
                             onRemove={() => removeWidget(widget.id)}
                         >
-                            {nodes[widget.type]}
+                            <SectionBoundary resetKey={activeWorkspaceId}>{nodes[widget.type]}</SectionBoundary>
                         </WidgetShell>
                     )}
                     renderOverlay={(widget) => (
@@ -268,7 +271,7 @@ export default function DashboardGrid({
                                     widthLabel=""
                                     removeLabel=""
                                 >
-                                    {nodes[widget.type]}
+                                    <SectionBoundary resetKey={activeWorkspaceId}>{nodes[widget.type]}</SectionBoundary>
                                 </WidgetShell>
                             </div>
                         )}

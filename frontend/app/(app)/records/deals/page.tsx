@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { getDealsPage, getDealMetricsFromCookie, getDealFacetsFromCookie, getCurrentUserFromCookie, getDefaultSavedViewFromCookie, getSavedViewsFromCookie } from "@/app/lib/api";
+import { type CookieResult, getDealsPage, getDealMetricsFromCookie, getDealFacetsFromCookie, getCurrentUserFromCookie, getDefaultSavedViewFromCookie, getSavedViewsResultFromCookie } from "@/app/lib/api";
 import { type Deal, type DealFacets, type DealMetrics, type Page, type SavedView } from "@/app/lib/types";
 import { redirect } from "next/navigation";
 import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
@@ -43,12 +43,13 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
 
     const status = statusParam((await searchParams).status);
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [metrics, facets, savedViews, defaultView]: [DealMetrics, DealFacets, SavedView[], SavedView | null] = await Promise.all([
+    const [metrics, facets, savedViewsResult, defaultView]: [DealMetrics, DealFacets, CookieResult<SavedView[]>, SavedView | null] = await Promise.all([
         getDealMetricsFromCookie(cookie, { status }),
         getDealFacetsFromCookie(cookie),
-        getSavedViewsFromCookie("deal", cookie),
+        getSavedViewsResultFromCookie("deal", cookie),
         getDefaultSavedViewFromCookie("deal", cookie),
     ]);
+    const savedViews = savedViewsResult.ok ? savedViewsResult.data : [];
     const dealsPage: Page<Deal> = await getDealsPage({ page: 1, size: 25, status, currency: dominantCurrency(metrics) }, init);
 
     return (
@@ -59,6 +60,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
             serverFacets={facets}
             savedViews={savedViews}
             defaultView={defaultView}
+            savedViewsUnavailable={!savedViewsResult.ok}
             timezone={user.timezone}
             currentUserId={user.id}
         />
