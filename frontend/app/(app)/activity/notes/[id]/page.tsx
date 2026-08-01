@@ -9,9 +9,17 @@ import {
 } from "@/app/lib/api";
 import type { Note, User } from "@/app/lib/types";
 import NoteEditorView from "@/app/components/activity/notes/NoteEditorView";
+import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
 
-export default async function NoteEditorPage({ params }: { params: Promise<{ id: string }> }) {
-    const { id } = await params;
+export default async function NoteEditorPage({
+    params,
+    searchParams,
+}: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<{ returnTo?: string | string[] }>;
+}) {
+    const [{ id }, query] = await Promise.all([params, searchParams]);
+    const returnPath = resolveRecordReturnPath("notes", query.returnTo);
     const cookie = (await headers()).get("cookie");
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) {
@@ -46,6 +54,7 @@ export default async function NoteEditorPage({ params }: { params: Promise<{ id:
             persons={persons}
             deals={deals}
             users={users}
+            returnPath={returnPath}
         />
     );
 }

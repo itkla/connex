@@ -41,6 +41,8 @@ import { deleteActivity, getActivityById } from '@/app/lib/api';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
 import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
+import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
+import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
 import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -150,6 +152,7 @@ export default function ActivitiesBrowser({
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<Activity | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const returnSnapshot = useRecordReturnScroll('activities', true);
 
     const searchParams = useSearchParams();
     const [deepLinkSettled, setDeepLinkSettled] = useState(
@@ -505,7 +508,11 @@ export default function ActivitiesBrowser({
                                                     plannedLabel={t('planned')}
                                                     onOpen={() => {
                                                         if (isProviderOwnedActivity(activity)) {
-                                                            router.push(`/activity/activities/${activity.id}`);
+                                                            router.push(recordDetailNavigationPath(
+                                                                'activities',
+                                                                activity.id,
+                                                                returnSnapshot,
+                                                            ));
                                                         } else {
                                                             setEditing(activity);
                                                         }

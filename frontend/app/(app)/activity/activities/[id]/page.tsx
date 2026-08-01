@@ -14,6 +14,8 @@ import {
 import type { User } from "@/app/lib/types";
 import { formatDateTime } from "@/app/lib/utils";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
+import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
+import RecordReturnLink from "@/app/components/records/RecordReturnLink";
 import Rise from "@/app/components/motion/Rise";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
@@ -31,8 +33,15 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
     );
 }
 
-export default async function ActivityDetailPage({ params }: { params: Promise<{ id: string }> }) {
-    const { id } = await params;
+export default async function ActivityDetailPage({
+    params,
+    searchParams,
+}: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<{ returnTo?: string | string[] }>;
+}) {
+    const [{ id }, query] = await Promise.all([params, searchParams]);
+    const returnPath = resolveRecordReturnPath("activities", query.returnTo);
     const cookie = (await headers()).get("cookie");
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) {
@@ -71,13 +80,13 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
                 <Rise className="flex flex-col gap-6">
-                    <Link
-                        href="/activity/all"
+                    <RecordReturnLink
+                        href={returnPath}
                         className="inline-flex w-fit items-center gap-2 text-base text-brand transition-colors hover:text-brand-hover"
                     >
                         <ArrowLeftIcon className="size-4" />
                         <span>{t("back")}</span>
-                    </Link>
+                    </RecordReturnLink>
                     <CrumbLabel value={activity.subject} />
 
                     <div className="flex items-start gap-3.5">

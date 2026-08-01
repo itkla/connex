@@ -31,6 +31,8 @@ import { deleteNote } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate } from '@/app/lib/utils';
 import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
+import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
+import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
 import type { Contact, Deal, Note, User } from '@/app/lib/types';
 
 type Props = {
@@ -58,6 +60,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
     const [sortBy, setSortBy] = useState<SortBy>('updated');
     const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const returnSnapshot = useRecordReturnScroll('notes', true);
 
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
@@ -275,7 +278,9 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                                                     open: t('open'),
                                                     delete: t('delete'),
                                                 }}
-                                                onOpen={() => router.push(`/activity/notes/${note.id}`)}
+                                                onOpen={() => router.push(
+                                                    recordDetailNavigationPath('notes', note.id, returnSnapshot),
+                                                )}
                                                 onDelete={() => setDeleteTarget(note)}
                                             />
                                         ))}
@@ -331,6 +336,20 @@ function NoteRow({
         <li className="group relative flex items-center gap-3 px-6 py-3.5 transition-colors hover:bg-muted/40">
             <Link
                 href={`/activity/notes/${note.id}`}
+                onClick={(event) => {
+                    if (
+                        event.defaultPrevented
+                        || event.button !== 0
+                        || event.metaKey
+                        || event.ctrlKey
+                        || event.shiftKey
+                        || event.altKey
+                    ) {
+                        return;
+                    }
+                    event.preventDefault();
+                    onOpen();
+                }}
                 className="flex min-w-0 flex-1 flex-col rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
                 <span className="truncate font-medium text-foreground">{title}</span>
