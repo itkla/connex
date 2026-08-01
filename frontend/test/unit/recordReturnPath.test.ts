@@ -182,8 +182,20 @@ describe('record return paths', () => {
         expect(values.has('connex:record-return-selection')).toBe(false);
     });
 
+    it('persists a scroll-only snapshot for a list without a multi-selection', () => {
+        recordDetailNavigationPath('contacts', 42, {
+            userId: 7,
+            workspaceId: 11,
+            ids: [],
+        });
+
+        expect(consumeRecordReturnSelection('contacts', 7, 11)).toEqual({
+            ids: [],
+            scrollTop: 417,
+        });
+    });
+
     it.each([
-        [[]],
         [[0]],
         [[1.5]],
         [Array.from({ length: 1001 }, (_, index) => index + 1)],
