@@ -50,6 +50,7 @@ import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
+import { PageShell } from '@/app/components/PageShell';
 import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
 import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
@@ -761,8 +762,8 @@ export default function TasksBrowser({
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <>
+            <PageShell tier="wide">
                 <Rise>
                     <header className="flex flex-wrap items-start justify-between gap-4">
                         <div>
@@ -1011,7 +1012,7 @@ export default function TasksBrowser({
                         </div>
                     )}
                 </Rise>
-            </div>
+            </PageShell>
 
             {editingTask && (
                 <EditTaskSheet
@@ -1046,7 +1047,7 @@ export default function TasksBrowser({
                 users={users}
                 currentUserId={currentUserId}
             />
-        </div>
+        </>
     );
 }
 

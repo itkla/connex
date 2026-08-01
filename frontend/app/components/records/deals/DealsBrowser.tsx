@@ -125,6 +125,7 @@ import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
 import DealsRevenueChart from '@/app/components/records/deals/DealsRevenueChart';
 import StageRatio from '@/app/components/records/deals/StageRatio';
+import { PageShell } from '@/app/components/PageShell';
 import {
     evaluableSegmentDefinition,
     hasSegmentConditions,
@@ -1276,13 +1277,13 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     );
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
+        <>
             <DealsQueryUrlSync
                 query={query}
                 deferredQuery={deferredQuery}
                 onExternalQuery={changeQuery}
             />
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+            <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
@@ -1718,7 +1719,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     onApply={(stageId) => bulkChangeDealStage(selectedDealIds, stageId)}
                     onSuccess={onBulkSuccess}
                 />
-            </div>
-        </div>
+            </PageShell>
+        </>
     );
 }

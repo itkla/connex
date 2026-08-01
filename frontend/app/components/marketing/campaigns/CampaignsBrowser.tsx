@@ -13,6 +13,7 @@ import { toastError } from "@/app/lib/toast";
 import { formatCurrency, formatShortDate } from "@/app/lib/utils";
 import NewCampaignDialog from "@/app/components/marketing/campaigns/NewCampaignDialog";
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
+import { PageShell } from "@/app/components/PageShell";
 
 const EMPTY_PAYLOAD: CampaignPayload = {
     name: "",
@@ -60,8 +61,8 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <>
+            <PageShell tier="wide">
                 <Rise>
                     <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
                         <div className="min-w-0">
@@ -157,7 +158,7 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                         </ul>
                     </Rise>
                 )}
-            </div>
+            </PageShell>
 
             <NewCampaignDialog
                 open={open}
@@ -168,6 +169,6 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                 isSuccess={isSuccess}
                 createNewCampaign={createNewCampaign}
             />
-        </div>
+        </>
     );
 }

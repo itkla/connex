@@ -18,6 +18,7 @@ import { SearchField } from '@/app/components/filters';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ProductDialog from '@/app/components/records/products/ProductDialog';
+import { PageShell } from '@/app/components/PageShell';
 import { deleteProduct, exportProductsCsv, getProducts } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatCurrency } from '@/app/lib/utils';
@@ -129,8 +130,8 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <>
+            <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
@@ -226,7 +227,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                         </div>
                     )}
                 </Rise>
-            </div>
+            </PageShell>
 
             {dialog && (
                 <ProductDialog
@@ -249,6 +250,6 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                 isDeleting={isRemoving}
                 confirmDelete={confirmRemove}
             />
-        </div>
+        </>
     );
 }

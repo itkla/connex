@@ -37,6 +37,7 @@ import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEv
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
+import { PageShell } from '@/app/components/PageShell';
 import { deleteActivity, getActivityById } from '@/app/lib/api';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
 import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
@@ -355,8 +356,8 @@ export default function ActivitiesBrowser({
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <>
+            <PageShell tier="wide">
                 <Rise>
                     <header className="flex flex-wrap items-start justify-between gap-4">
                         <div>
@@ -531,7 +532,7 @@ export default function ActivitiesBrowser({
                         </div>
                     </div>
                 </Rise>
-            </div>
+            </PageShell>
 
             {editing && (
                 <EditActivitySheet
@@ -566,7 +567,7 @@ export default function ActivitiesBrowser({
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}
             />
-        </div>
+        </>
     );
 }
 

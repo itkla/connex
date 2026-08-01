@@ -17,6 +17,7 @@ import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import { PageShell } from '@/app/components/PageShell';
 import { deleteDocumentTemplate } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { DocumentTemplate, DocumentType } from '@/app/lib/types';
@@ -64,8 +65,8 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <>
+            <PageShell tier="wide">
                 <Rise>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h1 className="text-3xl font-extrabold sm:text-4xl">{t('title')}</h1>
@@ -167,7 +168,7 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                         </div>
                     )}
                 </Rise>
-            </div>
+            </PageShell>
 
             <DeleteRecordDialog
                 open={removeTarget !== null}
@@ -179,6 +180,6 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
                 isDeleting={isRemoving}
                 confirmDelete={confirmRemove}
             />
-        </div>
+        </>
     );
 }
