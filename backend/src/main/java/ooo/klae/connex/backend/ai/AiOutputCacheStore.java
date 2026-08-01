@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AiOutputCacheStore {
     /** Sentinel used for {@code subjectBId} on single-subject (deal-scoped) features. */
     public static final int NO_SUBJECT = 0;
@@ -51,6 +54,7 @@ public class AiOutputCacheStore {
     private final PersonMapper personMapper;
     private final AiRestrictionEpoch aiRestrictionEpoch;
     private final ObjectMapper objectMapper;
+    private final WorkspaceService workspaceService;
 
     /**
      * Fingerprints the credential-free generation profile, masked prompt, and identity bindings.
@@ -87,10 +91,9 @@ public class AiOutputCacheStore {
 
     /**
      * Upserts the stored output for a subject only when the caller's restriction epoch is current.
-     * A serialization failure skips persistence rather than failing the caller, since a cache write
-     * must never break the user-facing response. This fence closes the in-flight write window only
-     * within one application JVM; multi-instance deployments still need persisted report-to-person
-     * provenance or a persisted epoch, tracked in issue #941.
+     * A serialization failure refuses persistence and disclosure. This fence closes the in-flight
+     * write window only within one application JVM; multi-instance deployments still need persisted
+     * report-to-person provenance or a persisted epoch, tracked in issue #941.
      * @param workspaceId active workspace
      * @param feature feature key
      * @param subjectAId primary subject id
@@ -100,24 +103,31 @@ public class AiOutputCacheStore {
      * @param warnings demasking warning count
      * @param generatedAt ISO generation instant
      * @param restrictionEpoch restriction epoch captured when the content was assembled
-     * @return true when the restriction epoch remains current, whether or not serialization allowed
-     *         persistence; false when a restriction advanced after assembly
+     * @return true only when the payload was serialized and persisted under the current epoch
      */
     public boolean save(int workspaceId, String feature, int subjectAId, int subjectBId,
             String contentHash, Object content, int warnings, String generatedAt,
             long restrictionEpoch) {
         Optional<String> payload = serialize(content);
-        return aiRestrictionEpoch.runIfCurrent(workspaceId, restrictionEpoch, () -> payload.ifPresent(value ->
+        if (payload.isEmpty()) {
+            logSaveRefusal("serialization_failure");
+            return false;
+        }
+        boolean saved = aiRestrictionEpoch.runIfCurrent(workspaceId, restrictionEpoch, () ->
                 aiOutputCacheMapper.upsert(entry(
                         workspaceId, feature, subjectAId, subjectBId, contentHash,
-                        value, warnings, generatedAt))));
+                        payload.get(), warnings, generatedAt)));
+        if (!saved) {
+            logSaveRefusal("restriction_epoch");
+        }
+        return saved;
     }
 
     /**
      * Upserts generated content only while every directly contributing contact remains visible and
      * unrestricted. Exact contact rows are locked in ascending id order so restriction changes and
-     * cache admission serialize without range-lock ordering ambiguity. Serialization failure skips
-     * persistence only after contributor admission succeeds.
+     * cache admission serialize without range-lock ordering ambiguity. Serialization failure
+     * refuses persistence before contributor admission begins.
      * @param workspaceId active workspace
      * @param feature feature key
      * @param subjectAId primary subject id
@@ -127,14 +137,17 @@ public class AiOutputCacheStore {
      * @param warnings demasking warning count
      * @param generatedAt ISO generation instant
      * @param contributorPersonIds exact directly contributing contact ids
-     * @return true when the generated content remains safe to serve, whether or not serialization
-     *         allowed persistence; false when contributor admission fails
+     * @return true only when contributor admission succeeds and the payload is persisted
      */
     @Transactional
     public boolean saveForPersons(int workspaceId, String feature, int subjectAId, int subjectBId,
             String contentHash, Object content, int warnings, String generatedAt,
             List<Integer> contributorPersonIds) {
         Optional<String> payload = serialize(content);
+        if (payload.isEmpty()) {
+            logSaveRefusal("serialization_failure");
+            return false;
+        }
         if (contributorPersonIds == null) {
             return false;
         }
@@ -151,13 +164,15 @@ public class AiOutputCacheStore {
                 return false;
             }
         }
-        if (payload.isEmpty()) {
-            return true;
-        }
         aiOutputCacheMapper.upsert(entry(
                 workspaceId, feature, subjectAId, subjectBId, contentHash,
                 payload.get(), warnings, generatedAt));
         return true;
+    }
+
+    private void logSaveRefusal(String reason) {
+        log.warn("AI cache save refused: organizationId={}, reason={}",
+                workspaceService.getCurrentOrgId(), reason);
     }
 
     private Optional<String> serialize(Object content) {

@@ -79,13 +79,14 @@ report narratives, or provider-backed business-card extraction with
 `CONNEX_AI_FEATURES_INTRO_RATIONALE=false`, `CONNEX_AI_FEATURES_REPORT_NARRATIVE=false`, or
 `CONNEX_AI_FEATURES_BUSINESS_CARD_EXTRACTION=false`. An absent per-feature setting defaults on, but
 the master switch, `AI_USE`, and organization-provider readiness remain mandatory.
-Cache-miss text generation defaults to 60 admitted provider attempts per organization in a rolling
+Cache-miss text generation defaults to 300 admitted provider attempts per organization in a rolling
 10-minute window (`CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG` and
 `CONNEX_AI_INVOCATION_QUOTA_WINDOW`), with 30 seconds between forced refresh attempts for the same
 cache identity (`CONNEX_AI_INVOCATION_REFRESH_THROTTLE`). Quota organizations, refresh identities,
 and active flights are each bounded by `CONNEX_AI_INVOCATION_QUOTA_MAX_ORGANIZATIONS`,
 `CONNEX_AI_INVOCATION_REFRESH_MAX_IDENTITIES`, and `CONNEX_AI_INVOCATION_MAX_ACTIVE_FLIGHTS`, all
-defaulting to 10,000. These quotas and single-flight registries are per backend replica; multi-replica
+defaulting to 10,000. The 300-attempt quota, refresh throttle, and single-flight registries are per
+JVM backend replica, so the effective organization quota multiplies across replicas; multi-replica
 deployments need a shared coordinator for cluster-wide enforcement.
 Paddle's current CPU wheel requires AVX support, and the default sidecar reserves up to two CPUs and
 2 GiB of memory. A deployment that lacks AVX or cannot spare those resources must set both

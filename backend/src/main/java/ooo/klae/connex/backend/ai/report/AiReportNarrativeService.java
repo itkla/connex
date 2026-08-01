@@ -22,7 +22,6 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
@@ -30,7 +29,6 @@ import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -55,8 +53,6 @@ public class AiReportNarrativeService {
     private final AiInvocationAdmissionService aiInvocationAdmissionService;
     private final AiFeatureGate aiFeatureGate;
     private final AiOutputCacheStore aiOutputCacheStore;
-    private final AiRestrictionEpoch aiRestrictionEpoch;
-    private final AiProviderConfigService aiProviderConfigService;
     private final WorkspaceService workspaceService;
     private final Clock clock;
 
@@ -94,6 +90,7 @@ public class AiReportNarrativeService {
      * @param periodStart first included date
      * @param periodEnd last included date
      * @param sources deterministic appendix rows and citation registry
+     * @param restrictionEpoch restriction epoch captured before deterministic figure assembly
      * @return grounded narrative or a graceful unavailable result
      */
     public ReportNarrativeDto generate(
@@ -101,7 +98,8 @@ public class AiReportNarrativeService {
             String reportName,
             LocalDate periodStart,
             LocalDate periodEnd,
-            List<ReportAppendixRowDto> sources) {
+            List<ReportAppendixRowDto> sources,
+            long restrictionEpoch) {
         NarrativePrep prep = prepare(reportId, reportName, periodStart, periodEnd, sources);
         if (prep.terminal() != null) {
             return prep.terminal();
@@ -119,57 +117,66 @@ public class AiReportNarrativeService {
 
         CacheIdentity identity = CacheIdentity.forSubject(
                 workspaceId, AiFeature.REPORT_NARRATIVE, reportId, LocaleContextHolder.getLocale());
-        try (Admission admission = aiInvocationAdmissionService.acquire(identity, false)) {
-            if (admission.decision() == Decision.RATE_LIMITED) {
-                return ReportNarrativeDto.unavailable(RATE_LIMITED);
-            }
-            if (admission.decision() == Decision.FOLLOWER) {
-                admission.awaitLeader();
-                ReportNarrativeDto joined = cached(
-                        workspaceId, cacheFeature, reportId, contentHash, reportContext);
-                return joined != null ? joined : ReportNarrativeDto.unavailable(PROVIDER_ERROR);
-            }
-            cached = cached(workspaceId, cacheFeature, reportId, contentHash, reportContext);
-            if (cached != null) {
-                admission.completeLeader(LeaderOutcome.CACHE_READY);
-                return cached;
-            }
-            try {
-                AiStructuredOutcome<AiReportNarrativeContent> outcome = aiInvocationService.completeStructured(
-                        new AiInvocation(AiFeature.REPORT_NARRATIVE, assembly.context(), assembly.prompt(),
-                                MAX_TOKENS, TEMPERATURE),
-                        AiReportNarrativeContent.class,
-                        AiReportProseResolver.noLiteralFigures(),
-                        admission);
-                if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeContent> parsed)) {
+        while (true) {
+            try (Admission admission = aiInvocationAdmissionService.acquire(identity, contentHash, false)) {
+                if (admission.decision() == Decision.RATE_LIMITED) {
+                    return ReportNarrativeDto.unavailable(RATE_LIMITED);
+                }
+                if (admission.decision() == Decision.FOLLOWER) {
+                    LeaderOutcome leaderOutcome = admission.awaitLeader();
+                    if (leaderOutcome == LeaderOutcome.FAILED) {
+                        continue;
+                    }
+                    ReportNarrativeDto joined = cached(
+                            workspaceId, cacheFeature, reportId, contentHash, reportContext);
+                    return joined != null ? joined : ReportNarrativeDto.unavailable(PROVIDER_ERROR);
+                }
+                cached = cached(workspaceId, cacheFeature, reportId, contentHash, reportContext);
+                if (cached != null) {
+                    admission.completeLeader(LeaderOutcome.CACHE_READY);
+                    return cached;
+                }
+                try {
+                    AiStructuredOutcome<AiReportNarrativeContent> outcome = aiInvocationService.completeStructured(
+                            new AiInvocation(AiFeature.REPORT_NARRATIVE, assembly.context(), assembly.prompt(),
+                                    MAX_TOKENS, TEMPERATURE),
+                            AiReportNarrativeContent.class,
+                            AiReportProseResolver.noLiteralFigures(),
+                            admission);
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeContent> parsed)) {
+                        return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
+                    }
+                    AiReportFigures figures = AiReportFigures.from(
+                            reportContext.sources(), LocaleContextHolder.getLocale());
+                    Optional<AiReportNarrativeContent> resolved =
+                            AiReportProseResolver.resolve(parsed.value(), reportContext, figures);
+                    if (resolved.isEmpty()) {
+                        return ReportNarrativeDto.unavailable(INVALID_GROUNDING);
+                    }
+                    AiReportNarrativeContent content = resolved.get();
+                    int warnings = parsed.demaskWarnings();
+                    String generatedAt = Instant.now(clock).toString();
+                    boolean saved = aiOutputCacheStore.save(
+                            workspaceId,
+                            cacheFeature,
+                            reportId,
+                            AiOutputCacheStore.NO_SUBJECT,
+                            contentHash,
+                            content,
+                            warnings,
+                            generatedAt,
+                            restrictionEpoch);
+                    if (!saved) {
+                        admission.completeLeader(LeaderOutcome.FAILED);
+                        return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
+                    }
+                    admission.completeLeader(LeaderOutcome.CACHE_READY);
+                    return toDto(content, generatedAt, warnings);
+                } catch (ForbiddenException exception) {
+                    return ReportNarrativeDto.unavailable(NOT_CONFIGURED);
+                } catch (RuntimeException exception) {
                     return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                 }
-                AiReportFigures figures = AiReportFigures.from(
-                        reportContext.sources(), LocaleContextHolder.getLocale());
-                Optional<AiReportNarrativeContent> resolved =
-                        AiReportProseResolver.resolve(parsed.value(), reportContext, figures);
-                if (resolved.isEmpty()) {
-                    return ReportNarrativeDto.unavailable(INVALID_GROUNDING);
-                }
-                AiReportNarrativeContent content = resolved.get();
-                int warnings = parsed.demaskWarnings();
-                String generatedAt = Instant.now(clock).toString();
-                aiOutputCacheStore.save(
-                        workspaceId,
-                        cacheFeature,
-                        reportId,
-                        AiOutputCacheStore.NO_SUBJECT,
-                        contentHash,
-                        content,
-                        warnings,
-                        generatedAt,
-                        prep.restrictionEpoch());
-                admission.completeLeader(LeaderOutcome.CACHE_READY);
-                return toDto(content, generatedAt, warnings);
-            } catch (ForbiddenException exception) {
-                return ReportNarrativeDto.unavailable(NOT_CONFIGURED);
-            } catch (RuntimeException exception) {
-                return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
             }
         }
     }
@@ -183,7 +190,9 @@ public class AiReportNarrativeService {
         if (reportId <= 0 || sources == null || sources.isEmpty()) {
             return NarrativePrep.terminal(ReportNarrativeDto.unavailable(INSUFFICIENT_DATA));
         }
-        if (!aiFeatureGate.isAiUsable(AiFeature.REPORT_NARRATIVE)) {
+        Optional<AiGenerationProfile> profile = aiFeatureGate.generationProfileIfUsable(
+                AiFeature.REPORT_NARRATIVE, MAX_TOKENS, TEMPERATURE);
+        if (profile.isEmpty()) {
             return NarrativePrep.terminal(ReportNarrativeDto.unavailable(NOT_CONFIGURED));
         }
         AiReportContext reportContext;
@@ -193,18 +202,10 @@ public class AiReportNarrativeService {
             return NarrativePrep.terminal(ReportNarrativeDto.unavailable(INVALID_GROUNDING));
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        long restrictionEpoch = aiRestrictionEpoch.current(workspaceId);
         AiReportAssembly assembly = aiReportAssembler.assemble(reportContext);
-        AiGenerationProfile profile;
-        try {
-            profile = aiProviderConfigService.profileForOrg(
-                    workspaceService.getCurrentOrgId(), MAX_TOKENS, TEMPERATURE);
-        } catch (ForbiddenException exception) {
-            return NarrativePrep.terminal(ReportNarrativeDto.unavailable(NOT_CONFIGURED));
-        }
-        String contentHash = aiOutputCacheStore.contentHash(profile, assembly.prompt(), assembly.context());
-        return NarrativePrep.ready(
-                workspaceId, reportContext, assembly, cacheFeature(), contentHash, restrictionEpoch);
+        String contentHash = aiOutputCacheStore.contentHash(
+                profile.get(), assembly.prompt(), assembly.context());
+        return NarrativePrep.ready(workspaceId, reportContext, assembly, cacheFeature(), contentHash);
     }
 
     private record NarrativePrep(
@@ -213,11 +214,10 @@ public class AiReportNarrativeService {
             AiReportContext context,
             AiReportAssembly assembly,
             String cacheFeature,
-            String contentHash,
-            long restrictionEpoch) {
+            String contentHash) {
 
         static NarrativePrep terminal(ReportNarrativeDto result) {
-            return new NarrativePrep(result, 0, null, null, null, null, 0);
+            return new NarrativePrep(result, 0, null, null, null, null);
         }
 
         static NarrativePrep ready(
@@ -225,10 +225,8 @@ public class AiReportNarrativeService {
                 AiReportContext context,
                 AiReportAssembly assembly,
                 String cacheFeature,
-                String contentHash,
-                long restrictionEpoch) {
-            return new NarrativePrep(
-                    null, workspaceId, context, assembly, cacheFeature, contentHash, restrictionEpoch);
+                String contentHash) {
+            return new NarrativePrep(null, workspaceId, context, assembly, cacheFeature, contentHash);
         }
     }
 

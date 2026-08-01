@@ -31,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.ReportGoal;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSchedule;
@@ -146,6 +147,7 @@ public class ReportService {
     private final DealRiskService dealRiskService;
     private final ReportNetworkService reportNetworkService;
     private final AiReportNarrativeService aiReportNarrativeService;
+    private final AiRestrictionEpoch aiRestrictionEpoch;
     private final AuditService auditService;
     private final DeletionPolicy deletionPolicy;
     private final ObjectMapper objectMapper;
@@ -554,13 +556,15 @@ public class ReportService {
         PeriodWindow period = resolvePeriod(definition.getCadence(), config.range(), request, config.bucket());
         validateAttainmentPeriod(config, period);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        long restrictionEpoch = aiRestrictionEpoch.current(workspaceId);
         GeneratedFigures figures = generateFigures(workspaceId, config, period);
         ReportNarrativeDto narrative = switch (mode) {
             case NONE -> ReportNarrativeDto.unavailable("not_requested");
             case CACHED -> aiReportNarrativeService.cachedNarrative(
                     id, definition.getName(), period.start(), period.end(), figures.appendix());
             case FULL -> aiReportNarrativeService.generate(
-                    id, definition.getName(), period.start(), period.end(), figures.appendix());
+                    id, definition.getName(), period.start(), period.end(), figures.appendix(),
+                    restrictionEpoch);
         };
         List<ReportCitationDto> citations = citations(narrative, figures.appendix());
         return new ReportDocumentDto(

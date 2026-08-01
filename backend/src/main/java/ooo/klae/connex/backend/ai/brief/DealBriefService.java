@@ -25,7 +25,6 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -50,7 +49,6 @@ public class DealBriefService {
     private final AiInvocationAdmissionService aiInvocationAdmissionService;
     private final AiFeatureGate aiFeatureGate;
     private final AiOutputCacheStore aiOutputCacheStore;
-    private final AiProviderConfigService aiProviderConfigService;
     private final WorkspaceService workspaceService;
     private final Clock clock;
 
@@ -71,20 +69,16 @@ public class DealBriefService {
      */
     public DealBriefDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (!aiFeatureGate.isAiUsable(AiFeature.DEAL_BRIEF)) {
+        Optional<AiGenerationProfile> profile = aiFeatureGate.generationProfileIfUsable(
+                AiFeature.DEAL_BRIEF, MAX_TOKENS, TEMPERATURE);
+        if (profile.isEmpty()) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
         }
 
         BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
-        AiGenerationProfile profile;
-        try {
-            profile = aiProviderConfigService.profileForOrg(
-                    workspaceService.getCurrentOrgId(), MAX_TOKENS, TEMPERATURE);
-        } catch (ForbiddenException exception) {
-            return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
-        }
         String cacheFeature = cacheFeature();
-        String contentHash = aiOutputCacheStore.contentHash(profile, assembly.prompt(), assembly.context());
+        String contentHash = aiOutputCacheStore.contentHash(
+                profile.get(), assembly.prompt(), assembly.context());
         if (!refresh) {
             DealBriefDto cached = cached(workspaceId, cacheFeature, dealId, contentHash);
             if (cached != null) {
@@ -94,50 +88,59 @@ public class DealBriefService {
 
         CacheIdentity identity = CacheIdentity.forSubject(
                 workspaceId, AiFeature.DEAL_BRIEF, dealId, LocaleContextHolder.getLocale());
-        try (Admission admission = aiInvocationAdmissionService.acquire(identity, refresh)) {
-            if (admission.decision() == Decision.RATE_LIMITED) {
-                return DealBriefDto.unavailable(dealId, RATE_LIMITED);
-            }
-            if (admission.decision() == Decision.FOLLOWER) {
-                admission.awaitLeader();
-                DealBriefDto joined = cached(workspaceId, cacheFeature, dealId, contentHash);
-                return joined != null ? joined : DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
-            }
-            if (!refresh) {
-                DealBriefDto rechecked = cached(workspaceId, cacheFeature, dealId, contentHash);
-                if (rechecked != null) {
+        boolean admissionRefresh = refresh;
+        while (true) {
+            try (Admission admission = aiInvocationAdmissionService.acquire(
+                    identity, contentHash, admissionRefresh)) {
+                if (admission.decision() == Decision.RATE_LIMITED) {
+                    return DealBriefDto.unavailable(dealId, RATE_LIMITED);
+                }
+                if (admission.decision() == Decision.FOLLOWER) {
+                    LeaderOutcome leaderOutcome = admission.awaitLeader();
+                    if (leaderOutcome == LeaderOutcome.FAILED) {
+                        admissionRefresh = false;
+                        continue;
+                    }
+                    DealBriefDto joined = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    return joined != null ? joined : DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+                }
+                if (!refresh) {
+                    DealBriefDto rechecked = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    if (rechecked != null) {
+                        admission.completeLeader(LeaderOutcome.CACHE_READY);
+                        return rechecked;
+                    }
+                }
+                try {
+                    AiStructuredOutcome<DealBriefContent> outcome = aiInvocationService.completeStructured(
+                            new AiInvocation(
+                                    AiFeature.DEAL_BRIEF, assembly.context(), assembly.prompt(),
+                                    MAX_TOKENS, TEMPERATURE),
+                            DealBriefContent.class,
+                            admission);
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<DealBriefContent> parsed)) {
+                        return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+                    }
+                    List<DealBriefContent.Section> sections = sections(parsed.value());
+                    if (sections.isEmpty()) {
+                        return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+                    }
+                    String generatedAt = Instant.now(clock).toString();
+                    boolean safeToServe = aiOutputCacheStore.saveForPersons(
+                            workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
+                            contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt,
+                            assembly.contributorPersonIds());
+                    if (!safeToServe) {
+                        return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+                    }
                     admission.completeLeader(LeaderOutcome.CACHE_READY);
-                    return rechecked;
-                }
-            }
-            try {
-                AiStructuredOutcome<DealBriefContent> outcome = aiInvocationService.completeStructured(
-                        new AiInvocation(
-                                AiFeature.DEAL_BRIEF, assembly.context(), assembly.prompt(),
-                                MAX_TOKENS, TEMPERATURE),
-                        DealBriefContent.class,
-                        admission);
-                if (!(outcome instanceof AiStructuredOutcome.Parsed<DealBriefContent> parsed)) {
+                    return DealBriefDto.of(
+                            dealId, toDtoSections(sections), generatedAt, parsed.demaskWarnings());
+                } catch (ForbiddenException exception) {
+                    return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
+                } catch (RuntimeException exception) {
                     return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
                 }
-                List<DealBriefContent.Section> sections = sections(parsed.value());
-                if (sections.isEmpty()) {
-                    return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
-                }
-                String generatedAt = Instant.now(clock).toString();
-                boolean safeToServe = aiOutputCacheStore.saveForPersons(
-                        workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
-                        contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt,
-                        assembly.contributorPersonIds());
-                if (!safeToServe) {
-                    return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
-                }
-                admission.completeLeader(LeaderOutcome.CACHE_READY);
-                return DealBriefDto.of(dealId, toDtoSections(sections), generatedAt, parsed.demaskWarnings());
-            } catch (ForbiddenException exception) {
-                return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
-            } catch (RuntimeException exception) {
-                return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
             }
         }
     }

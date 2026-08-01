@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.ai;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -11,30 +11,42 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
- * Fences cache writes assembled before a workspace processing restriction. This closes the
- * in-flight write window only within one application JVM; multi-instance deployments still need
- * persisted report-to-person provenance or a persisted epoch, tracked in issue #941.
+ * Fences cache writes whose complete demasked inputs were assembled before a workspace processing
+ * restriction. Workspaces use bounded lock stripes, so a transaction-held purge fence blocks only
+ * affected workspace stripes rather than every tenant in the JVM. This closes the in-flight write
+ * window only within one application JVM; multi-instance deployments still need persisted
+ * report-to-person provenance or a persisted epoch, tracked in issue #941.
+ *
+ * <p>The JVM-lock and InnoDB-row-lock order is load-bearing: a restriction transaction locks and
+ * updates the person, acquires every affected workspace fence in ascending workspace-stripe order,
+ * bumps those epochs, and only then executes the organization-wide cache delete. Epoch-fenced cache
+ * saves acquire the workspace read fence before their cache-row write. The epoch bump must
+ * therefore remain before the organization-wide delete, and each write fence remains held until
+ * transaction completion.
  */
 @Component
 public class AiRestrictionEpoch {
-    static final int MAX_TRACKED_WORKSPACES = 4096;
+    static final int DEFAULT_WORKSPACE_STRIPES = 4096;
 
-    private final int maxTrackedWorkspaces;
-    private final ReentrantReadWriteLock stateLock = new ReentrantReadWriteLock(true);
-    private final Map<Integer, AtomicLong> workspaceEpochs = new LinkedHashMap<>();
-    private final AtomicLong baselineEpoch = new AtomicLong();
+    private final ReentrantReadWriteLock[] workspaceLocks;
+    private final AtomicLong[] workspaceEpochs;
     private final AtomicLong epochSequence = new AtomicLong();
 
-    /** Creates the production restriction-epoch fence with bounded workspace state. */
+    /** Creates the production restriction-epoch fence with bounded workspace stripes. */
     public AiRestrictionEpoch() {
-        this(MAX_TRACKED_WORKSPACES);
+        this(DEFAULT_WORKSPACE_STRIPES);
     }
 
-    AiRestrictionEpoch(int maxTrackedWorkspaces) {
-        if (maxTrackedWorkspaces <= 0) {
+    AiRestrictionEpoch(int workspaceStripeCount) {
+        if (workspaceStripeCount <= 0) {
             throw new IllegalArgumentException("AI restriction epoch capacity must be positive");
         }
-        this.maxTrackedWorkspaces = maxTrackedWorkspaces;
+        workspaceLocks = new ReentrantReadWriteLock[workspaceStripeCount];
+        workspaceEpochs = new AtomicLong[workspaceStripeCount];
+        for (int index = 0; index < workspaceStripeCount; index++) {
+            workspaceLocks[index] = new ReentrantReadWriteLock(true);
+            workspaceEpochs[index] = new AtomicLong();
+        }
     }
 
     /**
@@ -43,90 +55,102 @@ public class AiRestrictionEpoch {
      * @return current workspace epoch
      */
     public long current(int workspaceId) {
-        requireWorkspace(workspaceId);
-        stateLock.readLock().lock();
+        int stripe = stripe(workspaceId);
+        ReentrantReadWriteLock lock = workspaceLocks[stripe];
+        lock.readLock().lock();
         try {
-            AtomicLong epoch = workspaceEpochs.get(workspaceId);
-            return epoch == null ? baselineEpoch.get() : epoch.get();
+            return workspaceEpochs[stripe].get();
         } finally {
-            stateLock.readLock().unlock();
+            lock.readLock().unlock();
         }
     }
 
     /**
+     * Advances affected workspace epochs in a globally consistent stripe order. The ordering
+     * prevents cross-organization restriction transactions from acquiring colliding stripes in
+     * opposite orders.
+     * @param workspaceIds affected workspace ids
+     */
+    public void bumpAll(List<Integer> workspaceIds) {
+        List<Integer> orderedWorkspaceIds = Objects.requireNonNull(workspaceIds, "workspaceIds").stream()
+                .map(workspaceId -> Objects.requireNonNull(workspaceId, "workspaceId"))
+                .distinct()
+                .sorted(Comparator.comparingInt(this::stripe).thenComparingInt(Integer::intValue))
+                .toList();
+        orderedWorkspaceIds.forEach(this::bump);
+    }
+
+    /**
      * Advances the restriction epoch for one workspace. When invoked inside a transaction, the
-     * write fence remains held until transaction completion so no newly assembled or persisted
-     * cache output can enter between the bump and the restriction purge commit.
+     * workspace-stripe write fence remains held until transaction completion so no newly assembled
+     * or persisted cache output can enter between the bump and the restriction purge commit.
      * @param workspaceId workspace whose in-flight cache writes must be fenced
      */
     public void bump(int workspaceId) {
-        requireWorkspace(workspaceId);
-        stateLock.writeLock().lock();
+        int stripe = stripe(workspaceId);
+        ReentrantReadWriteLock lock = workspaceLocks[stripe];
+        lock.writeLock().lock();
         boolean retainedForTransaction = false;
         try {
-            advance(workspaceId);
-            retainedForTransaction = retainWriteFenceUntilTransactionCompletion();
+            workspaceEpochs[stripe].set(nextEpoch());
+            retainedForTransaction = retainWriteFenceUntilTransactionCompletion(lock);
         } finally {
             if (!retainedForTransaction) {
-                stateLock.writeLock().unlock();
+                lock.writeLock().unlock();
             }
         }
     }
 
     boolean runIfCurrent(int workspaceId, long expectedEpoch, Runnable action) {
-        requireWorkspace(workspaceId);
         Objects.requireNonNull(action, "action");
-        stateLock.readLock().lock();
+        int stripe = stripe(workspaceId);
+        ReentrantReadWriteLock lock = workspaceLocks[stripe];
+        lock.readLock().lock();
         try {
-            AtomicLong epoch = workspaceEpochs.get(workspaceId);
-            long currentEpoch = epoch == null ? baselineEpoch.get() : epoch.get();
-            if (currentEpoch != expectedEpoch) {
+            if (workspaceEpochs[stripe].get() != expectedEpoch) {
                 return false;
             }
             action.run();
             return true;
         } finally {
-            stateLock.readLock().unlock();
+            lock.readLock().unlock();
         }
     }
 
-    int trackedWorkspaceCount() {
-        stateLock.readLock().lock();
-        try {
-            return workspaceEpochs.size();
-        } finally {
-            stateLock.readLock().unlock();
+    int usedWorkspaceStripeCount() {
+        int tracked = 0;
+        for (AtomicLong epoch : workspaceEpochs) {
+            if (epoch.get() != 0) {
+                tracked++;
+            }
         }
+        return tracked;
     }
 
-    private void advance(int workspaceId) {
-        AtomicLong current = workspaceEpochs.get(workspaceId);
-        if (current != null) {
-            current.set(nextEpoch());
-            return;
-        }
-        if (workspaceEpochs.size() >= maxTrackedWorkspaces) {
-            Integer evictedWorkspaceId = workspaceEpochs.keySet().iterator().next();
-            workspaceEpochs.remove(evictedWorkspaceId);
-            baselineEpoch.set(nextEpoch());
-        }
-        workspaceEpochs.put(workspaceId, new AtomicLong(nextEpoch()));
-    }
-
-    private boolean retainWriteFenceUntilTransactionCompletion() {
+    private boolean retainWriteFenceUntilTransactionCompletion(ReentrantReadWriteLock lock) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
             return false;
         }
-        TransactionSynchronizationManager.registerSynchronization(new WriteFenceRelease());
+        TransactionSynchronizationManager.registerSynchronization(new WriteFenceRelease(lock));
         return true;
     }
 
     private long nextEpoch() {
-        if (epochSequence.get() == Long.MAX_VALUE) {
-            throw new IllegalStateException("AI restriction epoch space is exhausted");
+        while (true) {
+            long current = epochSequence.get();
+            if (current == Long.MAX_VALUE) {
+                throw new IllegalStateException("AI restriction epoch space is exhausted");
+            }
+            if (epochSequence.compareAndSet(current, current + 1)) {
+                return current + 1;
+            }
         }
-        return epochSequence.incrementAndGet();
+    }
+
+    private int stripe(int workspaceId) {
+        requireWorkspace(workspaceId);
+        return Math.floorMod(workspaceId, workspaceLocks.length);
     }
 
     private static void requireWorkspace(int workspaceId) {
@@ -135,10 +159,16 @@ public class AiRestrictionEpoch {
         }
     }
 
-    private final class WriteFenceRelease implements TransactionSynchronization {
+    private static final class WriteFenceRelease implements TransactionSynchronization {
+        private final ReentrantReadWriteLock lock;
+
+        private WriteFenceRelease(ReentrantReadWriteLock lock) {
+            this.lock = lock;
+        }
+
         @Override
         public void afterCompletion(int status) {
-            stateLock.writeLock().unlock();
+            lock.writeLock().unlock();
         }
     }
 }

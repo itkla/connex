@@ -78,8 +78,11 @@ public class AiProperties {
      */
     private long maxMediaWorkingBytes = 67108864;
 
-    /** Maximum admitted cache-miss provider attempts per organization in one rolling window. */
-    private int invocationQuotaAttemptsPerOrg = 60;
+    /**
+     * Maximum admitted cache-miss provider attempts per organization in one rolling window, per
+     * JVM replica. Effective deployment-wide capacity multiplies across backend replicas.
+     */
+    private int invocationQuotaAttemptsPerOrg = 300;
 
     /** Rolling organization quota window for admitted cache-miss provider attempts. */
     private Duration invocationQuotaWindow = Duration.ofMinutes(10);

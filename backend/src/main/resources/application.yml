@@ -313,7 +313,8 @@ connex:
         max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}
         max-concurrent-media-requests-per-org: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS_PER_ORG:1}
         max-media-working-bytes: ${CONNEX_AI_MAX_MEDIA_WORKING_BYTES:67108864}
-        invocation-quota-attempts-per-org: ${CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG:60}
+        # Per JVM replica; effective organization quota multiplies across backend replicas.
+        invocation-quota-attempts-per-org: ${CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG:300}
         invocation-quota-window: ${CONNEX_AI_INVOCATION_QUOTA_WINDOW:10m}
         invocation-refresh-throttle: ${CONNEX_AI_INVOCATION_REFRESH_THROTTLE:30s}
         invocation-quota-max-organizations: ${CONNEX_AI_INVOCATION_QUOTA_MAX_ORGANIZATIONS:10000}

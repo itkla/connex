@@ -12,18 +12,27 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
  * Coordinates cache-miss AI invocations with organization quotas, forced-refresh throttling, and
- * per-cache-identity single-flight execution. All quotas and flights are local to one JVM replica;
- * cluster-wide enforcement requires a shared coordinator.
+ * per-cache-identity-and-content-hash single-flight execution. All quotas and flights are local to
+ * one JVM replica; cluster-wide enforcement requires a shared coordinator. Each admission scans
+ * the bounded organization-quota and refresh-identity registries for stale entries while holding
+ * the state lock, so operators should size those capacities with that linear scan cost in mind.
  */
 @Component
+@Slf4j
 public class AiInvocationAdmissionService {
+    static final Duration FOLLOWER_WAIT = Duration.ofSeconds(60);
+
     private final WorkspaceService workspaceService;
     private final Clock clock;
     private final int quotaAttemptsPerOrg;
@@ -32,20 +41,29 @@ public class AiInvocationAdmissionService {
     private final int quotaMaxOrganizations;
     private final int refreshMaxIdentities;
     private final int maxActiveFlights;
+    private final Duration followerWait;
     private final Object stateLock = new Object();
-    private final Map<Integer, QuotaState> quotaWindows =
-            new LinkedHashMap<>(16, 0.75f, true);
-    private final Map<CacheIdentity, Instant> refreshTimestamps =
-            new LinkedHashMap<>(16, 0.75f, true);
-    private final Map<CacheIdentity, FlightState> activeFlights = new HashMap<>();
+    private final Map<Integer, QuotaState> quotaWindows = new LinkedHashMap<>();
+    private final Map<CacheIdentity, Instant> refreshTimestamps = new LinkedHashMap<>();
+    private final Map<FlightIdentity, FlightState> activeFlights = new HashMap<>();
 
+    @Autowired
     public AiInvocationAdmissionService(
             AiProperties properties,
             WorkspaceService workspaceService,
             Clock clock) {
+        this(properties, workspaceService, clock, FOLLOWER_WAIT);
+    }
+
+    AiInvocationAdmissionService(
+            AiProperties properties,
+            WorkspaceService workspaceService,
+            Clock clock,
+            Duration followerWait) {
         AiProperties configured = Objects.requireNonNull(properties, "properties");
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.followerWait = positiveDuration(followerWait, "follower wait");
         quotaAttemptsPerOrg = positive(
                 configured.getInvocationQuotaAttemptsPerOrg(), "quota attempts per organization");
         quotaWindow = positiveDuration(configured.getInvocationQuotaWindow(), "quota window");
@@ -63,11 +81,17 @@ public class AiInvocationAdmissionService {
      * Joins an existing flight or admits one new cache-miss provider attempt. Followers consume no
      * quota and wait for the registered leader; rejected admissions never invoke the provider.
      * @param identity persistent cache identity
+     * @param contentHash output-shaping content fingerprint
      * @param refresh whether the caller is forcing a cache refresh
      * @return admission decision and lifecycle handle
      */
-    public Admission acquire(CacheIdentity identity, boolean refresh) {
+    public Admission acquire(CacheIdentity identity, String contentHash, boolean refresh) {
         CacheIdentity key = Objects.requireNonNull(identity, "identity");
+        String hash = Objects.requireNonNull(contentHash, "contentHash");
+        if (hash.isBlank()) {
+            throw new IllegalArgumentException("AI invocation content hash must not be blank");
+        }
+        FlightIdentity flightIdentity = new FlightIdentity(key, hash);
         int orgId = workspaceService.getCurrentOrgId();
         if (orgId <= 0) {
             throw new IllegalStateException("AI invocation organization is unavailable");
@@ -75,20 +99,20 @@ public class AiInvocationAdmissionService {
         Instant now = clock.instant();
         synchronized (stateLock) {
             purgeStale(now);
-            FlightState current = activeFlights.get(key);
+            FlightState current = activeFlights.get(flightIdentity);
             if (current != null) {
-                return Admission.follower(this, key, current);
+                return Admission.follower(this, flightIdentity, current);
             }
             Rejection capacity = capacityRejection(key, orgId, refresh);
             if (capacity != Rejection.NONE) {
-                return Admission.rejected(capacity);
+                return rejected(orgId, capacity);
             }
             if (refresh && refreshIsThrottled(key, now)) {
-                return Admission.rejected(Rejection.REFRESH_THROTTLE);
+                return rejected(orgId, Rejection.REFRESH_THROTTLE);
             }
             QuotaState quota = quotaWindows.get(orgId);
             if (quota != null && quota.size() >= quotaAttemptsPerOrg) {
-                return Admission.rejected(Rejection.ORGANIZATION_QUOTA);
+                return rejected(orgId, Rejection.ORGANIZATION_QUOTA);
             }
             if (quota == null) {
                 quota = new QuotaState();
@@ -98,10 +122,15 @@ public class AiInvocationAdmissionService {
             if (refresh) {
                 refreshTimestamps.put(key, now);
             }
-            FlightState flight = new FlightState();
-            activeFlights.put(key, flight);
-            return Admission.leader(this, key, flight, orgId);
+            FlightState flight = new FlightState(orgId);
+            activeFlights.put(flightIdentity, flight);
+            return Admission.leader(this, flightIdentity, flight);
         }
+    }
+
+    private Admission rejected(int orgId, Rejection rejection) {
+        log.warn("AI invocation rejected: organizationId={}, reason={}", orgId, rejection);
+        return Admission.rejected(rejection);
     }
 
     private Rejection capacityRejection(CacheIdentity identity, int orgId, boolean refresh) {
@@ -142,37 +171,41 @@ public class AiInvocationAdmissionService {
                         .compareTo(refreshThrottle) >= 0);
     }
 
-    private void commitInvocation(int orgId) {
+    private void commitInvocation(FlightIdentity identity, FlightState flight) {
         synchronized (stateLock) {
-            QuotaState quota = quotaWindows.get(orgId);
+            if (activeFlights.get(identity) != flight) {
+                throw new IllegalStateException("AI invocation flight is unavailable");
+            }
+            if (flight.invocationCommitted) {
+                return;
+            }
+            QuotaState quota = quotaWindows.get(flight.orgId);
             if (quota == null) {
                 throw new IllegalStateException("AI invocation quota reservation is unavailable");
             }
             quota.commit(clock.instant());
+            flight.invocationCommitted = true;
         }
     }
 
     private void complete(
-            CacheIdentity identity,
+            FlightIdentity identity,
             FlightState flight,
-            LeaderOutcome outcome,
-            int orgId,
-            boolean invocationCommitted) {
+            LeaderOutcome outcome) {
         synchronized (stateLock) {
-            if (activeFlights.get(identity) != flight) {
-                return;
-            }
-            if (!invocationCommitted) {
-                QuotaState quota = quotaWindows.get(orgId);
-                if (quota != null) {
-                    quota.release();
-                    if (quota.isEmpty()) {
-                        quotaWindows.remove(orgId);
+            if (activeFlights.get(identity) == flight) {
+                if (!flight.invocationCommitted) {
+                    QuotaState quota = quotaWindows.get(flight.orgId);
+                    if (quota != null) {
+                        quota.release();
+                        if (quota.isEmpty()) {
+                            quotaWindows.remove(flight.orgId);
+                        }
                     }
                 }
+                activeFlights.remove(identity);
             }
             flight.completion.complete(outcome);
-            activeFlights.remove(identity);
         }
     }
 
@@ -208,7 +241,7 @@ public class AiInvocationAdmissionService {
         return value;
     }
 
-    /** Persistent identity used for single-flight and forced-refresh admission. */
+    /** Persistent identity used for cache lookup and forced-refresh admission. */
     public record CacheIdentity(
             int workspaceId,
             AiFeature feature,
@@ -299,54 +332,56 @@ public class AiInvocationAdmissionService {
         FAILED
     }
 
+    private record FlightIdentity(CacheIdentity cacheIdentity, String contentHash) {
+        private FlightIdentity {
+            Objects.requireNonNull(cacheIdentity, "cacheIdentity");
+            Objects.requireNonNull(contentHash, "contentHash");
+        }
+    }
+
     /**
      * Lifecycle handle for an invocation admission. Leaders must publish an outcome; closing an
      * incomplete leader publishes failure so followers cannot remain blocked.
      */
     public static final class Admission implements AutoCloseable {
         private final AiInvocationAdmissionService owner;
-        private final CacheIdentity identity;
+        private final FlightIdentity identity;
         private final FlightState flight;
-        private final int orgId;
         private final Decision decision;
         private final Rejection rejection;
         private final Object lifecycleLock = new Object();
-        private boolean invocationCommitted;
         private boolean leaderCompleted;
         private boolean closed;
 
         private Admission(
                 AiInvocationAdmissionService owner,
-                CacheIdentity identity,
+                FlightIdentity identity,
                 FlightState flight,
-                int orgId,
                 Decision decision,
                 Rejection rejection) {
             this.owner = owner;
             this.identity = identity;
             this.flight = flight;
-            this.orgId = orgId;
             this.decision = decision;
             this.rejection = rejection;
         }
 
         private static Admission leader(
                 AiInvocationAdmissionService owner,
-                CacheIdentity identity,
-                FlightState flight,
-                int orgId) {
-            return new Admission(owner, identity, flight, orgId, Decision.LEADER, Rejection.NONE);
+                FlightIdentity identity,
+                FlightState flight) {
+            return new Admission(owner, identity, flight, Decision.LEADER, Rejection.NONE);
         }
 
         private static Admission follower(
                 AiInvocationAdmissionService owner,
-                CacheIdentity identity,
+                FlightIdentity identity,
                 FlightState flight) {
-            return new Admission(owner, identity, flight, 0, Decision.FOLLOWER, Rejection.NONE);
+            return new Admission(owner, identity, flight, Decision.FOLLOWER, Rejection.NONE);
         }
 
         private static Admission rejected(Rejection rejection) {
-            return new Admission(null, null, null, 0, Decision.RATE_LIMITED, rejection);
+            return new Admission(null, null, null, Decision.RATE_LIMITED, rejection);
         }
 
         /**
@@ -370,10 +405,17 @@ public class AiInvocationAdmissionService {
          * @return leader outcome
          */
         public LeaderOutcome awaitLeader() {
-            if (decision != Decision.FOLLOWER || flight == null) {
+            if (decision != Decision.FOLLOWER || owner == null || identity == null || flight == null) {
                 throw new IllegalStateException("Only an AI invocation follower can await a leader");
             }
-            return flight.completion.join();
+            try {
+                return flight.completion.copy()
+                        .orTimeout(owner.followerWait.toMillis(), TimeUnit.MILLISECONDS)
+                        .join();
+            } catch (CompletionException exception) {
+                owner.complete(identity, flight, LeaderOutcome.FAILED);
+                return LeaderOutcome.FAILED;
+            }
         }
 
         void commitLeaderInvocation() {
@@ -381,11 +423,7 @@ public class AiInvocationAdmissionService {
                 if (decision != Decision.LEADER || owner == null || closed || leaderCompleted) {
                     throw new IllegalStateException("Only an active AI invocation leader can commit quota");
                 }
-                if (invocationCommitted) {
-                    return;
-                }
-                owner.commitInvocation(orgId);
-                invocationCommitted = true;
+                owner.commitInvocation(identity, flight);
             }
         }
 
@@ -403,7 +441,7 @@ public class AiInvocationAdmissionService {
                     return;
                 }
                 leaderCompleted = true;
-                owner.complete(identity, flight, completedOutcome, orgId, invocationCommitted);
+                owner.complete(identity, flight, completedOutcome);
             }
         }
 
@@ -417,8 +455,7 @@ public class AiInvocationAdmissionService {
                 if (decision == Decision.LEADER && !leaderCompleted
                         && owner != null && identity != null && flight != null) {
                     leaderCompleted = true;
-                    owner.complete(
-                            identity, flight, LeaderOutcome.FAILED, orgId, invocationCommitted);
+                    owner.complete(identity, flight, LeaderOutcome.FAILED);
                 }
             }
         }
@@ -462,6 +499,12 @@ public class AiInvocationAdmissionService {
     }
 
     private static final class FlightState {
+        private final int orgId;
         private final CompletableFuture<LeaderOutcome> completion = new CompletableFuture<>();
+        private boolean invocationCommitted;
+
+        private FlightState(int orgId) {
+            this.orgId = orgId;
+        }
     }
 }

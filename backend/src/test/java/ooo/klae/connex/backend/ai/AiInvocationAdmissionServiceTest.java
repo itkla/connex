@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.mockito.Mockito.lenient;
 
 import java.time.Clock;
@@ -45,7 +46,7 @@ class AiInvocationAdmissionServiceTest {
     @BeforeEach
     void setUp() {
         properties = new AiProperties();
-        properties.setInvocationQuotaAttemptsPerOrg(60);
+        properties.setInvocationQuotaAttemptsPerOrg(300);
         properties.setInvocationQuotaWindow(Duration.ofMinutes(10));
         properties.setInvocationRefreshThrottle(Duration.ofSeconds(30));
         properties.setInvocationQuotaMaxOrganizations(10000);
@@ -72,7 +73,7 @@ class AiInvocationAdmissionServiceTest {
         try {
             for (int index = 0; index < callers; index++) {
                 decisions.add(executor.submit(() -> {
-                    try (Admission admission = service.acquire(identity, false)) {
+                    try (Admission admission = service.acquire(identity, "hash", false)) {
                         if (admission.decision() == Decision.LEADER) {
                             leaders.incrementAndGet();
                             int active = activeLeaders.incrementAndGet();
@@ -118,20 +119,20 @@ class AiInvocationAdmissionServiceTest {
         CacheIdentity second = identity(7, 30);
         CacheIdentity third = identity(7, 31);
 
-        try (Admission leader = service.acquire(first, false);
-                Admission follower = service.acquire(first, false)) {
+        try (Admission leader = service.acquire(first, "hash", false);
+                Admission follower = service.acquire(first, "hash", false)) {
             assertEquals(Decision.LEADER, leader.decision());
             assertEquals(Decision.FOLLOWER, follower.decision());
             leader.commitLeaderInvocation();
             leader.completeLeader(LeaderOutcome.CACHE_READY);
             assertEquals(LeaderOutcome.CACHE_READY, follower.awaitLeader());
         }
-        try (Admission leader = service.acquire(second, false)) {
+        try (Admission leader = service.acquire(second, "hash", false)) {
             assertEquals(Decision.LEADER, leader.decision());
             leader.commitLeaderInvocation();
             leader.completeLeader(LeaderOutcome.FAILED);
         }
-        try (Admission rejected = service.acquire(third, false)) {
+        try (Admission rejected = service.acquire(third, "hash", false)) {
             assertEquals(Decision.RATE_LIMITED, rejected.decision());
             assertEquals(Rejection.ORGANIZATION_QUOTA, rejected.rejection());
         }
@@ -142,11 +143,11 @@ class AiInvocationAdmissionServiceTest {
         properties.setInvocationQuotaAttemptsPerOrg(1);
         AiInvocationAdmissionService service = service();
 
-        try (Admission admitted = service.acquire(identity(7, 29), false)) {
+        try (Admission admitted = service.acquire(identity(7, 29), "hash", false)) {
             admitted.commitLeaderInvocation();
             admitted.completeLeader(LeaderOutcome.FAILED);
         }
-        try (Admission rejected = service.acquire(identity(7, 30), false)) {
+        try (Admission rejected = service.acquire(identity(7, 30), "hash", false)) {
             assertEquals(Decision.RATE_LIMITED, rejected.decision());
             assertEquals(Rejection.ORGANIZATION_QUOTA, rejected.rejection());
         }
@@ -157,13 +158,13 @@ class AiInvocationAdmissionServiceTest {
         AiInvocationAdmissionService service = service();
         CacheIdentity identity = identity(7, 29);
 
-        try (Admission admitted = service.acquire(identity, true)) {
+        try (Admission admitted = service.acquire(identity, "hash", true)) {
             assertEquals(Decision.LEADER, admitted.decision());
             admitted.commitLeaderInvocation();
             admitted.completeLeader(LeaderOutcome.FAILED);
         }
         clock.advance(Duration.ofSeconds(29));
-        try (Admission rejected = service.acquire(identity, true)) {
+        try (Admission rejected = service.acquire(identity, "hash", true)) {
             assertEquals(Decision.RATE_LIMITED, rejected.decision());
             assertEquals(Rejection.REFRESH_THROTTLE, rejected.rejection());
         }
@@ -174,8 +175,8 @@ class AiInvocationAdmissionServiceTest {
         AiInvocationAdmissionService service = service();
         CacheIdentity identity = identity(7, 29);
 
-        try (Admission leader = service.acquire(identity, true);
-                Admission follower = service.acquire(identity, true)) {
+        try (Admission leader = service.acquire(identity, "hash", true);
+                Admission follower = service.acquire(identity, "hash", true)) {
             assertEquals(Decision.LEADER, leader.decision());
             assertEquals(Decision.FOLLOWER, follower.decision());
             assertEquals(Rejection.NONE, follower.rejection());
@@ -186,16 +187,46 @@ class AiInvocationAdmissionServiceTest {
     }
 
     @Test
+    void differentContentHashesRunIndependentFlights() {
+        AiInvocationAdmissionService service = service();
+        CacheIdentity identity = identity(7, 29);
+
+        try (Admission first = service.acquire(identity, "hash-a", false);
+                Admission second = service.acquire(identity, "hash-b", false)) {
+            assertEquals(Decision.LEADER, first.decision());
+            assertEquals(Decision.LEADER, second.decision());
+            assertEquals(2, service.activeFlightCount());
+        }
+    }
+
+    @Test
+    void followerTimeoutFailsAndDeregistersLeaderFlight() {
+        AiInvocationAdmissionService service = new AiInvocationAdmissionService(
+                properties, workspaceService, clock, Duration.ofMillis(25));
+        CacheIdentity identity = identity(7, 29);
+
+        try (Admission leader = service.acquire(identity, "hash", false);
+                Admission follower = service.acquire(identity, "hash", false)) {
+            assertEquals(LeaderOutcome.FAILED, assertTimeoutPreemptively(
+                    Duration.ofSeconds(1), follower::awaitLeader));
+            assertEquals(0, service.activeFlightCount());
+            try (Admission retry = service.acquire(identity, "hash", false)) {
+                assertEquals(Decision.LEADER, retry.decision());
+            }
+        }
+    }
+
+    @Test
     void fullLiveQuotaStateRejectsAnUnseenOrganization() {
         properties.setInvocationQuotaMaxOrganizations(1);
         AiInvocationAdmissionService service = service();
 
-        try (Admission admitted = service.acquire(identity(7, 29), false)) {
+        try (Admission admitted = service.acquire(identity(7, 29), "hash", false)) {
             admitted.commitLeaderInvocation();
             admitted.completeLeader(LeaderOutcome.CACHE_READY);
         }
         currentOrg.set(12);
-        try (Admission rejected = service.acquire(identity(8, 30), false)) {
+        try (Admission rejected = service.acquire(identity(8, 30), "hash", false)) {
             assertEquals(Decision.RATE_LIMITED, rejected.decision());
             assertEquals(Rejection.CAPACITY, rejected.rejection());
         }
@@ -208,13 +239,13 @@ class AiInvocationAdmissionServiceTest {
         properties.setInvocationRefreshMaxIdentities(1);
         AiInvocationAdmissionService service = service();
 
-        try (Admission admitted = service.acquire(identity(7, 29), true)) {
+        try (Admission admitted = service.acquire(identity(7, 29), "hash", true)) {
             admitted.commitLeaderInvocation();
             admitted.completeLeader(LeaderOutcome.CACHE_READY);
         }
         clock.advance(Duration.ofMinutes(10));
         currentOrg.set(12);
-        try (Admission admitted = service.acquire(identity(8, 30), true)) {
+        try (Admission admitted = service.acquire(identity(8, 30), "hash", true)) {
             assertEquals(Decision.LEADER, admitted.decision());
             admitted.commitLeaderInvocation();
             admitted.completeLeader(LeaderOutcome.CACHE_READY);
@@ -228,16 +259,16 @@ class AiInvocationAdmissionServiceTest {
         properties.setInvocationQuotaAttemptsPerOrg(1);
         AiInvocationAdmissionService service = service();
 
-        try (Admission cacheLeader = service.acquire(identity(7, 29), false)) {
+        try (Admission cacheLeader = service.acquire(identity(7, 29), "hash", false)) {
             assertEquals(Decision.LEADER, cacheLeader.decision());
             cacheLeader.completeLeader(LeaderOutcome.CACHE_READY);
         }
-        try (Admission providerLeader = service.acquire(identity(7, 30), false)) {
+        try (Admission providerLeader = service.acquire(identity(7, 30), "hash", false)) {
             assertEquals(Decision.LEADER, providerLeader.decision());
             providerLeader.commitLeaderInvocation();
             providerLeader.completeLeader(LeaderOutcome.FAILED);
         }
-        try (Admission rejected = service.acquire(identity(7, 31), false)) {
+        try (Admission rejected = service.acquire(identity(7, 31), "hash", false)) {
             assertEquals(Decision.RATE_LIMITED, rejected.decision());
             assertEquals(Rejection.ORGANIZATION_QUOTA, rejected.rejection());
         }
@@ -254,10 +285,10 @@ class AiInvocationAdmissionServiceTest {
         try {
             for (int index = 0; index < 3; index++) {
                 currentOrg.set(20 + index);
-                active.add(service.acquire(identity(20 + index, 100 + index), true));
+                active.add(service.acquire(identity(20 + index, 100 + index), "hash", true));
             }
             currentOrg.set(23);
-            try (Admission rejected = service.acquire(identity(23, 103), true)) {
+            try (Admission rejected = service.acquire(identity(23, 103), "hash", true)) {
                 assertEquals(Decision.RATE_LIMITED, rejected.decision());
                 assertEquals(Rejection.CAPACITY, rejected.rejection());
             }

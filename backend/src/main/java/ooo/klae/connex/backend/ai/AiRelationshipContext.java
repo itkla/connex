@@ -7,7 +7,9 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -90,18 +92,21 @@ public class AiRelationshipContext {
      * @param personId stakeholder person id
      * @param personToken the stakeholder's issued mask token
      * @param context request-local masking context
+     * @return ids of connection people whose names or notes were appended
      */
-    public void appendStakeholderBackground(
+    public List<Integer> appendStakeholderBackground(
             StringBuilder prompt, int personId, String personToken, MaskingContext context) {
         if (personId <= 0 || isBlank(personToken)) {
-            return;
+            return List.of();
         }
-        List<String> lines = stakeholderBackgroundLines(personId, context);
+        Set<Integer> connectionPersonIds = new LinkedHashSet<>();
+        List<String> lines = stakeholderBackgroundLines(personId, context, connectionPersonIds);
         if (lines.isEmpty()) {
-            return;
+            return List.of();
         }
         prompt.append("- Person: ").append(personToken).append('\n');
         lines.forEach(prompt::append);
+        return connectionPersonIds.stream().sorted().toList();
     }
 
     private List<String> accountHistoryLines(int companyId, int currentDealId, MaskingContext context) {
@@ -141,10 +146,11 @@ public class AiRelationshipContext {
         return line.append('\n').toString();
     }
 
-    private List<String> stakeholderBackgroundLines(int personId, MaskingContext context) {
+    private List<String> stakeholderBackgroundLines(
+            int personId, MaskingContext context, Set<Integer> connectionPersonIds) {
         List<String> lines = new ArrayList<>();
         appendEmploymentLines(lines, personId, context);
-        appendConnectionLines(lines, personId, context);
+        appendConnectionLines(lines, personId, context, connectionPersonIds);
         return lines;
     }
 
@@ -174,7 +180,11 @@ public class AiRelationshipContext {
         }
     }
 
-    private void appendConnectionLines(List<String> lines, int personId, MaskingContext context) {
+    private void appendConnectionLines(
+            List<String> lines,
+            int personId,
+            MaskingContext context,
+            Set<Integer> connectionPersonIds) {
         try {
             List<PersonConnectionDto> connections = new ArrayList<>();
             for (PersonConnectionDto connection : safeList(
@@ -194,6 +204,9 @@ public class AiRelationshipContext {
                 line.append("; Strength: ").append(connection.getStrength());
                 appendInline(line, "Note", maskFree(connection.getNote(), context));
                 lines.add(line.append('\n').toString());
+                if (connection.getPersonId() > 0) {
+                    connectionPersonIds.add(connection.getPersonId());
+                }
                 if (++appended == MAX_CONNECTIONS) {
                     break;
                 }

@@ -3,11 +3,13 @@ package ooo.klae.connex.backend.ai.riskrationale;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.util.List;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -88,11 +90,13 @@ class DealRiskRationaleAssemblerTest {
 
         when(dealService.getDealSummary(DEAL_ID)).thenReturn(summary);
         when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(stakeholder));
+        when(aiRelationshipContext.appendStakeholderBackground(
+                any(StringBuilder.class), eq(PERSON_ID), any(), any())).thenReturn(List.of(99));
 
         RationaleAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID, risk);
         String serialized = serialized(assembly.prompt());
 
-        assertEquals(List.of(PERSON_ID), assembly.contributorPersonIds());
+        assertEquals(List.of(PERSON_ID, 99), assembly.contributorPersonIds());
         assertTrue(serialized.contains("{{C1}}"));
         assertTrue(serialized.contains("{{P1}}"));
         assertTrue(serialized.contains("person={{P2}}"));

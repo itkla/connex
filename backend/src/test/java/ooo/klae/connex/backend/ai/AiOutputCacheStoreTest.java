@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -49,6 +50,7 @@ class AiOutputCacheStoreTest {
 
     @Mock private AiOutputCacheMapper aiOutputCacheMapper;
     @Mock private PersonMapper personMapper;
+    @Mock private WorkspaceService workspaceService;
 
     private AiRestrictionEpoch restrictionEpoch;
     private AiOutputCacheStore store;
@@ -57,7 +59,8 @@ class AiOutputCacheStoreTest {
     void setUp() {
         restrictionEpoch = new AiRestrictionEpoch();
         store = new AiOutputCacheStore(
-                aiOutputCacheMapper, personMapper, restrictionEpoch, JsonMapper.builder().build());
+                aiOutputCacheMapper, personMapper, restrictionEpoch, JsonMapper.builder().build(),
+                workspaceService);
     }
 
     @Test
@@ -108,6 +111,16 @@ class AiOutputCacheStoreTest {
                 PROFILE.maxTokens(), PROFILE.temperature());
 
         assertNotEquals(hash(PROFILE), hash(changed));
+    }
+
+    @Test
+    void generationProfileToStringRedactsEndpoint() {
+        String rendered = PROFILE.toString();
+
+        assertFalse(rendered.contains(PROFILE.endpoint()));
+        assertTrue(rendered.contains("endpoint=<redacted>"));
+        assertTrue(rendered.contains("provider=" + PROFILE.provider()));
+        assertTrue(rendered.contains("modelId=" + PROFILE.modelId()));
     }
 
     @Test
@@ -170,6 +183,19 @@ class AiOutputCacheStoreTest {
     }
 
     @Test
+    void save_withSerializationFailureRefusesPersistence() {
+        ObjectMapper objectMapper = mock(ObjectMapper.class);
+        when(objectMapper.writeValueAsString(any())).thenThrow(new SerializationFailure());
+        AiOutputCacheStore failingStore = new AiOutputCacheStore(
+                aiOutputCacheMapper, personMapper, restrictionEpoch, objectMapper, workspaceService);
+
+        assertFalse(failingStore.save(
+                7, "report.narrative", 29, AiOutputCacheStore.NO_SUBJECT, "hash-1",
+                List.of("content"), 0, "2026-07-09T18:30:00Z", restrictionEpoch.current(7)));
+        verifyNoInteractions(aiOutputCacheMapper);
+    }
+
+    @Test
     void saveForPersons_locksDistinctContributorRowsInAscendingOrderBeforeUpsert() {
         when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person(3));
         when(personMapper.getVisiblePersonByIdForUpdate(7, 9)).thenReturn(person(9));
@@ -220,35 +246,16 @@ class AiOutputCacheStoreTest {
     }
 
     @Test
-    void saveForPersons_treatsSerializationFailureAsSafeAfterContributorAdmission() {
+    void saveForPersons_refusesSerializationFailureWithoutContributorAdmission() {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         when(objectMapper.writeValueAsString(any())).thenThrow(new SerializationFailure());
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person(3));
         AiOutputCacheStore failingStore = new AiOutputCacheStore(
-                aiOutputCacheMapper, personMapper, restrictionEpoch, objectMapper);
-
-        assertTrue(failingStore.saveForPersons(
-                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
-                "2026-07-09T18:30:00Z", List.of(3)));
-        verify(personMapper).getVisiblePersonByIdForUpdate(7, 3);
-        verifyNoInteractions(aiOutputCacheMapper);
-    }
-
-    @Test
-    void saveForPersons_rejectsRestrictedContributorWhenSerializationFails() {
-        ObjectMapper objectMapper = mock(ObjectMapper.class);
-        when(objectMapper.writeValueAsString(any())).thenThrow(new SerializationFailure());
-        Person restricted = person(3);
-        restricted.setSuspendedAt(LocalDateTime.parse("2026-07-21T10:00:00"));
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(restricted);
-        AiOutputCacheStore failingStore = new AiOutputCacheStore(
-                aiOutputCacheMapper, personMapper, restrictionEpoch, objectMapper);
+                aiOutputCacheMapper, personMapper, restrictionEpoch, objectMapper, workspaceService);
 
         assertFalse(failingStore.saveForPersons(
                 7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
                 "2026-07-09T18:30:00Z", List.of(3)));
-        verify(personMapper).getVisiblePersonByIdForUpdate(7, 3);
-        verifyNoInteractions(aiOutputCacheMapper);
+        verifyNoInteractions(personMapper, aiOutputCacheMapper);
     }
 
     @Test

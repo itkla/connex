@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
@@ -30,6 +31,7 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
     @Autowired ActivityMapper activityMapper;
     @Autowired NoteMapper noteMapper;
     @Autowired TaskMapper taskMapper;
+    @Autowired PersonEdgeMapper personEdgeMapper;
     @Autowired OrganizationMapper organizationMapper;
 
     @Test
@@ -139,6 +141,40 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
                 sameOrg.getId(), "report.narrative:v4:ja", 4243, 0));
         assertNotNull(aiOutputCacheMapper.getBySubject(
                 foreignOrg.getId(), "report.narrative:v4:en", 4244, 0));
+    }
+
+    @Test
+    void deleteForPersonPurgesConnectionPersonDealOutputsWithinOrganizationOnly() {
+        Company company = newCompany();
+        Person stakeholder = newPerson(company);
+        Person connected = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), null);
+        PersonEdge edge = new PersonEdge();
+        edge.setWorkspaceId(workspace.getId());
+        edge.setSourcePersonId(Math.min(stakeholder.getId(), connected.getId()));
+        edge.setTargetPersonId(Math.max(stakeholder.getId(), connected.getId()));
+        edge.setType("knows");
+        edge.setStrength(2);
+        personEdgeMapper.upsert(edge);
+        Workspace foreignOrg = newWorkspaceInOrg(newOrganization().getId());
+        save(workspace, "deal.brief:en", deal.getId(), 0, "brief-owner", "{}", 0);
+        save(workspace, "deal.risk_rationale:en", deal.getId(), 0, "risk-owner", "{}", 0);
+        save(foreignOrg, "deal.brief:en", deal.getId(), 0, "brief-foreign", "{}", 0);
+        save(foreignOrg, "deal.risk_rationale:en", deal.getId(), 0, "risk-foreign", "{}", 0);
+
+        assertEquals(2, aiOutputCacheMapper.deleteForPerson(workspace.getId(), connected.getId()));
+
+        assertNull(aiOutputCacheMapper.getBySubject(
+                workspace.getId(), "deal.brief:en", deal.getId(), 0));
+        assertNull(aiOutputCacheMapper.getBySubject(
+                workspace.getId(), "deal.risk_rationale:en", deal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+                foreignOrg.getId(), "deal.brief:en", deal.getId(), 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+                foreignOrg.getId(), "deal.risk_rationale:en", deal.getId(), 0));
     }
 
     private AiOutputCache save(

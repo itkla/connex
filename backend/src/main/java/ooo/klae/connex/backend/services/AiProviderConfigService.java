@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -200,21 +201,35 @@ public class AiProviderConfigService implements AiProviderReadiness {
         return isReady(config) && supportsImageInput(config);
     }
 
+    @Override
+    public Optional<AiGenerationProfile> generationProfileForOrg(
+            int orgId, int maxTokens, double temperature) {
+        AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
+        return isReady(config)
+                ? Optional.of(generationProfile(config, maxTokens, temperature))
+                : Optional.empty();
+    }
+
     /**
      * Reads the credential-free provider generation profile used for cache hashing. This path does
      * not lock user or organization rows and never decrypts credentials. A configuration change
      * between this read and leader invocation can cache one output under the earlier profile hash;
-     * the next request reads the new profile and self-corrects with a cache miss.
+     * the next request reads the new profile and normally self-corrects with a cache miss. A
+     * provider flip-flop that later restores the earlier fingerprint can re-serve content generated
+     * for that old target because the fingerprint is not a monotonic configuration version.
      * @param orgId organization whose provider profile is required
      * @param maxTokens feature output token cap
      * @param temperature feature sampling temperature
      * @return credential-free generation profile
      */
     public AiGenerationProfile profileForOrg(int orgId, int maxTokens, double temperature) {
-        AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
-        if (!isReady(config)) {
-            throw new ForbiddenException("AI provider is not available for this organization");
-        }
+        return generationProfileForOrg(orgId, maxTokens, temperature)
+                .orElseThrow(() -> new ForbiddenException(
+                        "AI provider is not available for this organization"));
+    }
+
+    private static AiGenerationProfile generationProfile(
+            AiProviderConfig config, int maxTokens, double temperature) {
         return new AiGenerationProfile(
                 config.getProvider(), config.getRegion(), config.getModelId(), config.getEndpoint(),
                 config.getDeployment(), config.getApiVersion(), config.getProjectId(),

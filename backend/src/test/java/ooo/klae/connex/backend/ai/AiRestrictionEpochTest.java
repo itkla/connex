@@ -41,7 +41,7 @@ class AiRestrictionEpochTest {
     }
 
     @Test
-    void workspaceStateRemainsBoundedAndEvictionInvalidatesStaleSnapshots() {
+    void workspaceStripesRemainBoundedAndCollisionInvalidatesStaleSnapshots() {
         AiRestrictionEpoch epoch = new AiRestrictionEpoch(3);
         epoch.bump(1);
         epoch.bump(2);
@@ -50,7 +50,7 @@ class AiRestrictionEpochTest {
 
         epoch.bump(4);
 
-        assertEquals(3, epoch.trackedWorkspaceCount());
+        assertEquals(3, epoch.usedWorkspaceStripeCount());
         assertNotEquals(evictedSnapshot, epoch.current(1));
     }
 
@@ -85,7 +85,7 @@ class AiRestrictionEpochTest {
         }
 
         assertEquals((long) bumpWorkers * iterations, epoch.current(7));
-        assertEquals(1, epoch.trackedWorkspaceCount());
+        assertEquals(1, epoch.usedWorkspaceStripeCount());
     }
 
     @Test
@@ -109,6 +109,30 @@ class AiRestrictionEpochTest {
             TransactionSynchronizationManager.setActualTransactionActive(false);
 
             assertEquals(epoch.current(7), blockedRead.get(1, TimeUnit.SECONDS));
+        } finally {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.clearSynchronization();
+            }
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
+    void transactionalFenceDoesNotBlockAnotherWorkspaceStripe() throws Exception {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            epoch.bump(7);
+
+            CompletableFuture<Long> otherWorkspace = CompletableFuture.supplyAsync(
+                    () -> epoch.current(8), executor);
+
+            assertEquals(0, otherWorkspace.get(1, TimeUnit.SECONDS));
+            TransactionSynchronizationUtils.triggerAfterCompletion(
+                    TransactionSynchronization.STATUS_COMMITTED);
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
         } finally {
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.clearSynchronization();

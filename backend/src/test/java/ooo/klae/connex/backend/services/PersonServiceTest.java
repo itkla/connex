@@ -4,6 +4,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 import javax.imageio.ImageIO;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -482,8 +484,11 @@ class PersonServiceTest extends AbstractServiceTest {
             workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0));
         assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0));
         assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
-        verify(aiRestrictionEpoch).bump(workspace.getId());
-        verify(aiRestrictionEpoch).bump(grantee.getId());
+        ArgumentCaptor<List<Integer>> bumpedWorkspaceIds = ArgumentCaptor.captor();
+        verify(aiRestrictionEpoch).bumpAll(bumpedWorkspaceIds.capture());
+        assertEquals(
+            Set.of(workspace.getId(), grantee.getId()),
+            Set.copyOf(bumpedWorkspaceIds.getValue()));
 
         String changes = jdbcTemplate.queryForObject(
             "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "

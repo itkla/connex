@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
@@ -36,6 +37,7 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -52,14 +54,12 @@ import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
-import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
 class IntroRationaleServiceTest {
     private static final int WORKSPACE_ID = 17;
-    private static final int ORG_ID = 9;
     private static final int PERSON_A_ID = 29;
     private static final int PERSON_B_ID = 41;
     private static final String CACHE_FEATURE = "intro.rationale:en";
@@ -77,7 +77,6 @@ class IntroRationaleServiceTest {
     @Mock private AiFeatureGate aiFeatureGate;
     @Mock private IntroductionService introductionService;
     @Mock private AiOutputCacheStore aiOutputCacheStore;
-    @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private WorkspaceService workspaceService;
     @Mock private PersonMapper personMapper;
 
@@ -92,16 +91,15 @@ class IntroRationaleServiceTest {
                 aiFeatureGate,
                 introductionService,
                 aiOutputCacheStore,
-                aiProviderConfigService,
                 workspaceService,
                 personMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
-        lenient().when(workspaceService.getCurrentOrgId()).thenReturn(ORG_ID);
-        lenient().when(aiProviderConfigService.profileForOrg(
-                ORG_ID, IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE))
-                .thenReturn(PROFILE);
-        lenient().when(aiInvocationAdmissionService.acquire(any(), anyBoolean())).thenReturn(admission);
+        lenient().when(aiFeatureGate.generationProfileIfUsable(
+                AiFeature.INTRO_RATIONALE,
+                IntroRationaleService.MAX_TOKENS,
+                IntroRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
+        lenient().when(aiInvocationAdmissionService.acquire(any(), anyString(), anyBoolean())).thenReturn(admission);
         lenient().when(admission.decision()).thenReturn(Decision.LEADER);
         lenient().when(personMapper.getPersonById(eq(WORKSPACE_ID), anyInt())).thenReturn(new Person());
         lenient().when(aiOutputCacheStore.saveForPersons(
@@ -117,7 +115,7 @@ class IntroRationaleServiceTest {
 
     @Test
     void generate_aiNotUsable_returnsNotConfiguredWithoutSuggestionOrInvocation() {
-        when(aiFeatureGate.isAiUsable(AiFeature.INTRO_RATIONALE)).thenReturn(false);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.INTRO_RATIONALE, IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE)).thenReturn(Optional.empty());
 
         IntroRationaleDto result = service.generate(PERSON_B_ID, PERSON_A_ID);
 
@@ -128,7 +126,7 @@ class IntroRationaleServiceTest {
 
     @Test
     void generate_pairNotInSuggestions_returnsNotASuggestionWithoutInvocation() {
-        when(aiFeatureGate.isAiUsable(AiFeature.INTRO_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.INTRO_RATIONALE, IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion(7, 11)));
 
@@ -141,7 +139,7 @@ class IntroRationaleServiceTest {
 
     @Test
     void generate_restrictedParticipant_returnsNotASuggestionWithoutAssembly() {
-        when(aiFeatureGate.isAiUsable(AiFeature.INTRO_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.INTRO_RATIONALE, IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion(PERSON_A_ID, PERSON_B_ID)));
         Person ceased = new Person();
@@ -205,7 +203,7 @@ class IntroRationaleServiceTest {
     void generate_cacheHit_reusesStoredRationaleWithoutInvocation() {
         IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
         IntroRationaleAssembly assembly = assembly();
-        when(aiFeatureGate.isAiUsable(AiFeature.INTRO_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.INTRO_RATIONALE, IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
@@ -227,10 +225,33 @@ class IntroRationaleServiceTest {
     }
 
     @Test
+    void generate_followerReadsCachePublishedByLeader() {
+        IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
+        IntroRationaleAssembly assembly = assembly();
+        when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
+                .thenReturn(List.of(suggestion));
+        when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
+                .thenReturn(Optional.empty(), Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
+        when(aiOutputCacheStore.read("payload", IntroRationaleContent.class))
+                .thenReturn(Optional.of(new IntroRationaleContent("Leader rationale.")));
+        when(admission.decision()).thenReturn(Decision.FOLLOWER);
+        when(admission.awaitLeader()).thenReturn(LeaderOutcome.CACHE_READY);
+
+        IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Leader rationale.", result.getRationale());
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(IntroRationaleContent.class), any(Admission.class));
+    }
+
+    @Test
     void generate_contentHashMismatch_regenerates() {
         IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
         IntroRationaleAssembly assembly = assembly();
-        when(aiFeatureGate.isAiUsable(AiFeature.INTRO_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.INTRO_RATIONALE, IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
@@ -245,6 +266,7 @@ class IntroRationaleServiceTest {
         assertEquals("Fresh.", result.getRationale());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission));
+        verify(aiInvocationAdmissionService).acquire(any(), eq(HASH), eq(false));
         verify(aiOutputCacheStore).saveForPersons(
                 eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
                 eq(HASH), any(IntroRationaleContent.class), eq(0), eq(NOW.toString()),
@@ -301,7 +323,7 @@ class IntroRationaleServiceTest {
 
     private void arrangeMiss(IntroRationaleAssembly assembly) {
         IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
-        when(aiFeatureGate.isAiUsable(AiFeature.INTRO_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.INTRO_RATIONALE, IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);

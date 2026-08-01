@@ -96,17 +96,19 @@ public class DealBriefAssembler {
                 allowedActivities(activities, allowedPersonIds), MAX_ACTIVITIES);
         List<Note> promptNotes = first(allowedNotes(notes, allowedPersonIds), MAX_NOTES);
         List<Task> promptTasks = promptTasks(allowedTasks(tasks, allowedPersonIds));
+        Set<Integer> connectionPersonIds = new LinkedHashSet<>();
 
         String userPrompt = userPrompt(deal, summary, stageHistory, stakeholders, warmth, risk,
                 promptActivities, promptNotes, promptTasks,
-                companyToken, context);
+                companyToken, context, connectionPersonIds);
         MaskedPrompt prompt = PromptAssembly.builder()
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
         return new BriefAssembly(
                 context, prompt,
-                contributorPersonIds(stakeholders, promptActivities, promptNotes, promptTasks));
+                contributorPersonIds(
+                        stakeholders, promptActivities, promptNotes, promptTasks, connectionPersonIds));
     }
 
     private String userPrompt(
@@ -120,7 +122,8 @@ public class DealBriefAssembler {
             List<Note> notes,
             List<Task> tasks,
             String companyToken,
-            MaskingContext context) {
+            MaskingContext context,
+            Set<Integer> connectionPersonIds) {
         int companyId = deal.getCompanyId() == null ? 0 : deal.getCompanyId();
         StringBuilder prompt = new StringBuilder("CRM_CONTEXT_BEGIN\nDEAL\n");
         appendValue(prompt, "Company", companyToken);
@@ -133,7 +136,7 @@ public class DealBriefAssembler {
 
         appendStageHistory(prompt, stageHistory, context);
         appendStakeholders(prompt, stakeholders, warmth, context);
-        appendStakeholderBackground(prompt, stakeholders, context);
+        appendStakeholderBackground(prompt, stakeholders, context, connectionPersonIds);
         appendRisk(prompt, risk, stakeholders, context);
         aiRelationshipContext.appendAccountHistory(prompt, companyId, deal.getId(), context);
         appendActivities(prompt, activities, context);
@@ -143,15 +146,21 @@ public class DealBriefAssembler {
     }
 
     private void appendStakeholderBackground(
-            StringBuilder prompt, List<MaskedStakeholder> stakeholders, MaskingContext context) {
+            StringBuilder prompt,
+            List<MaskedStakeholder> stakeholders,
+            MaskingContext context,
+            Set<Integer> connectionPersonIds) {
         StringBuilder block = new StringBuilder();
         int enriched = 0;
         for (MaskedStakeholder stakeholder : stakeholders) {
             if (stakeholder.personId() <= 0) {
                 continue;
             }
-            aiRelationshipContext.appendStakeholderBackground(
+            List<Integer> appended = aiRelationshipContext.appendStakeholderBackground(
                     block, stakeholder.personId(), stakeholder.personToken(), context);
+            if (appended != null) {
+                connectionPersonIds.addAll(appended);
+            }
             if (++enriched == MAX_ENRICHED_STAKEHOLDERS) {
                 break;
             }
@@ -257,8 +266,10 @@ public class DealBriefAssembler {
             List<MaskedStakeholder> stakeholders,
             List<Activity> activities,
             List<Note> notes,
-            List<Task> tasks) {
+            List<Task> tasks,
+            Set<Integer> connectionPersonIds) {
         Set<Integer> contributorIds = new LinkedHashSet<>();
+        contributorIds.addAll(connectionPersonIds);
         for (MaskedStakeholder stakeholder : stakeholders) {
             if (stakeholder.personId() > 0) {
                 contributorIds.add(stakeholder.personId());

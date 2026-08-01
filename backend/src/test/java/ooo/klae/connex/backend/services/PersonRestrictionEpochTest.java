@@ -89,9 +89,10 @@ class PersonRestrictionEpochTest {
         Person result = personService.updateProcessingRestrictions(PERSON_ID, true, false);
 
         assertSame(after, result);
-        InOrder fence = inOrder(restrictionEpoch, aiOutputCacheMapper);
-        fence.verify(restrictionEpoch).bump(WORKSPACE_ID);
-        fence.verify(restrictionEpoch).bump(OTHER_WORKSPACE_ID);
+        InOrder fence = inOrder(personMapper, workspaceMapper, restrictionEpoch, aiOutputCacheMapper);
+        fence.verify(personMapper).getOwnedPersonByIdForUpdate(WORKSPACE_ID, PERSON_ID);
+        fence.verify(workspaceMapper).findByOrgId(ORG_ID);
+        fence.verify(restrictionEpoch).bumpAll(List.of(WORKSPACE_ID, OTHER_WORKSPACE_ID));
         fence.verify(aiOutputCacheMapper).deleteForPerson(WORKSPACE_ID, PERSON_ID);
     }
 

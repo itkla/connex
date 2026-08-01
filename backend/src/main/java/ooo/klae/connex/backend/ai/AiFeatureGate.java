@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai;
 
+import java.util.Optional;
+
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
@@ -27,15 +29,30 @@ public class AiFeatureGate {
      * @return true when the feature may invoke the configured provider
      */
     public boolean isAiUsable(AiFeature feature) {
-        if (!aiProperties.isFeatureEnabled(feature)) {
-            return false;
-        }
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int actorId = workspaceService.getCurrentUserId();
-        if (!workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE)) {
+        if (!hasFeaturePermission(feature)) {
             return false;
         }
         return readiness(workspaceService.getCurrentOrgId(), feature.requiresImageInput());
+    }
+
+    /**
+     * Evaluates a text feature's instance switch, actor permission, and provider readiness while
+     * returning the exact provider profile from the single readiness read.
+     * @param feature text feature to evaluate
+     * @param maxTokens feature output token cap
+     * @param temperature feature sampling temperature
+     * @return ready generation profile, or empty when the feature is unavailable
+     */
+    public Optional<AiGenerationProfile> generationProfileIfUsable(
+            AiFeature feature, int maxTokens, double temperature) {
+        if (!hasFeaturePermission(feature) || feature.requiresImageInput()) {
+            return Optional.empty();
+        }
+        AiProviderReadiness readiness = providerReadiness.getIfAvailable();
+        return readiness == null
+                ? Optional.empty()
+                : readiness.generationProfileForOrg(
+                        workspaceService.getCurrentOrgId(), maxTokens, temperature);
     }
 
     /**
@@ -53,5 +70,14 @@ public class AiFeatureGate {
         return readiness != null && (imageInput
                 ? readiness.isImageInputReadyForOrg(orgId)
                 : readiness.isReadyForOrg(orgId));
+    }
+
+    private boolean hasFeaturePermission(AiFeature feature) {
+        if (!aiProperties.isFeatureEnabled(feature)) {
+            return false;
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        return workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE);
     }
 }

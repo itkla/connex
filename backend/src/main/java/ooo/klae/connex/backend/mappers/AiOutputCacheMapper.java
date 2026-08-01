@@ -22,12 +22,13 @@ public interface AiOutputCacheMapper {
     /**
      * Deletes every cached AI output that retains the person's data across every workspace in the
      * person's organization: person-keyed intro rationales (the person is either subject), and
-     * deal-keyed risk rationales for deals the person is a stakeholder of, plus deal briefs where
-     * the person is a stakeholder or is currently linked through an activity, note, or task
+     * deal-keyed risk rationales for deals the person is a stakeholder of or is connected to a
+     * stakeholder of, plus deal briefs where the person is a stakeholder, is connected to a
+     * stakeholder, or is currently linked through an activity, note, or task
      * (including same-org grantee workspaces the contact was shared into). Org-anchored via the
      * workspace join off {@code workspaceId}. Report caches carry no person provenance, so safe
-     * erasure deliberately over-purges every report narrative in the same organization. Removed-link,
-     * indirect-connection, and free-text provenance remain outside this method.
+     * erasure deliberately over-purges every report narrative in the same organization. Removed-link
+     * and free-text provenance remain outside this method.
      * @param workspaceId the restricting (owning) workspace, used to resolve the organization
      * @param personId the restricted contact
      * @return the number of cache rows removed

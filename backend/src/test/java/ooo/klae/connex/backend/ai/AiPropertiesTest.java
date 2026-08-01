@@ -28,10 +28,13 @@ class AiPropertiesTest {
         assertEquals(2, new AiProperties().getMaxConcurrentMediaRequests());
         assertEquals(1, new AiProperties().getMaxConcurrentMediaRequestsPerOrg());
         assertEquals(67108864, new AiProperties().getMaxMediaWorkingBytes());
+        assertEquals(300, new AiProperties().getInvocationQuotaAttemptsPerOrg());
         assertTrue(yaml.contains("enabled: ${CONNEX_AI_ENABLED:false}"));
         assertTrue(yaml.contains("deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}"));
         assertTrue(yaml.contains("nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}"));
         assertTrue(yaml.contains("max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}"));
+        assertTrue(yaml.contains(
+                "invocation-quota-attempts-per-org: ${CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG:300}"));
     }
 
     @Test

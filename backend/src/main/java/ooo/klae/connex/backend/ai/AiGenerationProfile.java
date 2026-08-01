@@ -35,4 +35,18 @@ public record AiGenerationProfile(
             throw new IllegalArgumentException("AI generation temperature must be finite and non-negative");
         }
     }
+
+    @Override
+    public String toString() {
+        return "AiGenerationProfile[provider=" + provider
+                + ", region=" + region
+                + ", modelId=" + modelId
+                + ", endpoint=<redacted>"
+                + ", deployment=" + deployment
+                + ", apiVersion=" + apiVersion
+                + ", projectId=" + projectId
+                + ", maxTokens=" + maxTokens
+                + ", temperature=" + temperature
+                + ']';
+    }
 }

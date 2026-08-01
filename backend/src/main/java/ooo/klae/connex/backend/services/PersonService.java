@@ -439,13 +439,13 @@ public class PersonService {
     public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int orgId = duplicateDecisionLockService.lockCurrentOrganization();
-        List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
-            ? restrictionWorkspaceIds(orgId, workspaceId)
-            : List.of();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null) {
             throw new ResourceNotFoundException("Person not found with id: " + id);
         }
+        List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
+            ? restrictionWorkspaceIds(orgId, workspaceId)
+            : List.of();
         personMapper.updateProcessingRestrictions(workspaceId, id, suspended, provisionCeased);
         if (suspended || provisionCeased) {
             withdrawProviderCapture(workspaceId, id);
@@ -453,7 +453,7 @@ public class PersonService {
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
         int purgedAiOutputs = 0;
         if (suspended || provisionCeased) {
-            restrictionWorkspaceIds.forEach(aiRestrictionEpoch::bump);
+            aiRestrictionEpoch.bumpAll(restrictionWorkspaceIds);
             purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
         }
         Person after = requireOwnedPerson(workspaceId, id);

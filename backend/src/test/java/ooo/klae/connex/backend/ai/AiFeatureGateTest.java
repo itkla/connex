@@ -1,13 +1,17 @@
 package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.EnumSet;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,6 +82,21 @@ class AiFeatureGateTest {
 
         assertTrue(gate.isAiUsable(AiFeature.DEAL_BRIEF));
         assertDoesNotThrow(() -> gate.requireAiUsable(AiFeature.DEAL_BRIEF));
+    }
+
+    @Test
+    void generationProfileUsesOneProviderReadinessSnapshot() {
+        AiGenerationProfile profile = new AiGenerationProfile(
+                "bedrock", "us-east-1", "model", null, null, null, null, 2048, 0.2);
+        properties.setEnabled(true);
+        when(workspaceService.permissionsFor(7, 42)).thenReturn(EnumSet.of(Permission.AI_USE));
+        when(providerReadiness.getIfAvailable()).thenReturn(readiness);
+        when(readiness.generationProfileForOrg(3, 2048, 0.2)).thenReturn(Optional.of(profile));
+
+        assertEquals(Optional.of(profile), gate.generationProfileIfUsable(
+                AiFeature.DEAL_BRIEF, 2048, 0.2));
+        verify(readiness).generationProfileForOrg(3, 2048, 0.2);
+        verify(readiness, never()).isReadyForOrg(3);
     }
 
     @Test

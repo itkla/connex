@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -36,6 +37,7 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -52,13 +54,11 @@ import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.DealRiskService;
-import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
 class DealRiskRationaleServiceTest {
     private static final int WORKSPACE_ID = 17;
-    private static final int ORG_ID = 9;
     private static final int DEAL_ID = 29;
     private static final String CACHE_FEATURE = "deal.risk_rationale:en";
     private static final String HASH = "content-hash-1";
@@ -75,7 +75,6 @@ class DealRiskRationaleServiceTest {
     @Mock private AiFeatureGate aiFeatureGate;
     @Mock private DealRiskService dealRiskService;
     @Mock private AiOutputCacheStore aiOutputCacheStore;
-    @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private WorkspaceService workspaceService;
 
     private DealRiskRationaleService service;
@@ -89,15 +88,14 @@ class DealRiskRationaleServiceTest {
                 aiFeatureGate,
                 dealRiskService,
                 aiOutputCacheStore,
-                aiProviderConfigService,
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
-        lenient().when(workspaceService.getCurrentOrgId()).thenReturn(ORG_ID);
-        lenient().when(aiProviderConfigService.profileForOrg(
-                ORG_ID, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE))
-                .thenReturn(PROFILE);
-        lenient().when(aiInvocationAdmissionService.acquire(any(), anyBoolean())).thenReturn(admission);
+        lenient().when(aiFeatureGate.generationProfileIfUsable(
+                AiFeature.DEAL_RISK_RATIONALE,
+                DealRiskRationaleService.MAX_TOKENS,
+                DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
+        lenient().when(aiInvocationAdmissionService.acquire(any(), anyString(), anyBoolean())).thenReturn(admission);
         lenient().when(admission.decision()).thenReturn(Decision.LEADER);
         lenient().when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
@@ -112,7 +110,7 @@ class DealRiskRationaleServiceTest {
 
     @Test
     void generate_aiNotUsable_returnsNotConfiguredWithoutRiskOrInvocation() {
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(false);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.empty());
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -127,7 +125,7 @@ class DealRiskRationaleServiceTest {
                 DEAL_ID, 125000, "USD", "none", 0,
                 List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 31))),
                 "2026-07-09 18:30:00");
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
 
         DealRationaleDto result = service.generate(DEAL_ID);
@@ -141,7 +139,7 @@ class DealRiskRationaleServiceTest {
     void generate_emptyFactors_returnsNotAtRiskWithoutInvocation() {
         DealRiskDto risk = new DealRiskDto(
                 DEAL_ID, 125000, "USD", "medium", 25, List.of(), "2026-07-09 18:30:00");
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
 
         DealRationaleDto result = service.generate(DEAL_ID);
@@ -156,7 +154,7 @@ class DealRiskRationaleServiceTest {
         RationaleAssembly eligible = assembly();
         RationaleAssembly filtered = new RationaleAssembly(
             eligible.context(), eligible.prompt(), false, eligible.contributorPersonIds());
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(filtered);
 
@@ -212,7 +210,7 @@ class DealRiskRationaleServiceTest {
     void generate_cacheHit_reusesStoredRationaleWithoutInvocation() {
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
@@ -234,11 +232,34 @@ class DealRiskRationaleServiceTest {
     }
 
     @Test
+    void generate_followerReadsCachePublishedByLeader() {
+        RationaleAssembly assembly = assembly();
+        DealRiskDto risk = atRisk();
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.empty(), Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
+        when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
+                .thenReturn(Optional.of(new DealRiskRationaleContent(
+                        "Leader narrative.", List.of("Leader action."))));
+        when(admission.decision()).thenReturn(Decision.FOLLOWER);
+        when(admission.awaitLeader()).thenReturn(LeaderOutcome.CACHE_READY);
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Leader narrative.", result.getNarrative());
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(DealRiskRationaleContent.class), any(Admission.class));
+    }
+
+    @Test
     void generate_japaneseLocaleReadsSeparateCacheEntry() {
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
@@ -259,7 +280,7 @@ class DealRiskRationaleServiceTest {
     void generate_contentHashMismatch_regenerates() {
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
@@ -274,6 +295,7 @@ class DealRiskRationaleServiceTest {
         assertEquals("Fresh narrative.", result.getNarrative());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
+        verify(aiInvocationAdmissionService).acquire(any(), eq(HASH), eq(false));
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
                 eq(NOW.toString()), eq(List.of(73)));
@@ -283,7 +305,7 @@ class DealRiskRationaleServiceTest {
     void generate_refresh_bypassesCacheAndRegenerates() {
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
@@ -352,7 +374,7 @@ class DealRiskRationaleServiceTest {
 
     private void arrangeMiss(RationaleAssembly assembly) {
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
+        when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);

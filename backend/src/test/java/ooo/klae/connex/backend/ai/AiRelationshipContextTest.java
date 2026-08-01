@@ -126,15 +126,21 @@ class AiRelationshipContextTest {
         employment.setStartedAt("2020-01-01");
         employment.setEndedAt(null);
         when(personService.getEmploymentHistory(PERSON_ID)).thenReturn(List.of(employment));
+        PersonConnectionDto colleague = connection(
+                "Jane Roe", "colleague", 8, "Trusted former teammate");
+        colleague.setPersonId(61);
+        PersonConnectionDto acquaintance = connection(
+                "Sam Poe", "knows", 3, "Mentioned a medical diagnosis");
+        acquaintance.setPersonId(62);
         when(connectionService.getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS))
-            .thenReturn(List.of(
-                connection("Jane Roe", "colleague", 8, "Trusted former teammate"),
-                connection("Sam Poe", "knows", 3, "Mentioned a medical diagnosis")));
+            .thenReturn(List.of(colleague, acquaintance));
 
         StringBuilder prompt = new StringBuilder();
-        context.appendStakeholderBackground(prompt, PERSON_ID, stakeholderToken, ctx);
+        List<Integer> contributorPersonIds =
+                context.appendStakeholderBackground(prompt, PERSON_ID, stakeholderToken, ctx);
         String out = prompt.toString();
 
+        assertEquals(List.of(61, 62), contributorPersonIds);
         assertTrue(out.contains("- Person: " + stakeholderToken));
         assertTrue(out.contains("Employment: {{C1}}"));
         assertTrue(out.contains("Title: VP Sales"));

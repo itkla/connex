@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.brief;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -130,11 +131,13 @@ class DealBriefAssemblerTest {
         when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
         when(scoringService.scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID))).thenReturn(List.of(temperature));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(aiRelationshipContext.appendStakeholderBackground(
+                any(StringBuilder.class), eq(PERSON_ID), any(), any())).thenReturn(List.of(99));
 
         BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
         String serialized = serialized(assembly.prompt());
 
-        assertEquals(List.of(PERSON_ID), assembly.contributorPersonIds());
+        assertEquals(List.of(PERSON_ID, 99), assembly.contributorPersonIds());
         assertTrue(serialized.contains("{{P1}}"));
         assertTrue(serialized.contains("{{C1}}"));
         assertTrue(serialized.contains(MaskingEngine.OMITTED_BY_POLICY));
