@@ -41,6 +41,8 @@ import { deleteActivity, getActivityById } from '@/app/lib/api';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
 import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
+import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -120,6 +122,7 @@ export default function ActivitiesBrowser({
     originWorkspaceId,
 }: Props) {
     const router = useRouter();
+    const { activeWorkspaceId } = useWorkspace();
     const t = useTranslations('ActivityPage');
     const tf = useTranslations('Filters');
     const locale = useLocale();
@@ -135,8 +138,14 @@ export default function ActivitiesBrowser({
     const [personFilter, setPersonFilter] = useState<Set<string>>(new Set());
     const [dealFilter, setDealFilter] = useState<Set<string>>(new Set());
     const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
-    const [filter, setFilter] = useState<Filter>('all');
-    const [filterInitialized, setFilterInitialized] = useState(false);
+    const [filter, setFilter] = useScopedViewPreference<Filter>({
+        storageKey: FILTER_STORAGE_KEY,
+        userId: currentUserId,
+        workspaceId: activeWorkspaceId,
+        initialValue: null,
+        fallback: 'all',
+        isValue: isFilter,
+    });
     const [editing, setEditing] = useState<Activity | null>(null);
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<Activity | null>(null);
@@ -160,18 +169,6 @@ export default function ActivitiesBrowser({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     useOwnedUrlParams({ activity: editing ? String(editing.id) : undefined }, deepLinkSettled);
-
-    useEffect(() => {
-        const stored = window.localStorage.getItem(FILTER_STORAGE_KEY);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (isFilter(stored)) setFilter(stored);
-        setFilterInitialized(true);
-    }, []);
-
-    useEffect(() => {
-        if (!filterInitialized) return;
-        window.localStorage.setItem(FILTER_STORAGE_KEY, filter);
-    }, [filter, filterInitialized]);
 
     const typeCounts = useMemo(() => {
         const counts: Record<Filter, number> = { all: 0, Call: 0, Email: 0, Meeting: 0, Note: 0, Other: 0 };

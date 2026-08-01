@@ -205,8 +205,14 @@ export default function TasksBrowser({
     const [personFilter, setPersonFilter] = useState<Set<string>>(new Set());
     const [dealFilter, setDealFilter] = useState<Set<string>>(new Set());
     const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
-    const [queue, setQueue] = useState<Queue>('myOpen');
-    const [queueInitialized, setQueueInitialized] = useState(false);
+    const [queue, setQueue] = useScopedViewPreference<Queue>({
+        storageKey: QUEUE_STORAGE_KEY,
+        userId: currentUserId,
+        workspaceId: activeWorkspaceId,
+        initialValue: null,
+        fallback: 'myOpen',
+        isValue: isQueue,
+    });
     const [view, setView] = useScopedViewPreference<TaskView>({
         storageKey: VIEW_STORAGE_KEY,
         userId: currentUserId,
@@ -292,18 +298,6 @@ export default function TasksBrowser({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     useOwnedUrlParams({ task: editingTask ? String(editingTask.id) : undefined }, deepLinkSettled);
-
-    useEffect(() => {
-        const stored = window.localStorage.getItem(QUEUE_STORAGE_KEY);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (isQueue(stored)) setQueue(stored);
-        setQueueInitialized(true);
-    }, []);
-
-    useEffect(() => {
-        if (!queueInitialized) return;
-        window.localStorage.setItem(QUEUE_STORAGE_KEY, queue);
-    }, [queue, queueInitialized]);
 
     useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
 
