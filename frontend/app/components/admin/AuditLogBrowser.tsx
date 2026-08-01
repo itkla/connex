@@ -27,6 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { getAuditLogs } from "@/app/lib/api";
 import Rise from "@/app/components/motion/Rise";
+import { PageShell } from "@/app/components/PageShell";
 import {
     SearchField,
     FilterBar,
@@ -463,8 +464,7 @@ export default function AuditLogBrowser({
     })();
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <Rise delay={0}>
                     <header className="flex flex-wrap items-end justify-between gap-4">
                         <div>
@@ -640,8 +640,7 @@ export default function AuditLogBrowser({
                     )}
                     </Rise>
                 )}
-            </div>
-        </div>
+        </PageShell>
     );
 }
 

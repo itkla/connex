@@ -18,6 +18,7 @@ import NewUserDialog from "@/app/components/records/users/NewUserDialog";
 import { useRecordsBrowser } from "@/app/hooks/useRecordsBrowser";
 import { useRecordsSort } from "@/app/hooks/useRecordsSort";
 import { type ColumnDef } from "@/app/components/records/types";
+import { PageShell } from "@/app/components/PageShell";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 import { type User } from "@/app/lib/types";
 
@@ -102,8 +103,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
     );
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t("heading")}</h1>
@@ -167,7 +167,6 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                         sortState={sortState}
                     />
                 </Rise>
-            </div>
-        </div>
+        </PageShell>
     );
 }

@@ -50,6 +50,7 @@ import { updateContact, createContact, importBusinessCard, getContactsPage, getC
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 import {
     recordDetailNavigationPath,
@@ -714,8 +715,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     );
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
@@ -1007,7 +1007,6 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                     onApply={(ownerId) => bulkAssignPersonOwner(selectedContactIds, ownerId)}
                     onSuccess={onBulkTagSuccess}
                 />
-            </div>
-        </div>
+        </PageShell>
     );
 }

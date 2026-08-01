@@ -83,6 +83,7 @@ import IconLink from '@/app/components/library/files/IconLink';
 import EmptyState from '@/app/components/library/files/EmptyState';
 import FileDetailSheet from '@/app/components/library/files/FileDetailSheet';
 import FileTagChips from '@/app/components/library/files/FileTagChips';
+import { PageShell } from '@/app/components/PageShell';
 
 type SortKey = 'newest' | 'oldest' | 'name' | 'largest';
 type ViewMode = 'grid' | 'list';
@@ -447,8 +448,7 @@ export default function FilesBrowser() {
     );
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
             <Rise>
                 <header className="flex flex-wrap items-end justify-between gap-4">
                     <div>
@@ -674,8 +674,7 @@ export default function FilesBrowser() {
                     loadFacets();
                 }}
             />
-            </div>
-        </div>
+        </PageShell>
     );
 }
 
