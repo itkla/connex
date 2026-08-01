@@ -32,13 +32,25 @@ class DeploymentProfileValidatorTest {
     }
 
     @Test
-    void rejectsBlankProfileOutsideDevTestAndSeeder() {
+    void rejectsWhitespaceProfileAtStartupIndependentlyOfBeanValidation() {
         MockEnvironment environment = new MockEnvironment();
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,
             () -> validator("   ", environment).run(null));
 
         assertEquals(MISSING_PROFILE_MESSAGE, exception.getMessage());
+    }
+
+    @Test
+    void beanValidationRejectsAWhitespaceProfileInEveryProfileIncludingSeeder() {
+        DeploymentProperties properties = new DeploymentProperties();
+        properties.setProfile("   ");
+
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Set<ConstraintViolation<DeploymentProperties>> violations = factory.getValidator().validate(properties);
+
+            assertFalse(violations.isEmpty());
+        }
     }
 
     @Test
