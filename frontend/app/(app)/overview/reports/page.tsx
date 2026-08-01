@@ -31,6 +31,7 @@ export default async function ReportsPage() {
             templates={templates}
             initialReports={reports}
             effectivePermissions={effectivePermissions}
+            currentUserId={user.id}
         />
     );
 }

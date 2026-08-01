@@ -1440,6 +1440,7 @@ export type DealDocument = {
     title?: string | null;
     currency: string;
     generatedAt: string;
+    createdBy: number | null;
     content: DocumentContent;
     requiresApproval: boolean;
     latestApproval?: DocumentApproval | null;
@@ -2179,11 +2180,15 @@ export type ReportDocument = {
     generatedAt: string;
 };
 
+/** How a frozen snapshot came to exist: created by hand, or frozen by scheduled delivery. */
+export type ReportSnapshotOrigin = 'manual' | 'scheduled';
+
 export type ReportSnapshotSummary = {
     id: number;
     reportDefinitionId: number;
     periodStart: string;
     periodEnd: string;
+    origin: ReportSnapshotOrigin;
     generatedBy: number | null;
     generatedAt: string;
 };

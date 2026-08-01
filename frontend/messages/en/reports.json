@@ -10,7 +10,9 @@
       "documentTitle": "Report",
       "documentDescription": "Generated narrative business report",
       "goalsTitle": "Goals",
-      "goalsDescription": "Revenue targets for report attainment"
+      "goalsDescription": "Revenue targets for report attainment",
+      "snapshotTitle": "Frozen report snapshot",
+      "snapshotDescription": "A report snapshot frozen at the time it was delivered"
     },
     "common": {
       "cancel": "Cancel",
@@ -201,7 +203,8 @@
       "noData": "No data for this period",
       "noCurrentStateData": "No current-state data",
       "source": "Source",
-      "metric": "Metric"
+      "metric": "Metric",
+      "scheduledSnapshot": "Frozen by scheduled delivery"
     },
     "cadence": {
       "weekly": "Weekly",

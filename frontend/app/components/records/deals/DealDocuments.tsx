@@ -38,6 +38,8 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatCurrency, formatDateTime } from '@/app/lib/utils';
 import {
@@ -56,6 +58,7 @@ type Props = {
     dealId: number;
     initial: DealDocument[];
     canApprove: boolean;
+    canDeleteDocuments: boolean;
     currentUserId: number;
 };
 
@@ -89,10 +92,17 @@ const STATUS_DOT: Record<DocumentStatus, string> = {
  * document's content or computes money. The server owns the approval gate; this UI only reflects
  * `requiresApproval` and the caller's `DOCUMENT_APPROVE` permission.
  */
-export default function DealDocuments({ dealId, initial, canApprove, currentUserId }: Props) {
+export default function DealDocuments({
+    dealId,
+    initial,
+    canApprove,
+    canDeleteDocuments,
+    currentUserId,
+}: Props) {
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
     const router = useRouter();
+    const { activeWorkspace } = useWorkspace();
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
     const [busy, setBusy] = useState(false);
@@ -315,7 +325,9 @@ export default function DealDocuments({ dealId, initial, canApprove, currentUser
                                                             <ArchiveBoxXMarkIcon className="size-4" />{t('markSuperseded')}
                                                         </DropdownMenuItem>
                                                     )}
-                                                    {doc.status === 'draft' && (
+                                                    {doc.status === 'draft'
+                                                        && canDeleteDocuments
+                                                        && canDeleteOwnedRecord(doc.createdBy, currentUserId, activeWorkspace?.role) && (
                                                         <>
                                                             <DropdownMenuSeparator />
                                                             <DropdownMenuItem variant="destructive" onSelect={() => remove(doc)}>

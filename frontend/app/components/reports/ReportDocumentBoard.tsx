@@ -7,6 +7,7 @@ import {
     ArchiveBoxArrowDownIcon,
     ArrowDownTrayIcon,
     ArrowPathIcon,
+    CalendarDaysIcon,
     ChevronDownIcon,
     ClockIcon,
     DocumentTextIcon,
@@ -30,7 +31,9 @@ import {
     generateReport,
     getReportSnapshot,
 } from '@/app/lib/api';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { recoverAiResult } from '@/app/lib/aiRecovery';
+import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     ReportCitation,
@@ -101,23 +104,31 @@ function isValidAttainmentRange(start: string, end: string, cadence: ReportDefin
 export default function ReportDocumentBoard({
     definition,
     initialSnapshots,
+    initialSnapshot = null,
     canUpdateReports,
+    canDeleteReports,
+    currentUserId,
     defaultTimezone,
 }: {
     definition: ReportDefinition;
     initialSnapshots: ReportSnapshotSummary[];
+    initialSnapshot?: ReportSnapshot | null;
     canUpdateReports: boolean;
+    canDeleteReports: boolean;
+    currentUserId: number;
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
+    const { activeWorkspace } = useWorkspace();
     const [state, setState] = useState<DocumentState>({ status: 'loading' });
     const [narrativeState, setNarrativeState] = useState<NarrativeState>('idle');
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
-    const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(null);
-    const [activeSnapshot, setActiveSnapshot] = useState<ReportSnapshot | null>(null);
-    const [start, setStart] = useState('');
-    const [end, setEnd] = useState('');
+    const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(initialSnapshot?.id ?? null);
+    const [activeSnapshot, setActiveSnapshot] = useState<ReportSnapshot | null>(initialSnapshot);
+    const [liveRequested, setLiveRequested] = useState(initialSnapshot == null);
+    const [start, setStart] = useState(initialSnapshot?.computedResult.periodStart ?? '');
+    const [end, setEnd] = useState(initialSnapshot?.computedResult.periodEnd ?? '');
     const [refreshKey, setRefreshKey] = useState(0);
     const [snapshotting, setSnapshotting] = useState(false);
     const [deletingSnapshotId, setDeletingSnapshotId] = useState<number | null>(null);
@@ -171,6 +182,7 @@ export default function ReportDocumentBoard({
     }, [definition.id]);
 
     useEffect(() => {
+        if (!liveRequested) return;
         const generationId = (generationRef.current += 1);
         (async () => {
             let figures: ReportDocument;
@@ -194,7 +206,7 @@ export default function ReportDocumentBoard({
         return () => {
             generationRef.current += 1;
         };
-    }, [definition.id, refreshKey, runNarrative]);
+    }, [definition.id, refreshKey, runNarrative, liveRequested]);
 
     const retryNarrative = () => {
         void runNarrative(generationRef.current);
@@ -221,7 +233,15 @@ export default function ReportDocumentBoard({
         setActiveSnapshot(null);
         setState({ status: 'loading' });
         setNarrativeState('idle');
+        setLiveRequested(true);
         setRefreshKey((key) => key + 1);
+    };
+
+    const showLive = () => {
+        snapshotRequestRef.current += 1;
+        setActiveSnapshotId(null);
+        setActiveSnapshot(null);
+        setLiveRequested(true);
     };
 
     const createSnapshot = async () => {
@@ -384,11 +404,7 @@ export default function ReportDocumentBoard({
                             <Button
                                 variant={activeSnapshotId == null ? 'secondary' : 'ghost'}
                                 size="sm"
-                                onClick={() => {
-                                    snapshotRequestRef.current += 1;
-                                    setActiveSnapshotId(null);
-                                    setActiveSnapshot(null);
-                                }}
+                                onClick={showLive}
                             >
                                 {t('document.live')}
                             </Button>
@@ -396,6 +412,8 @@ export default function ReportDocumentBoard({
                                 const active = activeSnapshotId === snapshot.id;
                                 const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
                                     .format(new Date(snapshot.generatedAt));
+                                const deletable = canDeleteReports
+                                    && canDeleteOwnedRecord(snapshot.generatedBy, currentUserId, activeWorkspace?.role);
                                 return (
                                     <div
                                         key={snapshot.id}
@@ -409,20 +427,32 @@ export default function ReportDocumentBoard({
                                             size="sm"
                                             onClick={() => openSnapshot(snapshot)}
                                             aria-pressed={active}
-                                            className="rounded-l-full rounded-r-none hover:bg-transparent"
+                                            className={cn(
+                                                'rounded-l-full hover:bg-transparent',
+                                                deletable ? 'rounded-r-none' : 'rounded-r-full',
+                                            )}
                                         >
+                                            {snapshot.origin === 'scheduled' ? (
+                                                <CalendarDaysIcon
+                                                    role="img"
+                                                    aria-label={t('document.scheduledSnapshot')}
+                                                    className="size-3.5 text-muted-foreground"
+                                                />
+                                            ) : null}
                                             {dateLabel}
                                         </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            onClick={() => setSnapshotPendingDelete(snapshot)}
-                                            disabled={deletingSnapshotId === snapshot.id}
-                                            aria-label={t('document.deleteSnapshotNamed', { date: dateLabel })}
-                                            className="rounded-l-none rounded-r-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                        >
-                                            <TrashIcon className="size-3.5" />
-                                        </Button>
+                                        {deletable ? (
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                onClick={() => setSnapshotPendingDelete(snapshot)}
+                                                disabled={deletingSnapshotId === snapshot.id}
+                                                aria-label={t('document.deleteSnapshotNamed', { date: dateLabel })}
+                                                className="rounded-l-none rounded-r-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                            >
+                                                <TrashIcon className="size-3.5" />
+                                            </Button>
+                                        ) : null}
                                     </div>
                                 );
                             })}
