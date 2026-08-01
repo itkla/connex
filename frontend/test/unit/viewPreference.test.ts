@@ -23,6 +23,19 @@ describe('viewPreferenceStorageKey', () => {
         expect(viewPreferenceStorageKey('tasks:view', null, null))
             .toBe('connex:view:anon:none:tasks:view');
     });
+
+    it.each(['tasks:queue', 'activities:filter'])(
+        'scopes the %s list preference so it cannot leak across users or workspaces',
+        (storageKey) => {
+            expect(viewPreferenceStorageKey(storageKey, 7, 11))
+                .toBe(`connex:view:7:11:${storageKey}`);
+            expect(viewPreferenceStorageKey(storageKey, 7, 11))
+                .not.toBe(viewPreferenceStorageKey(storageKey, 8, 11));
+            expect(viewPreferenceStorageKey(storageKey, 7, 11))
+                .not.toBe(viewPreferenceStorageKey(storageKey, 7, 12));
+            expect(viewPreferenceStorageKey(storageKey, 7, 11)).not.toBe(storageKey);
+        },
+    );
 });
 
 describe('resolveViewPreference', () => {

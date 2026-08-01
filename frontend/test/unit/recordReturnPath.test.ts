@@ -99,6 +99,58 @@ describe('record return paths', () => {
         expect(() => recordDetailPath('contacts', 1.5)).toThrow(RangeError);
     });
 
+    it.each([
+        ['tasks', '/activity/tasks/42'],
+        ['notes', '/activity/notes/42'],
+        ['activities', '/activity/activities/42'],
+    ] as const)('builds the %s detail path from its own detail route', (collection, expected) => {
+        expect(recordDetailPath(collection, 42)).toBe(expected);
+    });
+
+    it('keeps the activities list and detail routes distinct', () => {
+        expect(resolveRecordReturnPath('activities', '/activity/all?type=Call')).toBe('/activity/all?type=Call');
+        expect(resolveRecordReturnPath('activities', '/activity/activities')).toBe('/activity/all');
+    });
+
+    it.each([
+        ['tasks', '/activity/tasks?q=foo&status=open', '/activity/tasks?q=foo&status=open'],
+        ['notes', '/activity/notes?group=record', '/activity/notes?group=record'],
+        ['files', '/library/files?kind=image&tags=1%2C2', '/library/files?kind=image&tags=1%2C2'],
+    ] as const)('preserves an allowlisted %s return target', (collection, target, expected) => {
+        expect(resolveRecordReturnPath(collection, target)).toBe(expected);
+    });
+
+    it.each([
+        ['notes', '/activity/tasks', '/activity/notes'],
+        ['tasks', '/activity/notes', '/activity/tasks'],
+        ['files', '/activity/all', '/library/files'],
+    ] as const)('rejects a cross-collection %s return target', (collection, target, expected) => {
+        expect(resolveRecordReturnPath(collection, target)).toBe(expected);
+    });
+
+    it('rejects a stored snapshot for a collection that is not registered', () => {
+        values.set('connex:record-return-selection', JSON.stringify({
+            collection: 'campaigns',
+            returnTo: '/records/contacts?view=table&page=2&peek=person%3A42',
+            userId: 7,
+            workspaceId: 11,
+            selectedIds: [42],
+            scrollTop: 417,
+            navigationId: 'a4c0f631-e34a-4e6c-b6f8-14f133e3df49',
+            createdAt: Date.now(),
+        }));
+
+        expect(consumeRecordReturnSelection('contacts', 7, 11)).toBeNull();
+    });
+
+    it('restores scroll for a widened collection with no multi-selection', () => {
+        location.pathname = '/activity/notes';
+        location.search = '?group=record';
+        recordDetailNavigationPath('notes', 5, { userId: 7, workspaceId: 11, ids: [] });
+
+        expect(consumeRecordReturnSelection('notes', 7, 11)).toEqual({ ids: [], scrollTop: 417 });
+    });
+
     it('restores a scoped selection once for the exact list URL', () => {
         recordDetailNavigationPath('contacts', 42, {
             userId: 7,
