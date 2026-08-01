@@ -14,6 +14,8 @@ import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -22,6 +24,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
@@ -62,6 +65,7 @@ public class PersonService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final AuthService authService;
     private final AuditService auditService;
     private final NotificationChangePublisher notificationChanges;
@@ -75,6 +79,7 @@ public class PersonService {
     private final DuplicatePreflightService duplicatePreflightService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final ProviderCaptureMapper providerCaptureMapper;
+    private final AiRestrictionEpoch aiRestrictionEpoch;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -263,7 +268,7 @@ public class PersonService {
     public Person requireBusinessCardReuseTarget(
             int personId,
             PersonDuplicatePreflightRequest request,
-            String duplicateReviewToken) {
+        String duplicateReviewToken) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         Person person = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
@@ -433,7 +438,10 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        duplicateDecisionLockService.lockCurrentOrganization();
+        int orgId = duplicateDecisionLockService.lockCurrentOrganization();
+        List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
+            ? restrictionWorkspaceIds(orgId, workspaceId)
+            : List.of();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null) {
             throw new ResourceNotFoundException("Person not found with id: " + id);
@@ -443,9 +451,11 @@ public class PersonService {
             withdrawProviderCapture(workspaceId, id);
         }
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
-        int purgedAiOutputs = suspended || provisionCeased
-            ? aiOutputCacheMapper.deleteForPerson(workspaceId, id)
-            : 0;
+        int purgedAiOutputs = 0;
+        if (suspended || provisionCeased) {
+            restrictionWorkspaceIds.forEach(aiRestrictionEpoch::bump);
+            purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
+        }
         Person after = requireOwnedPerson(workspaceId, id);
         if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
             identityIntakeService.recordPerson(
@@ -469,6 +479,17 @@ public class PersonService {
                 "Updated processing restrictions for " + before.getName(), changes);
         }
         return after;
+    }
+
+    private List<Integer> restrictionWorkspaceIds(int orgId, int workspaceId) {
+        List<Integer> workspaceIds = workspaceMapper.findByOrgId(orgId).stream()
+            .map(Workspace::getId)
+            .sorted()
+            .toList();
+        if (!workspaceIds.contains(workspaceId)) {
+            throw new IllegalStateException("Active workspace is missing from its organization");
+        }
+        return workspaceIds;
     }
 
     /** Resolved company id for a person, treating an absent or zero-id company as {@code null}. */

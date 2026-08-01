@@ -7,6 +7,10 @@ import java.util.Objects;
  * @param provider provider id
  * @param region nullable provider region or location
  * @param modelId provider model id
+ * @param endpoint nullable provider endpoint
+ * @param deployment nullable provider deployment
+ * @param apiVersion nullable provider API version
+ * @param projectId nullable provider project identifier
  * @param maxTokens provider output token cap
  * @param temperature provider sampling temperature
  */
@@ -14,6 +18,10 @@ public record AiGenerationProfile(
         String provider,
         String region,
         String modelId,
+        String endpoint,
+        String deployment,
+        String apiVersion,
+        String projectId,
         int maxTokens,
         double temperature) {
 

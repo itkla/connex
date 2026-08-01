@@ -67,6 +67,7 @@ class IntroRationaleServiceTest {
     private static final Instant NOW = Instant.parse("2026-07-09T18:30:00Z");
     private static final AiGenerationProfile PROFILE = new AiGenerationProfile(
             "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+            null, null, null, null,
             IntroRationaleService.MAX_TOKENS, IntroRationaleService.TEMPERATURE);
 
     @Mock private IntroRationaleAssembler introRationaleAssembler;

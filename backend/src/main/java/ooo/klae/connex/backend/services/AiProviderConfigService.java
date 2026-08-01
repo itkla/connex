@@ -216,7 +216,9 @@ public class AiProviderConfigService implements AiProviderReadiness {
             throw new ForbiddenException("AI provider is not available for this organization");
         }
         return new AiGenerationProfile(
-                config.getProvider(), config.getRegion(), config.getModelId(), maxTokens, temperature);
+                config.getProvider(), config.getRegion(), config.getModelId(), config.getEndpoint(),
+                config.getDeployment(), config.getApiVersion(), config.getProjectId(),
+                maxTokens, temperature);
     }
 
     /**

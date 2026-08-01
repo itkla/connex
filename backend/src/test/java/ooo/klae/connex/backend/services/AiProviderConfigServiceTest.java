@@ -623,17 +623,35 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
-    void profileForOrgReadsGenerationInputsWithoutLocksOrCredentialDecryption() {
-        stored = readyConfig();
+    void profileForOrgReadsAllGenerationTargetsWithoutLocksOrCredentialDecryption() {
+        stored = readyAzureConfig();
 
-        AiGenerationProfile profile = service.profileForOrg(ORG_ID, 2048, 0.2);
+        AiGenerationProfile azureProfile = service.profileForOrg(ORG_ID, 2048, 0.2);
 
-        assertEquals("bedrock", profile.provider());
-        assertEquals("ap-northeast-1", profile.region());
-        assertEquals("anthropic.claude-3-5-sonnet-20240620-v1:0", profile.modelId());
-        assertEquals(2048, profile.maxTokens());
-        assertEquals(0.2, profile.temperature());
-        verify(aiProviderConfigMapper).findByOrg(ORG_ID);
+        assertEquals("azure_openai", azureProfile.provider());
+        assertNull(azureProfile.region());
+        assertEquals("gpt-5.2", azureProfile.modelId());
+        assertEquals("https://connex.openai.azure.com", azureProfile.endpoint());
+        assertEquals("contacts-prod", azureProfile.deployment());
+        assertEquals("2025-01-01-preview", azureProfile.apiVersion());
+        assertNull(azureProfile.projectId());
+        assertEquals(2048, azureProfile.maxTokens());
+        assertEquals(0.2, azureProfile.temperature());
+
+        stored = readyVertexConfig();
+        AiGenerationProfile vertexProfile = service.profileForOrg(ORG_ID, 4096, 0.1);
+
+        assertEquals("vertex", vertexProfile.provider());
+        assertEquals("us-central1", vertexProfile.region());
+        assertEquals("claude-sonnet-4@20250514", vertexProfile.modelId());
+        assertNull(vertexProfile.endpoint());
+        assertNull(vertexProfile.deployment());
+        assertNull(vertexProfile.apiVersion());
+        assertEquals("connex-prod1", vertexProfile.projectId());
+        assertEquals(4096, vertexProfile.maxTokens());
+        assertEquals(0.1, vertexProfile.temperature());
+        verify(aiProviderConfigMapper, times(2)).findByOrg(ORG_ID);
+        verify(aiProviderConfigMapper, never()).findByOrgForUpdate(anyInt());
         verify(userMapper, never()).lockByIdForShare(anyInt());
         verify(organizationMapper, never()).lockByIdForShare(anyInt());
         verify(aiProviderSecretCipher, never()).decryptCredential(anyInt(), anyString());
@@ -863,6 +881,35 @@ class AiProviderConfigServiceTest {
         config.setProvider("openai_compatible");
         config.setEndpoint(endpoint);
         config.setModelId("gpt-4o");
+        config.setNoTrainingAttested(true);
+        config.setAttestedAt(LocalDateTime.now());
+        config.setEnabled(true);
+        return config;
+    }
+
+    private static AiProviderConfig readyAzureConfig() {
+        AiProviderConfig config = new AiProviderConfig();
+        config.setOrgId(ORG_ID);
+        config.setProvider("azure_openai");
+        config.setEndpoint("https://connex.openai.azure.com");
+        config.setDeployment("contacts-prod");
+        config.setApiVersion("2025-01-01-preview");
+        config.setModelId("gpt-5.2");
+        config.setCredentialRef("secret:v1:azure");
+        config.setNoTrainingAttested(true);
+        config.setAttestedAt(LocalDateTime.now());
+        config.setEnabled(true);
+        return config;
+    }
+
+    private static AiProviderConfig readyVertexConfig() {
+        AiProviderConfig config = new AiProviderConfig();
+        config.setOrgId(ORG_ID);
+        config.setProvider("vertex");
+        config.setRegion("us-central1");
+        config.setModelId("claude-sonnet-4@20250514");
+        config.setProjectId("connex-prod1");
+        config.setCredentialRef("secret:v1:vertex");
         config.setNoTrainingAttested(true);
         config.setAttestedAt(LocalDateTime.now());
         config.setEnabled(true);

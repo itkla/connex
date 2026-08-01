@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
@@ -54,6 +55,7 @@ public class AiReportNarrativeService {
     private final AiInvocationAdmissionService aiInvocationAdmissionService;
     private final AiFeatureGate aiFeatureGate;
     private final AiOutputCacheStore aiOutputCacheStore;
+    private final AiRestrictionEpoch aiRestrictionEpoch;
     private final AiProviderConfigService aiProviderConfigService;
     private final WorkspaceService workspaceService;
     private final Clock clock;
@@ -160,7 +162,8 @@ public class AiReportNarrativeService {
                         contentHash,
                         content,
                         warnings,
-                        generatedAt);
+                        generatedAt,
+                        prep.restrictionEpoch());
                 admission.completeLeader(LeaderOutcome.CACHE_READY);
                 return toDto(content, generatedAt, warnings);
             } catch (ForbiddenException exception) {
@@ -190,6 +193,7 @@ public class AiReportNarrativeService {
             return NarrativePrep.terminal(ReportNarrativeDto.unavailable(INVALID_GROUNDING));
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        long restrictionEpoch = aiRestrictionEpoch.current(workspaceId);
         AiReportAssembly assembly = aiReportAssembler.assemble(reportContext);
         AiGenerationProfile profile;
         try {
@@ -199,7 +203,8 @@ public class AiReportNarrativeService {
             return NarrativePrep.terminal(ReportNarrativeDto.unavailable(NOT_CONFIGURED));
         }
         String contentHash = aiOutputCacheStore.contentHash(profile, assembly.prompt(), assembly.context());
-        return NarrativePrep.ready(workspaceId, reportContext, assembly, cacheFeature(), contentHash);
+        return NarrativePrep.ready(
+                workspaceId, reportContext, assembly, cacheFeature(), contentHash, restrictionEpoch);
     }
 
     private record NarrativePrep(
@@ -208,10 +213,11 @@ public class AiReportNarrativeService {
             AiReportContext context,
             AiReportAssembly assembly,
             String cacheFeature,
-            String contentHash) {
+            String contentHash,
+            long restrictionEpoch) {
 
         static NarrativePrep terminal(ReportNarrativeDto result) {
-            return new NarrativePrep(result, 0, null, null, null, null);
+            return new NarrativePrep(result, 0, null, null, null, null, 0);
         }
 
         static NarrativePrep ready(
@@ -219,8 +225,10 @@ public class AiReportNarrativeService {
                 AiReportContext context,
                 AiReportAssembly assembly,
                 String cacheFeature,
-                String contentHash) {
-            return new NarrativePrep(null, workspaceId, context, assembly, cacheFeature, contentHash);
+                String contentHash,
+                long restrictionEpoch) {
+            return new NarrativePrep(
+                    null, workspaceId, context, assembly, cacheFeature, contentHash, restrictionEpoch);
         }
     }
 

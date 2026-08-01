@@ -49,6 +49,7 @@ public class AiOutputCacheStore {
 
     private final AiOutputCacheMapper aiOutputCacheMapper;
     private final PersonMapper personMapper;
+    private final AiRestrictionEpoch aiRestrictionEpoch;
     private final ObjectMapper objectMapper;
 
     /**
@@ -85,8 +86,11 @@ public class AiOutputCacheStore {
     }
 
     /**
-     * Upserts the stored output for a subject. A serialization failure skips persistence rather than
-     * failing the caller, since a cache write must never break the user-facing response.
+     * Upserts the stored output for a subject only when the caller's restriction epoch is current.
+     * A serialization failure skips persistence rather than failing the caller, since a cache write
+     * must never break the user-facing response. This fence closes the in-flight write window only
+     * within one application JVM; multi-instance deployments still need persisted report-to-person
+     * provenance or a persisted epoch, tracked in issue #941.
      * @param workspaceId active workspace
      * @param feature feature key
      * @param subjectAId primary subject id
@@ -95,16 +99,18 @@ public class AiOutputCacheStore {
      * @param content demasked structured content, serialized to JSON for storage
      * @param warnings demasking warning count
      * @param generatedAt ISO generation instant
+     * @param restrictionEpoch restriction epoch captured when the content was assembled
+     * @return true when the restriction epoch remains current, whether or not serialization allowed
+     *         persistence; false when a restriction advanced after assembly
      */
-    public void save(int workspaceId, String feature, int subjectAId, int subjectBId, String contentHash,
-            Object content, int warnings, String generatedAt) {
+    public boolean save(int workspaceId, String feature, int subjectAId, int subjectBId,
+            String contentHash, Object content, int warnings, String generatedAt,
+            long restrictionEpoch) {
         Optional<String> payload = serialize(content);
-        if (payload.isEmpty()) {
-            return;
-        }
-        aiOutputCacheMapper.upsert(entry(
-                workspaceId, feature, subjectAId, subjectBId, contentHash,
-                payload.get(), warnings, generatedAt));
+        return aiRestrictionEpoch.runIfCurrent(workspaceId, restrictionEpoch, () -> payload.ifPresent(value ->
+                aiOutputCacheMapper.upsert(entry(
+                        workspaceId, feature, subjectAId, subjectBId, contentHash,
+                        value, warnings, generatedAt))));
     }
 
     /**
@@ -206,6 +212,10 @@ public class AiOutputCacheStore {
         appendPart(serialized, profile.provider());
         appendPart(serialized, profile.region());
         appendPart(serialized, profile.modelId());
+        appendPart(serialized, profile.endpoint());
+        appendPart(serialized, profile.deployment());
+        appendPart(serialized, profile.apiVersion());
+        appendPart(serialized, profile.projectId());
         appendPart(serialized, Integer.toString(profile.maxTokens()));
         appendPart(serialized, canonicalTemperature(profile.temperature()));
         appendPart(serialized, prompt.getSystemPrompt());

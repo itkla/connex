@@ -62,6 +62,7 @@ class DealBriefServiceTest {
     private static final Instant NOW = Instant.parse("2026-07-09T18:30:00Z");
     private static final AiGenerationProfile PROFILE = new AiGenerationProfile(
             "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+            null, null, null, null,
             DealBriefService.MAX_TOKENS, DealBriefService.TEMPERATURE);
 
     @Mock private DealBriefAssembler dealBriefAssembler;
