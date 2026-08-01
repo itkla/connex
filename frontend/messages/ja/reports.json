@@ -204,7 +204,12 @@
       "noCurrentStateData": "現在状態のデータはありません",
       "source": "出典",
       "metric": "指標",
-      "scheduledSnapshot": "スケジュール配信により凍結"
+      "scheduledSnapshot": "スケジュール配信により凍結",
+      "snapshotUnavailableTitle": "このスナップショットは利用できなくなりました",
+      "snapshotUnavailableBody": "凍結スナップショットは順次削除されるため、メールのリンクがスナップショットより長く残ることがあります。ライブレポートは引き続き閲覧できます。",
+      "snapshotForbiddenTitle": "このスナップショットへのアクセス権がありません",
+      "snapshotForbiddenBody": "このレポートへのアクセスが必要な場合は、ワークスペース管理者にお問い合わせください。",
+      "viewLiveReport": "ライブレポートを表示"
     },
     "cadence": {
       "weekly": "週次",

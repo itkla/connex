@@ -43,6 +43,19 @@ public interface ReportMapper {
         @Param("workspaceId") int workspaceId,
         @Param("reportDefinitionId") int reportDefinitionId);
 
+    int countSnapshots(
+        @Param("workspaceId") int workspaceId,
+        @Param("reportDefinitionId") int reportDefinitionId);
+
+    int countSnapshotsNotGeneratedBy(
+        @Param("workspaceId") int workspaceId,
+        @Param("reportDefinitionId") int reportDefinitionId,
+        @Param("generatedBy") int generatedBy);
+
+    int countScheduledSnapshots(
+        @Param("workspaceId") int workspaceId,
+        @Param("reportDefinitionId") int reportDefinitionId);
+
     int countWorkspaceSnapshots(@Param("workspaceId") int workspaceId);
 
     long workspaceSnapshotBytes(@Param("workspaceId") int workspaceId);
@@ -57,7 +70,16 @@ public interface ReportMapper {
     int deleteScheduledSnapshotsBeyondRetention(
         @Param("workspaceId") int workspaceId,
         @Param("reportScheduleId") int reportScheduleId,
+        @Param("reportDefinitionId") int reportDefinitionId,
         @Param("keepCount") int keepCount);
+
+    int deleteOldestScheduledSnapshots(
+        @Param("workspaceId") int workspaceId,
+        @Param("limit") int limit);
+
+    int deleteOrphanedScheduledSnapshots(
+        @Param("workspaceId") int workspaceId,
+        @Param("reportDefinitionId") int reportDefinitionId);
 
     int deleteSnapshot(
         @Param("workspaceId") int workspaceId,

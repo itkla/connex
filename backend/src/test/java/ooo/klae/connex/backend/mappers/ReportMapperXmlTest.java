@@ -277,16 +277,56 @@ class ReportMapperXmlTest {
         assertTrue(manualCount.contains("report_definition_id = ?"));
         assertTrue(manualCount.contains("origin = 'manual'"));
 
+        for (String statement : new String[] {
+                "countSnapshots", "countSnapshotsNotGeneratedBy", "countScheduledSnapshots"}) {
+            String deletionGuard = configuration.getMappedStatement(
+                            ReportMapper.class.getName() + "." + statement)
+                    .getBoundSql(Map.of(
+                            "workspaceId", 7,
+                            "reportDefinitionId", 9,
+                            "generatedBy", 13))
+                    .getSql();
+            assertTrue(deletionGuard.contains("workspace_id = ?"));
+            assertTrue(deletionGuard.contains("report_definition_id = ?"));
+            assertFalse(deletionGuard.contains("${"));
+        }
+
         String retention = configuration.getMappedStatement(
                         ReportMapper.class.getName() + ".deleteScheduledSnapshotsBeyondRetention")
-                .getBoundSql(Map.of("workspaceId", 7, "reportScheduleId", 11, "keepCount", 25))
+                .getBoundSql(Map.of(
+                        "workspaceId", 7,
+                        "reportScheduleId", 11,
+                        "reportDefinitionId", 9,
+                        "keepCount", 25))
                 .getSql();
         assertTrue(retention.contains("workspace_id = ?"));
         assertTrue(retention.contains("report_schedule_id = ?"));
+        assertTrue(retention.contains("report_schedule_id IS NULL"));
+        assertTrue(retention.contains("report_definition_id = ?"));
         assertTrue(retention.contains("origin = 'scheduled'"));
         assertTrue(retention.contains("SELECT id FROM ("));
         assertTrue(retention.contains("LIMIT ?"));
+
+        String capacityPrune = configuration.getMappedStatement(
+                        ReportMapper.class.getName() + ".deleteOldestScheduledSnapshots")
+                .getBoundSql(Map.of("workspaceId", 7, "limit", 1000))
+                .getSql();
+        assertTrue(capacityPrune.contains("workspace_id = ?"));
+        assertTrue(capacityPrune.contains("origin = 'scheduled'"));
+        assertTrue(capacityPrune.contains("ORDER BY generated_at ASC, id ASC"));
+        assertTrue(capacityPrune.contains("LIMIT ?"));
+
+        String orphanPrune = configuration.getMappedStatement(
+                        ReportMapper.class.getName() + ".deleteOrphanedScheduledSnapshots")
+                .getBoundSql(Map.of("workspaceId", 7, "reportDefinitionId", 9))
+                .getSql();
+        assertTrue(orphanPrune.contains("workspace_id = ?"));
+        assertTrue(orphanPrune.contains("report_definition_id = ?"));
+        assertTrue(orphanPrune.contains("report_schedule_id IS NULL"));
+        assertTrue(orphanPrune.contains("origin = 'scheduled'"));
         assertFalse(retention.contains("${"));
+        assertFalse(capacityPrune.contains("${"));
+        assertFalse(orphanPrune.contains("${"));
     }
 
     private static void assertWorkspaceScoped(

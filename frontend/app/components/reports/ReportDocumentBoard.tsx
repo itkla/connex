@@ -235,14 +235,33 @@ export default function ReportDocumentBoard({
         setNarrativeState('idle');
         setLiveRequested(true);
         setRefreshKey((key) => key + 1);
+        syncSnapshotUrl(null);
     };
 
-    const showLive = () => {
+    /**
+     * Reflects the selected pill into the URL with a shallow `history.replaceState`, so a frozen
+     * snapshot stays shareable and the emailed deep link and the in-page selection agree.
+     */
+    const syncSnapshotUrl = useCallback((snapshotId: number | null) => {
+        const path = snapshotId == null
+            ? `/overview/reports/${definition.id}`
+            : `/overview/reports/${definition.id}/snapshots/${snapshotId}`;
+        if (window.location.pathname === path) return;
+        window.history.replaceState(null, '', `${path}${window.location.search}`);
+    }, [definition.id]);
+
+    /**
+     * Returns the board to the live report. Seeds the generation input from the visible date range
+     * so the figures that load match the dates the reader can see.
+     */
+    const fallbackToLive = useCallback(() => {
         snapshotRequestRef.current += 1;
+        generationInputRef.current = start && end ? { start, end } : {};
         setActiveSnapshotId(null);
         setActiveSnapshot(null);
         setLiveRequested(true);
-    };
+        syncSnapshotUrl(null);
+    }, [start, end, syncSnapshotUrl]);
 
     const createSnapshot = async () => {
         const input = generationInput();
@@ -253,6 +272,7 @@ export default function ReportDocumentBoard({
             setSnapshots((current) => [snapshot, ...current]);
             setActiveSnapshotId(snapshot.id);
             setActiveSnapshot(snapshot);
+            syncSnapshotUrl(snapshot.id);
             toastSuccess(t('document.snapshotCreated'));
         } catch (error) {
             toastError(error instanceof Error ? error.message : t('common.requestFailed'));
@@ -272,9 +292,7 @@ export default function ReportDocumentBoard({
             await deleteReportSnapshot(definition.id, snapshot.id);
             setSnapshots((current) => current.filter((item) => item.id !== snapshot.id));
             if (activeSnapshotId === snapshot.id) {
-                setActiveSnapshotId(null);
-                setActiveSnapshot(null);
-                setLiveRequested(true);
+                fallbackToLive();
             }
             toastSuccess(t('document.snapshotDeleted'));
             setSnapshotPendingDelete(null);
@@ -291,14 +309,17 @@ export default function ReportDocumentBoard({
         setActiveSnapshotId(snapshot.id);
         setActiveSnapshot(null);
         try {
-            const loaded = await getReportSnapshot(definition.id, snapshot.id);
+            const loaded = await withTimeout(
+                getReportSnapshot(definition.id, snapshot.id),
+                FIGURES_TIMEOUT_MS,
+            );
             if (snapshotRequestRef.current === requestId) {
                 setActiveSnapshot(loaded);
+                syncSnapshotUrl(loaded.id);
             }
         } catch (error) {
             if (snapshotRequestRef.current === requestId) {
-                setActiveSnapshotId(null);
-                setLiveRequested(true);
+                fallbackToLive();
                 toastError(error instanceof Error ? error.message : t('common.requestFailed'));
             }
         }
@@ -406,7 +427,7 @@ export default function ReportDocumentBoard({
                             <Button
                                 variant={activeSnapshotId == null ? 'secondary' : 'ghost'}
                                 size="sm"
-                                onClick={showLive}
+                                onClick={fallbackToLive}
                             >
                                 {t('document.live')}
                             </Button>

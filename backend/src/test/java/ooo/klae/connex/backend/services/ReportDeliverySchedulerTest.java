@@ -90,7 +90,23 @@ class ReportDeliverySchedulerTest {
                 scheduleMapper, placementRegistry, tenantWorkScope, scheduleService,
                 automationExecutor, reportService, workspaceService, auditService,
                 templateRenderer, mailProperties, mailService, CLOCK);
+    }
+
+    @Test
+    void scheduledWrapperReturnsWhenSchedulingIsDisabled() {
+        scheduler.deliverDueOnSchedule();
+
+        verifyNoInteractions(placementRegistry);
+    }
+
+    @Test
+    void scheduledWrapperRunsTheSweepWhenSchedulingIsEnabled() {
         ReflectionTestUtils.setField(scheduler, "schedulingEnabled", true);
+        when(placementRegistry.activeCatalogs()).thenReturn(List.of());
+
+        scheduler.deliverDueOnSchedule();
+
+        verify(placementRegistry).activeCatalogs();
     }
 
     @Test

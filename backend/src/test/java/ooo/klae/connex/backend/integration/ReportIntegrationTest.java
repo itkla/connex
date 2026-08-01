@@ -8,6 +8,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -75,10 +77,7 @@ import tools.jackson.databind.ObjectMapper;
  * Full-stack HTTP coverage for workspace-shared reports, RBAC, deterministic generation, and
  * immutable snapshot restore.
  */
-@SpringBootTest(properties = {
-    "spring.task.scheduling.enabled=false",
-    "connex.reports.scheduling-enabled=true"
-})
+@SpringBootTest
 @Transactional
 class ReportIntegrationTest {
 
@@ -707,7 +706,7 @@ class ReportIntegrationTest {
     }
 
     @Test
-    void scheduledSnapshotRetentionKeepsTwentySixAndLeavesManualSnapshots() throws Exception {
+    void scheduledSnapshotRetentionKeepsTwentySixAndReclaimsOrphans() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
         User member = newMember(workspace, "member");
@@ -725,7 +724,12 @@ class ReportIntegrationTest {
         int manualSnapshotId = responseId(manualResult);
         int scheduleId = createSchedule(session, workspace, reportId, member.getId());
 
-        for (int delivery = 0; delivery < 27; delivery++) {
+        forceScheduledDelivery(workspace.getId(), scheduleId);
+        int orphanSnapshotId = latestScheduledSnapshotId(workspace.getId(), scheduleId);
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE report_snapshot SET report_schedule_id = NULL WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), orphanSnapshotId));
+        for (int delivery = 1; delivery < 27; delivery++) {
             forceScheduledDelivery(workspace.getId(), scheduleId);
         }
 
@@ -733,10 +737,88 @@ class ReportIntegrationTest {
                 "SELECT COUNT(*) FROM report_snapshot "
                         + "WHERE workspace_id = ? AND report_schedule_id = ? AND origin = 'scheduled'",
                 Integer.class, workspace.getId(), scheduleId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_snapshot WHERE workspace_id = ? AND id = ?",
+                Integer.class, workspace.getId(), orphanSnapshotId));
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM report_snapshot "
                         + "WHERE workspace_id = ? AND id = ? AND origin = 'manual' AND report_schedule_id IS NULL",
                 Integer.class, workspace.getId(), manualSnapshotId));
+    }
+
+    @Test
+    void scheduleDeletionReclaimsItsOrphanedScheduledSnapshots() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace);
+        int scheduleId = createSchedule(session, workspace, reportId, member.getId());
+        forceScheduledDelivery(workspace.getId(), scheduleId);
+
+        mockMvc.perform(delete("/api/reports/{id}/schedule", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_snapshot "
+                        + "WHERE workspace_id = ? AND report_definition_id = ? AND origin = 'scheduled'",
+                Integer.class, workspace.getId(), reportId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_schedule WHERE workspace_id = ? AND id = ?",
+                Integer.class, workspace.getId(), scheduleId));
+    }
+
+    @Test
+    void scheduledDeliveryPrunesOldestScheduledSnapshotAtWorkspaceCapacity() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int archiveReportId = createReport(session, workspace);
+        int deliveryReportId = createReport(session, workspace);
+        fillWorkspaceSnapshotQuota(workspace.getId(), archiveReportId, member.getId(), 1);
+        int oldestScheduledSnapshotId = jdbcTemplate.queryForObject(
+                "SELECT id FROM report_snapshot WHERE workspace_id = ? AND origin = 'scheduled' "
+                        + "ORDER BY generated_at ASC, id ASC LIMIT 1",
+                Integer.class, workspace.getId());
+        int scheduleId = createSchedule(session, workspace, deliveryReportId, member.getId());
+
+        forceScheduledDelivery(workspace.getId(), scheduleId);
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_snapshot WHERE workspace_id = ? AND id = ?",
+                Integer.class, workspace.getId(), oldestScheduledSnapshotId));
+        assertEquals(1000, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_snapshot WHERE workspace_id = ?",
+                Integer.class, workspace.getId()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_snapshot "
+                        + "WHERE workspace_id = ? AND report_schedule_id = ? AND origin = 'scheduled'",
+                Integer.class, workspace.getId(), scheduleId));
+        verify(mailService).sendForWorkspace(anyInt(), any());
+    }
+
+    @Test
+    void scheduledDeliveryAuditsFailureAndSendsNothingWhenCapacityCannotBeReclaimed() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int archiveReportId = createReport(session, workspace);
+        int deliveryReportId = createReport(session, workspace);
+        fillWorkspaceSnapshotQuota(workspace.getId(), archiveReportId, member.getId(), 0);
+        int scheduleId = createSchedule(session, workspace, deliveryReportId, member.getId());
+
+        forceScheduledDelivery(workspace.getId(), scheduleId);
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_snapshot "
+                        + "WHERE workspace_id = ? AND report_schedule_id = ? AND origin = 'scheduled'",
+                Integer.class, workspace.getId(), scheduleId));
+        verify(mailService, never()).sendForWorkspace(anyInt(), any());
     }
 
     @Test
@@ -776,6 +858,85 @@ class ReportIntegrationTest {
                 .session(adminSession)
                 .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void reportCreatorCannotCascadeAnotherMembersSnapshotButAdminCan() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User creator = newMember(workspace, "member");
+        User snapshotCreator = newMember(workspace, "member");
+        User admin = newMember(workspace, "admin");
+        MockHttpSession creatorSession = login(creator.getUsername());
+        MockHttpSession snapshotSession = login(snapshotCreator.getUsername());
+        MockHttpSession adminSession = login(admin.getUsername());
+        int reportId = createReport(creatorSession, workspace);
+        mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(snapshotSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isCreated());
+
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(creatorSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void reportDeleteAuditRecordsDestroyedSnapshotCount() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User admin = newMember(workspace, "admin");
+        MockHttpSession adminSession = login(admin.getUsername());
+        int reportId = createReport(adminSession, workspace);
+        mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isCreated());
+
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
+
+        assertDestroyedSnapshotCount(workspace.getId(), reportId, 1);
+    }
+
+    @Test
+    void reportCreatorCannotCascadeScheduledSnapshotButAdminCan() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User creator = newMember(workspace, "member");
+        User admin = newMember(workspace, "admin");
+        MockHttpSession creatorSession = login(creator.getUsername());
+        MockHttpSession adminSession = login(admin.getUsername());
+        int reportId = createReport(creatorSession, workspace);
+        int scheduleId = createSchedule(creatorSession, workspace, reportId, creator.getId());
+        forceScheduledDelivery(workspace.getId(), scheduleId);
+
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(creatorSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
         mockMvc.perform(delete("/api/reports/{id}", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(adminSession)
@@ -1845,6 +2006,38 @@ class ReportIntegrationTest {
                 Integer.class, workspaceId, scheduleId);
         assertNotNull(id);
         return id;
+    }
+
+    private void fillWorkspaceSnapshotQuota(
+            int workspaceId, int reportDefinitionId, int generatedBy, int scheduledCount) {
+        List<Object[]> snapshots = new ArrayList<>(1000);
+        for (int index = 0; index < 1000; index++) {
+            snapshots.add(new Object[] {
+                workspaceId,
+                reportDefinitionId,
+                LocalDate.of(2026, 1, 1),
+                LocalDate.of(2026, 1, 31),
+                "{}",
+                index < scheduledCount ? "scheduled" : "manual",
+                generatedBy,
+                LocalDateTime.of(2020, 1, 1, 0, 0).plusSeconds(index)
+            });
+        }
+        jdbcTemplate.batchUpdate(
+                "INSERT INTO report_snapshot "
+                        + "(workspace_id, report_definition_id, period_start, period_end, computed_result, "
+                        + "origin, generated_by, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                snapshots);
+    }
+
+    private void assertDestroyedSnapshotCount(int workspaceId, int reportId, int expected) throws Exception {
+        String changes = jdbcTemplate.queryForObject(
+                "SELECT changes FROM audit_log WHERE workspace_id = ? AND action = 'report.delete' "
+                        + "AND entity_id = ? AND outcome = 'success' ORDER BY id DESC LIMIT 1",
+                String.class, workspaceId, reportId);
+        assertNotNull(changes);
+        assertEquals(expected,
+                objectMapper.readTree(changes).path("destroyedSnapshotCount").asInt());
     }
 
     private int createRevenueGoal(

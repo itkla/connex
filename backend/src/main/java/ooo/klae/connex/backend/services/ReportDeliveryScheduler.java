@@ -71,13 +71,23 @@ public class ReportDeliveryScheduler {
     @Value("${connex.reports.scheduling-enabled:true}")
     private boolean schedulingEnabled;
 
+    /**
+     * Invokes the delivery sweep from Spring's scheduling infrastructure only when operator
+     * scheduling is enabled. Keeping the flag at this wrapper leaves {@link #deliverDue()} usable
+     * for deterministic tests and explicit orchestration without enabling background scheduling.
+     */
     @Scheduled(
         fixedDelayString = "${connex.reports.delivery-delay-ms:300000}",
         initialDelayString = "${connex.reports.initial-delay-ms:300000}")
-    public void deliverDue() {
+    public void deliverDueOnSchedule() {
         if (!schedulingEnabled) {
             return;
         }
+        deliverDue();
+    }
+
+    /** Performs one flag-free delivery sweep across all active tenant catalogs. */
+    public void deliverDue() {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         for (String catalog : placementRegistry.activeCatalogs()) {
             try {

@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -28,6 +29,9 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 class BulkOperationServiceTest extends AbstractServiceTest {
 
     @Autowired BulkOperationService bulkOperationService;
+    @Autowired DealService dealService;
+    @Autowired DealDocumentService documentService;
+    @Autowired DocumentTemplateService templateService;
     @Autowired ShareMapper shareMapper;
 
     @Test
@@ -150,6 +154,39 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void nonDraftDocumentsRequireAdminForDirectAndBulkDealDeletion() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal directDeal = newDeal(pipeline, stage, company);
+        Deal bulkDeal = newDeal(pipeline, stage, company);
+        DocumentTemplate template = documentTemplate();
+        documentService.updateStatus(
+            directDeal.getId(), documentService.generate(directDeal.getId(), template.getId()).id(), "final");
+        documentService.updateStatus(
+            bulkDeal.getId(), documentService.generate(bulkDeal.getId(), template.getId()).id(), "final");
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> dealService.delete(directDeal.getId()));
+        assertThrows(ForbiddenException.class,
+            () -> bulkOperationService.deleteDeals(List.of(bulkDeal.getId())));
+        assertNotNull(dealMapper.getDealById(workspace.getId(), directDeal.getId()));
+        assertNotNull(dealMapper.getDealById(workspace.getId(), bulkDeal.getId()));
+
+        User admin = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), admin.getId(), "admin");
+        authenticateAs(admin, workspace.getId());
+        dealService.delete(directDeal.getId());
+        BulkOperationResult result = bulkOperationService.deleteDeals(List.of(bulkDeal.getId()));
+
+        assertEquals(1, result.getSucceeded());
+        assertEquals(0, result.getFailed());
+        assertNull(dealMapper.getDealById(workspace.getId(), directDeal.getId()));
+        assertNull(dealMapper.getDealById(workspace.getId(), bulkDeal.getId()));
+    }
+
+    @Test
     void assignOwnerToCompaniesUpdatesOwnedRowsAndReportsForeignAndStaleIds() {
         Company local = newCompany();
         Workspace other = newOtherWorkspace();
@@ -245,6 +282,15 @@ class BulkOperationServiceTest extends AbstractServiceTest {
 
     private boolean hasTag(int personId, int tagId) {
         return tagMapper.getTagsByPersonId(workspace.getId(), personId).stream().anyMatch(t -> t.getId() == tagId);
+    }
+
+    private DocumentTemplate documentTemplate() {
+        DocumentTemplate template = new DocumentTemplate();
+        template.setName("Bulk deal document " + unique());
+        template.setType("quote");
+        template.setLocale("en");
+        template.setTitle("Bulk deletion guard");
+        return templateService.create(template);
     }
 
     private Workspace newOtherWorkspace() {

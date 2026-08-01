@@ -83,6 +83,8 @@ public class ReportService {
     private static final int MAX_SNAPSHOT_BYTES = 4_194_304;
     private static final int MAX_SNAPSHOTS_PER_REPORT = 100;
     private static final int MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE = 26;
+    private static final int SCHEDULED_EVICTION_BATCH_SIZE = 16;
+    private static final int MAX_SCHEDULED_EVICTION_BATCHES = 256;
     private static final int MAX_SNAPSHOT_LIST_SIZE =
             MAX_SNAPSHOTS_PER_REPORT + MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE;
     private static final int MAX_REPORTS_PER_WORKSPACE = 100;
@@ -311,13 +313,25 @@ public class ReportService {
     @Transactional
     @RequirePermission(Permission.REPORT_DELETE)
     public void delete(int id) {
-        ReportDefinition definition = requireDefinition(id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        reportMapper.lockDefinitions(workspaceId);
+        ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
+        if (definition == null) {
+            throw new ResourceNotFoundException("Report not found with id: " + id);
+        }
         deletionPolicy.requireDeletable(definition.getCreatedBy());
-        if (reportMapper.deleteDefinition(workspaceService.getCurrentWorkspaceId(), id) == 0) {
+        int currentUserId = workspaceService.getCurrentUserId();
+        int destroyedSnapshotCount = reportMapper.countSnapshots(workspaceId, id);
+        if (reportMapper.countSnapshotsNotGeneratedBy(workspaceId, id, currentUserId) > 0
+                || reportMapper.countScheduledSnapshots(workspaceId, id) > 0) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        }
+        if (reportMapper.deleteDefinition(workspaceId, id) == 0) {
             throw new ResourceNotFoundException("Report not found with id: " + id);
         }
         auditService.record("report.delete", "report", id, definition.getName(),
-                "Deleted report " + definition.getName(), null);
+                "Deleted report " + definition.getName(),
+                Map.of("destroyedSnapshotCount", destroyedSnapshotCount));
     }
 
     /**
@@ -410,8 +424,8 @@ public class ReportService {
             throw new ResourceNotFoundException("Report delivery schedule is unavailable");
         }
         reportMapper.deleteScheduledSnapshotsBeyondRetention(
-                workspaceId, scheduleId, MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE - 1);
-        requireWorkspaceSnapshotCapacity(workspaceId, computedResult);
+                workspaceId, scheduleId, reportId, MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE - 1);
+        requireDeliverySnapshotCapacity(workspaceId, computedResult);
         return insertSnapshot(
                 workspaceId, reportId, document, computedResult, generatedBy,
                 SNAPSHOT_ORIGIN_SCHEDULED, scheduleId);
@@ -444,12 +458,42 @@ public class ReportService {
         return persisted;
     }
 
+    private boolean hasWorkspaceSnapshotCapacity(int workspaceId, String computedResult) {
+        return reportMapper.countWorkspaceSnapshots(workspaceId) < MAX_SNAPSHOTS_PER_WORKSPACE
+                && reportMapper.workspaceSnapshotBytes(workspaceId)
+                        + computedResult.getBytes(StandardCharsets.UTF_8).length
+                                <= MAX_SNAPSHOT_BYTES_PER_WORKSPACE;
+    }
+
     private void requireWorkspaceSnapshotCapacity(int workspaceId, String computedResult) {
-        if (reportMapper.countWorkspaceSnapshots(workspaceId) >= MAX_SNAPSHOTS_PER_WORKSPACE
-                || reportMapper.workspaceSnapshotBytes(workspaceId)
-                        + computedResult.getBytes(StandardCharsets.UTF_8).length > MAX_SNAPSHOT_BYTES_PER_WORKSPACE) {
+        if (!hasWorkspaceSnapshotCapacity(workspaceId, computedResult)) {
             throw new BadRequestException("The workspace report snapshot quota has been reached");
         }
+    }
+
+    /**
+     * Preserves scheduled-delivery continuity by evicting the oldest scheduled-origin snapshots
+     * workspace-wide when the workspace quota is exhausted. Eviction runs in small batches and
+     * stops as soon as the snapshot fits, so a workspace that is marginally over its quota loses
+     * only the few oldest scheduled rows rather than its whole evidence tail.
+     *
+     * <p>This deliberately trades the oldest scheduled evidence for delivery continuity: without
+     * it, a workspace reaching its quota would fail every future scheduled delivery permanently
+     * and silently, because the occurrence is already claimed by the time this runs. Manual
+     * snapshots are never evicted, and a workspace that still cannot fit the snapshot fails closed
+     * so the scheduler audits the failure and sends nothing.
+     */
+    private void requireDeliverySnapshotCapacity(int workspaceId, String computedResult) {
+        for (int batch = 0; batch < MAX_SCHEDULED_EVICTION_BATCHES; batch++) {
+            if (hasWorkspaceSnapshotCapacity(workspaceId, computedResult)) {
+                return;
+            }
+            if (reportMapper.deleteOldestScheduledSnapshots(
+                    workspaceId, SCHEDULED_EVICTION_BATCH_SIZE) == 0) {
+                break;
+            }
+        }
+        requireWorkspaceSnapshotCapacity(workspaceId, computedResult);
     }
 
     /** Lists frozen snapshots for a report definition. */

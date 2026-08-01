@@ -76,6 +76,26 @@
       AND origin = 'manual'
   </select>
 
+  <select id="countSnapshots" resultType="int">
+    SELECT COUNT(*) FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND report_definition_id = #{reportDefinitionId}
+  </select>
+
+  <select id="countSnapshotsNotGeneratedBy" resultType="int">
+    SELECT COUNT(*) FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND report_definition_id = #{reportDefinitionId}
+      AND (generated_by IS NULL OR generated_by &lt;&gt; #{generatedBy})
+  </select>
+
+  <select id="countScheduledSnapshots" resultType="int">
+    SELECT COUNT(*) FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND report_definition_id = #{reportDefinitionId}
+      AND origin = 'scheduled'
+  </select>
+
   <select id="countWorkspaceSnapshots" resultType="int">
     SELECT COUNT(*) FROM report_snapshot WHERE workspace_id = #{workspaceId}
   </select>
@@ -98,18 +118,40 @@
   <delete id="deleteScheduledSnapshotsBeyondRetention">
     DELETE FROM report_snapshot
     WHERE workspace_id = #{workspaceId}
-      AND report_schedule_id = #{reportScheduleId}
       AND origin = 'scheduled'
+      AND (
+        report_schedule_id = #{reportScheduleId}
+        OR (report_schedule_id IS NULL AND report_definition_id = #{reportDefinitionId})
+      )
       AND id NOT IN (
         SELECT id FROM (
           SELECT id FROM report_snapshot
           WHERE workspace_id = #{workspaceId}
-            AND report_schedule_id = #{reportScheduleId}
             AND origin = 'scheduled'
+            AND (
+              report_schedule_id = #{reportScheduleId}
+              OR (report_schedule_id IS NULL AND report_definition_id = #{reportDefinitionId})
+            )
           ORDER BY generated_at DESC, id DESC
           LIMIT #{keepCount}
         ) AS keep_rows
       )
+  </delete>
+
+  <delete id="deleteOldestScheduledSnapshots">
+    DELETE FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND origin = 'scheduled'
+    ORDER BY generated_at ASC, id ASC
+    LIMIT #{limit}
+  </delete>
+
+  <delete id="deleteOrphanedScheduledSnapshots">
+    DELETE FROM report_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND report_definition_id = #{reportDefinitionId}
+      AND report_schedule_id IS NULL
+      AND origin = 'scheduled'
   </delete>
 
   <delete id="deleteSnapshot">

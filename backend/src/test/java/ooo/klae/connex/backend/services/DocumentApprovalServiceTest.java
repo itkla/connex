@@ -153,6 +153,38 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void authorCannotApproveOwnDocumentRequestedByAnotherMember() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        User requester = newUser();
+        authenticateAs(requester, workspace.getId());
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        authenticateAs(currentUser, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
+    }
+
+    @Test
+    void authorCannotApproveAfterCancellingAndAnotherMemberRequests() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+        approvalService.cancel(deal.getId(), doc.id());
+        User requester = newUser();
+        authenticateAs(requester, workspace.getId());
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        authenticateAs(currentUser, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
+    }
+
+    @Test
     void unknownRequesterFailsClosed() {
         Deal deal = jpyDeal();
         DealDocumentDto doc = generate(deal);
@@ -237,6 +269,27 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void onlyAdminOrOwnerCanCancelAnApprovalWithUnknownRequester() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        jdbcTemplate.update(
+                "UPDATE document_approval SET requested_by = NULL WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), approval.id());
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.cancel(deal.getId(), doc.id()));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+
+        authenticateAs(currentUser, workspace.getId());
+        DocumentApprovalDto cancelled = approvalService.cancel(deal.getId(), doc.id());
+        assertEquals("cancelled", cancelled.status());
+        assertEquals("draft", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
     void supersedeByRequesterCancelsPendingApproval() {
         Deal deal = jpyDeal();
         DealDocumentDto doc = generate(deal);
@@ -248,6 +301,22 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         assertThrows(BadRequestException.class,
             () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+    }
+
+    @Test
+    void differentMemberCanSupersedeAndCancelAnotherMembersPendingApproval() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        User superseder = newUser();
+        authenticateAs(superseder, workspace.getId());
+
+        DealDocumentDto superseded = documentService.updateStatus(
+            deal.getId(), doc.id(), "superseded");
+
+        assertEquals("superseded", superseded.status());
+        assertEquals("cancelled", superseded.latestApproval().status());
+        assertEquals(currentUser.getId(), approval.requestedBy());
     }
 
     @Test
