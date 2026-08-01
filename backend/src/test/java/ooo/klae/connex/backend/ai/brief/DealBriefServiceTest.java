@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -29,8 +30,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.i18n.LocaleContextHolder;
 
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
+import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiInvocation;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -43,21 +49,28 @@ import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.DealBriefDto;
+import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
 class DealBriefServiceTest {
     private static final int WORKSPACE_ID = 17;
+    private static final int ORG_ID = 9;
     private static final int DEAL_ID = 29;
-    private static final String FEATURE = "deal.brief";
     private static final String CACHE_FEATURE = "deal.brief:en";
     private static final String HASH = "content-hash-1";
     private static final Instant NOW = Instant.parse("2026-07-09T18:30:00Z");
+    private static final AiGenerationProfile PROFILE = new AiGenerationProfile(
+            "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+            DealBriefService.MAX_TOKENS, DealBriefService.TEMPERATURE);
 
     @Mock private DealBriefAssembler dealBriefAssembler;
     @Mock private AiInvocationService aiInvocationService;
+    @Mock private AiInvocationAdmissionService aiInvocationAdmissionService;
+    @Mock private Admission admission;
     @Mock private AiFeatureGate aiFeatureGate;
     @Mock private AiOutputCacheStore aiOutputCacheStore;
+    @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private WorkspaceService workspaceService;
 
     private DealBriefService service;
@@ -67,11 +80,18 @@ class DealBriefServiceTest {
         service = new DealBriefService(
                 dealBriefAssembler,
                 aiInvocationService,
+                aiInvocationAdmissionService,
                 aiFeatureGate,
                 aiOutputCacheStore,
+                aiProviderConfigService,
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        lenient().when(workspaceService.getCurrentOrgId()).thenReturn(ORG_ID);
+        lenient().when(aiProviderConfigService.profileForOrg(
+                ORG_ID, DealBriefService.MAX_TOKENS, DealBriefService.TEMPERATURE)).thenReturn(PROFILE);
+        lenient().when(aiInvocationAdmissionService.acquire(any(), anyBoolean())).thenReturn(admission);
+        lenient().when(admission.decision()).thenReturn(Decision.LEADER);
         lenient().when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(true);
@@ -85,7 +105,7 @@ class DealBriefServiceTest {
 
     @Test
     void generate_aiNotUsable_returnsNotConfiguredWithoutInvocation() {
-        when(aiFeatureGate.isAiUsable()).thenReturn(false);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_BRIEF)).thenReturn(false);
 
         DealBriefDto result = service.generate(DEAL_ID);
 
@@ -94,7 +114,7 @@ class DealBriefServiceTest {
         assertEquals("not_configured", result.getReason());
         assertNull(result.getSections());
         assertNull(result.getBrief());
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission));
         verify(dealBriefAssembler, never()).assemble(anyInt(), anyInt());
     }
 
@@ -102,7 +122,7 @@ class DealBriefServiceTest {
     void generate_happyPath_returnsDemaskedSectionsPersistsAndWarnings() {
         BriefAssembly assembly = assembly();
         arrangeMiss(assembly);
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealBriefContent(List.of(
                                 new DealBriefContent.Section("Who they are", "Mina Patel leads the call."),
@@ -122,8 +142,8 @@ class DealBriefServiceTest {
         assertEquals(2, result.getWarnings());
 
         ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
-        verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealBriefContent.class));
-        assertEquals(FEATURE, invocation.getValue().feature());
+        verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealBriefContent.class), eq(admission));
+        assertEquals(AiFeature.DEAL_BRIEF, invocation.getValue().feature());
         assertEquals(DealBriefService.MAX_TOKENS, invocation.getValue().maxTokens());
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(2),
@@ -134,7 +154,7 @@ class DealBriefServiceTest {
     void generate_contributorRestrictedBeforeCacheAdmissionReturnsProviderError() {
         BriefAssembly assembly = assembly();
         arrangeMiss(assembly);
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealBriefContent(List.of(new DealBriefContent.Section("Status", "Fresh."))),
                         0, 20, 10, "end_turn"));
@@ -151,9 +171,9 @@ class DealBriefServiceTest {
     @Test
     void generate_cacheHit_reusesStoredBriefWithoutInvocation() {
         BriefAssembly assembly = assembly();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_BRIEF)).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 3, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealBriefContent.class))
@@ -166,7 +186,7 @@ class DealBriefServiceTest {
         assertEquals("Stored brief.", result.getSections().get(0).body());
         assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
         assertEquals(3, result.getWarnings());
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission));
         verify(aiOutputCacheStore, never()).saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
@@ -175,9 +195,9 @@ class DealBriefServiceTest {
     void generate_japaneseLocaleReadsSeparateCacheEntry() {
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         BriefAssembly assembly = assembly();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_BRIEF)).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(
                 WORKSPACE_ID, "deal.brief:ja", DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
@@ -189,18 +209,18 @@ class DealBriefServiceTest {
 
         assertTrue(result.isAvailable());
         assertEquals("保存済みの概要。", result.getSections().getFirst().body());
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission));
     }
 
     @Test
     void generate_contentHashMismatch_regenerates() {
         BriefAssembly assembly = assembly();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_BRIEF)).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealBriefContent(List.of(new DealBriefContent.Section("Who they are", "Fresh."))),
                         0, 20, 10, "end_turn"));
@@ -209,7 +229,7 @@ class DealBriefServiceTest {
 
         assertEquals("Fresh.", result.getSections().get(0).body());
         assertEquals(NOW.toString(), result.getGeneratedAt());
-        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
+        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission));
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0),
                 eq(NOW.toString()), eq(List.of(73)));
@@ -218,10 +238,10 @@ class DealBriefServiceTest {
     @Test
     void generate_refresh_bypassesCacheAndRegenerates() {
         BriefAssembly assembly = assembly();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_BRIEF)).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealBriefContent(List.of(new DealBriefContent.Section("Who they are", "Fresh take."))),
                         0, 20, 10, "end_turn"));
@@ -229,7 +249,7 @@ class DealBriefServiceTest {
         DealBriefDto result = service.generate(DEAL_ID, true);
 
         assertEquals("Fresh take.", result.getSections().get(0).body());
-        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
+        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission));
         verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0),
@@ -239,7 +259,7 @@ class DealBriefServiceTest {
     @Test
     void generate_providerFailure_returnsProviderError() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenThrow(new AiProviderException("provider unavailable"));
 
         DealBriefDto result = service.generate(DEAL_ID);
@@ -253,7 +273,7 @@ class DealBriefServiceTest {
     @Test
     void generate_maskingLeak_returnsProviderError() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenThrow(new MaskingLeakException("blocked outbound identifier"));
 
         DealBriefDto result = service.generate(DEAL_ID);
@@ -265,7 +285,7 @@ class DealBriefServiceTest {
     @Test
     void generate_malformedOutcome_returnsProviderErrorAndDoesNotPersist() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Malformed<>(
                         AiStructuredOutcome.REASON_MALFORMED, 200, 120, "end_turn"));
 
@@ -280,7 +300,7 @@ class DealBriefServiceTest {
     @Test
     void generate_noValidSections_returnsProviderError() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealBriefContent(List.of(new DealBriefContent.Section("  ", "  "))),
                         0, 20, 5, "end_turn"));
@@ -294,9 +314,9 @@ class DealBriefServiceTest {
     }
 
     private void arrangeMiss(BriefAssembly assembly) {
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_BRIEF)).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.empty());
     }

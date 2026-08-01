@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.ai;
 
+import java.time.Duration;
+import java.util.EnumMap;
+import java.util.Map;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +25,13 @@ public class AiProperties {
      * per-org configured and enabled BYOP provider, so AI features fail closed.
      */
     private boolean enabled = false;
+
+    /**
+     * Optional per-feature switches. A feature is enabled when the master {@link #enabled} switch
+     * is true and its entry is not explicitly false; an absent entry therefore defaults on while
+     * the master switch still disables every feature.
+     */
+    private Map<AiFeature, Boolean> features = new EnumMap<>(AiFeature.class);
 
     /**
      * Whether organizations may point an OpenAI-compatible provider at private or internal
@@ -66,4 +77,32 @@ public class AiProperties {
      * bytes, and bounded provider responses.
      */
     private long maxMediaWorkingBytes = 67108864;
+
+    /** Maximum admitted cache-miss provider attempts per organization in one rolling window. */
+    private int invocationQuotaAttemptsPerOrg = 60;
+
+    /** Rolling organization quota window for admitted cache-miss provider attempts. */
+    private Duration invocationQuotaWindow = Duration.ofMinutes(10);
+
+    /** Minimum interval between admitted forced refreshes for one cache identity. */
+    private Duration invocationRefreshThrottle = Duration.ofSeconds(30);
+
+    /** Maximum simultaneously live organization quota windows retained by one replica. */
+    private int invocationQuotaMaxOrganizations = 10000;
+
+    /** Maximum simultaneously live forced-refresh timestamps retained by one replica. */
+    private int invocationRefreshMaxIdentities = 10000;
+
+    /** Maximum active single-flight identities retained by one replica. */
+    private int invocationMaxActiveFlights = 10000;
+
+    /**
+     * Returns whether the master switch and the selected feature switch permit the feature.
+     * @param feature feature to evaluate
+     * @return true unless the master switch is off or the feature is explicitly disabled
+     */
+    public boolean isFeatureEnabled(AiFeature feature) {
+        return enabled && feature != null
+                && (features == null || !Boolean.FALSE.equals(features.get(feature)));
+    }
 }

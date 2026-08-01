@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -27,9 +28,11 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Persistent, workspace-scoped store for generated AI outputs. Replaces the per-JVM in-memory caches
  * so a brief/rationale is re-prompted only when the deal's assembled context changes, not on every
- * page load. Validity is keyed on {@link #contentHash(MaskedPrompt, MaskingContext)} — a fingerprint
- * of the masked prompt plus its request-local identity bindings — so a stored row is reused only when
- * the freshly assembled prompt is identical. Payloads are stored demasked as JSON.
+ * page load. Validity is keyed on
+ * {@link #contentHash(AiGenerationProfile, MaskedPrompt, MaskingContext)} — a fingerprint of the
+ * credential-free provider profile, masked prompt, and request-local identity bindings — so a
+ * stored row is reused only when the output-shaping inputs are identical. Payloads are stored
+ * demasked as JSON.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,22 +45,26 @@ public class AiOutputCacheStore {
      * a purely prompt-derived hash would not otherwise reflect — invalidate previously stored rows on
      * deploy. Bump this when output-shaping logic changes without a corresponding prompt change.
      */
-    static final String HASH_VERSION = "v2-structured-json-fail-closed";
+    static final String HASH_VERSION = "v3-provider-profile-grounding";
 
     private final AiOutputCacheMapper aiOutputCacheMapper;
     private final PersonMapper personMapper;
     private final ObjectMapper objectMapper;
 
     /**
-     * Fingerprints a masked prompt and its identity bindings for cache validity.
+     * Fingerprints the credential-free generation profile, masked prompt, and identity bindings.
+     * @param profile credential-free provider and sampling profile
      * @param prompt masked prompt
      * @param context request-local masking context
      * @return hex SHA-256 of the serialized prompt and bindings
      */
-    public String contentHash(MaskedPrompt prompt, MaskingContext context) {
+    public String contentHash(
+            AiGenerationProfile profile,
+            MaskedPrompt prompt,
+            MaskingContext context) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(serialized(prompt, context).getBytes(StandardCharsets.UTF_8));
+            digest.update(serialized(profile, prompt, context).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is not available", exception);
@@ -187,24 +194,39 @@ public class AiOutputCacheStore {
         }
     }
 
-    private static String serialized(MaskedPrompt prompt, MaskingContext context) {
+    private static String serialized(
+            AiGenerationProfile profile,
+            MaskedPrompt prompt,
+            MaskingContext context) {
+        Objects.requireNonNull(profile, "profile");
         Objects.requireNonNull(prompt, "prompt");
         Objects.requireNonNull(context, "context");
         StringBuilder serialized = new StringBuilder();
         appendPart(serialized, HASH_VERSION);
+        appendPart(serialized, profile.provider());
+        appendPart(serialized, profile.region());
+        appendPart(serialized, profile.modelId());
+        appendPart(serialized, Integer.toString(profile.maxTokens()));
+        appendPart(serialized, canonicalTemperature(profile.temperature()));
         appendPart(serialized, prompt.getSystemPrompt());
-        serialized.append(prompt.getMessages().size()).append(':');
+        appendPart(serialized, Integer.toString(prompt.getMessages().size()));
         for (MaskedMessage message : prompt.getMessages()) {
             appendPart(serialized, message.getRole());
             appendPart(serialized, message.getContent());
         }
-        List<Map.Entry<String, String>> bindings = context.tokenBindings();
-        serialized.append(bindings.size()).append(':');
+        List<Map.Entry<String, String>> bindings = context.tokenBindings().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .toList();
+        appendPart(serialized, Integer.toString(bindings.size()));
         for (Map.Entry<String, String> binding : bindings) {
             appendPart(serialized, binding.getKey());
             appendPart(serialized, binding.getValue());
         }
         return serialized.toString();
+    }
+
+    private static String canonicalTemperature(double temperature) {
+        return BigDecimal.valueOf(temperature).stripTrailingZeros().toPlainString();
     }
 
     private static void appendPart(StringBuilder serialized, String value) {

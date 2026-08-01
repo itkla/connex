@@ -31,6 +31,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
@@ -619,6 +620,23 @@ class AiProviderConfigServiceTest {
         resolution.verify(organizationMapper).lockByIdForShare(ORG_ID);
         resolution.verify(aiProviderConfigMapper).findByOrg(ORG_ID);
         resolution.verify(aiProviderSecretCipher).decryptCredential(ORG_ID, "secret:v1:88");
+    }
+
+    @Test
+    void profileForOrgReadsGenerationInputsWithoutLocksOrCredentialDecryption() {
+        stored = readyConfig();
+
+        AiGenerationProfile profile = service.profileForOrg(ORG_ID, 2048, 0.2);
+
+        assertEquals("bedrock", profile.provider());
+        assertEquals("ap-northeast-1", profile.region());
+        assertEquals("anthropic.claude-3-5-sonnet-20240620-v1:0", profile.modelId());
+        assertEquals(2048, profile.maxTokens());
+        assertEquals(0.2, profile.temperature());
+        verify(aiProviderConfigMapper).findByOrg(ORG_ID);
+        verify(userMapper, never()).lockByIdForShare(anyInt());
+        verify(organizationMapper, never()).lockByIdForShare(anyInt());
+        verify(aiProviderSecretCipher, never()).decryptCredential(anyInt(), anyString());
     }
 
     @Test

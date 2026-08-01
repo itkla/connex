@@ -55,9 +55,10 @@ class AiInvocationServiceTest {
     private static final int WORKSPACE_ID = 11;
     private static final int ORG_ID = 22;
     private static final int ACTOR_ID = 33;
-    private static final String FEATURE = "relationship.summary";
+    private static final AiFeature FEATURE = AiFeature.DEAL_BRIEF;
 
     @Mock private AiFeatureGate aiFeatureGate;
+    @Mock private AiInvocationAdmissionService.Admission invocationAdmission;
     @Mock private AiMediaAdmissionService aiMediaAdmissionService;
     @Mock private AiMediaAdmissionService.Lease mediaLease;
     @Mock private AiProviderConfigService aiProviderConfigService;
@@ -88,7 +89,8 @@ class AiInvocationServiceTest {
 
     @Test
     void complete_gateDenies_auditsBlockedWithoutPromptText() {
-        doThrow(new ForbiddenException("AI features are not available")).when(aiFeatureGate).requireAiUsable();
+        doThrow(new ForbiddenException("AI features are not available"))
+                .when(aiFeatureGate).requireAiUsable(AiFeature.DEAL_BRIEF);
         AiInvocation invocation = invocation("Summarize relationship state");
 
         assertThrows(ForbiddenException.class, () -> service.complete(invocation));
@@ -181,14 +183,13 @@ class AiInvocationServiceTest {
         AiInputImage image = new AiInputImage(
                 "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
         AiInvocation invocation = new AiInvocation(
-                base.feature(), base.context(), base.prompt(), List.of(image), 64, 0.2);
+                AiFeature.BUSINESS_CARD_EXTRACTION, base.context(), base.prompt(), List.of(image), 64, 0.2);
         when(aiProvider.complete(any(AiCompletionRequest.class)))
                 .thenReturn(new AiCompletionResult("{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
 
         service.complete(invocation);
 
-        verify(aiFeatureGate).requireAiImageUsable();
-        verify(aiFeatureGate, never()).requireAiUsable();
+        verify(aiFeatureGate).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
         ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
         verify(aiProvider).complete(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().images().size());
@@ -208,7 +209,7 @@ class AiInvocationServiceTest {
         AiInputImage image = new AiInputImage(
                 "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
         AiInvocation invocation = new AiInvocation(
-                base.feature(), base.context(), base.prompt(), List.of(image), 64, 0.2);
+                AiFeature.BUSINESS_CARD_EXTRACTION, base.context(), base.prompt(), List.of(image), 64, 0.2);
         when(aiMediaAdmissionService.acquire(anyInt(), anyList()))
                 .thenThrow(new TooManyRequestsException("AI image processing is busy"));
 
@@ -230,7 +231,7 @@ class AiInvocationServiceTest {
         AiInputImage image = new AiInputImage(
                 "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
         AiInvocation invocation = new AiInvocation(
-                base.feature(), base.context(), base.prompt(), List.of(image), 64, 0.2);
+                AiFeature.BUSINESS_CARD_EXTRACTION, base.context(), base.prompt(), List.of(image), 64, 0.2);
         resolved = new ResolvedAiProvider("openai_compatible", null, "llama3.3:70b",
                 "https://provider.example.test/v1", null, null, null, false, false,
                 AiCredentials.of(Map.of()));
@@ -376,6 +377,36 @@ class AiInvocationServiceTest {
         assertNoContent(audits.get(1));
     }
 
+    @Test
+    void completeStructuredWithAdmissionCommitsQuotaImmediatelyBeforeProviderAttempt() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
+
+        service.completeStructured(invocation, IntroRationaleContent.class, invocationAdmission);
+
+        InOrder order = inOrder(auditService, invocationAdmission, aiProvider);
+        order.verify(auditService).recordStrictIndependentScoped(
+                eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+                any(), any(), any());
+        order.verify(invocationAdmission).commitLeaderInvocation();
+        order.verify(aiProvider).complete(any());
+    }
+
+    @Test
+    void completeStructuredWithAdmissionDoesNotCommitQuotaWhenGateDenies() {
+        doThrow(new ForbiddenException("AI features are not available"))
+                .when(aiFeatureGate).requireAiUsable(AiFeature.DEAL_BRIEF);
+        AiInvocation invocation = invocation("Summarize relationship state");
+
+        assertThrows(ForbiddenException.class, () ->
+                service.completeStructured(invocation, IntroRationaleContent.class, invocationAdmission));
+
+        verify(invocationAdmission, never()).commitLeaderInvocation();
+        verify(aiProviderConfigService, never()).resolveForOrg(ORG_ID, ACTOR_ID);
+        verify(aiProvider, never()).complete(any());
+    }
+
     private static <T> AiStructuredOutcome.Parsed<T> asParsed(AiStructuredOutcome<T> outcome) {
         if (outcome instanceof AiStructuredOutcome.Parsed<T> parsed) {
             return parsed;
@@ -404,7 +435,7 @@ class AiInvocationServiceTest {
         AiInputImage image = new AiInputImage(
                 "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
         return new AiInvocation(
-                invocation.feature(), invocation.context(), invocation.prompt(), List.of(image),
+                AiFeature.BUSINESS_CARD_EXTRACTION, invocation.context(), invocation.prompt(), List.of(image),
                 invocation.maxTokens(), invocation.temperature());
     }
 

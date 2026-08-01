@@ -51,6 +51,7 @@ public class AiInvocationService {
     private static final String UNKNOWN_TARGET = "unresolved";
     private static final String PARSE_OUTCOME_PARSED = "parsed";
     private static final Set<String> TRUNCATION_STOP_REASONS = Set.of("length", "max_tokens");
+    private static final Runnable NO_INVOCATION_COMMITMENT = () -> {};
 
     private final AiFeatureGate aiFeatureGate;
     private final AiMediaAdmissionService aiMediaAdmissionService;
@@ -66,7 +67,8 @@ public class AiInvocationService {
      * @return demasked completion outcome
      */
     public AiCompletionOutcome complete(AiInvocation invocation) {
-        try (RawInvocation raw = invokeRaw(invocation, AiOutputMode.TEXT)) {
+        try (RawInvocation raw = invokeRaw(
+                invocation, AiOutputMode.TEXT, NO_INVOCATION_COMMITMENT)) {
             AiCompletionResult result = raw.result();
             Demasker.DemaskResult demasked = Demasker.demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
@@ -88,7 +90,26 @@ public class AiInvocationService {
      * @return parsed or malformed structured outcome
      */
     public <T> AiStructuredOutcome<T> completeStructured(AiInvocation invocation, Class<T> type) {
-        return completeStructured(invocation, type, AiRawOutputGuard.PERMIT_ALL);
+        return completeStructuredWithCommitment(
+                invocation, type, AiRawOutputGuard.PERMIT_ALL, NO_INVOCATION_COMMITMENT);
+    }
+
+    /**
+     * Completes a structured invocation and commits the leader's reserved organization quota only
+     * immediately before the provider attempt.
+     * @param invocation masked invocation request
+     * @param type content type to bind the parsed object to
+     * @param admission active cache-miss leader admission
+     * @param <T> content type
+     * @return parsed or malformed structured outcome
+     */
+    public <T> AiStructuredOutcome<T> completeStructured(
+            AiInvocation invocation,
+            Class<T> type,
+            AiInvocationAdmissionService.Admission admission) {
+        Objects.requireNonNull(admission, "admission");
+        return completeStructuredWithCommitment(
+                invocation, type, AiRawOutputGuard.PERMIT_ALL, admission::commitLeaderInvocation);
     }
 
     /**
@@ -103,9 +124,39 @@ public class AiInvocationService {
      */
     public <T> AiStructuredOutcome<T> completeStructured(
             AiInvocation invocation, Class<T> type, AiRawOutputGuard guard) {
+        return completeStructuredWithCommitment(
+                invocation, type, guard, NO_INVOCATION_COMMITMENT);
+    }
+
+    /**
+     * Completes a guarded structured invocation and commits the leader's reserved organization
+     * quota only immediately before the provider attempt.
+     * @param invocation masked invocation request
+     * @param type content type to bind the parsed object to
+     * @param guard pre-demask validator run on the masked output
+     * @param admission active cache-miss leader admission
+     * @param <T> content type
+     * @return parsed or malformed structured outcome
+     */
+    public <T> AiStructuredOutcome<T> completeStructured(
+            AiInvocation invocation,
+            Class<T> type,
+            AiRawOutputGuard guard,
+            AiInvocationAdmissionService.Admission admission) {
+        Objects.requireNonNull(admission, "admission");
+        return completeStructuredWithCommitment(
+                invocation, type, guard, admission::commitLeaderInvocation);
+    }
+
+    private <T> AiStructuredOutcome<T> completeStructuredWithCommitment(
+            AiInvocation invocation,
+            Class<T> type,
+            AiRawOutputGuard guard,
+            Runnable invocationCommitment) {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(guard, "guard");
-        try (RawInvocation raw = invokeRaw(invocation, AiOutputMode.JSON)) {
+        Objects.requireNonNull(invocationCommitment, "invocationCommitment");
+        try (RawInvocation raw = invokeRaw(invocation, AiOutputMode.JSON, invocationCommitment)) {
             AiCompletionResult result = raw.result();
             String stripped = CompletionNormalizer.stripReasoning(result.text());
             ObjectNode object = AiJson.extractObject(stripped, objectMapper);
@@ -142,27 +193,26 @@ public class AiInvocationService {
                 result.inputTokens(), result.outputTokens(), result.stopReason());
     }
 
-    private RawInvocation invokeRaw(AiInvocation invocation, AiOutputMode outputMode) {
+    private RawInvocation invokeRaw(
+            AiInvocation invocation, AiOutputMode outputMode, Runnable invocationCommitment) {
         Objects.requireNonNull(invocation, "invocation");
         Objects.requireNonNull(outputMode, "outputMode");
+        Objects.requireNonNull(invocationCommitment, "invocationCommitment");
         boolean structured = outputMode == AiOutputMode.JSON;
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int orgId = workspaceService.getCurrentOrgId();
         String correlationId = UUID.randomUUID().toString();
 
         try {
-            if (invocation.images().isEmpty()) {
-                aiFeatureGate.requireAiUsable();
-            } else {
-                aiFeatureGate.requireAiImageUsable();
-            }
+            aiFeatureGate.requireAiUsable(invocation.feature());
         } catch (ForbiddenException exception) {
             emitAudit(workspaceId, orgId, null, invocation, correlationId, "blocked",
                     null, null, null, null, "gate", structured, null);
             throw exception;
         }
 
-        return invokeAdmitted(invocation, outputMode, workspaceId, orgId, correlationId);
+        return invokeAdmitted(
+                invocation, outputMode, workspaceId, orgId, correlationId, invocationCommitment);
     }
 
     private AiMediaAdmissionService.Lease acquireMedia(
@@ -185,7 +235,8 @@ public class AiInvocationService {
             AiOutputMode outputMode,
             int workspaceId,
             int orgId,
-            String correlationId) {
+            String correlationId,
+            Runnable invocationCommitment) {
         boolean structured = outputMode == AiOutputMode.JSON;
 
         ResolvedAiProvider resolved;
@@ -229,6 +280,7 @@ public class AiInvocationService {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
                         workspaceId, orgId, correlationId, invocation, structured));
             }
+            invocationCommitment.run();
             AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
                     .complete(request(resolved, invocation, outputMode));
             return new RawInvocation(
@@ -293,7 +345,7 @@ public class AiInvocationService {
         metadata.put("provider", provider(resolved));
         metadata.put("region", region(resolved));
         metadata.put("model", model(resolved));
-        metadata.put("feature", invocation.feature());
+        metadata.put("feature", invocation.feature().wireKey());
         metadata.put("outcome", outcome);
         metadata.put("correlationId", correlationId);
         metadata.put("messageCount", invocation.prompt().getMessages().size());

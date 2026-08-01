@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderReadiness;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
@@ -197,6 +198,25 @@ public class AiProviderConfigService implements AiProviderReadiness {
     public boolean isImageInputReadyForOrg(int orgId) {
         AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
         return isReady(config) && supportsImageInput(config);
+    }
+
+    /**
+     * Reads the credential-free provider generation profile used for cache hashing. This path does
+     * not lock user or organization rows and never decrypts credentials. A configuration change
+     * between this read and leader invocation can cache one output under the earlier profile hash;
+     * the next request reads the new profile and self-corrects with a cache miss.
+     * @param orgId organization whose provider profile is required
+     * @param maxTokens feature output token cap
+     * @param temperature feature sampling temperature
+     * @return credential-free generation profile
+     */
+    public AiGenerationProfile profileForOrg(int orgId, int maxTokens, double temperature) {
+        AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
+        if (!isReady(config)) {
+            throw new ForbiddenException("AI provider is not available for this organization");
+        }
+        return new AiGenerationProfile(
+                config.getProvider(), config.getRegion(), config.getModelId(), maxTokens, temperature);
     }
 
     /**

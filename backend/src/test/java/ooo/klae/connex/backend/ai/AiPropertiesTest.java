@@ -6,9 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.EnumMap;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.mock.env.MockEnvironment;
 
 class AiPropertiesTest {
 
@@ -23,7 +29,51 @@ class AiPropertiesTest {
         assertEquals(1, new AiProperties().getMaxConcurrentMediaRequestsPerOrg());
         assertEquals(67108864, new AiProperties().getMaxMediaWorkingBytes());
         assertTrue(yaml.contains("enabled: ${CONNEX_AI_ENABLED:false}"));
+        assertTrue(yaml.contains("deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}"));
         assertTrue(yaml.contains("nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}"));
         assertTrue(yaml.contains("max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}"));
+    }
+
+    @Test
+    void featuresDefaultOnOnlyUnderEnabledMasterSwitch() {
+        AiProperties properties = new AiProperties();
+
+        for (AiFeature feature : AiFeature.values()) {
+            assertFalse(properties.isFeatureEnabled(feature));
+        }
+
+        properties.setEnabled(true);
+
+        for (AiFeature feature : AiFeature.values()) {
+            assertTrue(properties.isFeatureEnabled(feature));
+        }
+    }
+
+    @Test
+    void explicitFeatureFalseDisablesOnlyThatFeature() {
+        AiProperties properties = new AiProperties();
+        properties.setEnabled(true);
+        Map<AiFeature, Boolean> features = new EnumMap<>(AiFeature.class);
+        features.put(AiFeature.DEAL_BRIEF, false);
+        properties.setFeatures(features);
+
+        assertFalse(properties.isFeatureEnabled(AiFeature.DEAL_BRIEF));
+        assertTrue(properties.isFeatureEnabled(AiFeature.REPORT_NARRATIVE));
+    }
+
+    @Test
+    void relaxedBindingMapsFeatureAndDurationKnobs() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("connex.ai.enabled", "true")
+                .withProperty("connex.ai.features.deal-brief", "false")
+                .withProperty("connex.ai.invocation-quota-window", "15m");
+
+        AiProperties properties = Binder.get(environment)
+                .bind("connex.ai", Bindable.of(AiProperties.class))
+                .orElseThrow(() -> new IllegalStateException("AI properties did not bind"));
+
+        assertFalse(properties.isFeatureEnabled(AiFeature.DEAL_BRIEF));
+        assertTrue(properties.isFeatureEnabled(AiFeature.REPORT_NARRATIVE));
+        assertEquals(Duration.ofMinutes(15), properties.getInvocationQuotaWindow());
     }
 }

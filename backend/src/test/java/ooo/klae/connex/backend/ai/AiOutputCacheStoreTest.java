@@ -42,6 +42,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class AiOutputCacheStoreTest {
+    private static final AiGenerationProfile PROFILE = new AiGenerationProfile(
+            "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0", 2048, 0.2);
+
     @Mock private AiOutputCacheMapper aiOutputCacheMapper;
     @Mock private PersonMapper personMapper;
 
@@ -54,25 +57,40 @@ class AiOutputCacheStoreTest {
 
     @Test
     void contentHash_isStableForIdenticalPromptAndBindings() {
-        assertEquals(store.contentHash(prompt("Owner: {{P1}}"), context("Mina Patel")),
-                store.contentHash(prompt("Owner: {{P1}}"), context("Mina Patel")));
+        assertEquals(store.contentHash(PROFILE, prompt("Owner: {{P1}}"), context("Mina Patel")),
+                store.contentHash(PROFILE, prompt("Owner: {{P1}}"), context("Mina Patel")));
     }
 
     @Test
-    void contentHash_usesFailClosedStructuredOutputPolicyVersion() {
-        assertEquals("v2-structured-json-fail-closed", AiOutputCacheStore.HASH_VERSION);
+    void contentHash_usesProviderProfileGroundingVersion() {
+        assertEquals("v3-provider-profile-grounding", AiOutputCacheStore.HASH_VERSION);
     }
 
     @Test
     void contentHash_differsWhenIdentityBindingsDiffer() {
-        assertNotEquals(store.contentHash(prompt("Owner: {{P1}}"), context("Mina Patel")),
-                store.contentHash(prompt("Owner: {{P1}}"), context("Mina Shah")));
+        assertNotEquals(store.contentHash(PROFILE, prompt("Owner: {{P1}}"), context("Mina Patel")),
+                store.contentHash(PROFILE, prompt("Owner: {{P1}}"), context("Mina Shah")));
     }
 
     @Test
     void contentHash_differsWhenPromptTextDiffers() {
-        assertNotEquals(store.contentHash(prompt("Owner: {{P1}}"), context("Mina Patel")),
-                store.contentHash(prompt("Lead: {{P1}}"), context("Mina Patel")));
+        assertNotEquals(store.contentHash(PROFILE, prompt("Owner: {{P1}}"), context("Mina Patel")),
+                store.contentHash(PROFILE, prompt("Lead: {{P1}}"), context("Mina Patel")));
+    }
+
+    @Test
+    void contentHash_differsWhenProviderOrModelChanges() {
+        AiGenerationProfile providerChanged = new AiGenerationProfile(
+                "vertex", "us-east-1", PROFILE.modelId(), PROFILE.maxTokens(), PROFILE.temperature());
+        AiGenerationProfile modelChanged = new AiGenerationProfile(
+                PROFILE.provider(), PROFILE.region(), "anthropic.claude-sonnet-4-v1:0",
+                PROFILE.maxTokens(), PROFILE.temperature());
+        String original = store.contentHash(PROFILE, prompt("Owner: {{P1}}"), context("Mina Patel"));
+
+        assertNotEquals(original,
+                store.contentHash(providerChanged, prompt("Owner: {{P1}}"), context("Mina Patel")));
+        assertNotEquals(original,
+                store.contentHash(modelChanged, prompt("Owner: {{P1}}"), context("Mina Patel")));
     }
 
     @Test

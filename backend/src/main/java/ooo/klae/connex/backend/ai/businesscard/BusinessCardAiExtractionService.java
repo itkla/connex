@@ -10,6 +10,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
@@ -31,7 +32,6 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 @Service
 @RequiredArgsConstructor
 public class BusinessCardAiExtractionService {
-    private static final String FEATURE = "business_card.scan";
     private static final int MAX_TOKENS = 512;
     private static final double TEMPERATURE = 0;
     private static final Pattern EMAIL = Pattern.compile(
@@ -47,7 +47,7 @@ public class BusinessCardAiExtractionService {
     private final AiInvocationService aiInvocationService;
 
     public boolean isAvailable() {
-        return aiFeatureGate.isAiImageUsable();
+        return aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
     }
 
     /**
@@ -68,7 +68,7 @@ public class BusinessCardAiExtractionService {
                     validated.height());
             MaskingContext context = new MaskingContext();
             AiInvocation invocation = new AiInvocation(
-                    FEATURE,
+                    AiFeature.BUSINESS_CARD_EXTRACTION,
                     context,
                     PromptAssembly.builder()
                             .system(MaskingEngine.maskFreeText(SYSTEM_PROMPT, context))

@@ -292,6 +292,12 @@ connex:
         # disclosures and counsel approval. An operator must explicitly set CONNEX_AI_ENABLED=true,
         # and the feature gate still requires an enabled, attested BYOP provider plus AI_USE.
         enabled: ${CONNEX_AI_ENABLED:false}
+        features:
+            deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}
+            deal-risk-rationale: ${CONNEX_AI_FEATURES_DEAL_RISK_RATIONALE:true}
+            intro-rationale: ${CONNEX_AI_FEATURES_INTRO_RATIONALE:true}
+            report-narrative: ${CONNEX_AI_FEATURES_REPORT_NARRATIVE:true}
+            business-card-extraction: ${CONNEX_AI_FEATURES_BUSINESS_CARD_EXTRACTION:true}
         # Instance gate for org-configured private/internal OpenAI-compatible endpoints. Defaults
         # false: on a shared multi-tenant deployment an org-supplied internal endpoint is an SSRF
         # vector, so the org-level allowInternalEndpoint flag is honored only when the operator of
@@ -307,6 +313,12 @@ connex:
         max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}
         max-concurrent-media-requests-per-org: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS_PER_ORG:1}
         max-media-working-bytes: ${CONNEX_AI_MAX_MEDIA_WORKING_BYTES:67108864}
+        invocation-quota-attempts-per-org: ${CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG:60}
+        invocation-quota-window: ${CONNEX_AI_INVOCATION_QUOTA_WINDOW:10m}
+        invocation-refresh-throttle: ${CONNEX_AI_INVOCATION_REFRESH_THROTTLE:30s}
+        invocation-quota-max-organizations: ${CONNEX_AI_INVOCATION_QUOTA_MAX_ORGANIZATIONS:10000}
+        invocation-refresh-max-identities: ${CONNEX_AI_INVOCATION_REFRESH_MAX_IDENTITIES:10000}
+        invocation-max-active-flights: ${CONNEX_AI_INVOCATION_MAX_ACTIVE_FLIGHTS:10000}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

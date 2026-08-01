@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -28,8 +29,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.i18n.LocaleContextHolder;
 
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
+import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiInvocation;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -46,21 +52,29 @@ import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.DealRiskService;
+import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
 class DealRiskRationaleServiceTest {
     private static final int WORKSPACE_ID = 17;
+    private static final int ORG_ID = 9;
     private static final int DEAL_ID = 29;
     private static final String CACHE_FEATURE = "deal.risk_rationale:en";
     private static final String HASH = "content-hash-1";
     private static final Instant NOW = Instant.parse("2026-07-09T18:30:00Z");
+    private static final AiGenerationProfile PROFILE = new AiGenerationProfile(
+            "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+            DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE);
 
     @Mock private DealRiskRationaleAssembler dealRiskRationaleAssembler;
     @Mock private AiInvocationService aiInvocationService;
+    @Mock private AiInvocationAdmissionService aiInvocationAdmissionService;
+    @Mock private Admission admission;
     @Mock private AiFeatureGate aiFeatureGate;
     @Mock private DealRiskService dealRiskService;
     @Mock private AiOutputCacheStore aiOutputCacheStore;
+    @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private WorkspaceService workspaceService;
 
     private DealRiskRationaleService service;
@@ -70,12 +84,20 @@ class DealRiskRationaleServiceTest {
         service = new DealRiskRationaleService(
                 dealRiskRationaleAssembler,
                 aiInvocationService,
+                aiInvocationAdmissionService,
                 aiFeatureGate,
                 dealRiskService,
                 aiOutputCacheStore,
+                aiProviderConfigService,
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        lenient().when(workspaceService.getCurrentOrgId()).thenReturn(ORG_ID);
+        lenient().when(aiProviderConfigService.profileForOrg(
+                ORG_ID, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE))
+                .thenReturn(PROFILE);
+        lenient().when(aiInvocationAdmissionService.acquire(any(), anyBoolean())).thenReturn(admission);
+        lenient().when(admission.decision()).thenReturn(Decision.LEADER);
         lenient().when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(true);
@@ -89,13 +111,13 @@ class DealRiskRationaleServiceTest {
 
     @Test
     void generate_aiNotUsable_returnsNotConfiguredWithoutRiskOrInvocation() {
-        when(aiFeatureGate.isAiUsable()).thenReturn(false);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(false);
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
         assertUnavailable(result, "not_configured");
         verify(dealRiskService, never()).assessDeal(anyInt(), anyInt());
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
     }
 
     @Test
@@ -104,27 +126,27 @@ class DealRiskRationaleServiceTest {
                 DEAL_ID, 125000, "USD", "none", 0,
                 List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 31))),
                 "2026-07-09 18:30:00");
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
         assertUnavailable(result, "not_at_risk");
         verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
     }
 
     @Test
     void generate_emptyFactors_returnsNotAtRiskWithoutInvocation() {
         DealRiskDto risk = new DealRiskDto(
                 DEAL_ID, 125000, "USD", "medium", 25, List.of(), "2026-07-09 18:30:00");
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
         assertUnavailable(result, "not_at_risk");
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
     }
 
     @Test
@@ -133,21 +155,21 @@ class DealRiskRationaleServiceTest {
         RationaleAssembly eligible = assembly();
         RationaleAssembly filtered = new RationaleAssembly(
             eligible.context(), eligible.prompt(), false, eligible.contributorPersonIds());
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(filtered);
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
         assertUnavailable(result, "not_at_risk");
-        verify(aiInvocationService, never()).completeStructured(any(), any());
-        verify(aiOutputCacheStore, never()).contentHash(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
+        verify(aiOutputCacheStore, never()).contentHash(any(), any(), any());
     }
 
     @Test
     void generate_happyPath_returnsDemaskedNarrativeActionsPersistsAndWarnings() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealRiskRationaleContent(
                                 "The deal is overdue and quiet.",
@@ -172,7 +194,7 @@ class DealRiskRationaleServiceTest {
     @Test
     void generate_contributorRestrictedBeforeCacheAdmissionReturnsProviderError() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealRiskRationaleContent("Fresh narrative.", List.of()),
                         0, 20, 10, "end_turn"));
@@ -189,10 +211,10 @@ class DealRiskRationaleServiceTest {
     void generate_cacheHit_reusesStoredRationaleWithoutInvocation() {
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
@@ -205,7 +227,7 @@ class DealRiskRationaleServiceTest {
         assertEquals(List.of("Stored action."), result.getActions());
         assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
         assertEquals(1, result.getWarnings());
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
         verify(aiOutputCacheStore, never()).saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any());
     }
@@ -215,10 +237,10 @@ class DealRiskRationaleServiceTest {
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(
                 WORKSPACE_ID, "deal.risk_rationale:ja", DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
@@ -229,20 +251,20 @@ class DealRiskRationaleServiceTest {
 
         assertTrue(result.isAvailable());
         assertEquals("保存済みの説明。", result.getNarrative());
-        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
     }
 
     @Test
     void generate_contentHashMismatch_regenerates() {
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealRiskRationaleContent("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
 
@@ -250,7 +272,7 @@ class DealRiskRationaleServiceTest {
 
         assertEquals("Fresh narrative.", result.getNarrative());
         assertEquals(NOW.toString(), result.getGeneratedAt());
-        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
+        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
                 eq(NOW.toString()), eq(List.of(73)));
@@ -260,18 +282,18 @@ class DealRiskRationaleServiceTest {
     void generate_refresh_bypassesCacheAndRegenerates() {
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealRiskRationaleContent("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
 
         DealRationaleDto result = service.generate(DEAL_ID, true);
 
         assertEquals("Fresh narrative.", result.getNarrative());
-        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
+        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission));
         verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
@@ -281,7 +303,7 @@ class DealRiskRationaleServiceTest {
     @Test
     void generate_malformedOutcome_returnsProviderErrorAndDoesNotPersist() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Malformed<>(
                         AiStructuredOutcome.REASON_TRUNCATED, 200, 200, "length"));
 
@@ -295,7 +317,7 @@ class DealRiskRationaleServiceTest {
     @Test
     void generate_blankNarrative_returnsProviderErrorAndDoesNotPersist() {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new DealRiskRationaleContent("   ", List.of("Do something.")), 0, 20, 5, "end_turn"));
 
@@ -329,17 +351,17 @@ class DealRiskRationaleServiceTest {
 
     private void arrangeMiss(RationaleAssembly assembly) {
         DealRiskDto risk = atRisk();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.DEAL_RISK_RATIONALE)).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.empty());
     }
 
     private void arrangeInvocationFailure(RuntimeException exception) {
         arrangeMiss(assembly());
-        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenThrow(exception);
     }
 

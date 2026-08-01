@@ -21,32 +21,30 @@ public class AiFeatureGate {
     private final WorkspaceService workspaceService;
     private final ObjectProvider<AiProviderReadiness> providerReadiness;
 
-    public boolean isAiUsable() {
-        return isAiUsable(false);
-    }
-
-    public boolean isAiImageUsable() {
-        return isAiUsable(true);
-    }
-
-    private boolean isAiUsable(boolean imageInput) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int orgId = workspaceService.getCurrentOrgId();
-        int actorId = workspaceService.getCurrentUserId();
-        return aiProperties.isEnabled()
-                && workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE)
-                && readiness(orgId, imageInput);
-    }
-
-    public void requireAiUsable() {
-        if (!isAiUsable()) {
-            throw new ForbiddenException("AI features are not available");
+    /**
+     * Evaluates instance, feature, permission, and provider readiness in fail-closed order.
+     * @param feature feature to evaluate
+     * @return true when the feature may invoke the configured provider
+     */
+    public boolean isAiUsable(AiFeature feature) {
+        if (!aiProperties.isFeatureEnabled(feature)) {
+            return false;
         }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        if (!workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE)) {
+            return false;
+        }
+        return readiness(workspaceService.getCurrentOrgId(), feature.requiresImageInput());
     }
 
-    public void requireAiImageUsable() {
-        if (!isAiImageUsable()) {
-            throw new ForbiddenException("AI image features are not available");
+    /**
+     * Requires the selected AI feature to pass the fail-closed gate.
+     * @param feature feature to require
+     */
+    public void requireAiUsable(AiFeature feature) {
+        if (!isAiUsable(feature)) {
+            throw new ForbiddenException("AI features are not available");
         }
     }
 

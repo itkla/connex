@@ -19,12 +19,15 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
+import ooo.klae.connex.backend.ai.AiGenerationProfile;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
-import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -33,21 +36,26 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 class AiReportNarrativeServiceTest {
     private final AiReportAssembler assembler = mock(AiReportAssembler.class);
     private final AiInvocationService invocationService = mock(AiInvocationService.class);
+    private final AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
     private final AiFeatureGate featureGate = mock(AiFeatureGate.class);
     private final AiOutputCacheStore cacheStore = mock(AiOutputCacheStore.class);
+    private final AiProviderConfigService providerConfigService = mock(AiProviderConfigService.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
-    private final AuthService authService = mock(AuthService.class);
     private final Clock clock = Clock.systemUTC();
 
     private final AiReportNarrativeService service = new AiReportNarrativeService(
-            assembler, invocationService, featureGate, cacheStore, workspaceService, authService, clock);
+            assembler, invocationService, admissionService, featureGate, cacheStore,
+            providerConfigService, workspaceService, clock);
 
     private static final List<ReportAppendixRowDto> SOURCES = List.of(
             new ReportAppendixRowDto("metric.0.0", "w1", "count · Total", BigDecimal.ONE, null, "count"));
+    private static final AiGenerationProfile PROFILE = new AiGenerationProfile(
+            "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+            AiReportNarrativeService.MAX_TOKENS, AiReportNarrativeService.TEMPERATURE);
 
     @Test
     void cachedNarrativeReturnsNotConfiguredWhenGateClosedWithoutTouchingProvider() {
-        when(featureGate.isAiUsable()).thenReturn(false);
+        when(featureGate.isAiUsable(AiFeature.REPORT_NARRATIVE)).thenReturn(false);
 
         ReportNarrativeDto result = service.cachedNarrative(
                 7, "Report", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31), SOURCES);
@@ -59,10 +67,14 @@ class AiReportNarrativeServiceTest {
 
     @Test
     void cachedNarrativeReturnsNotCachedOnCacheMissWithoutTouchingProvider() {
-        when(featureGate.isAiUsable()).thenReturn(true);
+        when(featureGate.isAiUsable(AiFeature.REPORT_NARRATIVE)).thenReturn(true);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(1);
+        when(workspaceService.getCurrentOrgId()).thenReturn(2);
         when(assembler.assemble(any())).thenReturn(mock(AiReportAssembly.class));
-        when(cacheStore.contentHash(any(), any())).thenReturn("hash");
+        when(providerConfigService.profileForOrg(
+                2, AiReportNarrativeService.MAX_TOKENS, AiReportNarrativeService.TEMPERATURE))
+                .thenReturn(PROFILE);
+        when(cacheStore.contentHash(any(), any(), any())).thenReturn("hash");
         when(cacheStore.find(anyInt(), anyString(), anyInt(), anyInt())).thenReturn(Optional.empty());
 
         ReportNarrativeDto result = service.cachedNarrative(
