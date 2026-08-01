@@ -6,5 +6,51 @@
     "retrying": "Retrying",
     "back": "Go back",
     "reference": "Reference: {digest}"
+  },
+  "NotFound": {
+    "title": "We couldn't find that",
+    "body": "This page doesn't exist, or it was moved or deleted.",
+    "home": "Go to dashboard",
+    "site": {
+      "body": "This page doesn't exist. Check the address, or head back to the start.",
+      "home": "Back to home"
+    },
+    "records": {
+      "body": "This record doesn't exist, or it was deleted. It may also belong to a different workspace.",
+      "contacts": "All contacts",
+      "companies": "All companies",
+      "deals": "All deals"
+    },
+    "activity": {
+      "body": "This item doesn't exist, or it was deleted. It may also belong to a different workspace.",
+      "tasks": "All tasks",
+      "notes": "All notes",
+      "activities": "All activities"
+    },
+    "library": {
+      "body": "This document or file doesn't exist, or it was deleted.",
+      "documents": "All documents",
+      "files": "All files"
+    },
+    "reports": {
+      "body": "This report doesn't exist, or it was deleted.",
+      "all": "All reports"
+    }
+  },
+  "AccessDenied": {
+    "title": "You don't have access",
+    "body": "Your role doesn't include permission to view this. Ask a workspace admin if you need access.",
+    "home": "Go to dashboard"
+  },
+  "PermissionsUnavailable": {
+    "title": "We couldn't confirm your permissions",
+    "body": "This page stays hidden until we can check what you're allowed to see. The issue is usually temporary — try again in a moment.",
+    "home": "Go to dashboard"
+  },
+  "SectionUnavailable": {
+    "title": "Couldn't load this",
+    "body": "This section failed to load. The rest of the page is unaffected.",
+    "retry": "Try again",
+    "retrying": "Retrying"
   }
 }
