@@ -49,6 +49,48 @@ For components that clearly extend an existing page/component pattern, or minor 
 
 When in doubt, open a reference page and mirror it.
 
+## Product grammar
+
+The signed-off 1.0 interaction contract (issue #842). A working checklist, not prose. The shared components named here are the enforcement surface — reuse them; do not hand-roll a wrapper, header, or state that one of them already owns.
+
+**Page shell & width tiers.** Every routed surface that renders inside the app shell `<main>` wraps its content in `PageShell` (`app/components/PageShell.tsx`) — never a hand-rolled `min-h-full … mx-auto max-w-* flex flex-col gap-*` div. Pick the `tier` by job, not by taste:
+- `wide` (`max-w-[100rem]`) — list/browser, dashboard, overview, settings, admin.
+- `reading` (`max-w-5xl`) — record detail and long-form pages.
+- `form` (`max-w-3xl`) — focused single-column forms and narrow detail.
+- Full-bleed surfaces (the relationship map) and marketing/docs shells do not use `PageShell`.
+Section rhythm (`gap-10` between stacked children) and page gutter/padding come from the shell — do not re-declare them. A `loading.tsx` skeleton uses the same `PageShell` tier as the page it stands in for.
+
+**Page header.** The page title is a `PageHeader` (`app/components/PageHeader.tsx`), never a bare `<h1>`. Canon: `text-4xl font-extrabold tracking-tight`; the `compact` variant only for a genuinely secondary page. Optional `description` sits under the title; `actions` is the right-aligned cluster (the caller composes primary + secondary). Domain identity headers (record detail with a dynamic name/avatar, the Me and report-document heroes) are §17 domain expression and keep their bespoke header — they still adopt `PageShell`.
+
+**States.** Every list/collection ships all four:
+- Loading → `loading.tsx` skeletons (shape-matched), never a centered spinner over content.
+- Empty → `EmptyState` (`app/components/EmptyState.tsx`); `tone="brand"` teaches/encourages on a true first-run empty, `tone="muted"` for a neutral/no-results empty. Not "nothing here". Record browsers wire it through `RecordsRenderView`'s `emptyState` prop.
+- Error → `ErrorState` inside a `SectionBoundary` so one failed section never blanks the page.
+- Permission (403) → `AccessDenied` (`app/components/AccessDenied.tsx`): `variant="page"` for a route-level refusal (localized via `AccessDeniedPage`), `variant="inline"` for an in-panel refusal (settings/organization tabs). Never a swallowed 403 that renders as empty — an empty security surface implies "nothing happened" when the answer is "you may not view this."
+
+**Cards vs open sections (§13/§16).** Cards are semantic containers — an actionable insight, a record preview, a grouped metric, a self-contained widget, a distinct status. Content that already belongs to the surrounding page uses open sections, dividers, typography, and whitespace. No card-in-card unless hierarchy demands it.
+
+**Density & work modes (§2).** Comfortable is the baseline. Compactness is user-selected, scoped, reversible, and persistent — only in explicit bounded work modes (tables, bulk cleanup, imports, pipeline review). Cards, forms, Home, dashboards, detail pages, and mobile never inherit table density.
+
+**Overlay selection (§11/§12).** Inline edit for simple reversible fields; dialog/sheet for focused creation and small multi-field edits; a dedicated page/workspace for complex or consequential work. Reach for the lightest surface the job allows — a modal is rarely the first answer.
+
+**Motion (§14).** Expressive in memorable moments (page/section entrance via `Rise`, Peek, palette, Quick Create, drag/drop, meaningful completion); quiet and fast in repeated operations (table edit, filter/sort, bulk review, notification processing). *The first interaction may delight; the fiftieth must not irritate.* Repeated chrome (`PageShell`, `PageHeader`) carries no motion of its own — the page entrance owns it. Every animation honors `prefers-reduced-motion`.
+
+**Mobile (§12).** Same capability semantics, different presentation: task-adaptive lists and focused sheets, not desktop card stacks or horizontally scrolled tables. Generous touch targets; one task at a time; defer complex authoring until a real mobile job justifies it.
+
+**Color (§15/§18).** Calm neutral canvas. Semantic palettes (`--warmth-*`, `--chart-*`, success/warning/destructive, `--rank-*`) carry unambiguous meaning — never a raw hex or px, never color alone.
+
+### Review checklist (every new page / redesign / cross-surface pattern)
+- [ ] Content is inside `PageShell` at the correct `tier`; no hand-rolled wrapper, gutter, or `gap-*`.
+- [ ] Title is a `PageHeader` (canon size) with actions in the cluster slot; no bare `<h1>`.
+- [ ] Loading, empty, error, and permission states all present and use the shared components.
+- [ ] Cards only for genuine semantic units; open sections otherwise; no card-in-card.
+- [ ] Comfortable spacing by default; any density is an explicit, reversible work mode.
+- [ ] Overlay weight matches edit complexity (inline → dialog/sheet → page).
+- [ ] Motion restrained in repeated operations; reduced-motion path verified.
+- [ ] Only design tokens for color/spacing; verified in light + dark.
+- [ ] EN + JA keys added for every new string; verified at representative desktop and mobile widths.
+
 ## Conventions
 
 - **Comments:** JSDoc/TSDoc on exported functions/components/types only. **No inline comments.**
