@@ -28,7 +28,8 @@ function resolveProvider(
     providers: readonly ProviderCaptureOverview[],
     enabled: readonly ConnectedAccountProvider[],
 ): ConnectedAccountProvider | null {
-    const candidates = providers.filter((provider) => enabled.includes(provider.provider));
+    const enabledSet = new Set(enabled);
+    const candidates = providers.filter((provider) => enabledSet.has(provider.provider));
     const busiest = candidates
         .filter((provider) => pendingCount(provider) > 0)
         .sort((a, b) => pendingCount(b) - pendingCount(a))[0];
