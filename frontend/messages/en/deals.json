@@ -27,7 +27,7 @@
         "degraded": "Some relationship context was unavailable when this brief was generated.",
         "source_deal": "Deal #{id}",
         "source_person": "Contact #{id}",
-        "source_activity": "Activity #{id}",
+        "source_act": "Activity #{id}",
         "source_note": "Note #{id}",
         "source_task": "Task #{id}"
     },

@@ -129,8 +129,8 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                 <div className="flex flex-1 flex-col gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
                     {state.brief.sections && state.brief.sections.length > 0 ? (
                         <div className="grid max-w-[70ch] flex-1 gap-4">
-                            {state.brief.sections.map((section, index) => (
-                                <div key={index} className="grid gap-1.5">
+                            {state.brief.sections.map((section) => (
+                                <div key={section.title} className="grid gap-1.5">
                                     <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
                                     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
                                         {section.body}

@@ -386,8 +386,11 @@ export type DealBriefUnavailableReason =
     | 'rate_limited'
     | 'insufficient_data';
 
-/** Kind of record a brief section cites, mapped to a localized label and record link. */
-export type DealBriefCitationKind = 'deal' | 'person' | 'activity' | 'note' | 'task';
+/**
+ * Kind of record a brief section cites — the raw wire value emitted by the backend registry
+ * ({@code act} is an activity). Mapped to a localized label and record link on the client.
+ */
+export type DealBriefCitationKind = 'deal' | 'person' | 'act' | 'note' | 'task';
 
 /** A grounded reference from a brief section back to a real CRM record. */
 export type DealBriefCitation = {

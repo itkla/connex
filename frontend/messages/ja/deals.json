@@ -27,7 +27,7 @@
         "degraded": "このブリーフの生成時に、一部の関係コンテキストを取得できませんでした。",
         "source_deal": "取引 #{id}",
         "source_person": "連絡先 #{id}",
-        "source_activity": "アクティビティ #{id}",
+        "source_act": "アクティビティ #{id}",
         "source_note": "メモ #{id}",
         "source_task": "タスク #{id}"
     },

@@ -102,9 +102,13 @@ function aiExtractedFields(result: BusinessCardScanResult): ConfidenceField[] {
         { field: 'title', ...result.fields.title },
         { field: 'company', ...result.company },
     ];
-    return candidates
-        .filter((candidate) => Boolean(candidate.value) && candidate.origin === 'AI')
-        .map((candidate) => candidate.field);
+    const fields: ConfidenceField[] = [];
+    for (const candidate of candidates) {
+        if (candidate.value && candidate.origin === 'AI') {
+            fields.push(candidate.field);
+        }
+    }
+    return fields;
 }
 
 function importErrorMessageKey(kind: BusinessCardRequestErrorKind, canDiscardImage: boolean) {
