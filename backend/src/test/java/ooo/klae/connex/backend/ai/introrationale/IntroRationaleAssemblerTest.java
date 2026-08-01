@@ -96,7 +96,7 @@ class IntroRationaleAssemblerTest {
     }
 
     @Test
-    void assemble_japaneseLocaleTranslatesOnlyJsonStringValues() {
+    void assemble_japaneseLocaleTranslatesRationaleAndPreservesReasonCodes() {
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         try {
             IntroSuggestionDto suggestion = new IntroSuggestionDto();
@@ -110,10 +110,13 @@ class IntroRationaleAssemblerTest {
 
             String systemPrompt = assembler.assemble(WORKSPACE_ID, suggestion).prompt().getSystemPrompt();
 
-            assertTrue(systemPrompt.contains("Write every JSON string value in Japanese"));
-            assertTrue(systemPrompt.contains("keep all JSON property names"));
+            assertTrue(systemPrompt.contains(
+                    "Use Japanese only for the natural-language \"rationale\" value"));
+            assertTrue(systemPrompt.contains("Keep all JSON property names"));
             assertTrue(systemPrompt.contains("in English exactly as specified"));
-            assertTrue(systemPrompt.contains("do not translate the keys"));
+            assertTrue(systemPrompt.contains(
+                    "Copy every \"reasonCodes\" value verbatim from the supplied Reason codes"));
+            assertTrue(systemPrompt.contains("do not translate grounding identifiers"));
             assertTrue(systemPrompt.contains("\"rationale\""));
             assertTrue(systemPrompt.contains("\"reasonCodes\""));
         } finally {

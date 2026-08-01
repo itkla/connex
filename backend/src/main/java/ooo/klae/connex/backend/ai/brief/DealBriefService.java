@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
@@ -71,20 +72,21 @@ public class DealBriefService {
      * @return available brief or a graceful unavailability response
      */
     public DealBriefDto generate(int dealId, boolean refresh) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
-        if (!hasSufficientEvidence(assembly.sourceRegistry(), dealId)) {
-            return DealBriefDto.unavailable(dealId, INSUFFICIENT_DATA);
-        }
         Optional<AiGenerationProfile> profile = aiFeatureGate.generationProfileIfUsable(
                 AiFeature.DEAL_BRIEF, MAX_TOKENS, TEMPERATURE);
         if (profile.isEmpty()) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
         }
 
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
+        if (!hasSufficientEvidence(assembly.sourceRegistry(), dealId)) {
+            return DealBriefDto.unavailable(dealId, INSUFFICIENT_DATA);
+        }
         String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(
-                profile.get(), assembly.prompt(), assembly.context());
+                profile.get(), assembly.prompt(), assembly.context(),
+                sourceRegistryHashMaterial(assembly.sourceRegistry()));
         if (!refresh) {
             DealBriefDto cached = cached(
                     workspaceId, cacheFeature, dealId, contentHash, assembly);
@@ -214,6 +216,15 @@ public class DealBriefService {
         boolean hasSupportingSource = sourceRegistry.values().stream()
                 .anyMatch(source -> !currentDeal.equals(source));
         return hasCurrentDeal && hasSupportingSource;
+    }
+
+    private static List<String> sourceRegistryHashMaterial(
+            Map<String, DealBriefSource> sourceRegistry) {
+        return sourceRegistry.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .flatMap(entry -> Stream.of(
+                        entry.getKey(), entry.getValue().kind(), Integer.toString(entry.getValue().id())))
+                .toList();
     }
 
     private static String cacheFeature() {

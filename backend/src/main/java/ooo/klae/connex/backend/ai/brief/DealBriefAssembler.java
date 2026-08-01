@@ -592,9 +592,10 @@ public class DealBriefAssembler {
 
     private static String languageDirective() {
         String language = LocaleContextHolder.getLocale().getDisplayLanguage(Locale.ENGLISH);
-        return "\nWrite every JSON string value in " + (language.isBlank() ? "English" : language)
-                + ", but keep all JSON property names (the object keys) in English exactly as specified;"
-                + " do not translate the keys.";
+        return "\nUse " + (language.isBlank() ? "English" : language)
+                + " only for the natural-language \"title\" and \"body\" values. Keep all JSON property"
+                + " names in English exactly as specified. Copy every \"sourceIds\" value verbatim from"
+                + " the supplied positional Source ids; do not translate grounding identifiers.";
     }
 
     private static boolean isUsableMasked(String value) {

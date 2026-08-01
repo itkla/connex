@@ -116,9 +116,10 @@ public class IntroRationaleAssembler {
 
     private static String languageDirective() {
         String language = LocaleContextHolder.getLocale().getDisplayLanguage(Locale.ENGLISH);
-        return "\nWrite every JSON string value in " + (language.isBlank() ? "English" : language)
-                + ", but keep all JSON property names (the object keys) in English exactly as specified;"
-                + " do not translate the keys.";
+        return "\nUse " + (language.isBlank() ? "English" : language)
+                + " only for the natural-language \"rationale\" value. Keep all JSON property names"
+                + " in English exactly as specified. Copy every \"reasonCodes\" value verbatim from"
+                + " the supplied Reason codes; do not translate grounding identifiers.";
     }
 
     private static String identifierToken(EntityKind kind, String value, MaskingContext context) {

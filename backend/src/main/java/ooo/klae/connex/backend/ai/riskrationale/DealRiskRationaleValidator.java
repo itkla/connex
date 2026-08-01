@@ -15,6 +15,7 @@ final class DealRiskRationaleValidator {
                 || factorCodes == null || factorCodes.isEmpty()
                 || !validCodes(content.narrativeFactorCodes(), factorCodes)
                 || content.recommendedActions() == null
+                || content.recommendedActions().isEmpty()
                 || content.recommendedActions().size() > DealRiskRationaleService.MAX_ACTIONS) {
             return Optional.empty();
         }

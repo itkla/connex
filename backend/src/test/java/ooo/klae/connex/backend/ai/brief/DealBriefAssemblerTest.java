@@ -175,16 +175,19 @@ class DealBriefAssemblerTest {
     }
 
     @Test
-    void assemble_japaneseLocaleTranslatesOnlyJsonStringValues() {
+    void assemble_japaneseLocaleTranslatesProseAndPreservesSourceIds() {
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         try {
             String systemPrompt = assembler.assemble(WORKSPACE_ID, DEAL_ID).prompt().getSystemPrompt();
 
-            assertTrue(systemPrompt.contains("Write every JSON string value in Japanese"));
-            assertTrue(systemPrompt.contains("keep all JSON property names"));
+            assertTrue(systemPrompt.contains(
+                    "Use Japanese only for the natural-language \"title\" and \"body\" values"));
+            assertTrue(systemPrompt.contains("Keep all JSON property names"));
             assertTrue(systemPrompt.contains("in English exactly as specified"));
-            assertTrue(systemPrompt.contains("do not translate the keys"));
+            assertTrue(systemPrompt.contains(
+                    "Copy every \"sourceIds\" value verbatim from the supplied positional Source ids"));
+            assertTrue(systemPrompt.contains("do not translate grounding identifiers"));
             assertTrue(systemPrompt.contains("\"sections\""));
             assertTrue(systemPrompt.contains("\"title\""));
             assertTrue(systemPrompt.contains("\"body\""));

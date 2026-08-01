@@ -198,7 +198,7 @@ class DealRiskRationaleServiceTest {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        content("Fresh narrative.", List.of()),
+                        content("Fresh narrative.", List.of("Follow up with the stakeholder.")),
                         0, 20, 10, "end_turn"));
         when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
@@ -270,7 +270,7 @@ class DealRiskRationaleServiceTest {
                 WORKSPACE_ID, "deal.risk_rationale:ja", DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
-                .thenReturn(Optional.of(content("保存済みの説明。", List.of())));
+                .thenReturn(Optional.of(content("保存済みの説明。", List.of("フォローアップする。"))));
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -291,7 +291,7 @@ class DealRiskRationaleServiceTest {
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        content("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
+                        content("Fresh narrative.", List.of("Follow up with the stakeholder.")), 0, 20, 10, "end_turn"));
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -316,7 +316,7 @@ class DealRiskRationaleServiceTest {
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        content("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
+                        content("Fresh narrative.", List.of("Follow up with the stakeholder.")), 0, 20, 10, "end_turn"));
 
         DealRationaleDto result = service.generate(DEAL_ID, true);
 

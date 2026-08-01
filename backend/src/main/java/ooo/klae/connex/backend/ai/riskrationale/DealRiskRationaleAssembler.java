@@ -417,9 +417,11 @@ public class DealRiskRationaleAssembler {
 
     private static String languageDirective() {
         String language = LocaleContextHolder.getLocale().getDisplayLanguage(Locale.ENGLISH);
-        return "\nWrite every JSON string value in " + (language.isBlank() ? "English" : language)
-                + ", but keep all JSON property names (the object keys) in English exactly as specified;"
-                + " do not translate the keys.";
+        return "\nUse " + (language.isBlank() ? "English" : language)
+                + " only for the natural-language \"narrative\" and \"text\" values. Keep all JSON"
+                + " property names in English exactly as specified. Copy every \"narrativeFactorCodes\""
+                + " and \"factorCodes\" value verbatim from the supplied Code values; do not translate"
+                + " grounding identifiers.";
     }
 
     private static String truncate(String value, int maxCodePoints) {
