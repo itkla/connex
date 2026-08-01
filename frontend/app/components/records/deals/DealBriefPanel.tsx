@@ -6,15 +6,19 @@ import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import { generateDealBrief } from '@/app/lib/api';
 import { recoverAiResult } from '@/app/lib/aiRecovery';
-import type { DealBrief } from '@/app/lib/types';
+import type { DealBrief, DealBriefCitation } from '@/app/lib/types';
+import { formatDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 
 type BriefState =
     | { status: 'loading' }
     | { status: 'hidden' }
     | { status: 'error' }
+    | { status: 'rateLimited' }
+    | { status: 'insufficient' }
     | { status: 'ready'; brief: DealBrief };
 
 type DealBriefState = BriefState & { dealId: number };
@@ -47,6 +51,10 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                     setStoredState({ dealId, status: 'ready', brief });
                 } else if (brief.reason === 'provider_error') {
                     setStoredState({ dealId, status: 'error' });
+                } else if (brief.reason === 'rate_limited') {
+                    setStoredState({ dealId, status: 'rateLimited' });
+                } else if (brief.reason === 'insufficient_data') {
+                    setStoredState({ dealId, status: 'insufficient' });
                 } else {
                     setStoredState({ dealId, status: 'hidden' });
                 }
@@ -81,6 +89,9 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
 
     if (state.status === 'hidden') return null;
 
+    const citationLabel = (citation: DealBriefCitation) =>
+        t(`source_${citation.kind}`, { id: citation.id });
+
     return (
         <section aria-label={t('panelTitle')} className={cn('flex flex-col gap-3', className)}>
             <h2 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -102,16 +113,41 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                         {t('retry')}
                     </Button>
                 </div>
+            ) : state.status === 'rateLimited' ? (
+                <div className="flex flex-1 items-center justify-between gap-3 rounded-lg border px-4 py-3">
+                    <p className="text-sm text-muted-foreground">{t('rateLimited')}</p>
+                    <Button variant="ghost" size="sm" onClick={retry} className="shrink-0">
+                        <ArrowPathIcon className="size-4" aria-hidden />
+                        {t('retry')}
+                    </Button>
+                </div>
+            ) : state.status === 'insufficient' ? (
+                <div className="flex flex-1 items-center rounded-lg border border-dashed px-4 py-3">
+                    <p className="text-sm text-muted-foreground">{t('insufficientData')}</p>
+                </div>
             ) : (
                 <div className="flex flex-1 flex-col gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
                     {state.brief.sections && state.brief.sections.length > 0 ? (
                         <div className="grid max-w-[70ch] flex-1 gap-4">
                             {state.brief.sections.map((section, index) => (
-                                <div key={index} className="grid gap-1">
+                                <div key={index} className="grid gap-1.5">
                                     <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
                                     <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
                                         {section.body}
                                     </p>
+                                    {section.citations && section.citations.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1">
+                                            {section.citations.map((citation) => (
+                                                <Badge
+                                                    key={`${citation.kind}-${citation.id}`}
+                                                    variant="outline"
+                                                    className="font-normal text-muted-foreground"
+                                                >
+                                                    {citationLabel(citation)}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ))}
                         </div>
@@ -120,14 +156,13 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                             {state.brief.brief}
                         </div>
                     )}
+                    {state.brief.degraded ? (
+                        <p className="text-xs text-muted-foreground">{t('degraded')}</p>
+                    ) : null}
                     <div className="flex items-center justify-between gap-3">
                         <p className="text-xs text-muted-foreground">
                             {t('attribution', {
-                                time: state.brief.generatedAt
-                                    ? new Intl.DateTimeFormat(locale, { timeStyle: 'short' }).format(
-                                          new Date(state.brief.generatedAt),
-                                      )
-                                    : '',
+                                time: formatDateTime(state.brief.generatedAt ?? undefined, locale),
                             })}
                             {state.brief.warnings > 0 ? <> · {t('integrityWarning')}</> : null}
                         </p>

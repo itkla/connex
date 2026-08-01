@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { generateIntroRationale } from '@/app/lib/api';
 import type { IntroRationale } from '@/app/lib/types';
+import { formatDateTime } from '@/app/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
 type RationaleState =
@@ -31,6 +32,7 @@ export default function IntroRationaleLine({
     personBId: number;
 }) {
     const t = useTranslations('IntroRationale');
+    const locale = useLocale();
     const pairKey = `${Math.min(personAId, personBId)}:${Math.max(personAId, personBId)}`;
     const [storedState, setStoredState] = useState<IntroRationaleState>({ pairKey, status: 'loading' });
     const state: RationaleState = storedState.pairKey === pairKey ? storedState : { status: 'loading' };
@@ -66,6 +68,12 @@ export default function IntroRationaleLine({
             <LightBulbIcon className="mt-0.5 size-3.5 shrink-0" aria-label={t('label')} />
             <span>
                 {state.rationale.rationale}
+                <span className="text-muted-foreground/70">
+                    {' · '}
+                    {t('attribution', {
+                        time: formatDateTime(state.rationale.generatedAt ?? undefined, locale),
+                    })}
+                </span>
                 {state.rationale.warnings > 0 ? (
                     <span className="text-muted-foreground/70"> · {t('integrityWarning')}</span>
                 ) : null}

@@ -94,6 +94,19 @@ function confidenceItems(result: BusinessCardScanResult): Array<{ field: Confide
     return items;
 }
 
+function aiExtractedFields(result: BusinessCardScanResult): ConfidenceField[] {
+    const candidates: Array<{ field: ConfidenceField; value?: string | null; origin?: string | null }> = [
+        { field: 'name', ...result.fields.name },
+        { field: 'email', ...result.fields.email },
+        { field: 'phone', ...result.fields.phone },
+        { field: 'title', ...result.fields.title },
+        { field: 'company', ...result.company },
+    ];
+    return candidates
+        .filter((candidate) => Boolean(candidate.value) && candidate.origin === 'AI')
+        .map((candidate) => candidate.field);
+}
+
 function importErrorMessageKey(kind: BusinessCardRequestErrorKind, canDiscardImage: boolean) {
     switch (kind) {
         case 'unauthorized':
@@ -328,6 +341,7 @@ export function BusinessCardCapture({
     const cardControlsDisabled = disabled || requiresExactImportRetry;
 
     const confidences = result ? confidenceItems(result) : [];
+    const aiFields = result ? aiExtractedFields(result) : [];
     const warnings = result
         ? [...new Set(result.warnings.map(warningMessageKey))]
         : [];
@@ -379,6 +393,13 @@ export function BusinessCardCapture({
                                         </li>
                                     ))}
                                 </ul>
+                            )}
+                            {aiFields.length > 0 && (
+                                <p className="mt-2 text-xs leading-relaxed text-muted-foreground" role="note">
+                                    {t('cardAiExtractedFields', {
+                                        fields: aiFields.map((field) => t(confidenceLabelKey(field))).join(', '),
+                                    })}
+                                </p>
                             )}
                         </div>
                         {onRemove && (
