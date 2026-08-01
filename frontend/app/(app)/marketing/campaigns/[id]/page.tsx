@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
-    getCampaignFromCookie,
+    getCampaign,
     getCampaignAudienceFromCookie,
     getCampaignEngagement,
     getCampaignExports,
@@ -9,7 +9,8 @@ import {
     getCampaignSends,
     getCampaignSnapshots,
     getCurrentUserFromCookie,
-    getEffectivePermissionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
+    type CookieResult,
 } from "@/app/lib/api";
 import {
     type CampaignAudience,
@@ -20,6 +21,9 @@ import {
     type CampaignSend,
 } from "@/app/lib/types";
 import CampaignDetail from "@/app/components/marketing/campaigns/CampaignDetail";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailablePage";
+import { loadRecord } from "@/app/lib/recordAccess";
 
 export default async function CampaignDetailPage({
     params,
@@ -37,8 +41,12 @@ export default async function CampaignDetailPage({
         notFound();
     }
 
-    const campaignResult = await getCampaignFromCookie(id, cookie);
-    if (!campaignResult.ok) {
+    const campaignInit = { headers: { cookie: cookie ?? "" }, cache: "no-store" } as const;
+    const campaignAccess = await loadRecord(() => getCampaign(id, campaignInit));
+    if (campaignAccess.kind === "forbidden") {
+        return <AccessDeniedPage />;
+    }
+    if (campaignAccess.kind === "missing") {
         notFound();
     }
 
@@ -50,7 +58,7 @@ export default async function CampaignDetailPage({
         CampaignSend[],
         CampaignAudienceExport[],
         CampaignEngagement | null,
-        string[],
+        CookieResult<string[]>,
     ] = await Promise.all([
         getCampaignAudienceFromCookie(id, cookie),
         getCampaignSnapshots(id, init).catch(() => []),
@@ -58,23 +66,26 @@ export default async function CampaignDetailPage({
         getCampaignSends(id, init).catch(() => []),
         getCampaignExports(id, init).catch(() => []),
         getCampaignEngagement(id, init).catch(() => null),
-        getEffectivePermissionsFromCookie(cookie),
+        getEffectivePermissionsResultFromCookie(cookie),
     ]);
+    if (!effectivePermissions.ok) {
+        return <PermissionsUnavailablePage />;
+    }
 
     const initialAudience =
         audienceResult.ok && audienceResult.data ? audienceResult.data : null;
 
     return (
         <CampaignDetail
-            campaign={campaignResult.data}
+            campaign={campaignAccess.record}
             initialAudience={initialAudience}
             initialSnapshots={snapshots}
             initialMessages={messages}
             initialSends={sends}
             initialExports={exports}
             initialEngagement={engagement}
-            canManage={effectivePermissions.includes("CAMPAIGN_MANAGE")}
-            canSend={effectivePermissions.includes("CAMPAIGN_SEND")}
+            canManage={effectivePermissions.data.includes("CAMPAIGN_MANAGE")}
+            canSend={effectivePermissions.data.includes("CAMPAIGN_SEND")}
         />
     );
 }

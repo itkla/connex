@@ -3,10 +3,13 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
+import AccessDeniedPage from '@/app/components/AccessDeniedPage';
+import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
+import { loadRecord } from '@/app/lib/recordAccess';
 import {
     getActiveWorkspaceMembersResultFromCookie,
     getCurrentUserFromCookie,
-    getEffectivePermissionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
     getPipelinesFromCookie,
     getReport,
     getTagsFromCookie,
@@ -26,15 +29,18 @@ export default async function EditReportPage({ params }: { params: Promise<{ id:
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [report, pipelines, ownersResult, tags, effectivePermissions] = await Promise.all([
-        getReport(id, init).catch(() => null),
+    const [reportAccess, pipelines, ownersResult, tags, permissionsResult] = await Promise.all([
+        loadRecord(() => getReport(id, init)),
         getPipelinesFromCookie(cookie),
         getActiveWorkspaceMembersResultFromCookie(cookie),
         getTagsFromCookie(cookie).catch((): Tag[] => []),
-        getEffectivePermissionsFromCookie(cookie),
+        getEffectivePermissionsResultFromCookie(cookie),
     ]);
-    if (!report) notFound();
-    const canReadGoals = effectivePermissions.includes('GOAL_READ');
+    if (reportAccess.kind === 'forbidden') return <AccessDeniedPage />;
+    if (reportAccess.kind === 'missing') notFound();
+    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
+    const report = reportAccess.record;
+    const canReadGoals = permissionsResult.data.includes('GOAL_READ');
     if (!canReadGoals && report.config.widgets.some((widget) => widget.measure === 'attainment')) {
         redirect('/overview/reports');
     }
