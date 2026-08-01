@@ -21,7 +21,8 @@
     JOIN workspace cache_workspace
       ON cache_workspace.id = c.workspace_id AND cache_workspace.org_id = owner_workspace.org_id
     WHERE (
-      (c.feature LIKE 'intro.rationale:%'
+      c.feature LIKE 'report.narrative:%'
+      OR (c.feature LIKE 'intro.rationale:%'
         AND (c.subject_a_id = #{personId} OR c.subject_b_id = #{personId}))
       OR (c.feature LIKE 'deal.risk_rationale:%'
         AND c.subject_a_id IN (

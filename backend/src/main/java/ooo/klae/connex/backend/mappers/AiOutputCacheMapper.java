@@ -25,9 +25,9 @@ public interface AiOutputCacheMapper {
      * deal-keyed risk rationales for deals the person is a stakeholder of, plus deal briefs where
      * the person is a stakeholder or is currently linked through an activity, note, or task
      * (including same-org grantee workspaces the contact was shared into). Org-anchored via the
-     * workspace join off {@code workspaceId}. This purges the listed currently discoverable
-     * structured outputs; report narratives and removed-link, indirect-connection, or free-text
-     * provenance remain outside this method.
+     * workspace join off {@code workspaceId}. Report caches carry no person provenance, so safe
+     * erasure deliberately over-purges every report narrative in the same organization. Removed-link,
+     * indirect-connection, and free-text provenance remain outside this method.
      * @param workspaceId the restricting (owning) workspace, used to resolve the organization
      * @param personId the restricted contact
      * @return the number of cache rows removed

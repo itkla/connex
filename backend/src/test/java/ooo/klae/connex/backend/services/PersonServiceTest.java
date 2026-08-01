@@ -479,7 +479,7 @@ class PersonServiceTest extends AbstractServiceTest {
         assertNull(aiOutputCacheMapper.getBySubject(
             workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0));
         assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0));
-        assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
+        assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
 
         String changes = jdbcTemplate.queryForObject(
             "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "

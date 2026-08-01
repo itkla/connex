@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Objects;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -14,6 +16,7 @@ import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -27,6 +30,7 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
     @Autowired ActivityMapper activityMapper;
     @Autowired NoteMapper noteMapper;
     @Autowired TaskMapper taskMapper;
+    @Autowired OrganizationMapper organizationMapper;
 
     @Test
     void upsert_assignsGeneratedId() {
@@ -101,6 +105,8 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         Deal taskDeal = newDeal(pipeline, stage, company);
         Deal stakeholderDeal = newDeal(pipeline, stage, company);
         Deal unrelatedDeal = newDeal(pipeline, stage, company);
+        Workspace sameOrg = newWorkspaceInOrg(orgIdOf(workspace));
+        Workspace foreignOrg = newWorkspaceInOrg(newOrganization().getId());
         activityMapper.insert(activity(subject, activityDeal, actor));
         noteMapper.insert(note(subject, noteDeal, actor));
         taskMapper.insert(task(subject, taskDeal, actor));
@@ -112,8 +118,11 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         }
         save(workspace, "deal.brief:en", unrelatedDeal.getId(), 0,
                 "brief-unrelated", "{}", 0);
+        save(workspace, "report.narrative:v4:en", 4242, 0, "report-owner", "{}", 0);
+        save(sameOrg, "report.narrative:v4:ja", 4243, 0, "report-sibling", "{}", 0);
+        save(foreignOrg, "report.narrative:v4:en", 4244, 0, "report-foreign", "{}", 0);
 
-        assertEquals(5, aiOutputCacheMapper.deleteForPerson(workspace.getId(), subject.getId()));
+        assertEquals(7, aiOutputCacheMapper.deleteForPerson(workspace.getId(), subject.getId()));
 
         assertNull(cached("deal.brief:en", activityDeal));
         assertNull(cached("deal.brief:en", noteDeal));
@@ -124,6 +133,12 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         assertNotNull(cached("deal.risk_rationale:en", noteDeal));
         assertNotNull(cached("deal.risk_rationale:en", taskDeal));
         assertNotNull(cached("deal.brief:en", unrelatedDeal));
+        assertNull(aiOutputCacheMapper.getBySubject(
+                workspace.getId(), "report.narrative:v4:en", 4242, 0));
+        assertNull(aiOutputCacheMapper.getBySubject(
+                sameOrg.getId(), "report.narrative:v4:ja", 4243, 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+                foreignOrg.getId(), "report.narrative:v4:en", 4244, 0));
     }
 
     private AiOutputCache save(
@@ -186,5 +201,29 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         ws.setSlug("ws_" + unique());
         workspaceMapper.insert(ws);
         return ws;
+    }
+
+    private Organization newOrganization() {
+        String value = unique();
+        Organization organization = new Organization();
+        organization.setName("Org " + value);
+        organization.setSlug("org-" + value);
+        organizationMapper.insert(organization);
+        return organization;
+    }
+
+    private Workspace newWorkspaceInOrg(int orgId) {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        ws.setOrgId(orgId);
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
+    private int orgIdOf(Workspace ws) {
+        Integer orgId = workspaceMapper.getOrgId(ws.getId());
+        assertNotNull(orgId);
+        return Objects.requireNonNull(orgId);
     }
 }
