@@ -154,9 +154,20 @@ class AiOutputCacheStoreTest {
     }
 
     @Test
+    void deleteIfContentHashMatches_delegatesExactObservedVersion() {
+        when(aiOutputCacheMapper.deleteBySubjectAndContentHash(
+                7, "deal.brief", 29, 0, "hash-1")).thenReturn(1);
+
+        assertTrue(store.deleteIfContentHashMatches(7, "deal.brief", 29, 0, "hash-1"));
+        verify(aiOutputCacheMapper).deleteBySubjectAndContentHash(
+                7, "deal.brief", 29, 0, "hash-1");
+    }
+
+    @Test
     void save_withCurrentRestrictionEpochSerializesContentAndUpserts() {
         assertTrue(store.save(7, "deal.brief", 29, AiOutputCacheStore.NO_SUBJECT, "hash-1",
-                new DealBriefContent(List.of(new DealBriefContent.Section("Who they are", "Mina Patel."))), 2,
+                new DealBriefContent(List.of(new DealBriefContent.Section(
+                        "Who they are", "Mina Patel.", List.of("person.0")))), 2,
                 "2026-07-09T18:30:00Z", restrictionEpoch.current(7)));
 
         ArgumentCaptor<AiOutputCache> entry = ArgumentCaptor.forClass(AiOutputCache.class);

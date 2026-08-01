@@ -2,8 +2,8 @@ package ooo.klae.connex.backend.ai.brief;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -35,14 +35,17 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @RequiredArgsConstructor
 public class DealBriefService {
     static final int MAX_TOKENS = 2048;
-    static final int MAX_SECTIONS = 8;
+    static final int MIN_SECTIONS = 3;
+    static final int MAX_SECTIONS = 4;
     static final int MAX_TITLE_CHARS = 160;
     static final int MAX_BODY_CHARS = 2000;
+    static final int MIN_EVIDENCE_SOURCES = 2;
     static final double TEMPERATURE = 0.2;
 
     private static final String NOT_CONFIGURED = "not_configured";
     private static final String PROVIDER_ERROR = "provider_error";
     private static final String RATE_LIMITED = "rate_limited";
+    private static final String INSUFFICIENT_DATA = "insufficient_data";
 
     private final DealBriefAssembler dealBriefAssembler;
     private final AiInvocationService aiInvocationService;
@@ -69,18 +72,22 @@ public class DealBriefService {
      */
     public DealBriefDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
+        if (!hasSufficientEvidence(assembly.sourceRegistry(), dealId)) {
+            return DealBriefDto.unavailable(dealId, INSUFFICIENT_DATA);
+        }
         Optional<AiGenerationProfile> profile = aiFeatureGate.generationProfileIfUsable(
                 AiFeature.DEAL_BRIEF, MAX_TOKENS, TEMPERATURE);
         if (profile.isEmpty()) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
         }
 
-        BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
         String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(
                 profile.get(), assembly.prompt(), assembly.context());
         if (!refresh) {
-            DealBriefDto cached = cached(workspaceId, cacheFeature, dealId, contentHash);
+            DealBriefDto cached = cached(
+                    workspaceId, cacheFeature, dealId, contentHash, assembly);
             if (cached != null) {
                 return cached;
             }
@@ -101,11 +108,13 @@ public class DealBriefService {
                         admissionRefresh = false;
                         continue;
                     }
-                    DealBriefDto joined = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    DealBriefDto joined = cached(
+                            workspaceId, cacheFeature, dealId, contentHash, assembly);
                     return joined != null ? joined : DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
                 }
                 if (!refresh) {
-                    DealBriefDto rechecked = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    DealBriefDto rechecked = cached(
+                            workspaceId, cacheFeature, dealId, contentHash, assembly);
                     if (rechecked != null) {
                         admission.completeLeader(LeaderOutcome.CACHE_READY);
                         return rechecked;
@@ -121,21 +130,26 @@ public class DealBriefService {
                     if (!(outcome instanceof AiStructuredOutcome.Parsed<DealBriefContent> parsed)) {
                         return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
                     }
-                    List<DealBriefContent.Section> sections = sections(parsed.value());
-                    if (sections.isEmpty()) {
+                    Optional<DealBriefContent> validated = DealBriefValidator.validate(
+                            parsed.value(), assembly.sourceRegistry());
+                    if (validated.isEmpty()) {
                         return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
                     }
                     String generatedAt = Instant.now(clock).toString();
                     boolean safeToServe = aiOutputCacheStore.saveForPersons(
                             workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
-                            contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt,
+                            contentHash, validated.get(), parsed.demaskWarnings(), generatedAt,
                             assembly.contributorPersonIds());
                     if (!safeToServe) {
                         return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
                     }
                     admission.completeLeader(LeaderOutcome.CACHE_READY);
                     return DealBriefDto.of(
-                            dealId, toDtoSections(sections), generatedAt, parsed.demaskWarnings());
+                            dealId,
+                            toDtoSections(validated.get().sections(), assembly.sourceRegistry()),
+                            generatedAt,
+                            parsed.demaskWarnings(),
+                            assembly.degraded());
                 } catch (ForbiddenException exception) {
                     return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
                 } catch (RuntimeException exception) {
@@ -145,47 +159,61 @@ public class DealBriefService {
         }
     }
 
-    private DealBriefDto cached(int workspaceId, String cacheFeature, int dealId, String contentHash) {
+    private DealBriefDto cached(
+            int workspaceId,
+            String cacheFeature,
+            int dealId,
+            String contentHash,
+            BriefAssembly assembly) {
         Optional<AiOutputCache> row = aiOutputCacheStore.find(
                 workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT);
         if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
             return null;
         }
         Optional<DealBriefContent> content = aiOutputCacheStore.read(row.get().getPayload(), DealBriefContent.class);
-        if (content.isEmpty()) {
-            return null;
-        }
-        List<DealBriefContent.Section> sections = sections(content.get());
-        if (sections.isEmpty()) {
+        Optional<DealBriefContent> validated = content.flatMap(
+                value -> DealBriefValidator.validate(value, assembly.sourceRegistry()));
+        if (validated.isEmpty()) {
+            aiOutputCacheStore.deleteIfContentHashMatches(
+                    workspaceId,
+                    cacheFeature,
+                    dealId,
+                    AiOutputCacheStore.NO_SUBJECT,
+                    row.get().getContentHash());
             return null;
         }
         return DealBriefDto.of(
-                dealId, toDtoSections(sections), row.get().getGeneratedAt(), row.get().getWarnings());
+                dealId,
+                toDtoSections(validated.get().sections(), assembly.sourceRegistry()),
+                row.get().getGeneratedAt(),
+                row.get().getWarnings(),
+                assembly.degraded());
     }
 
-    private static List<DealBriefContent.Section> sections(DealBriefContent content) {
-        if (content == null || content.sections() == null) {
-            return List.of();
-        }
-        List<DealBriefContent.Section> sections = new ArrayList<>();
-        for (DealBriefContent.Section section : content.sections()) {
-            if (section == null || isBlank(section.title()) || isBlank(section.body())) {
-                continue;
-            }
-            sections.add(new DealBriefContent.Section(
-                    truncate(section.title().strip(), MAX_TITLE_CHARS),
-                    truncate(section.body().strip(), MAX_BODY_CHARS)));
-            if (sections.size() == MAX_SECTIONS) {
-                break;
-            }
-        }
-        return List.copyOf(sections);
-    }
-
-    private static List<DealBriefDto.Section> toDtoSections(List<DealBriefContent.Section> sections) {
+    private static List<DealBriefDto.Section> toDtoSections(
+            List<DealBriefContent.Section> sections,
+            Map<String, DealBriefSource> sourceRegistry) {
         return sections.stream()
-                .map(section -> new DealBriefDto.Section(section.title(), section.body()))
+                .map(section -> new DealBriefDto.Section(
+                        section.title(),
+                        section.body(),
+                        section.sourceIds().stream()
+                                .map(sourceRegistry::get)
+                                .map(source -> new DealBriefDto.Citation(source.kind(), source.id()))
+                                .toList()))
                 .toList();
+    }
+
+    private static boolean hasSufficientEvidence(
+            Map<String, DealBriefSource> sourceRegistry, int currentDealId) {
+        if (sourceRegistry.size() < MIN_EVIDENCE_SOURCES) {
+            return false;
+        }
+        DealBriefSource currentDeal = new DealBriefSource("deal", currentDealId);
+        boolean hasCurrentDeal = sourceRegistry.containsValue(currentDeal);
+        boolean hasSupportingSource = sourceRegistry.values().stream()
+                .anyMatch(source -> !currentDeal.equals(source));
+        return hasCurrentDeal && hasSupportingSource;
     }
 
     private static String cacheFeature() {
@@ -193,16 +221,4 @@ public class DealBriefService {
         return AiFeature.DEAL_BRIEF.wireKey() + ':' + (language.isBlank() ? "en" : language);
     }
 
-    private static String truncate(String value, int maxCodePoints) {
-        int codePoints = value.codePointCount(0, value.length());
-        if (codePoints <= maxCodePoints) {
-            return value;
-        }
-        int end = value.offsetByCodePoints(0, maxCodePoints - 1);
-        return value.substring(0, end) + "…";
-    }
-
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
-    }
 }

@@ -93,7 +93,8 @@ public class DealRiskRationaleService {
         String contentHash = aiOutputCacheStore.contentHash(
                 profile.get(), assembly.prompt(), assembly.context());
         if (!refresh) {
-            DealRationaleDto cached = cached(workspaceId, cacheFeature, dealId, contentHash);
+            DealRationaleDto cached = cached(
+                    workspaceId, cacheFeature, dealId, contentHash, assembly);
             if (cached != null) {
                 return cached;
             }
@@ -114,11 +115,13 @@ public class DealRiskRationaleService {
                         admissionRefresh = false;
                         continue;
                     }
-                    DealRationaleDto joined = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    DealRationaleDto joined = cached(
+                            workspaceId, cacheFeature, dealId, contentHash, assembly);
                     return joined != null ? joined : DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
                 }
                 if (!refresh) {
-                    DealRationaleDto rechecked = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    DealRationaleDto rechecked = cached(
+                            workspaceId, cacheFeature, dealId, contentHash, assembly);
                     if (rechecked != null) {
                         admission.completeLeader(LeaderOutcome.CACHE_READY);
                         return rechecked;
@@ -139,23 +142,22 @@ public class DealRiskRationaleService {
                             instanceof AiStructuredOutcome.Parsed<DealRiskRationaleContent> parsed)) {
                         return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
                     }
-                    DealRiskRationaleContent content = parsed.value();
-                    if (content == null || isBlank(content.narrative())) {
+                    Optional<DealRiskRationaleContent> validated = DealRiskRationaleValidator.validate(
+                            parsed.value(), assembly.factorCodes());
+                    if (validated.isEmpty()) {
                         return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
                     }
-                    String narrative = truncate(content.narrative().strip(), MAX_NARRATIVE_CHARS);
-                    List<String> actions = actions(content.actions());
+                    DealRiskRationaleContent content = normalize(validated.get());
                     String generatedAt = Instant.now(clock).toString();
                     boolean safeToServe = aiOutputCacheStore.saveForPersons(
                             workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
-                            contentHash, new DealRiskRationaleContent(narrative, actions),
+                            contentHash, content,
                             parsed.demaskWarnings(), generatedAt, assembly.contributorPersonIds());
                     if (!safeToServe) {
                         return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
                     }
                     admission.completeLeader(LeaderOutcome.CACHE_READY);
-                    return DealRationaleDto.of(
-                            dealId, narrative, actions, generatedAt, parsed.demaskWarnings());
+                    return toDto(dealId, content, generatedAt, parsed.demaskWarnings());
                 } catch (ForbiddenException exception) {
                     return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
                 } catch (RuntimeException exception) {
@@ -165,7 +167,12 @@ public class DealRiskRationaleService {
         }
     }
 
-    private DealRationaleDto cached(int workspaceId, String cacheFeature, int dealId, String contentHash) {
+    private DealRationaleDto cached(
+            int workspaceId,
+            String cacheFeature,
+            int dealId,
+            String contentHash,
+            RationaleAssembly assembly) {
         Optional<AiOutputCache> row = aiOutputCacheStore.find(
                 workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT);
         if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
@@ -173,32 +180,49 @@ public class DealRiskRationaleService {
         }
         Optional<DealRiskRationaleContent> content = aiOutputCacheStore.read(
                 row.get().getPayload(), DealRiskRationaleContent.class);
-        if (content.isEmpty() || isBlank(content.get().narrative())) {
+        Optional<DealRiskRationaleContent> validated = content.flatMap(
+                value -> DealRiskRationaleValidator.validate(value, assembly.factorCodes()));
+        if (validated.isEmpty()) {
+            aiOutputCacheStore.deleteIfContentHashMatches(
+                    workspaceId,
+                    cacheFeature,
+                    dealId,
+                    AiOutputCacheStore.NO_SUBJECT,
+                    row.get().getContentHash());
             return null;
         }
-        return DealRationaleDto.of(
-                dealId,
-                truncate(content.get().narrative().strip(), MAX_NARRATIVE_CHARS),
-                actions(content.get().actions()),
-                row.get().getGeneratedAt(),
-                row.get().getWarnings());
+        return toDto(
+                dealId, normalize(validated.get()), row.get().getGeneratedAt(), row.get().getWarnings());
     }
 
-    private static List<String> actions(List<String> actions) {
-        if (actions == null) {
-            return List.of();
+    private static DealRiskRationaleContent normalize(DealRiskRationaleContent content) {
+        List<DealRiskRationaleContent.RecommendedAction> recommendedActions = new ArrayList<>();
+        List<String> actions = new ArrayList<>();
+        for (DealRiskRationaleContent.RecommendedAction action : content.recommendedActions()) {
+            String text = truncate(action.text().strip(), MAX_ACTION_CHARS);
+            recommendedActions.add(new DealRiskRationaleContent.RecommendedAction(
+                    text, List.copyOf(action.factorCodes())));
+            actions.add(text);
         }
-        List<String> cleaned = new ArrayList<>();
-        for (String action : actions) {
-            if (isBlank(action)) {
-                continue;
-            }
-            cleaned.add(truncate(action.strip(), MAX_ACTION_CHARS));
-            if (cleaned.size() == MAX_ACTIONS) {
-                break;
-            }
-        }
-        return List.copyOf(cleaned);
+        return new DealRiskRationaleContent(
+                truncate(content.narrative().strip(), MAX_NARRATIVE_CHARS),
+                List.copyOf(content.narrativeFactorCodes()),
+                List.copyOf(recommendedActions),
+                List.copyOf(actions));
+    }
+
+    private static DealRationaleDto toDto(
+            int dealId, DealRiskRationaleContent content, String generatedAt, int warnings) {
+        return DealRationaleDto.of(
+                dealId,
+                content.narrative(),
+                content.narrativeFactorCodes(),
+                content.recommendedActions().stream()
+                        .map(action -> new DealRationaleDto.RecommendedAction(
+                                action.text(), action.factorCodes()))
+                        .toList(),
+                generatedAt,
+                warnings);
     }
 
     private static String cacheFeature() {
@@ -215,7 +239,4 @@ public class DealRiskRationaleService {
         return value.substring(0, end) + "…";
     }
 
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
-    }
 }

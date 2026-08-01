@@ -1,10 +1,12 @@
 package ooo.klae.connex.backend.ai.introrationale;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +62,8 @@ class IntroRationaleAssemblerTest {
         assertTrue(serialized.contains("Shared company: {{C1}}"));
         assertTrue(serialized.contains("Score: 82"));
         assertTrue(serialized.contains("CRM_CONTEXT_END"));
+        assertEquals(
+                Set.of("mutual_connections", "shared_company"), assembly.reasonCodes());
         assertFalse(serialized.contains("Alice Ng"));
         assertFalse(serialized.contains("Bob Lee"));
         assertFalse(serialized.contains("Atlas Systems"));
@@ -111,6 +115,7 @@ class IntroRationaleAssemblerTest {
             assertTrue(systemPrompt.contains("in English exactly as specified"));
             assertTrue(systemPrompt.contains("do not translate the keys"));
             assertTrue(systemPrompt.contains("\"rationale\""));
+            assertTrue(systemPrompt.contains("\"reasonCodes\""));
         } finally {
             LocaleContextHolder.resetLocaleContext();
         }

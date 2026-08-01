@@ -97,6 +97,7 @@ class DealRiskRationaleAssemblerTest {
         String serialized = serialized(assembly.prompt());
 
         assertEquals(List.of(PERSON_ID, 99), assembly.contributorPersonIds());
+        assertEquals(java.util.Set.of("stakeholder_cold"), assembly.factorCodes());
         assertTrue(serialized.contains("{{C1}}"));
         assertTrue(serialized.contains("{{P1}}"));
         assertTrue(serialized.contains("person={{P2}}"));
@@ -182,7 +183,8 @@ class DealRiskRationaleAssemblerTest {
             assertTrue(systemPrompt.contains("in English exactly as specified"));
             assertTrue(systemPrompt.contains("do not translate the keys"));
             assertTrue(systemPrompt.contains("\"narrative\""));
-            assertTrue(systemPrompt.contains("\"actions\""));
+            assertTrue(systemPrompt.contains("\"narrativeFactorCodes\""));
+            assertTrue(systemPrompt.contains("\"recommendedActions\""));
         } finally {
             LocaleContextHolder.resetLocaleContext();
         }

@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -153,7 +154,7 @@ class DealRiskRationaleServiceTest {
         DealRiskDto risk = atRisk();
         RationaleAssembly eligible = assembly();
         RationaleAssembly filtered = new RationaleAssembly(
-            eligible.context(), eligible.prompt(), false, eligible.contributorPersonIds());
+            eligible.context(), eligible.prompt(), false, Set.of(), eligible.contributorPersonIds());
         when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(filtered);
@@ -170,7 +171,7 @@ class DealRiskRationaleServiceTest {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        new DealRiskRationaleContent(
+                        content(
                                 "The deal is overdue and quiet.",
                                 List.of("Contact Mina Patel today.", "Confirm the budget.")),
                         2, 120, 45, "end_turn"));
@@ -180,6 +181,8 @@ class DealRiskRationaleServiceTest {
         assertTrue(result.isAvailable());
         assertEquals("The deal is overdue and quiet.", result.getNarrative());
         assertEquals(List.of("Contact Mina Patel today.", "Confirm the budget."), result.getActions());
+        assertEquals(List.of("stalled"), result.getNarrativeFactorCodes());
+        assertEquals(List.of("stalled"), result.getRecommendedActions().getFirst().factorCodes());
         assertEquals(
                 "The deal is overdue and quiet.\n• Contact Mina Patel today.\n• Confirm the budget.",
                 result.getRationale());
@@ -195,7 +198,7 @@ class DealRiskRationaleServiceTest {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        new DealRiskRationaleContent("Fresh narrative.", List.of()),
+                        content("Fresh narrative.", List.of()),
                         0, 20, 10, "end_turn"));
         when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
@@ -217,7 +220,7 @@ class DealRiskRationaleServiceTest {
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
-                .thenReturn(Optional.of(new DealRiskRationaleContent("Stored narrative.", List.of("Stored action."))));
+                .thenReturn(Optional.of(content("Stored narrative.", List.of("Stored action."))));
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -241,7 +244,7 @@ class DealRiskRationaleServiceTest {
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.empty(), Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
-                .thenReturn(Optional.of(new DealRiskRationaleContent(
+                .thenReturn(Optional.of(content(
                         "Leader narrative.", List.of("Leader action."))));
         when(admission.decision()).thenReturn(Decision.FOLLOWER);
         when(admission.awaitLeader()).thenReturn(LeaderOutcome.CACHE_READY);
@@ -267,7 +270,7 @@ class DealRiskRationaleServiceTest {
                 WORKSPACE_ID, "deal.risk_rationale:ja", DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
-                .thenReturn(Optional.of(new DealRiskRationaleContent("保存済みの説明。", List.of())));
+                .thenReturn(Optional.of(content("保存済みの説明。", List.of())));
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -288,7 +291,7 @@ class DealRiskRationaleServiceTest {
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        new DealRiskRationaleContent("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
+                        content("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -299,6 +302,8 @@ class DealRiskRationaleServiceTest {
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
                 eq(NOW.toString()), eq(List.of(73)));
+        verify(aiOutputCacheStore, never()).deleteIfContentHashMatches(
+                anyInt(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -311,7 +316,7 @@ class DealRiskRationaleServiceTest {
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        new DealRiskRationaleContent("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
+                        content("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
 
         DealRationaleDto result = service.generate(DEAL_ID, true);
 
@@ -342,7 +347,7 @@ class DealRiskRationaleServiceTest {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        new DealRiskRationaleContent("   ", List.of("Do something.")), 0, 20, 5, "end_turn"));
+                        content("   ", List.of("Do something.")), 0, 20, 5, "end_turn"));
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -401,7 +406,18 @@ class DealRiskRationaleServiceTest {
                 .system("Use only the supplied risk factors.")
                 .userTurn("Stakeholder: " + person)
                 .build();
-        return new RationaleAssembly(context, prompt, true, List.of(73));
+        return new RationaleAssembly(context, prompt, true, Set.of("stalled"), List.of(73));
+    }
+
+    private static DealRiskRationaleContent content(String narrative, List<String> actions) {
+        return new DealRiskRationaleContent(
+                narrative,
+                List.of("stalled"),
+                actions.stream()
+                        .map(action -> new DealRiskRationaleContent.RecommendedAction(
+                                action, List.of("stalled")))
+                        .toList(),
+                null);
     }
 
     private static AiOutputCache row(String contentHash, int warnings, String generatedAt) {

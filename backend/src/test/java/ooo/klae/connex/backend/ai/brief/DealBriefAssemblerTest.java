@@ -100,14 +100,17 @@ class DealBriefAssemblerTest {
         history.setStageName("Discovery");
         history.setAchievedAt("2026-07-01 09:00:00");
         Activity activity = new Activity();
+        activity.setId(201);
         activity.setSubject("Mina Patel met the team at Acme");
         activity.setNotes("Budget review went well");
         activity.setTimestamp("2026-07-08 14:00:00");
         Note note = new Note();
+        note.setId(301);
         note.setTitle("Call background");
         note.setContent("Mina Patel discussed a diagnosis and follow-up details.");
         note.setCreatedAt("2026-07-07 16:00:00");
         Task task = new Task();
+        task.setId(401);
         task.setDescription("Send Acme the revised proposal");
         task.setDueDate("2026-07-10");
         task.setCompleted(false);
@@ -132,7 +135,12 @@ class DealBriefAssemblerTest {
         when(scoringService.scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID))).thenReturn(List.of(temperature));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(aiRelationshipContext.appendStakeholderBackground(
-                any(StringBuilder.class), eq(PERSON_ID), any(), any())).thenReturn(List.of(99));
+                any(StringBuilder.class), eq(PERSON_ID), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    AiRelationshipContext.SourceIdProvider sourceIds = invocation.getArgument(4);
+                    sourceIds.sourceId("person", 99);
+                    return false;
+                });
 
         BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
         String serialized = serialized(assembly.prompt());
@@ -140,7 +148,7 @@ class DealBriefAssemblerTest {
         assertEquals(List.of(PERSON_ID, 99), assembly.contributorPersonIds());
         assertTrue(serialized.contains("{{P1}}"));
         assertTrue(serialized.contains("{{C1}}"));
-        assertTrue(serialized.contains(MaskingEngine.OMITTED_BY_POLICY));
+        assertFalse(serialized.contains(MaskingEngine.OMITTED_BY_POLICY));
         assertFalse(serialized.contains("Mina Patel"));
         assertFalse(serialized.contains("Acme"));
         assertFalse(serialized.contains("mina.patel@acme.example"));
@@ -149,8 +157,19 @@ class DealBriefAssemblerTest {
         assertTrue(serialized.contains("2026-08-31"));
         assertTrue(serialized.contains("2026-07-01 09:00:00"));
         assertTrue(serialized.contains("2026-07-08 14:00:00"));
-        assertTrue(serialized.contains("2026-07-07 16:00:00"));
+        assertFalse(serialized.contains("2026-07-07 16:00:00"));
         assertTrue(serialized.contains("2026-07-10"));
+        assertTrue(serialized.contains("Source: deal.0"));
+        assertTrue(serialized.contains("Source: person.0"));
+        assertTrue(serialized.contains("Source: act.0"));
+        assertFalse(serialized.contains("Source: " + DEAL_ID));
+        assertFalse(serialized.contains("Source: 201"));
+        assertEquals(new DealBriefSource("deal", DEAL_ID), assembly.sourceRegistry().get("deal.0"));
+        assertEquals(new DealBriefSource("person", PERSON_ID), assembly.sourceRegistry().get("person.0"));
+        assertEquals(new DealBriefSource("person", 99), assembly.sourceRegistry().get("person.1"));
+        assertEquals(new DealBriefSource("act", 201), assembly.sourceRegistry().get("act.0"));
+        assertFalse(assembly.sourceRegistry().containsValue(new DealBriefSource("note", 301)));
+        assertEquals(new DealBriefSource("task", 401), assembly.sourceRegistry().get("task.0"));
         verify(scoringService).scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID));
         verify(dealRiskService).assessDeal(WORKSPACE_ID, DEAL_ID);
     }
@@ -201,7 +220,8 @@ class DealBriefAssemblerTest {
         verify(scoringService).scoreContacts(WORKSPACE_ID, Set.of());
         verify(aiRelationshipContext, never()).appendStakeholderBackground(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -211,12 +231,15 @@ class DealBriefAssemblerTest {
         ceased.setName("Ceased Contact");
         ceased.setProvisionCeasedAt(LocalDateTime.parse("2026-07-02T00:00:00"));
         Activity activity = new Activity();
+        activity.setId(201);
         activity.setPerson(ceased);
         activity.setSubject("Activity for Ceased Contact");
         Note note = new Note();
+        note.setId(301);
         note.setPerson(ceased);
         note.setTitle("Note for Ceased Contact");
         Task task = new Task();
+        task.setId(401);
         task.setPerson(ceased);
         task.setDescription("Task for Ceased Contact");
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
@@ -243,12 +266,15 @@ class DealBriefAssemblerTest {
         linked.setId(74);
         linked.setName("Linked Contact");
         Activity activity = new Activity();
+        activity.setId(201);
         activity.setPerson(linked);
         activity.setSubject("Linked activity");
         Note note = new Note();
+        note.setId(301);
         note.setPerson(linked);
         note.setTitle("Linked note");
         Task task = new Task();
+        task.setId(401);
         task.setPerson(linked);
         task.setDescription("Linked task");
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
@@ -327,6 +353,31 @@ class DealBriefAssemblerTest {
         assertFalse(prompt.contains("Restricted task"));
     }
 
+    @Test
+    void assemble_doesNotRegisterCurrentDealFromStageHistoryOutsidePromptCap() {
+        Deal emptyDeal = new Deal();
+        emptyDeal.setId(DEAL_ID);
+        DealStageHistory oldMeaningful = new DealStageHistory();
+        oldMeaningful.setStageName("Old discovery");
+        List<DealStageHistory> history = new ArrayList<>();
+        history.add(oldMeaningful);
+        for (int index = 0; index < DealBriefAssembler.MAX_STAGE_HISTORY; index++) {
+            history.add(new DealStageHistory());
+        }
+        when(dealService.getDealById(DEAL_ID)).thenReturn(emptyDeal);
+        when(dealService.getStageHistory(DEAL_ID)).thenReturn(history);
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(
+                new DealPerson(person(), "Champion")));
+
+        BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
+        String prompt = serialized(assembly.prompt());
+
+        assertFalse(prompt.contains("Old discovery"));
+        assertTrue(prompt.contains("TIMELINE\n- none"));
+        assertFalse(assembly.sourceRegistry().containsValue(new DealBriefSource("deal", DEAL_ID)));
+        assertEquals(new DealBriefSource("person", PERSON_ID), assembly.sourceRegistry().get("person.0"));
+    }
+
     private static Deal deal() {
         Deal deal = new Deal();
         deal.setId(DEAL_ID);
@@ -355,6 +406,7 @@ class DealBriefAssemblerTest {
 
     private static Activity activity(Person person, String subject) {
         Activity activity = new Activity();
+        activity.setId(person.getId() + 1_000);
         activity.setPerson(person);
         activity.setSubject(subject);
         return activity;
@@ -362,6 +414,7 @@ class DealBriefAssemblerTest {
 
     private static Note note(Person person, String title) {
         Note note = new Note();
+        note.setId(person.getId() + 2_000);
         note.setPerson(person);
         note.setTitle(title);
         return note;
@@ -369,6 +422,7 @@ class DealBriefAssemblerTest {
 
     private static Task task(Person person, String description, boolean completed) {
         Task task = new Task();
+        task.setId(person.getId() + 3_000);
         task.setPerson(person);
         task.setDescription(description);
         task.setCompleted(completed);

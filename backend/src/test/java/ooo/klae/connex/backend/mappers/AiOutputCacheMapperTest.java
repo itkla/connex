@@ -73,6 +73,20 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void deleteBySubjectAndContentHash_removesOnlyObservedVersion() {
+        save(workspace, "deal.brief", 29, 0, "hash-current", "{}", 0);
+
+        assertEquals(0, aiOutputCacheMapper.deleteBySubjectAndContentHash(
+                workspace.getId(), "deal.brief", 29, 0, "hash-stale"));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+                workspace.getId(), "deal.brief", 29, 0));
+        assertEquals(1, aiOutputCacheMapper.deleteBySubjectAndContentHash(
+                workspace.getId(), "deal.brief", 29, 0, "hash-current"));
+        assertNull(aiOutputCacheMapper.getBySubject(
+                workspace.getId(), "deal.brief", 29, 0));
+    }
+
+    @Test
     void secondSubjectDistinguishesRows() {
         save(workspace, "intro.rationale", 29, 0, "hash-a", "{\"rationale\":\"a\"}", 0);
         save(workspace, "intro.rationale", 29, 41, "hash-b", "{\"rationale\":\"b\"}", 0);

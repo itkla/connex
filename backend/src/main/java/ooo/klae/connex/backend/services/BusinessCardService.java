@@ -420,7 +420,8 @@ public class BusinessCardService {
         }
         return new BusinessCardScanResponse(
                 draft.fields(),
-                new CompanyCandidate(candidate.value(), candidate.confidence(), matchedId),
+                new CompanyCandidate(
+                        candidate.value(), candidate.confidence(), candidate.origin(), matchedId),
                 List.copyOf(warnings));
     }
 

@@ -84,7 +84,7 @@ class AiRelationshipContextTest {
         context.appendAccountHistory(prompt, COMPANY_ID, CURRENT_DEAL_ID, new MaskingContext());
         String out = prompt.toString();
 
-        assertTrue(out.contains(MaskingEngine.OMITTED_BY_POLICY));
+        assertFalse(out.contains(MaskingEngine.OMITTED_BY_POLICY));
         assertFalse(out.contains("medical diagnosis"));
     }
 
@@ -105,14 +105,16 @@ class AiRelationshipContextTest {
     }
 
     @Test
-    void appendAccountHistory_failsClosedToNoneWhenFetchThrows() {
+    void appendAccountHistory_marksUnavailableAndDegradedWhenFetchThrows() {
         when(dealService.getAccountHistoryDeals(anyInt(), anyInt(), anyInt()))
             .thenThrow(new RuntimeException("boom"));
 
         StringBuilder prompt = new StringBuilder();
-        context.appendAccountHistory(prompt, COMPANY_ID, CURRENT_DEAL_ID, new MaskingContext());
+        boolean degraded = context.appendAccountHistory(
+                prompt, COMPANY_ID, CURRENT_DEAL_ID, new MaskingContext());
 
-        assertTrue(prompt.toString().contains("ACCOUNT_HISTORY\n- none\n"));
+        assertTrue(prompt.toString().contains("ACCOUNT_HISTORY\n- unavailable\n"));
+        assertTrue(degraded);
     }
 
     @Test
@@ -147,7 +149,7 @@ class AiRelationshipContextTest {
         assertTrue(out.contains("Status: current"));
         assertTrue(out.contains("Connection: {{P2}}"));
         assertTrue(out.contains("Trusted former teammate"));
-        assertTrue(out.contains(MaskingEngine.OMITTED_BY_POLICY));
+        assertFalse(out.contains(MaskingEngine.OMITTED_BY_POLICY));
         assertFalse(out.contains("Globex Corp"));
         assertFalse(out.contains("Jane Roe"));
         assertFalse(out.contains("medical diagnosis"));
@@ -216,6 +218,62 @@ class AiRelationshipContextTest {
         assertTrue(prompt.toString().contains("Industry: Manufacturing"));
     }
 
+    @Test
+    void appendPaths_distinguishNoneFromUnavailableWithoutDegradingAbsentIdentifiers() {
+        when(companyService.getCompanyById(COMPANY_ID)).thenReturn(null);
+        when(dealService.getAccountHistoryDeals(
+                COMPANY_ID, CURRENT_DEAL_ID, AiRelationshipContext.MAX_ACCOUNT_DEALS))
+                .thenReturn(List.of());
+
+        StringBuilder company = new StringBuilder();
+        StringBuilder history = new StringBuilder();
+
+        assertFalse(context.appendCompanyProfile(company, COMPANY_ID, new MaskingContext()));
+        assertFalse(context.appendAccountHistory(
+                history, COMPANY_ID, CURRENT_DEAL_ID, new MaskingContext()));
+        assertTrue(company.toString().contains("Industry: none"));
+        assertTrue(history.toString().contains("ACCOUNT_HISTORY\n- none\n"));
+
+        StringBuilder absent = new StringBuilder();
+        assertFalse(context.appendCompanyProfile(absent, 0, new MaskingContext()));
+        assertFalse(context.appendAccountHistory(absent, 0, CURRENT_DEAL_ID, new MaskingContext()));
+        assertFalse(context.appendStakeholderBackground(
+                absent, 0, null, new MaskingContext(), (kind, id) -> ""));
+        assertTrue(absent.toString().contains("Industry: none"));
+        assertTrue(absent.toString().contains("ACCOUNT_HISTORY\n- none\n"));
+        assertTrue(absent.toString().contains("Person: none"));
+    }
+
+    @Test
+    void appendStakeholderBackground_preservesSuccessfulConnectionsDuringEmploymentFailure() {
+        MaskingContext ctx = new MaskingContext();
+        String stakeholderToken = MaskingEngine.maskField(EntityKind.PERSON, "Champion Person", ctx);
+        when(personService.getEmploymentHistory(PERSON_ID)).thenThrow(new RuntimeException("boom"));
+        when(connectionService.getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS))
+                .thenReturn(List.of(connection("Allowed Person", "knows", 7, "Allowed note")));
+
+        StringBuilder prompt = new StringBuilder();
+        boolean degraded = context.appendStakeholderBackground(
+                prompt, PERSON_ID, stakeholderToken, ctx, (kind, id) -> "");
+
+        assertTrue(degraded);
+        assertTrue(prompt.toString().contains("Employment: unavailable"));
+        assertTrue(prompt.toString().contains("Connection: {{P2}}"));
+        assertFalse(prompt.toString().contains("Connection: unavailable"));
+    }
+
+    @Test
+    void appendCompanyProfile_marksUnavailableAndDegradedOnFailure() {
+        when(companyService.getCompanyById(COMPANY_ID)).thenThrow(new RuntimeException("boom"));
+
+        StringBuilder prompt = new StringBuilder();
+        boolean degraded = context.appendCompanyProfile(
+                prompt, COMPANY_ID, new MaskingContext());
+
+        assertTrue(degraded);
+        assertTrue(prompt.toString().contains("Industry: unavailable"));
+    }
+
     private static Deal deal(
             int id, Boolean won, double value, double actualValue, String currency, String reason, String closedAt) {
         Deal deal = new Deal();
@@ -231,6 +289,7 @@ class AiRelationshipContextTest {
 
     private static PersonConnectionDto connection(String name, String type, int strength, String note) {
         PersonConnectionDto connection = new PersonConnectionDto();
+        connection.setPersonId(100 + strength);
         connection.setPersonName(name);
         connection.setType(type);
         connection.setStrength(strength);

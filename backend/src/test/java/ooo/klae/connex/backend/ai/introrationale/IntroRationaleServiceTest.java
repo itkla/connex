@@ -20,6 +20,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -158,8 +159,7 @@ class IntroRationaleServiceTest {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        new IntroRationaleContent(
-                                "Alice and Bob share three trusted connections and complementary roles."),
+                        content("Alice and Bob share three trusted connections and complementary roles."),
                         2, 80, 24, "end_turn"));
 
         IntroRationaleDto result = service.generate(PERSON_B_ID, PERSON_A_ID);
@@ -170,6 +170,7 @@ class IntroRationaleServiceTest {
         assertEquals(
                 "Alice and Bob share three trusted connections and complementary roles.",
                 result.getRationale());
+        assertEquals(List.of("mutual_connections"), result.getReasonCodes());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         assertEquals(2, result.getWarnings());
 
@@ -188,7 +189,7 @@ class IntroRationaleServiceTest {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
-                        new IntroRationaleContent("Alice should meet Bob."),
+                        content("Alice should meet Bob."),
                         0, 20, 10, "end_turn"));
         when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
@@ -211,7 +212,7 @@ class IntroRationaleServiceTest {
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
                 .thenReturn(Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", IntroRationaleContent.class))
-                .thenReturn(Optional.of(new IntroRationaleContent("Stored rationale.")));
+                .thenReturn(Optional.of(content("Stored rationale.")));
 
         IntroRationaleDto result = service.generate(PERSON_B_ID, PERSON_A_ID);
 
@@ -235,7 +236,7 @@ class IntroRationaleServiceTest {
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
                 .thenReturn(Optional.empty(), Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", IntroRationaleContent.class))
-                .thenReturn(Optional.of(new IntroRationaleContent("Leader rationale.")));
+                .thenReturn(Optional.of(content("Leader rationale.")));
         when(admission.decision()).thenReturn(Decision.FOLLOWER);
         when(admission.awaitLeader()).thenReturn(LeaderOutcome.CACHE_READY);
 
@@ -259,7 +260,7 @@ class IntroRationaleServiceTest {
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission)))
-                .thenReturn(new AiStructuredOutcome.Parsed<>(new IntroRationaleContent("Fresh."), 0, 20, 10, "end_turn"));
+                .thenReturn(new AiStructuredOutcome.Parsed<>(content("Fresh."), 0, 20, 10, "end_turn"));
 
         IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
 
@@ -271,6 +272,8 @@ class IntroRationaleServiceTest {
                 eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
                 eq(HASH), any(IntroRationaleContent.class), eq(0), eq(NOW.toString()),
                 eq(List.of(PERSON_A_ID, PERSON_B_ID)));
+        verify(aiOutputCacheStore, never()).deleteIfContentHashMatches(
+                anyInt(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -291,7 +294,7 @@ class IntroRationaleServiceTest {
     void generate_blankRationale_returnsProviderErrorAndDoesNotPersist() {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission)))
-                .thenReturn(new AiStructuredOutcome.Parsed<>(new IntroRationaleContent("   "), 0, 5, 0, "end_turn"));
+                .thenReturn(new AiStructuredOutcome.Parsed<>(content("   "), 0, 5, 0, "end_turn"));
 
         IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
 
@@ -346,7 +349,11 @@ class IntroRationaleServiceTest {
                 .system("Use only the supplied introduction signals.")
                 .userTurn("Person A: " + personA + "; Person B: " + personB)
                 .build();
-        return new IntroRationaleAssembly(context, prompt);
+        return new IntroRationaleAssembly(context, prompt, Set.of("mutual_connections"));
+    }
+
+    private static IntroRationaleContent content(String rationale) {
+        return new IntroRationaleContent(rationale, List.of("mutual_connections"));
     }
 
     private static IntroSuggestionDto suggestion(int personAId, int personBId) {

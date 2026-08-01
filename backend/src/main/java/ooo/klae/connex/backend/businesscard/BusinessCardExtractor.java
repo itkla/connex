@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.CompanyCandidate;
+import ooo.klae.connex.backend.dto.BusinessCardScanResponse.ExtractionOrigin;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 
@@ -75,7 +76,8 @@ public class BusinessCardExtractor {
 
         return new BusinessCardScanResponse(
                 new Fields(field(name), field(email), field(phone), field(title)),
-                new CompanyCandidate(value(company), confidence(company), null),
+                new CompanyCandidate(
+                        value(company), confidence(company), origin(company), null),
                 List.copyOf(warnings));
     }
 
@@ -302,7 +304,8 @@ public class BusinessCardExtractor {
     private static FieldCandidate field(Candidate candidate) {
         return candidate == null
                 ? FieldCandidate.empty()
-                : new FieldCandidate(candidate.value(), candidate.confidence());
+                : new FieldCandidate(
+                        candidate.value(), candidate.confidence(), ExtractionOrigin.OCR);
     }
 
     private static String value(Candidate candidate) {
@@ -311,6 +314,10 @@ public class BusinessCardExtractor {
 
     private static Double confidence(Candidate candidate) {
         return candidate == null ? null : candidate.confidence();
+    }
+
+    private static ExtractionOrigin origin(Candidate candidate) {
+        return candidate == null ? null : ExtractionOrigin.OCR;
     }
 
     private static double clamp(double value) {

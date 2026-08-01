@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -20,6 +21,7 @@ public class IntroRationaleDto {
     private final int personBId;
     private final boolean available;
     private final String rationale;
+    private final List<String> reasonCodes;
     private final String generatedAt;
     private final int warnings;
     private final String reason;
@@ -29,17 +31,24 @@ public class IntroRationaleDto {
      * @param personAId canonical lower person id
      * @param personBId canonical higher person id
      * @param rationale demasked rationale prose
+     * @param reasonCodes deterministic suggestion reasons supporting the rationale
      * @param generatedAt ISO generation instant
      * @param warnings demasking warning count
      * @return available response
      */
     public static IntroRationaleDto of(
-            int personAId, int personBId, String rationale, String generatedAt, int warnings) {
+            int personAId,
+            int personBId,
+            String rationale,
+            List<String> reasonCodes,
+            String generatedAt,
+            int warnings) {
         return new IntroRationaleDto(
                 personAId,
                 personBId,
                 true,
                 Objects.requireNonNull(rationale, "rationale"),
+                List.copyOf(Objects.requireNonNull(reasonCodes, "reasonCodes")),
                 Objects.requireNonNull(generatedAt, "generatedAt"),
                 warnings,
                 null);
@@ -56,6 +65,6 @@ public class IntroRationaleDto {
         if (reason == null || !UNAVAILABLE_REASONS.contains(reason)) {
             throw new IllegalArgumentException("Unsupported introduction rationale unavailability reason");
         }
-        return new IntroRationaleDto(personAId, personBId, false, null, null, 0, reason);
+        return new IntroRationaleDto(personAId, personBId, false, null, null, null, 0, reason);
     }
 }

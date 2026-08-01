@@ -90,6 +90,24 @@ public class AiOutputCacheStore {
     }
 
     /**
+     * Deletes a cache row only while its content hash still matches the version the caller read.
+     * @param workspaceId active workspace
+     * @param feature feature key
+     * @param subjectAId primary subject id
+     * @param subjectBId secondary subject id, or {@link #NO_SUBJECT}
+     * @param contentHash hash observed on the invalid row
+     * @return true when a row matching the observed hash was deleted
+     */
+    public boolean deleteIfContentHashMatches(
+            int workspaceId, String feature, int subjectAId, int subjectBId, String contentHash) {
+        if (contentHash == null || contentHash.isBlank()) {
+            return false;
+        }
+        return aiOutputCacheMapper.deleteBySubjectAndContentHash(
+                workspaceId, feature, subjectAId, subjectBId, contentHash) == 1;
+    }
+
+    /**
      * Upserts the stored output for a subject only when the caller's restriction epoch is current.
      * A serialization failure refuses persistence and disclosure. This fence closes the in-flight
      * write window only within one application JVM; multi-instance deployments still need persisted

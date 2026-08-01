@@ -17,10 +17,16 @@ class DealBriefDtoTest {
     @Test
     void of_createsAvailableBrief() {
         List<DealBriefDto.Section> sections = List.of(
-                new DealBriefDto.Section("Who they are", "Acme Corp. renewal."),
-                new DealBriefDto.Section("Next step", "Call the champion."));
+                new DealBriefDto.Section(
+                        "Who they are",
+                        "Acme Corp. renewal.",
+                        List.of(new DealBriefDto.Citation("deal", DEAL_ID))),
+                new DealBriefDto.Section(
+                        "Next step",
+                        "Call the champion.",
+                        List.of(new DealBriefDto.Citation("person", 73))));
 
-        DealBriefDto result = DealBriefDto.of(DEAL_ID, sections, GENERATED_AT, 3);
+        DealBriefDto result = DealBriefDto.of(DEAL_ID, sections, GENERATED_AT, 3, true);
 
         assertEquals(DEAL_ID, result.getDealId());
         assertTrue(result.isAvailable());
@@ -30,12 +36,14 @@ class DealBriefDtoTest {
                 result.getBrief());
         assertEquals(GENERATED_AT, result.getGeneratedAt());
         assertEquals(3, result.getWarnings());
+        assertTrue(result.isDegraded());
         assertNull(result.getReason());
     }
 
     @Test
     void unavailable_acceptsSupportedReasons() {
-        for (String reason : List.of("not_configured", "provider_error", "rate_limited")) {
+        for (String reason : List.of(
+                "not_configured", "provider_error", "rate_limited", "insufficient_data")) {
             DealBriefDto result = DealBriefDto.unavailable(DEAL_ID, reason);
 
             assertEquals(DEAL_ID, result.getDealId());
@@ -44,6 +52,7 @@ class DealBriefDtoTest {
             assertNull(result.getBrief());
             assertNull(result.getGeneratedAt());
             assertEquals(0, result.getWarnings());
+            assertFalse(result.isDegraded());
             assertEquals(reason, result.getReason());
         }
     }
