@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -47,6 +48,7 @@ class CapabilitiesControllerTest {
         when(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL)).thenReturn(false);
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT)).thenReturn(true);
+        when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
 
         mockMvc.perform(get("/api/capabilities"))
                 .andExpect(status().isOk())
@@ -59,6 +61,16 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.connectedCapture.microsoft").value(false))
                 .andExpect(jsonPath("$.mailManaged").value(false))
                 .andExpect(jsonPath("$.businessCardScanning").value(true))
-                .andExpect(jsonPath("$.businessCardImport").value(true));
+                .andExpect(jsonPath("$.businessCardImport").value(true))
+                .andExpect(jsonPath("$.campaignDelivery").value(true));
+    }
+
+    @Test
+    void capabilitiesReportsCampaignDeliveryWhenUnavailable() throws Exception {
+        mockMvc.perform(get("/api/capabilities"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.campaignDelivery").value(false));
+
+        verify(capabilityRegistry).isAvailable(Capability.CAMPAIGN_DELIVERY);
     }
 }

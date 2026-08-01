@@ -24,6 +24,20 @@ import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 @Service
 public class CapabilityRegistry {
 
+    /**
+     * Declares the deployment-edition policy: the profiles under which each capability is
+     * refused regardless of entitlement, rollout, or operator configuration.
+     *
+     * <p>Managed mail is the only profile-constrained capability. It is transport operated by
+     * Connex on the customer's behalf, which cannot exist in an on-prem installation the
+     * customer runs itself; an on-prem operator configures their own SMTP instead. Every other
+     * capability is deliberately profile-neutral because its availability is already decided by
+     * its own operator setting — the deployment edition says nothing about whether an operator
+     * wants SSO, social login, connected accounts, card scanning, or campaign delivery.
+     *
+     * <p>Every capability is listed explicitly, and {@code CapabilityRegistryTest} pins this
+     * table literally, so adding a capability forces a deliberate profile decision here.
+     */
     private static final Map<Capability, Set<String>> FORBIDDEN_PROFILES = Map.ofEntries(
             Map.entry(Capability.SSO, Set.of()),
             Map.entry(Capability.SOCIAL_LOGIN_GOOGLE, Set.of()),
@@ -32,10 +46,13 @@ public class CapabilityRegistry {
             Map.entry(Capability.CONNECTED_ACCOUNTS_MICROSOFT, Set.of()),
             Map.entry(Capability.CONNECTED_CAPTURE_GOOGLE, Set.of()),
             Map.entry(Capability.CONNECTED_CAPTURE_MICROSOFT, Set.of()),
-            Map.entry(Capability.MANAGED_MAIL, Set.of()),
+            Map.entry(Capability.MANAGED_MAIL, Set.of(DeploymentProperties.PROFILE_ON_PREM)),
             Map.entry(Capability.BUSINESS_CARD_SCANNING, Set.of()),
             Map.entry(Capability.BUSINESS_CARD_IMPORT, Set.of()),
             Map.entry(Capability.CAMPAIGN_DELIVERY, Set.of()));
+
+    private static final Map<Capability, Set<String>> PRODUCTION_PROFILE_POLICY =
+            immutableForbiddenProfiles(FORBIDDEN_PROFILES);
 
     private final SsoConnectionService ssoConnectionService;
     private final SocialLoginClientRegistrations socialLoginClientRegistrations;
@@ -73,7 +90,7 @@ public class CapabilityRegistry {
         this(ssoConnectionService, socialLoginClientRegistrations, connectedAccountProviders,
                 connectedCaptureProperties,
                 mailProperties, businessCardService,
-                deploymentProperties, capabilityEntitlement, deliveryProperties, FORBIDDEN_PROFILES);
+                deploymentProperties, capabilityEntitlement, deliveryProperties, PRODUCTION_PROFILE_POLICY);
     }
 
     CapabilityRegistry(SsoConnectionService ssoConnectionService,
@@ -152,6 +169,31 @@ public class CapabilityRegistry {
             case BUSINESS_CARD_IMPORT -> businessCardService.isImportAvailable();
             case CAMPAIGN_DELIVERY -> deliveryProperties.isEnabled();
         };
+    }
+
+    /**
+     * Returns the production deployment-edition policy mapping every capability to the
+     * deployment profiles that refuse it.
+     *
+     * @return unmodifiable policy covering every {@link Capability}
+     */
+    public static Map<Capability, Set<String>> deploymentProfilePolicy() {
+        return PRODUCTION_PROFILE_POLICY;
+    }
+
+    /**
+     * Returns whether the deployment-edition policy permits a capability under a profile.
+     *
+     * @param capability capability to evaluate
+     * @param profile deployment profile, or {@code null} or blank when none is configured
+     * @return {@code true} when no configured profile forbids the capability
+     */
+    public static boolean isAllowedForProfile(Capability capability, String profile) {
+        Objects.requireNonNull(capability, "capability");
+        if (profile == null || profile.isBlank()) {
+            return true;
+        }
+        return !PRODUCTION_PROFILE_POLICY.get(capability).contains(profile);
     }
 
     private static Map<Capability, Set<String>> immutableForbiddenProfiles(
