@@ -622,6 +622,21 @@ async function resultWithCookie<T>(
     }
 }
 
+/**
+ * Wraps an in-flight request in the {@link CookieResult} shape, for fetchers that are
+ * already bound to their arguments and so cannot go through {@link resultWithCookie}.
+ * Lets a caller distinguish a failure from a legitimately empty payload without
+ * inventing a zeroed fallback.
+ * @param request the pending request
+ */
+export async function toResult<T>(request: Promise<T>): Promise<CookieResult<T>> {
+    try {
+        return { ok: true, data: await request };
+    } catch {
+        return { ok: false };
+    }
+}
+
 function buildQuery(params: Record<string, unknown>): string {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -1432,6 +1447,13 @@ export function getTasksFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Task>((init) => getTasks(init), cookie);
 }
 
+export function getTasksPageResultFromCookie(
+    cookie: string | null,
+    params: Types.PageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Task>>((init) => getTasksPage(params, init), cookie);
+}
+
 /** Bounded due-date-ordered open-task preview for the dashboard. */
 export function getUpcomingTasksFromCookie(cookie: string | null, limit = 4) {
     return getJson<Types.Task[]>(`/api/tasks/upcoming${buildQuery({ limit })}`, withCookie(cookie));
@@ -1493,6 +1515,16 @@ export function getActivitiesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Activity>((init) => getActivities(init), cookie);
 }
 
+export function getActivitiesPageResultFromCookie(
+    cookie: string | null,
+    params: Types.ActivitiesPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Activity>>(
+        (init) => getActivitiesPage(params, init),
+        cookie,
+    );
+}
+
 export function createActivity(payload: Types.CreateActivityPayload, init: RequestInit = {}) {
     return postJson<Types.Activity>(`/api/activities`, payload, init);
 }
@@ -1527,6 +1559,13 @@ export function getWorkspaceNotes(init: RequestInit = {}) {
 
 export function getNotesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
+}
+
+export function getNotesPageResultFromCookie(
+    cookie: string | null,
+    params: Types.NotesPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Note>>((init) => getNotesPage(params, init), cookie);
 }
 
 export function getNoteById(id: number, init: RequestInit = {}) {
@@ -1959,6 +1998,10 @@ export function getRecentMovesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.JobMove>((init) => getRecentMoves(init), cookie);
 }
 
+export function getRecentMovesResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.JobMove[]>((init) => getRecentMoves(init), cookie);
+}
+
 export function getContactConnections(id: number, init: RequestInit = {}) {
     return getJson<Types.PersonConnection[]>(`/api/persons/${id}/connections`, init);
 }
@@ -2359,6 +2402,13 @@ export function getDealBoard(pipelineId: number, init: RequestInit = {}) {
 
 export function getDealsFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Deal>((init) => getDeals(init), cookie);
+}
+
+export function getDealsPageResultFromCookie(
+    cookie: string | null,
+    params: Types.DealsPageParams = {},
+) {
+    return resultWithCookie<Types.Page<Types.Deal>>((init) => getDealsPage(params, init), cookie);
 }
 
 /**

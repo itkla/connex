@@ -13,7 +13,7 @@ import {
 
 import {
     getActiveWorkspaceMembersResultFromCookie,
-    getActivitiesPage,
+    getActivitiesPageResultFromCookie,
     getActivityVolumeFromCookie,
     getAllStagesResultFromCookie,
     getCapabilitiesResultFromCookie,
@@ -22,7 +22,6 @@ import {
     getAttachmentsPage,
     getCompanyById,
     getCompaniesPageResultFromCookie,
-    getContactsPage,
     getContactsPageResultFromCookie,
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
@@ -33,21 +32,22 @@ import {
     getDealPipelineValueFromCookie,
     getDealRevenueTimeseries,
     getDealStageDistribution,
-    getDealsPage,
+    getDealsPageResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getIntroSuggestionsResultFromCookie,
-    getNotesPage,
+    getNotesPageResultFromCookie,
     getNotifications,
     getPipelinesResultFromCookie,
     getProviderConnectionsResultFromCookie,
-    getRecentMovesFromCookie,
+    getRecentMovesResultFromCookie,
     getTaskSummaryFromCookie,
-    getTasksPage,
+    getTasksPageResultFromCookie,
     getUpcomingTasksFromCookie,
     getTeamLeaderboardFromCookie,
     getUpcomingActivityCountFromCookie,
     getUsers,
     getRelationshipDashboardResultFromCookie,
+    toResult,
 } from '@/app/lib/api';
 import type {
     ActivityVolumeBucket,
@@ -58,9 +58,7 @@ import type {
     Deal,
     DealKpis,
     DealMetrics,
-    DealPipelineValue,
     DealRevenueSeries,
-    DealStageDistribution,
     NotificationPage,
     Page,
     RelationshipDashboard,
@@ -80,6 +78,7 @@ import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
 import RecentMoves from '@/app/components/dashboard/RecentMoves';
 import Rise from '@/app/components/motion/Rise';
+import SectionUnavailable from '@/app/components/SectionUnavailable';
 import TaskSummary from '@/app/components/dashboard/TaskSummary';
 import Timeline from '@/app/components/me/Timeline';
 import DashboardGrid from '@/app/components/dashboard/customize/DashboardGrid';
@@ -252,6 +251,7 @@ async function loadActivationExtras(cookie: string | null): Promise<{
 
 export default async function Dashboard() {
     const t = await getTranslations('DashboardPage');
+    const tUnavailable = await getTranslations('SectionUnavailable');
 
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
@@ -261,22 +261,22 @@ export default async function Dashboard() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [contacts, deals, pipelinesResult, stagesResult, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals, captureOverviewResult] =
+    const [contactsResult, dealsResult, pipelinesResult, stagesResult, tasksResult, upcomingTasks, activitiesResult, notesResult, users, recentFiles, fileFacets, recentMovesResult, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals, captureOverviewResult] =
         await Promise.all([
-            getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
-            getDealsPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getContactsPageResultFromCookie(cookie, { page: 1, size: 100 }),
+            getDealsPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getPipelinesResultFromCookie(cookie),
             getAllStagesResultFromCookie(cookie),
-            getTasksPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getTasksPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getUpcomingTasksFromCookie(cookie, 4).catch(() => [] as Task[]),
-            getActivitiesPage({ page: 1, size: 100 }, init).then((response) => response.items),
-            getNotesPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getActivitiesPageResultFromCookie(cookie, { page: 1, size: 100 }),
+            getNotesPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsPage({ size: 6, sort: 'newest' }, init).catch(
                 () => ({ items: [], total: 0 }) as Page<Attachment>,
             ),
             getAttachmentFacets(init).catch(() => EMPTY_ATTACHMENT_FACETS),
-            getRecentMovesFromCookie(cookie),
+            getRecentMovesResultFromCookie(cookie),
             getIntroSuggestionsResultFromCookie(cookie, 4),
             getRelationshipDashboardResultFromCookie(cookie),
             getDashboardLayoutFromCookie(cookie),
@@ -294,6 +294,17 @@ export default async function Dashboard() {
             getCaptureOverviewResultFromCookie(cookie),
         ]);
 
+    const contacts = contactsResult.ok ? contactsResult.data.items : [];
+    const deals = dealsResult.ok ? dealsResult.data.items : [];
+    const tasks = tasksResult.ok ? tasksResult.data.items : [];
+    const activities = activitiesResult.ok ? activitiesResult.data.items : [];
+    const notes = notesResult.ok ? notesResult.data.items : [];
+    const recentMoves = recentMovesResult.ok ? recentMovesResult.data : [];
+    const timelineAvailable = contactsResult.ok
+        && dealsResult.ok
+        && tasksResult.ok
+        && activitiesResult.ok
+        && notesResult.ok;
     const introSuggestions = introSuggestionsResult.ok ? introSuggestionsResult.data : [];
     const relationshipDashboard = relationshipDashboardResult.ok
         ? relationshipDashboardResult.data
@@ -388,14 +399,18 @@ export default async function Dashboard() {
     const activationExtrasPromise = activationNeedsEvaluation ? loadActivationExtras(cookie) : null;
 
     const currency = dominantCurrency(dealMetrics);
-    const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
-        getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
-        getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
-        getDealRevenueTimeseries(currency, user.timezone, {}, init).catch(
-            () => ({ closed: [], projected: [] }) as DealRevenueSeries,
-        ),
-        getDealStageDistribution(currency, {}, init).catch(() => [] as DealStageDistribution[]),
+    const [dealKpisResult, pipelineValuesResult, revenueSeriesResult, stageDistributionResult] = await Promise.all([
+        toResult(getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE)),
+        toResult(getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE)),
+        toResult(getDealRevenueTimeseries(currency, user.timezone, {}, init)),
+        toResult(getDealStageDistribution(currency, {}, init)),
     ]);
+    const dealKpis = dealKpisResult.ok ? dealKpisResult.data : EMPTY_DEAL_KPIS;
+    const pipelineValues = pipelineValuesResult.ok ? pipelineValuesResult.data : [];
+    const revenueSeries = revenueSeriesResult.ok
+        ? revenueSeriesResult.data
+        : ({ closed: [], projected: [] } as DealRevenueSeries);
+    const stageDistribution = stageDistributionResult.ok ? stageDistributionResult.data : [];
 
     const companyWarmthItems: CompanyWarmthItem[] = relationshipDashboard.coolingCompanies.map(
         ({ company, temperature }) => ({ company, temp: temperature }),
@@ -452,33 +467,39 @@ export default async function Dashboard() {
     const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
         overview: (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" />
-                <OverviewCard index={1} label={t('contacts')} value={contactsPage.total} icon={UsersIcon} href="/records/contacts" />
-                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" />
-                <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" />
+                <OverviewCard index={0} label={t('companies')} value={companiesPage.total} icon={BuildingOffice2Icon} href="/records/companies" unavailable={!companiesPageResult.ok} unavailableLabel={tUnavailable('title')} />
+                <OverviewCard index={1} label={t('contacts')} value={contactsPage.total} icon={UsersIcon} href="/records/contacts" unavailable={!contactsPageResult.ok} unavailableLabel={tUnavailable('title')} />
+                <OverviewCard index={2} label={t('deals')} value={dealMetrics.totalCount} icon={BriefcaseIcon} href="/records/deals" unavailable={!dealMetricsResult.ok} unavailableLabel={tUnavailable('title')} />
+                <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" unavailable={!pipelinesResult.ok} unavailableLabel={tUnavailable('title')} />
             </div>
         ),
-        pipeline: <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />,
+        pipeline: revenueSeriesResult.ok
+            ? <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />
+            : <SectionUnavailable />,
         tasks: <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />,
         atRiskDeals: (
             <AtRiskDeals items={atRiskDeals} truncated={relationshipDashboard.dealRisksTruncated} />
         ),
         coolingRelationships: <CoolingRelationships items={coolingContacts} currentUserId={user.id} />,
-        recentMoves: <RecentMoves moves={recentMoves} />,
+        recentMoves: recentMovesResult.ok ? <RecentMoves moves={recentMoves} /> : <SectionUnavailable />,
         introOpportunities: <IntroOpportunities items={introSuggestions} />,
         recentFiles: <RecentFiles files={recentFiles.items} total={fileFacets.total} totalSize={fileFacets.totalSize} />,
-        recentActivity: (
+        recentActivity: timelineAvailable ? (
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <Timeline tasks={tasks} activities={activities} notes={notes} users={users} persons={contacts} deals={deals} currentUserId={user.id} limit={8} />
             </div>
+        ) : (
+            <SectionUnavailable />
         ),
         companyWarmth: <CompanyWarmth items={companyWarmthItems} />,
         warmthDistribution: <WarmthDistribution summary={warmthSummary} />,
         closingSoon: <ClosingSoonDeals items={closingSoonItems} />,
-        recentNotes: (
+        recentNotes: notesResult.ok ? (
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <NoteList notes={notes} />
             </div>
+        ) : (
+            <SectionUnavailable />
         ),
         notifications: (
             <NotificationsCard
@@ -493,17 +514,27 @@ export default async function Dashboard() {
                 <QuickCreate />
             </div>
         ),
-        analyticsKpis: <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />,
-        revenueTrend: chartCard(
-            <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
-        ),
-        winRate: chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />),
-        pipelineValue: chartCard(
-            <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,
-        ),
-        stageFunnel: chartCard(
-            <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />,
-        ),
+        analyticsKpis: dealKpisResult.ok
+            ? <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />
+            : <SectionUnavailable />,
+        revenueTrend: revenueSeriesResult.ok
+            ? chartCard(
+                <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
+            )
+            : <SectionUnavailable />,
+        winRate: dealKpisResult.ok
+            ? chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />)
+            : <SectionUnavailable />,
+        pipelineValue: pipelineValuesResult.ok && pipelinesResult.ok
+            ? chartCard(
+                <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,
+            )
+            : <SectionUnavailable />,
+        stageFunnel: stageDistributionResult.ok && pipelinesResult.ok && stagesResult.ok
+            ? chartCard(
+                <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />,
+            )
+            : <SectionUnavailable />,
         activityVolume: chartCard(<ActivityVolume buckets={activityVolume} range={DASHBOARD_RANGE} />),
         teamLeaderboard: chartCard(
             <TeamLeaderboard users={users} standings={leaderboard} />,

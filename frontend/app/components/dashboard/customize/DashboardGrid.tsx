@@ -9,6 +9,7 @@ import {
     type SortableGridMessages,
 } from '@/app/components/layout/SortableGrid';
 import SortableGrid from '@/app/components/layout/SortableGrid';
+import SectionBoundary from '@/app/components/SectionBoundary';
 import { Button } from '@/components/ui/button';
 import {
     Drawer,
@@ -255,7 +256,7 @@ export default function DashboardGrid({
                             onToggleWidth={() => toggleWidth(widget.id)}
                             onRemove={() => removeWidget(widget.id)}
                         >
-                            {nodes[widget.type]}
+                            <SectionBoundary>{nodes[widget.type]}</SectionBoundary>
                         </WidgetShell>
                     )}
                     renderOverlay={(widget) => (
@@ -268,7 +269,7 @@ export default function DashboardGrid({
                                     widthLabel=""
                                     removeLabel=""
                                 >
-                                    {nodes[widget.type]}
+                                    <SectionBoundary>{nodes[widget.type]}</SectionBoundary>
                                 </WidgetShell>
                             </div>
                         )}
