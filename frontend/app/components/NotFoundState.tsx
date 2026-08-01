@@ -2,8 +2,6 @@ import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 
 import PageState, { type PageStateAction } from '@/app/components/PageState';
 
-export type { PageStateAction as NotFoundAction };
-
 /**
  * 404 presentation rendered by `not-found.tsx` segment files. Each segment supplies its
  * own copy and return-to-list destinations so a dead record link lands somewhere useful

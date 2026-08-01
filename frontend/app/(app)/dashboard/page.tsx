@@ -124,6 +124,8 @@ const EMPTY_DEAL_KPIS: DealKpis = {
     avgCycleSeries: [],
 };
 
+const EMPTY_REVENUE_SERIES: DealRevenueSeries = { closed: [], projected: [] };
+
 const EMPTY_TASK_SUMMARY: TaskSummaryCounts = {
     todo: 0,
     inProgress: 0,
@@ -407,9 +409,7 @@ export default async function Dashboard() {
     ]);
     const dealKpis = dealKpisResult.ok ? dealKpisResult.data : EMPTY_DEAL_KPIS;
     const pipelineValues = pipelineValuesResult.ok ? pipelineValuesResult.data : [];
-    const revenueSeries = revenueSeriesResult.ok
-        ? revenueSeriesResult.data
-        : ({ closed: [], projected: [] } as DealRevenueSeries);
+    const revenueSeries = revenueSeriesResult.ok ? revenueSeriesResult.data : EMPTY_REVENUE_SERIES;
     const stageDistribution = stageDistributionResult.ok ? stageDistributionResult.data : [];
 
     const companyWarmthItems: CompanyWarmthItem[] = relationshipDashboard.coolingCompanies.map(
