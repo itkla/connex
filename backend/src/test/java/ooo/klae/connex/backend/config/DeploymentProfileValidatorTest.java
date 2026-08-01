@@ -132,6 +132,36 @@ class DeploymentProfileValidatorTest {
     }
 
     @Test
+    void rejectsOnPremWhenInstanceManagedMailIsEnabled() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.mail.managed", "true");
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+            () -> validator(DeploymentProperties.PROFILE_ON_PREM, environment).run(null));
+
+        assertEquals("connex.deployment.profile=on-prem forbids: connex.mail.managed=true",
+            exception.getMessage());
+    }
+
+    @Test
+    void allowsOnPremWhenInstanceManagedMailIsDisabled() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.mail.managed", "false")
+            .withProperty("connex.mail.enabled", "true");
+
+        assertDoesNotThrow(() -> validator(DeploymentProperties.PROFILE_ON_PREM, environment).run(null));
+    }
+
+    @Test
+    void allowsInstanceManagedMailForSaasAndSilo() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.mail.managed", "true");
+
+        assertDoesNotThrow(() -> validator(DeploymentProperties.PROFILE_SAAS, environment).run(null));
+        assertDoesNotThrow(() -> validator(DeploymentProperties.PROFILE_SILO, environment).run(null));
+    }
+
+    @Test
     void rejectsInvalidDeploymentProfileValue() {
         DeploymentProperties properties = new DeploymentProperties();
         properties.setProfile("shared");

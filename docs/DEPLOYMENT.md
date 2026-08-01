@@ -171,8 +171,9 @@ no action. **An existing deployment that relied on the old soft-launch behaviour
 variable before taking this upgrade.**
 
 `saas` additionally forbids the internal-access opt-ins (bootstrap, private SSO issuer hosts,
-internal AI/SMTP hosts); `silo` and `on-prem` allow them. The profile also gates instance-managed
-mail, which is unavailable on `on-prem`.
+internal AI/SMTP hosts); `silo` and `on-prem` allow them. `on-prem` forbids instance-managed mail
+(`CONNEX_MAIL_MANAGED=true` fails startup there) — an on-prem operator configures their own SMTP,
+and workspace SMTP overrides stay available.
 
 Full profile semantics, the capability×profile matrix, and how to demonstrate the difference are
 in [DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md).

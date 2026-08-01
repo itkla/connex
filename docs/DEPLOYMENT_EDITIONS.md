@@ -38,10 +38,11 @@ still exercised during evaluation).
 
 ## What the profile controls
 
-### 1. Internal-access opt-ins
+### 1. Settings each profile refuses
 
 `saas` refuses four settings that would let an instance reach private network space. `silo` and
 `on-prem` allow them, because reaching internal infrastructure is the point of those editions.
+`on-prem` refuses instance-managed mail.
 
 | Setting | `saas` | `silo` | `on-prem` |
 |---|---|---|---|
@@ -49,12 +50,22 @@ still exercised during evaluation).
 | `connex.sso.allow-private-issuer-hosts` | forbidden | allowed | allowed |
 | `connex.ai.allow-internal-endpoints` | forbidden | allowed | allowed |
 | `connex.mail.allow-internal-hosts` | forbidden | allowed | allowed |
+| `connex.mail.managed` | allowed | allowed | **forbidden** |
 
-Setting any of these to `true` under `saas` fails startup:
+Setting a forbidden value to `true` fails startup:
 
 ```text
 connex.deployment.profile=saas forbids: connex.bootstrap.enabled=true
+connex.deployment.profile=on-prem forbids: connex.mail.managed=true
 ```
+
+The on-prem managed-mail refusal is what keeps the advertised capability matrix and actual
+behaviour consistent. `MailConfigResolver`, `WorkspaceMailConfigService`, and
+`MailManagedController` read `MailProperties` directly rather than through the capability
+registry — a deliberate, arch-test-sanctioned exemption. Without this refusal, an on-prem instance
+with `CONNEX_MAIL_MANAGED=true` would advertise `mailManaged: false` while still routing mail
+through the managed transport *and* locking the customer out of configuring their own SMTP. Failing
+startup makes that divergent state unreachable rather than merely undocumented.
 
 ### 2. Capability × profile matrix
 
@@ -77,6 +88,10 @@ on the customer's behalf, which cannot exist in an installation Connex does not 
 operator configures their own SMTP instead. Every other capability is profile-neutral because its
 availability is already decided by its own operator setting — the edition says nothing about
 whether an operator wants SSO, social login, connected accounts, card scanning, or campaigns.
+
+This row is enforced twice, on purpose: the registry refuses the capability, and the startup
+validator refuses `connex.mail.managed=true` outright under `on-prem` (see above). An on-prem
+instance therefore cannot reach a state where the two disagree.
 
 **"Allowed" is not "enabled."** The profile gate is one of four. A capability is available only
 when the profile permits it *and* entitlement permits it *and* rollout permits it *and* the
@@ -101,12 +116,13 @@ observable without a login:
 curl -s http://localhost:8080/api/capabilities | jq .mailManaged
 ```
 
-With instance-managed mail configured, that is `true` under `saas` and `silo` and `false` under
-`on-prem`, from the identical artifact and identical mail configuration.
+With `CONNEX_MAIL_MANAGED=true`, that is `true` under `saas` and `silo`. Under `on-prem` the same
+variable is refused at startup, so an on-prem instance boots without it and reports `false`.
 
 [`deploy-smoke.yml`](../.github/workflows/deploy-smoke.yml) enforces exactly this in CI: it boots
-the built WAR under all three profiles with managed mail configured and asserts the `mailManaged`
-split, so collapsing the matrix back to "everything everywhere" fails the build.
+the built WAR under all three profiles — `saas` and `silo` with `CONNEX_MAIL_MANAGED=true`,
+`on-prem` without it — and asserts the resulting `mailManaged` split, so collapsing the matrix back
+to "everything everywhere" fails the build.
 
 The fail-loud contract itself is covered by unit tests rather than a boot case, because the
 profile-boot job runs with dev-relaxed database transport and the `dev` profile is exempt by

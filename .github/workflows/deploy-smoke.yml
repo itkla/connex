@@ -126,13 +126,19 @@ jobs:
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-root
-          CONNEX_MAIL_MANAGED: 'true'
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
           for PROFILE in saas silo on-prem; do
             echo "=== booting deployment profile: $PROFILE ==="
-            CONNEX_DEPLOYMENT_PROFILE="$PROFILE" java -jar "$WAR" > "/tmp/boot-$PROFILE.log" 2>&1 &
+            if [ "$PROFILE" = "on-prem" ]; then
+              EXPECTED_MANAGED_MAIL=false
+              CONNEX_DEPLOYMENT_PROFILE="$PROFILE" java -jar "$WAR" > "/tmp/boot-$PROFILE.log" 2>&1 &
+            else
+              EXPECTED_MANAGED_MAIL=true
+              CONNEX_DEPLOYMENT_PROFILE="$PROFILE" CONNEX_MAIL_MANAGED=true \
+                java -jar "$WAR" > "/tmp/boot-$PROFILE.log" 2>&1 &
+            fi
             PID=$!
             BOOTED=0
             for _ in $(seq 1 90); do
@@ -158,11 +164,10 @@ jobs:
                 exit 1
               fi
             done
-            if [ "$PROFILE" = "on-prem" ]; then EXPECTED_MANAGED_MAIL=false; else EXPECTED_MANAGED_MAIL=true; fi
             ACTUAL_MANAGED_MAIL=$(jq -r '.mailManaged' <<< "$CAPABILITIES")
             if [ "$ACTUAL_MANAGED_MAIL" != "$EXPECTED_MANAGED_MAIL" ]; then
               echo "::error::profile $PROFILE reported mailManaged=$ACTUAL_MANAGED_MAIL, expected $EXPECTED_MANAGED_MAIL"
-              echo "CONNEX_MAIL_MANAGED=true is set for every boot, so this asserts the deployment-edition matrix"
+              echo "saas/silo boot with CONNEX_MAIL_MANAGED=true; on-prem forbids it, so it boots without it"
               kill "$PID" 2>/dev/null || true
               exit 1
             fi

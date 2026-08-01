@@ -27,6 +27,17 @@ import lombok.RequiredArgsConstructor;
  * maintenance-mode context. Without this exemption seeder runs would be unbootable in both
  * directions.
  *
+ * <p>Each profile also forbids the settings that contradict it. The SaaS profile refuses the
+ * internal-access opt-ins. The on-prem profile refuses {@code connex.mail.managed}, because
+ * instance-managed mail is transport Connex operates and cannot exist in an installation Connex
+ * does not run. That refusal is what keeps the advertised capability matrix and actual runtime
+ * behaviour consistent: {@code MailConfigResolver}, {@code WorkspaceMailConfigService}, and
+ * {@code MailManagedController} read {@link ooo.klae.connex.backend.mail.MailProperties} directly
+ * rather than through the capability registry, so an on-prem instance with managed mail enabled
+ * would otherwise advertise the capability as unavailable while still routing mail through the
+ * managed transport and locking the customer out of their own SMTP. Failing startup makes that
+ * divergent state unreachable instead of merely undocumented.
+ *
  * <p>Invalid values remain the responsibility of bean validation on
  * {@link DeploymentProperties}. Forced cookie security and database transport checks are
  * intentionally outside this matrix because existing fail-closed validators already own those
@@ -41,16 +52,24 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     private static final String SSO_ALLOW_PRIVATE_ISSUER_HOSTS = "connex.sso.allow-private-issuer-hosts";
     private static final String AI_ALLOW_INTERNAL_ENDPOINTS = "connex.ai.allow-internal-endpoints";
     private static final String MAIL_ALLOW_INTERNAL_HOSTS = "connex.mail.allow-internal-hosts";
-    private static final List<String> CHECKED_KEYS = List.of(
+    private static final String MAIL_MANAGED = "connex.mail.managed";
+    private static final List<String> INTERNAL_ACCESS_KEYS = List.of(
         BOOTSTRAP_ENABLED,
         SSO_ALLOW_PRIVATE_ISSUER_HOSTS,
         AI_ALLOW_INTERNAL_ENDPOINTS,
         MAIL_ALLOW_INTERNAL_HOSTS
     );
+    private static final List<String> POSTURE_KEYS = List.of(
+        BOOTSTRAP_ENABLED,
+        SSO_ALLOW_PRIVATE_ISSUER_HOSTS,
+        AI_ALLOW_INTERNAL_ENDPOINTS,
+        MAIL_ALLOW_INTERNAL_HOSTS,
+        MAIL_MANAGED
+    );
     private static final Map<String, List<String>> FORBIDDEN_KEYS_BY_PROFILE = Map.of(
-        DeploymentProperties.PROFILE_SAAS, CHECKED_KEYS,
+        DeploymentProperties.PROFILE_SAAS, INTERNAL_ACCESS_KEYS,
         DeploymentProperties.PROFILE_SILO, List.of(),
-        DeploymentProperties.PROFILE_ON_PREM, List.of()
+        DeploymentProperties.PROFILE_ON_PREM, List.of(MAIL_MANAGED)
     );
     private static final Logger log = LoggerFactory.getLogger(DeploymentProfileValidator.class);
 
@@ -89,7 +108,7 @@ public class DeploymentProfileValidator implements ApplicationRunner {
 
     private Map<String, Boolean> readPosture() {
         Map<String, Boolean> posture = new LinkedHashMap<>();
-        for (String key : CHECKED_KEYS) {
+        for (String key : POSTURE_KEYS) {
             posture.put(key, environment.getProperty(key, Boolean.class, false));
         }
         return posture;
