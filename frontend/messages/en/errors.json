@@ -39,8 +39,9 @@
   },
   "AccessDenied": {
     "title": "You don't have access",
-    "body": "Your role doesn't include permission to view this. Ask a workspace admin if you need access.",
-    "home": "Go to dashboard"
+    "body": "You may be in the wrong workspace, or your role doesn't include permission to view this. Try switching workspace, signing in again, or asking a workspace admin.",
+    "home": "Go to dashboard",
+    "signIn": "Sign in again"
   },
   "PermissionsUnavailable": {
     "title": "We couldn't confirm your permissions",
@@ -49,7 +50,7 @@
   },
   "SectionUnavailable": {
     "title": "Couldn't load this",
-    "body": "This section failed to load. The rest of the page is unaffected.",
+    "body": "This section couldn't be loaded. Try again in a moment.",
     "retry": "Try again",
     "retrying": "Retrying"
   }

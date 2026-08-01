@@ -43,7 +43,10 @@ export default function SectionUnavailable({
     };
 
     return (
-        <div className="flex h-full flex-col items-start justify-center gap-3 rounded-2xl border border-border bg-card px-6 py-8">
+        <div
+            role="status"
+            className="flex h-full flex-col items-start justify-center gap-3 rounded-2xl border border-border bg-card px-6 py-8"
+        >
             <div className="flex items-center gap-2 text-muted-foreground">
                 <ExclamationTriangleIcon className="size-5 shrink-0" aria-hidden />
                 <p className="text-sm font-semibold text-foreground">{title ?? t('title')}</p>

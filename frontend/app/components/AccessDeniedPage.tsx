@@ -13,7 +13,10 @@ export default async function AccessDeniedPage() {
         <AccessDenied
             title={t('title')}
             body={t('body')}
-            action={{ href: '/dashboard', label: t('home') }}
+            actions={[
+                { href: '/dashboard', label: t('home') },
+                { href: '/auth/login', label: t('signIn'), variant: 'ghost' },
+            ]}
         />
     );
 }

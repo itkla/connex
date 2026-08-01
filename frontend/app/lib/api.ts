@@ -820,6 +820,12 @@ export class ApiError extends Error {
     code?: string;
     fieldErrors?: ApiFieldErrors;
     correlationId?: string;
+    /**
+     * True when the response carried no body. A bodyless 401/403 is how Spring Security signals an
+     * unauthenticated caller (expired or missing session), as opposed to a genuine authorization
+     * denial, which the backend answers with an explanatory body.
+     */
+    emptyBody?: boolean;
 
     constructor(
         message: string,
@@ -827,6 +833,7 @@ export class ApiError extends Error {
         code?: string,
         fieldErrors?: ApiFieldErrors,
         correlationId?: string,
+        emptyBody?: boolean,
     ) {
         super(message);
         this.name = "ApiError";
@@ -834,6 +841,7 @@ export class ApiError extends Error {
         this.code = code;
         this.fieldErrors = fieldErrors;
         this.correlationId = correlationId;
+        this.emptyBody = emptyBody;
     }
 }
 
@@ -922,7 +930,7 @@ async function getApiError(res: Response): Promise<ApiError> {
     const text = await res.text().catch(() => "");
 
     if (!text) {
-        return new ApiError(`Request failed (${res.status})`, res.status);
+        return new ApiError(`Request failed (${res.status})`, res.status, undefined, undefined, undefined, true);
     }
 
     try {
@@ -2128,6 +2136,16 @@ export function getContactEvidence(id: number, init: RequestInit = {}) {
 export function getContactTemperaturesFromCookie(cookie: string | null, ids: number[]) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
     return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(ids, init), cookie);
+}
+
+export function getContactTemperaturesResultFromCookie(cookie: string | null, ids: number[]) {
+    if (ids.length === 0) {
+        return Promise.resolve({ ok: true as const, data: [] as Types.RelationshipTemperature[] });
+    }
+    return resultWithCookie<Types.RelationshipTemperature[]>(
+        (init) => getContactTemperatures(ids, init),
+        cookie,
+    );
 }
 
 export function getCoolingContactTemperaturesFromCookie(cookie: string | null, limit = 6) {

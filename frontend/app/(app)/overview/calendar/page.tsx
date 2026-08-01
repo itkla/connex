@@ -3,7 +3,7 @@ import type { CalendarSourceKey, CalendarTruncation } from '@/app/components/cal
 import {
     getActivitiesCappedResultFromCookie,
     getContactsCappedResultFromCookie,
-    getContactTemperaturesFromCookie,
+    getContactTemperaturesResultFromCookie,
     getCurrentUserFromCookie,
     getDealsCappedResultFromCookie,
     getNotesCappedResultFromCookie,
@@ -58,9 +58,11 @@ export default async function CalendarPage() {
     const deals = collect('deals', dealsResult, failed, truncated);
     const notes = collect('notes', notesResult, failed, truncated);
 
-    const temperatures = persons.length > 0
-        ? await getContactTemperaturesFromCookie(cookie, persons.map((person) => person.id))
-        : [];
+    const temperaturesResult = await getContactTemperaturesResultFromCookie(
+        cookie,
+        persons.map((person) => person.id),
+    );
+    const temperatures = temperaturesResult.ok ? temperaturesResult.data : [];
 
     return (
         <CalendarShell
@@ -73,6 +75,7 @@ export default async function CalendarPage() {
             currentUserId={user.id}
             failedSources={failed}
             truncatedSources={truncated}
+            warmthFailed={!temperaturesResult.ok}
         />
     );
 }

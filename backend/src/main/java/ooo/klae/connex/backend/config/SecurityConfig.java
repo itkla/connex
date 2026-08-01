@@ -238,6 +238,9 @@ public class SecurityConfig {
                     workspaceCookie.clear(res);
                     res.setStatus(200);
                 })
+            )
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
             );
         if (oauthEnabled) {
             http
@@ -247,9 +250,6 @@ public class SecurityConfig {
                     .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
                     .successHandler(ssoAuthenticationSuccessHandler)
                     .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
-                )
-                .exceptionHandling(ex -> ex
-                    .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                 );
         }
         if (ssoEnabled) {

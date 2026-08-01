@@ -72,6 +72,8 @@ export interface CalendarShellProps {
     failedSources?: ReadonlyArray<CalendarSourceKey>;
     /** Sources cut short by the per-source cap, disclosed above the grid. */
     truncatedSources?: ReadonlyArray<CalendarTruncation>;
+    /** Whether contact-warmth colours could not be loaded, disclosed above the grid. */
+    warmthFailed?: boolean;
 }
 
 export default function CalendarShell({
@@ -84,6 +86,7 @@ export default function CalendarShell({
     currentUserId,
     failedSources = [],
     truncatedSources = [],
+    warmthFailed = false,
 }: CalendarShellProps) {
     const t = useTranslations('Calendar');
     const locale = useLocale();
@@ -444,7 +447,7 @@ export default function CalendarShell({
                     </header>
                 </Rise>
 
-                <SourceNotice failed={failedSources} truncated={truncatedSources} />
+                <SourceNotice failed={failedSources} truncated={truncatedSources} warmthFailed={warmthFailed} />
 
                 <UpNext events={visibleEvents} locale={locale} onOpenEvent={onOpenEvent} />
 

@@ -42,7 +42,7 @@ export default async function EditReportPage({ params }: { params: Promise<{ id:
     const report = reportAccess.record;
     const canReadGoals = permissionsResult.data.includes('GOAL_READ');
     if (!canReadGoals && report.config.widgets.some((widget) => widget.measure === 'attainment')) {
-        redirect('/overview/reports');
+        return <AccessDeniedPage />;
     }
 
     return (

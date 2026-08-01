@@ -39,7 +39,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     const effectivePermissions = permissionsResult.data;
     if (report.config.widgets.some((widget) => widget.measure === 'attainment')
             && !effectivePermissions.includes('GOAL_READ')) {
-        redirect('/overview/reports');
+        return <AccessDeniedPage />;
     }
 
     return (
