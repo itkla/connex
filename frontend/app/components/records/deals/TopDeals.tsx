@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { type DealSummary, type DealTop } from '@/app/lib/types';
 import { formatCompactCurrency } from '@/app/lib/utils';
 
-const RANK_COLORS = ['#fbbf24', '#94a3b8', '#cd7f32'] as const; // gold, silver, bronze
+const RANK_COLORS = ['var(--rank-gold)', 'var(--rank-silver)', 'var(--rank-bronze)'] as const;
 
 /**
  * Biggest open deals and top wins from the server-computed {@link DealTop} rollup. Company names

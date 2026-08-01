@@ -8,10 +8,10 @@ import { ChartContainer, ChartLegend, ChartLegendContent, type ChartConfig } fro
 import { type DealAging, type Stage } from '@/app/lib/types';
 
 const BUCKETS = [
-    { key: 'fresh', labelKey: 'bucketFresh', color: '#22c55e' },
-    { key: 'active', labelKey: 'bucketActive', color: '#84cc16' },
-    { key: 'aging', labelKey: 'bucketAging', color: '#f59e0b' },
-    { key: 'stalled', labelKey: 'bucketStalled', color: '#ef4444' },
+    { key: 'fresh', labelKey: 'bucketFresh', color: 'var(--warmth-hot)' },
+    { key: 'active', labelKey: 'bucketActive', color: 'var(--warmth-warm)' },
+    { key: 'aging', labelKey: 'bucketAging', color: 'var(--chart-open)' },
+    { key: 'stalled', labelKey: 'bucketStalled', color: 'var(--chart-lost)' },
 ] as const;
 
 type BucketKey = (typeof BUCKETS)[number]['key'];

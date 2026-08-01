@@ -220,7 +220,7 @@ function TagForm({
                     <div className="mt-1 flex items-center gap-2">
                         <label
                             className="relative size-9 shrink-0 cursor-pointer overflow-hidden rounded-lg ring-1 ring-inset ring-border"
-                            style={{ backgroundColor: hexValid ? color : '#ffffff' }}
+                            style={{ backgroundColor: hexValid ? color : 'var(--card)' }}
                             title={t('customColorLabel')}
                         >
                             <input
