@@ -184,7 +184,7 @@
         "revenueTrend": "収益トレンド",
         "stageRatio": "ステージ分布",
         "openPipeline": "オープン案件の予測金額",
-        "openPipelineTooltip": "まだオープン（決着予定日を過ぎていない）の案件の予測金額の合計です。",
+        "openPipelineTooltip": "オープンのままの全案件の予測金額の合計です。決着予定日では絞り込みません。",
         "openDeals": "オープン案件",
         "openDealsTooltip": "まだオープンの案件の件数です。",
         "closedForecast": "決着案件の予測金額",
@@ -265,7 +265,9 @@
         "toastStageChangedPartial": "{total}件中{succeeded}件の取引を移動しました",
         "toastStageFailed": "{failed}件の取引を移動できませんでした",
         "sectionPerformance": "実績",
-        "sectionSummary": "パイプライン概要"
+        "sectionSummary": "パイプライン概要",
+        "metricsBasis": "現在の絞り込み条件に一致する案件・オープンパイプラインは決着予定日で絞り込みません・アーカイブ済みアカウントの案件は未割り当てとして集計します",
+        "valueDerivedFromLineItems": "この金額は明細から自動計算されています。変更するには明細を編集または削除してください。"
     },
     "DealsRevenueChart": {
         "actualRevenue": "実績収益",

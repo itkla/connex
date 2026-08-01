@@ -209,7 +209,12 @@
       "snapshotUnavailableBody": "Frozen snapshots are pruned over time, so an emailed link can outlive the snapshot it points to. The live report is still available.",
       "snapshotForbiddenTitle": "You don't have access to this snapshot",
       "snapshotForbiddenBody": "Ask a workspace admin if you need access to this report.",
-      "viewLiveReport": "View live report"
+      "viewLiveReport": "View live report",
+      "figureBasis": {
+        "wonRevenue": "Won revenue · closed in period · current owner · workspace deals only · archived account names retained",
+        "openPipeline": "Open pipeline · expected to close in period · current owner · workspace deals only · archived account names retained",
+        "forecastWeighted": "Weighted forecast · expected to close in period · all-history stage rates · current owner · workspace deals only"
+      }
     },
     "cadence": {
       "weekly": "Weekly",

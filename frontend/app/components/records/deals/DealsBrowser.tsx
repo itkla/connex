@@ -978,6 +978,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         await updateDealValue(full.id, full.value ?? 0);
                     }),
                 validate: (v) => (v !== '' && /^\d+(\.\d{1,2})?$/.test(v) ? null : t('valueInvalid')),
+                disabled: (d) => (d.valueSource === 'line_items' ? t('valueDerivedFromLineItems') : null),
             },
         },
         {
@@ -1362,6 +1363,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
                             />
                         </div>
+                        <p className="mt-2 text-xs text-muted-foreground">{t('metricsBasis')}</p>
                     </section>
                 </Rise>
 
