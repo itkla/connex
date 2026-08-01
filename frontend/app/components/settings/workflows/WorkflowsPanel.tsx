@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AccessDenied from "@/app/components/AccessDenied";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -124,9 +125,7 @@ export default function WorkflowsPanel() {
 
     if (accessDenied) {
         return (
-            <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-                {t("noAccess")}
-            </p>
+            <AccessDenied variant="inline" body={t("noAccess")} />
         );
     }
 
