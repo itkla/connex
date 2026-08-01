@@ -115,6 +115,9 @@ public class DocumentApprovalService {
             throw new BadRequestException("No pending approval on this document");
         }
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
+        if (actor == null || approval.getRequestedBy() == null || approval.getRequestedBy() == actor.getId()) {
+            throw new ForbiddenException("An approval cannot be decided by its requester");
+        }
         boolean approved = "approved".equals(decision);
         approvalMapper.decide(workspaceId, approval.getId(), decision,
             actor == null ? null : actor.getId(), blankToNull(comment));
