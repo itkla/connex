@@ -9,6 +9,8 @@ import type { InstanceCapabilities } from "@/app/lib/types";
 export type NavAccess = {
     /** Goals live under Reports and require {@code GOAL_READ}. */
     goals: boolean;
+    /** The workspace audit log requires {@code AUDIT_READ}. */
+    auditLog: boolean;
     /** The connected-capture review queue requires at least one capture-enabled provider. */
     captureReviews: boolean;
 };
@@ -16,6 +18,7 @@ export type NavAccess = {
 /** The fail-closed default applied when capabilities or permissions could not be loaded. */
 export const NO_NAV_ACCESS: NavAccess = {
     goals: false,
+    auditLog: false,
     captureReviews: false,
 };
 
@@ -33,6 +36,7 @@ export function resolveNavAccess(
 ): NavAccess {
     return {
         goals: effectivePermissions.includes("GOAL_READ"),
+        auditLog: effectivePermissions.includes("AUDIT_READ"),
         captureReviews:
             capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft,
     };

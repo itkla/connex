@@ -9,20 +9,22 @@ const REFERENCE_LOCALE = "en";
 
 type MessageValue = string | { [key: string]: MessageValue };
 
-function isMessageTree(value: MessageValue): value is { [key: string]: MessageValue } {
-    return typeof value === "object" && value !== null;
+function isMessageTree(value: unknown): value is { [key: string]: MessageValue } {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseMessageTree(locale: string, file: string): { [key: string]: MessageValue } {
+    const parsed: unknown = JSON.parse(readFileSync(join(MESSAGES_ROOT, locale, file), "utf8"));
+    if (!isMessageTree(parsed)) {
+        throw new Error(`messages/${locale}/${file} is not a JSON object`);
+    }
+    return parsed;
 }
 
 function flattenKeys(tree: { [key: string]: MessageValue }, prefix = ""): string[] {
     return Object.entries(tree).flatMap(([key, value]) =>
         isMessageTree(value) ? flattenKeys(value, `${prefix}${key}.`) : [`${prefix}${key}`],
     );
-}
-
-function readNamespaceFile(locale: string, file: string): { [key: string]: MessageValue } {
-    return JSON.parse(readFileSync(join(MESSAGES_ROOT, locale, file), "utf8")) as {
-        [key: string]: MessageValue;
-    };
 }
 
 function namespaceFiles(locale: string): string[] {
@@ -34,11 +36,6 @@ function namespaceFiles(locale: string): string[] {
 const referenceFiles = namespaceFiles(REFERENCE_LOCALE);
 const translatedLocales = locales.filter((locale) => locale !== REFERENCE_LOCALE);
 
-/**
- * Finds keys declared more than once within the same JSON object. `JSON.parse` silently keeps the
- * last occurrence, so a duplicate is invisible to any parsed comparison and can only be caught by
- * scanning the raw text.
- */
 function duplicateKeys(source: string): string[] {
     const seenPerDepth = new Map<number, Set<string>>();
     const duplicates: string[] = [];
@@ -91,11 +88,6 @@ function duplicateKeys(source: string): string[] {
 const ICU_ARGUMENT = /\{\s*([A-Za-z0-9_]+)\s*(?=[,}])/g;
 const ICU_SELECTORS = new Set(["plural", "select", "selectordinal", "zero", "one", "two", "few", "many", "other"]);
 
-/**
- * Extracts the ICU argument names a message interpolates. A brace that opens a plural or select
- * sub-message is skipped, so literal sub-message text (e.g. the `Review` in `one {Review # item}`)
- * is never mistaken for an argument.
- */
 function placeholders(value: string): string[] {
     const names: string[] = [];
     for (const match of value.matchAll(ICU_ARGUMENT)) {
@@ -124,8 +116,8 @@ describe("message catalogue parity", () => {
 
     describe.each(translatedLocales)("%s", (locale) => {
         it.each(referenceFiles)("%s has exactly the keys en defines", (file) => {
-            const referenceKeys = flattenKeys(readNamespaceFile(REFERENCE_LOCALE, file)).sort();
-            const translatedKeys = flattenKeys(readNamespaceFile(locale, file)).sort();
+            const referenceKeys = flattenKeys(parseMessageTree(REFERENCE_LOCALE, file)).sort();
+            const translatedKeys = flattenKeys(parseMessageTree(locale, file)).sort();
 
             const missing = referenceKeys.filter((key) => !translatedKeys.includes(key));
             const orphaned = translatedKeys.filter((key) => !referenceKeys.includes(key));
@@ -134,8 +126,8 @@ describe("message catalogue parity", () => {
         });
 
         it.each(referenceFiles)("%s carries the same ICU placeholders as en", (file) => {
-            const reference = new Map(flattenEntries(readNamespaceFile(REFERENCE_LOCALE, file)));
-            const translated = flattenEntries(readNamespaceFile(locale, file));
+            const reference = new Map(flattenEntries(parseMessageTree(REFERENCE_LOCALE, file)));
+            const translated = flattenEntries(parseMessageTree(locale, file));
 
             const mismatched = translated
                 .filter(([key]) => reference.has(key))

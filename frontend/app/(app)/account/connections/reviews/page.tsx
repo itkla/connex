@@ -20,36 +20,25 @@ function pendingCount(provider: ProviderCaptureOverview): number {
     return provider.reviewCount + provider.pendingApprovalCount;
 }
 
-/**
- * Ranks the providers the user has actually connected, preferring the busiest review queue and
- * falling back to any live connection. Instance capability alone is not a usable signal — it is
- * identical for every user — so a provider the user has not connected never wins, and a user with
- * no usable connection resolves to nothing rather than an empty queue.
- *
- * @param connections - the user's provider connections
- * @param overviews - the per-provider capture overviews
- * @param enabled - the providers whose capture surface the instance enables
- * @returns the provider whose queue should open, or null when there is no usable connection
- */
-function resolveProvider(
-    connections: readonly ProviderConnection[],
+function providerWithMostPendingReviewsAmongUserConnections(
+    userConnections: readonly ProviderConnection[],
     overviews: readonly ProviderCaptureOverview[],
-    enabled: readonly ConnectedAccountProvider[],
+    instanceEnabledProviders: readonly ConnectedAccountProvider[],
 ): ConnectedAccountProvider | null {
-    const enabledSet = new Set(enabled);
-    const usable = connections.filter(
-        (connection) => enabledSet.has(connection.provider) && connection.status !== "revoked",
+    const instanceEnabled = new Set(instanceEnabledProviders);
+    const usableConnections = userConnections.filter(
+        (connection) => instanceEnabled.has(connection.provider) && connection.status !== "revoked",
     );
-    if (usable.length === 0) return null;
+    if (usableConnections.length === 0) return null;
 
-    const usableSet = new Set(usable.map((connection) => connection.provider));
-    const busiest = overviews
-        .filter((overview) => usableSet.has(overview.provider) && pendingCount(overview) > 0)
+    const userConnected = new Set(usableConnections.map((connection) => connection.provider));
+    const busiestQueue = overviews
+        .filter((overview) => userConnected.has(overview.provider) && pendingCount(overview) > 0)
         .sort((a, b) => pendingCount(b) - pendingCount(a))[0];
-    if (busiest) return busiest.provider;
+    if (busiestQueue) return busiestQueue.provider;
 
-    const live = usable.find((connection) => connection.status === "connected");
-    return live?.provider ?? usable[0].provider;
+    const liveConnection = usableConnections.find((connection) => connection.status === "connected");
+    return liveConnection?.provider ?? usableConnections[0].provider;
 }
 
 /**
@@ -73,7 +62,7 @@ export default async function CaptureReviewsPage() {
         getProviderConnectionsResultFromCookie(cookie),
         getCaptureOverviewResultFromCookie(cookie),
     ]);
-    const provider = resolveProvider(
+    const provider = providerWithMostPendingReviewsAmongUserConnections(
         connectionsResult.ok ? connectionsResult.data : [],
         overviewResult.ok ? overviewResult.data.providers : [],
         enabled,

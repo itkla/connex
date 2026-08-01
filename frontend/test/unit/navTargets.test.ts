@@ -14,11 +14,6 @@ function resolveLiteralSegment(directory: string, segment: string): string | nul
     return existsSync(literal) ? literal : null;
 }
 
-/**
- * Reports whether a static in-app path resolves to a rendered route. Resolution is literal only: a
- * navigation target is a path the product declares, so a typo must fail rather than be absorbed by a
- * dynamic sibling segment (which would let `/records/deals/NOPE` masquerade as `[id]`).
- */
 function routeExists(path: string): boolean {
     const segments = path.split("/").filter(Boolean);
     return ROUTE_ROOTS.some((root) => {

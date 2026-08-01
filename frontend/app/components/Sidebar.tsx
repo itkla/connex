@@ -112,7 +112,9 @@ function useSections(navAccess: NavAccess): NavSection[] {
         ...(isOrgAdmin
             ? [{ label: t("navOrganization"), href: "/organization/members", icon: BuildingLibraryIcon }]
             : []),
-        { label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon },
+        ...(navAccess.auditLog
+            ? [{ label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon }]
+            : []),
     ];
     return [
         {
@@ -193,23 +195,14 @@ function isActive(pathname: string, href: string): boolean {
     return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/**
- * Resolves which item in a section owns the active state. Nested destinations (e.g. Goals under
- * Reports) match more than one item's prefix, so the longest matching href wins and only one item is
- * ever highlighted. Items carrying an explicit {@link NavItem.active} override are excluded.
- *
- * @param items - the section's navigation items
- * @param pathname - the current pathname
- * @returns the winning href, or null when nothing matches
- */
-function activeHrefFor(items: readonly NavItem[], pathname: string): string | null {
-    let best: string | null = null;
+function longestMatchingHref(items: readonly NavItem[], pathname: string): string | null {
+    let longestMatch: string | null = null;
     for (const item of items) {
         if (item.active !== undefined) continue;
         if (!isActive(pathname, item.href)) continue;
-        if (best === null || item.href.length > best.length) best = item.href;
+        if (longestMatch === null || item.href.length > longestMatch.length) longestMatch = item.href;
     }
-    return best;
+    return longestMatch;
 }
 
 // function toggleSidebar() {
@@ -234,7 +227,7 @@ function NavGroup({
     navigationKey: string;
     onCollapsedChange: (sectionId: SidebarSectionId, collapsed: boolean) => void;
 }) {
-    const activeHref = activeHrefFor(section.items, pathname);
+    const activeHref = longestMatchingHref(section.items, pathname);
     const itemActive = activeHref !== null || section.items.some((item) => item.active === true);
     const groupActive = itemActive || section.activePaths?.some((href) => isActive(pathname, href)) === true;
     const [manualState, setManualState] = useState<{ navigationKey: string; collapsed: boolean } | null>(null);

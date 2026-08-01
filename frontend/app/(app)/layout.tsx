@@ -1,5 +1,7 @@
 import type { Viewport } from "next";
+import { Suspense } from "react";
 import Sidebar from "@/app/components/Sidebar";
+import SidebarFallback from "@/app/components/SidebarFallback";
 import ContentShell from "@/app/components/ContentShell";
 import {
     DEFAULT_CAPABILITIES,
@@ -25,6 +27,8 @@ import { SidebarModeProvider } from "@/app/hooks/useSidebarMode";
 import NavActionsBridge from "@/app/components/actions/NavActionsBridge";
 import { resolveNavAccess } from "@/app/lib/navAccess";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
+
+const SIDEBAR_SURFACE_CLASS = "bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl";
 
 /** `viewportFit: cover` lets `env(safe-area-inset-*)` resolve to real values on notched devices, which the mobile bottom bar relies on. Scoped to the app shell so marketing/auth pages keep the default. */
 export const viewport: Viewport = {
@@ -79,11 +83,13 @@ export default async function AppLayout({
                                 <SidebarModeProvider>
                                     <ContentShell
                                         sidebar={
-                                            <Sidebar
-                                                user={user}
-                                                navAccess={navAccess}
-                                                className="bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl"
-                                            />
+                                            <Suspense fallback={<SidebarFallback className={SIDEBAR_SURFACE_CLASS} />}>
+                                                <Sidebar
+                                                    user={user}
+                                                    navAccess={navAccess}
+                                                    className={SIDEBAR_SURFACE_CLASS}
+                                                />
+                                            </Suspense>
                                         }
                                     >
                                         {children}

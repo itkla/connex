@@ -6,19 +6,14 @@ import type { PermissionCheck } from "./types";
  * catalog spelling so the vocabulary stays consistent when a real effective-permissions endpoint
  * replaces this role-derived approximation.
  */
-export const WORKSPACE_CAPABILITIES = [
-    "ORGANIZATION_VIEW",
-    "WORKSPACE_MANAGE",
-    "MEMBER_MANAGE",
-    "AUDIT_READ",
-] as const;
+export const WORKSPACE_CAPABILITIES = ["ORGANIZATION_VIEW", "WORKSPACE_MANAGE", "MEMBER_MANAGE"] as const;
 
 /** A capability the client can approximate from the coarse role signals it already has. */
 export type WorkspaceCapability = (typeof WORKSPACE_CAPABILITIES)[number];
 
 const ROLE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspaceCapability>> = {
-    owner: new Set(["WORKSPACE_MANAGE", "MEMBER_MANAGE", "AUDIT_READ"]),
-    admin: new Set(["WORKSPACE_MANAGE", "MEMBER_MANAGE", "AUDIT_READ"]),
+    owner: new Set(["WORKSPACE_MANAGE", "MEMBER_MANAGE"]),
+    admin: new Set(["WORKSPACE_MANAGE", "MEMBER_MANAGE"]),
     member: new Set([]),
 };
 

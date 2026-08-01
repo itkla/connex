@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { FlagIcon, InboxIcon } from "@heroicons/react/24/outline";
+import { ClipboardDocumentListIcon, FlagIcon, InboxIcon } from "@heroicons/react/24/outline";
 
 import { useRegisterActions } from "@/app/hooks/useActions";
 import type { AppAction } from "@/app/lib/actions/types";
@@ -14,9 +14,10 @@ type Props = {
 /**
  * Registers the navigation actions that are gated on an instance capability or an effective
  * permission. They live in a bridge rather than the seed registry because the registry context
- * carries only coarse role signals, while these gates are resolved on the server and handed to the
- * shell. Registering nothing when access is absent keeps the palette free of destinations the
- * backend would reject. Renders nothing.
+ * carries only coarse role signals, which cannot answer for custom roles; these gates are resolved
+ * from the viewer's effective permissions on the server and handed to the shell. Registering nothing
+ * when access is absent keeps the palette free of destinations the backend would reject.
+ * Renders nothing.
  */
 export default function NavActionsBridge({ navAccess }: Props): null {
     const actions = useMemo<readonly AppAction[]>(() => {
@@ -46,8 +47,20 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 },
             });
         }
+        if (navAccess.auditLog) {
+            gated.push({
+                id: "navigate.audit-log",
+                group: "navigate",
+                labelKey: "navigate.auditLog",
+                icon: ClipboardDocumentListIcon,
+                order: 170,
+                execute: (_context, helpers) => {
+                    helpers.router.push("/admin/logs");
+                },
+            });
+        }
         return gated;
-    }, [navAccess.goals, navAccess.captureReviews]);
+    }, [navAccess.goals, navAccess.captureReviews, navAccess.auditLog]);
 
     useRegisterActions(actions);
     return null;
