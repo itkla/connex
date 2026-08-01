@@ -1,4 +1,5 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/app/components/PageShell';
 
 function SectionLabel() {
     return <Skeleton className="mb-3 h-3 w-24" />;
@@ -6,8 +7,7 @@ function SectionLabel() {
 
 export default function DashboardLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between md:gap-8">
                     <div className="space-y-3">
                         <Skeleton className="h-6 w-32" />
@@ -92,7 +92,6 @@ export default function DashboardLoading() {
                         ))}
                     </div>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

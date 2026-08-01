@@ -1,4 +1,5 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/app/components/PageShell';
 
 function TemplateRow() {
     return (
@@ -17,8 +18,7 @@ function TemplateRow() {
 
 export default function DocumentTemplatesLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <PageShell tier="wide">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <Skeleton className="h-9 w-64 max-w-full sm:h-10" />
                     <div className="flex items-center gap-2">
@@ -52,7 +52,6 @@ export default function DocumentTemplatesLoading() {
                         ))}
                     </div>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

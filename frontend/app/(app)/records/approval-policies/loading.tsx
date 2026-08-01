@@ -1,4 +1,5 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/app/components/PageShell';
 
 function PolicyRow() {
     return (
@@ -16,8 +17,7 @@ function PolicyRow() {
 
 export default function ApprovalPoliciesLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <PageShell tier="wide">
                 <div className="flex items-center justify-between">
                     <Skeleton className="h-10 w-64" />
                     <div className="flex items-center gap-2">
@@ -51,7 +51,6 @@ export default function ApprovalPoliciesLoading() {
                         ))}
                     </div>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

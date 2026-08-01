@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageShell } from "@/app/components/PageShell";
 
 function SectionLabel() {
     return (
@@ -10,8 +11,7 @@ function SectionLabel() {
 
 export default function CampaignDetailLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <div className="flex flex-col gap-4">
                     <Skeleton className="h-5 w-28" />
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
@@ -51,7 +51,6 @@ export default function CampaignDetailLoading() {
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }
