@@ -24,6 +24,22 @@ const DEBOUNCE_MS = 250;
 
 const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate', 'workspace'];
 
+const SEEDED_ACTION_LIMITS_WHEN_QUERY_EMPTY: Partial<Record<ActionGroup, number>> = { navigate: 8 };
+
+function limitSeededActionsKeepingUserContext(
+    actions: readonly AppAction[],
+    seededLimit: number | undefined,
+): AppAction[] {
+    if (seededLimit === undefined) return [...actions];
+    let seededSoFar = 0;
+    return actions.filter((action) => {
+        const isUserContextAction = action.label !== undefined;
+        if (isUserContextAction) return true;
+        seededSoFar += 1;
+        return seededSoFar <= seededLimit;
+    });
+}
+
 const PANEL_COLLAPSED = 168;
 const PANEL_EXPANDED = 452;
 const PANEL_VIEWPORT_CLEARANCE = 44;
@@ -167,7 +183,10 @@ export default function GlobalSearch() {
                 (action) => action.group === group && (!lowerQuery || actionSearchText(action, tActions).includes(lowerQuery)),
             );
             if (lowerQuery) actions.sort((a, b) => rankAction(a, lowerQuery, tActions) - rankAction(b, lowerQuery, tActions));
-            return actions.length > 0 ? [{ group, actions }] : [];
+            const visible = lowerQuery
+                ? actions
+                : limitSeededActionsKeepingUserContext(actions, SEEDED_ACTION_LIMITS_WHEN_QUERY_EMPTY[group]);
+            return visible.length > 0 ? [{ group, actions: visible }] : [];
         });
     }, [available, lowerQuery, tActions]);
 

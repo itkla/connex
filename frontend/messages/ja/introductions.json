@@ -75,5 +75,9 @@
   "IntroRationale": {
     "label": "AIインサイト",
     "integrityWarning": "一部の参照を確認できませんでした"
+  },
+  "IntroductionsLayout": {
+    "title": "概要 / 紹介",
+    "description": "お互いに紹介する価値のあるネットワーク内の人物"
   }
 }

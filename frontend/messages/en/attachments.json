@@ -95,5 +95,9 @@
     "toastTagged": "{count, plural, =1 {# file tagged} other {# files tagged}}",
     "toastTagFailed": "Couldn't tag the files",
     "toastDownloadFailed": "Couldn't prepare the download"
+  },
+  "LibraryFilesLayout": {
+    "title": "Library / Files",
+    "description": "Manage your organization's files"
   }
 }

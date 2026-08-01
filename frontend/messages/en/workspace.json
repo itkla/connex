@@ -577,5 +577,9 @@
     "loadFailed": "Your single sign-on settings couldn't be loaded.",
     "noAccess": "You need the Manage SSO permission to view this.",
     "retry": "Try again"
+  },
+  "WorkflowsLayout": {
+    "title": "Workflows",
+    "description": "Run actions automatically when records change or on a schedule"
   }
 }

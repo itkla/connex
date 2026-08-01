@@ -74,5 +74,9 @@
     "activityDeleted": "アクティビティを削除しました",
     "noteDeleted": "メモを削除しました",
     "deleteFailed": "削除できませんでした"
+  },
+  "MeLayout": {
+    "title": "マイページ",
+    "description": "自分の関係性と業務をひと目で確認"
   }
 }

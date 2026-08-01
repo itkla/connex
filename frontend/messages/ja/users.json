@@ -57,5 +57,9 @@
     "create": "作成",
     "toastCreated": "ユーザーを作成しました",
     "toastFailed": "ユーザーの作成に失敗しました"
+  },
+  "UsersLayout": {
+    "title": "ユーザー",
+    "description": "ワークスペースのユーザーを管理"
   }
 }

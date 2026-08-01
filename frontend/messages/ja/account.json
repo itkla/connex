@@ -321,8 +321,19 @@
     "scope": "プロバイダーの権限範囲",
     "data": "取り込むフィールド",
     "excluded": "常に除外するもの",
-    "visibility": "可視性",
-    "retention": "保存期間",
+    "visibility": {
+      "ownerOnly": "連携アカウントの所有者だけに表示",
+      "recordAccess": "紐づいたレコードへアクセスできるワークスペースメンバーに表示",
+      "workspaceActivityEvidence": "レコードのアクセス制御に従うワークスペースの活動根拠として表示",
+      "unknown": "可視性ルール: {code}"
+    },
+    "retention": {
+      "untilPurged": "ワークスペースの取り込みデータを消去するまで保存",
+      "untilPurgedOrDisconnected": "消去またはプロバイダー連携解除まで保存",
+      "purgedOnDisconnect": "プロバイダー連携を解除したときに消去",
+      "purgedOnAccountDeletion": "連携アカウントの所有者を削除したときに消去",
+      "unknown": "保存ルール: {code}"
+    },
     "admittedField": {
       "providerSourceId": "プロバイダー側の不透明な識別子",
       "occurredAt": "やり取りの日時",
@@ -351,19 +362,6 @@
       "nonPrimaryCalendars": "メイン以外のカレンダー",
       "body": "本文取り込みが無効な場合のメール本文",
       "unknown": "除外するプロバイダーデータ: {code}"
-    },
-    "visibility": {
-      "ownerOnly": "連携アカウントの所有者だけに表示",
-      "recordAccess": "紐づいたレコードへアクセスできるワークスペースメンバーに表示",
-      "workspaceActivityEvidence": "レコードのアクセス制御に従うワークスペースの活動根拠として表示",
-      "unknown": "可視性ルール: {code}"
-    },
-    "retention": {
-      "untilPurged": "ワークスペースの取り込みデータを消去するまで保存",
-      "untilPurgedOrDisconnected": "消去またはプロバイダー連携解除まで保存",
-      "purgedOnDisconnect": "プロバイダー連携を解除したときに消去",
-      "purgedOnAccountDeletion": "連携アカウントの所有者を削除したときに消去",
-      "unknown": "保存ルール: {code}"
     }
   },
   "AccountCaptureLifecycle": {
@@ -473,5 +471,9 @@
     "cancel": "キャンセル",
     "left": "ワークスペースを退出しました",
     "leaveFailed": "ワークスペースを退出できませんでした。"
+  },
+  "AccountLayout": {
+    "title": "アカウント設定",
+    "description": "プロフィール・セキュリティ・Connex の動作の管理"
   }
 }

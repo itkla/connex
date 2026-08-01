@@ -101,7 +101,7 @@
     "sectionOverview": "概要",
     "sectionRecords": "レコード",
     "sectionMarketing": "マーケティング",
-    "sectionActivity": "アクティビティ",
+    "sectionActivity": "活動記録",
     "sectionLibrary": "ライブラリ",
     "sectionWorkspace": "ワークスペース",
     "navDashboard": "ダッシュボード",
@@ -109,8 +109,8 @@
     "navMap": "マップ",
     "navIntroductions": "紹介",
     "navAnalytics": "分析",
-    "navInsights": "インサイト",
     "navReports": "レポート",
+    "navGoals": "目標",
     "navCompanies": "企業",
     "navContacts": "コンタクト",
     "navDeals": "案件",
@@ -123,11 +123,12 @@
     "navFiles": "ファイル",
     "navUsers": "ユーザー",
     "navWorkflows": "ワークフロー",
+    "navCaptureReviews": "取り込みの確認",
     "navAuditLog": "監査ログ",
     "navSettings": "設定",
     "navOrganization": "組織",
     "sectionHelp": "ヘルプとリソース",
-    "navDocs": "ドキュメント",
+    "navDocs": "ヘルプドキュメント",
     "profile": "プロフィール",
     "accountSettings": "アカウント設定",
     "logOut": "ログアウト",
@@ -141,7 +142,10 @@
     "languageSaveFailed": "言語を更新できませんでした。もう一度お試しください。",
     "profilePictureAlt": "{name}さんのプロフィール画像",
     "navProducts": "商品",
-    "navDocuments": "ドキュメント"
+    "navDocuments": "ドキュメント",
+    "navNotifications": "通知",
+    "navApprovalPolicies": "承認ポリシー",
+    "navSearch": "検索"
   },
   "CommonContentShell": {
     "hideSidebar": "サイドバーを非表示",
@@ -248,5 +252,9 @@
     "noHistoryTooltip": "この関係を評価するには、やり取りの履歴がまだ足りません。",
     "tooltip": "温度 {score}% · 最終接触 {lastTouch}",
     "goesCold": "{when} に冷め込み"
+  },
+  "SearchLayout": {
+    "title": "検索",
+    "description": "ワークスペース全体を検索"
   }
 }

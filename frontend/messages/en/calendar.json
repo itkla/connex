@@ -72,5 +72,9 @@
     "neverTouched": "No contact yet",
     "alreadyCold": "Cold — time to reconnect",
     "goesColdIn": "{count, plural, =0 {Goes cold today} =1 {Goes cold tomorrow} other {Goes cold in # days}}"
+  },
+  "CalendarLayout": {
+    "title": "Overview / Calendar",
+    "description": "Your schedule at a glance"
   }
 }

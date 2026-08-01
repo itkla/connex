@@ -130,5 +130,9 @@
     "noCollaborators": "追加できるメンバーがいません",
     "cancel": "キャンセル",
     "inbox": "受信トレイ"
+  },
+  "NotificationsLayout": {
+    "title": "通知",
+    "description": "通知の受信トレイ"
   }
 }

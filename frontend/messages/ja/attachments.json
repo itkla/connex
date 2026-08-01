@@ -95,5 +95,9 @@
     "toastTagged": "{count}件のファイルにタグを付けました",
     "toastTagFailed": "ファイルにタグを付けられませんでした",
     "toastDownloadFailed": "ダウンロードを準備できませんでした"
+  },
+  "LibraryFilesLayout": {
+    "title": "ライブラリ / ファイル",
+    "description": "組織のファイルを管理"
   }
 }

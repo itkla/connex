@@ -73,5 +73,9 @@
     "loadMoreLoading": "Loading…",
     "loadMoreRetry": "Try again",
     "loadMoreError": "Couldn't load more events."
+  },
+  "AdminLogsLayout": {
+    "title": "Audit log",
+    "description": "Recent activity across your workspace"
   }
 }

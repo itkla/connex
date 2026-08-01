@@ -130,5 +130,9 @@
     "noCollaborators": "No teammates available",
     "cancel": "Cancel",
     "inbox": "Inbox"
+  },
+  "NotificationsLayout": {
+    "title": "Notifications",
+    "description": "Your notification inbox"
   }
 }

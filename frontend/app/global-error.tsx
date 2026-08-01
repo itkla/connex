@@ -42,7 +42,7 @@ export default function GlobalError({ error, reset, unstable_retry }: SegmentErr
                         </Button>
                         {error.digest ? (
                             <p className="mt-6 font-mono text-xs text-muted-foreground select-all">
-                                Reference: {error.digest}
+                                Reference / 参照コード: {error.digest}
                             </p>
                         ) : null}
                     </div>

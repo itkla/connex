@@ -109,8 +109,8 @@
     "navMap": "Map",
     "navIntroductions": "Introductions",
     "navAnalytics": "Analytics",
-    "navInsights": "Insights",
     "navReports": "Reports",
+    "navGoals": "Goals",
     "navCompanies": "Companies",
     "navContacts": "Contacts",
     "navDeals": "Deals",
@@ -123,6 +123,7 @@
     "navFiles": "Files",
     "navUsers": "Users",
     "navWorkflows": "Workflows",
+    "navCaptureReviews": "Capture reviews",
     "navAuditLog": "Audit log",
     "navSettings": "Settings",
     "navOrganization": "Organization",
@@ -141,7 +142,10 @@
     "languageSaveFailed": "Couldn't update your language. Please try again.",
     "profilePictureAlt": "{name}'s profile picture",
     "navProducts": "Products",
-    "navDocuments": "Documents"
+    "navDocuments": "Documents",
+    "navNotifications": "Notifications",
+    "navApprovalPolicies": "Approval policies",
+    "navSearch": "Search"
   },
   "CommonContentShell": {
     "hideSidebar": "Hide sidebar",
@@ -248,5 +252,9 @@
     "noHistoryTooltip": "Not enough interaction history to score this relationship yet.",
     "tooltip": "{score}% warm · last touch {lastTouch}",
     "goesCold": "goes cold {when}"
+  },
+  "SearchLayout": {
+    "title": "Search",
+    "description": "Search across your workspace"
   }
 }

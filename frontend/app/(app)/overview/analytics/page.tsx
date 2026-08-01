@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 
 import {
     getAllStagesFromCookie,
@@ -38,10 +39,13 @@ const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
     contactDecay: { soon: 0, mid: 0, later: 0 },
 };
 
-export const metadata: Metadata = {
-    title: 'Analytics',
-    description: 'Revenue, pipeline, and team activity at a glance',
-};
+export async function generateMetadata(): Promise<Metadata> {
+    const t = await getTranslations('AnalyticsLayout');
+    return {
+        title: t('title'),
+        description: t('description'),
+    };
+}
 
 export default async function AnalyticsPage() {
     const cookie = (await headers()).get('cookie');

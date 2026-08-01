@@ -321,8 +321,19 @@
     "scope": "Provider scopes",
     "data": "Admitted fields",
     "excluded": "Always excluded",
-    "visibility": "Visibility",
-    "retention": "Retention",
+    "visibility": {
+      "ownerOnly": "Visible only to the connected account owner",
+      "recordAccess": "Visible to workspace members who can access the linked record",
+      "workspaceActivityEvidence": "Visible as workspace activity evidence under record access controls",
+      "unknown": "Visibility rule: {code}"
+    },
+    "retention": {
+      "untilPurged": "Retained until you purge captured workspace data",
+      "untilPurgedOrDisconnected": "Retained until purge or provider disconnect",
+      "purgedOnDisconnect": "Purged when the provider account is disconnected",
+      "purgedOnAccountDeletion": "Purged when the connected account owner is deleted",
+      "unknown": "Retention rule: {code}"
+    },
     "admittedField": {
       "providerSourceId": "Opaque provider source identifier",
       "occurredAt": "Interaction date and time",
@@ -351,19 +362,6 @@
       "nonPrimaryCalendars": "Calendars outside the primary calendar",
       "body": "Message body when body capture is not enabled",
       "unknown": "Excluded provider data: {code}"
-    },
-    "visibility": {
-      "ownerOnly": "Visible only to the connected account owner",
-      "recordAccess": "Visible to workspace members who can access the linked record",
-      "workspaceActivityEvidence": "Visible as workspace activity evidence under record access controls",
-      "unknown": "Visibility rule: {code}"
-    },
-    "retention": {
-      "untilPurged": "Retained until you purge captured workspace data",
-      "untilPurgedOrDisconnected": "Retained until purge or provider disconnect",
-      "purgedOnDisconnect": "Purged when the provider account is disconnected",
-      "purgedOnAccountDeletion": "Purged when the connected account owner is deleted",
-      "unknown": "Retention rule: {code}"
     }
   },
   "AccountCaptureLifecycle": {
@@ -473,5 +471,9 @@
     "cancel": "Cancel",
     "left": "You left the workspace",
     "leaveFailed": "Could not leave the workspace."
+  },
+  "AccountLayout": {
+    "title": "Account settings",
+    "description": "Manage your profile, security, and how Connex works for you"
   }
 }

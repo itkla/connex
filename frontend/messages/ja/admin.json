@@ -73,5 +73,9 @@
     "loadMoreLoading": "読み込み中…",
     "loadMoreRetry": "再試行",
     "loadMoreError": "追加のイベントを読み込めませんでした。"
+  },
+  "AdminLogsLayout": {
+    "title": "監査ログ",
+    "description": "ワークスペース全体の最近の操作"
   }
 }

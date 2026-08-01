@@ -230,5 +230,9 @@
     "a11yDropped": "Dropped {name} onto {target}.",
     "a11yCancelled": "Reordering {name} was cancelled.",
     "a11yInstructions": "To reorder a widget, press space or enter to pick it up, use the arrow keys to move it, and press space or enter again to drop it."
+  },
+  "DashboardLayout": {
+    "title": "Dashboard",
+    "description": "Your organization at a glance"
   }
 }
