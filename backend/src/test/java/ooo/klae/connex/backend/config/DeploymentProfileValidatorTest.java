@@ -144,6 +144,18 @@ class DeploymentProfileValidatorTest {
     }
 
     @Test
+    void rejectsOnPremWhenInstanceManagedMailIsEnabledWithARelaxedSpelling() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.mail.MANAGED", "true");
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+            () -> validator(DeploymentProperties.PROFILE_ON_PREM, environment).run(null));
+
+        assertEquals("connex.deployment.profile=on-prem forbids: connex.mail.managed=true",
+            exception.getMessage());
+    }
+
+    @Test
     void allowsOnPremWhenInstanceManagedMailIsDisabled() {
         MockEnvironment environment = new MockEnvironment()
             .withProperty("connex.mail.managed", "false")

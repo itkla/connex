@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
@@ -37,6 +38,13 @@ import lombok.RequiredArgsConstructor;
  * would otherwise advertise the capability as unavailable while still routing mail through the
  * managed transport and locking the customer out of their own SMTP. Failing startup makes that
  * divergent state unreachable instead of merely undocumented.
+ *
+ * <p>Posture keys are read through the same relaxed {@link Binder} that populates the backing
+ * {@code @ConfigurationProperties} beans, not exact-match {@code Environment.getProperty}. An
+ * exact-match read would resolve {@code connex.mail.managed} only for its canonical spelling, so a
+ * relaxed spelling the binder accepts (for instance {@code connex.mail.MANAGED}) could enable
+ * managed mail while this validator saw {@code false} and admitted the on-prem boot — the exact
+ * hole this refusal closes. Binding here guarantees the validator reads what the beans read.
  *
  * <p>Invalid values remain the responsibility of bean validation on
  * {@link DeploymentProperties}. Forced cookie security and database transport checks are
@@ -107,9 +115,10 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     }
 
     private Map<String, Boolean> readPosture() {
+        Binder binder = Binder.get(environment);
         Map<String, Boolean> posture = new LinkedHashMap<>();
         for (String key : POSTURE_KEYS) {
-            posture.put(key, environment.getProperty(key, Boolean.class, false));
+            posture.put(key, binder.bind(key, Boolean.class).orElse(false));
         }
         return posture;
     }

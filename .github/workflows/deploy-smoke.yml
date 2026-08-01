@@ -177,6 +177,30 @@ jobs:
             sleep 3
           done
 
+          echo "=== on-prem must REFUSE instance-managed mail ==="
+          CONNEX_DEPLOYMENT_PROFILE=on-prem CONNEX_MAIL_MANAGED=true \
+            java -jar "$WAR" > /tmp/boot-on-prem-managed.log 2>&1 &
+          PID=$!
+          REFUSED=0
+          for _ in $(seq 1 90); do
+            if curl -sf http://localhost:8080/api/version > /dev/null 2>&1; then break; fi
+            if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; break; fi
+            sleep 2
+          done
+          if [ "$REFUSED" != 1 ]; then
+            echo "::error::on-prem booted with CONNEX_MAIL_MANAGED=true; it must fail startup"
+            tail -60 /tmp/boot-on-prem-managed.log
+            kill "$PID" 2>/dev/null || true
+            exit 1
+          fi
+          if ! grep -q "connex.deployment.profile=on-prem forbids: connex.mail.managed=true" \
+              /tmp/boot-on-prem-managed.log; then
+            echo "::error::on-prem refused to boot but not for the managed-mail reason"
+            tail -60 /tmp/boot-on-prem-managed.log
+            exit 1
+          fi
+          echo "on-prem correctly refused instance-managed mail at startup"
+
   required:
     name: Deploy — required
     if: always()
