@@ -119,13 +119,14 @@ jobs:
       - name: Build bootWar
         working-directory: backend
         run: bash gradlew bootWar --no-daemon -Pversion=ci
-      - name: Boot saas, silo, on-prem and smoke the public endpoints
+      - name: Boot saas, silo, on-prem and assert the capability matrix
         working-directory: backend
         env:
           SPRING_PROFILES_ACTIVE: dev
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-root
+          CONNEX_MAIL_MANAGED: 'true'
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
@@ -145,9 +146,27 @@ jobs:
               kill "$PID" 2>/dev/null || true
               exit 1
             fi
-            curl -sf http://localhost:8080/api/capabilities | grep -q '"businessCardScanning"' \
-              || { echo "::error::capabilities smoke failed for $PROFILE"; kill "$PID" 2>/dev/null || true; exit 1; }
-            echo "profile $PROFILE booted and smoked OK"
+            if ! CAPABILITIES=$(curl -sf http://localhost:8080/api/capabilities); then
+              echo "::error::capabilities smoke failed for $PROFILE"
+              kill "$PID" 2>/dev/null || true
+              exit 1
+            fi
+            for FIELD in businessCardScanning campaignDelivery mailManaged; do
+              if ! jq -e "has(\"$FIELD\")" > /dev/null <<< "$CAPABILITIES"; then
+                echo "::error::capabilities response for $PROFILE is missing $FIELD"
+                kill "$PID" 2>/dev/null || true
+                exit 1
+              fi
+            done
+            if [ "$PROFILE" = "on-prem" ]; then EXPECTED_MANAGED_MAIL=false; else EXPECTED_MANAGED_MAIL=true; fi
+            ACTUAL_MANAGED_MAIL=$(jq -r '.mailManaged' <<< "$CAPABILITIES")
+            if [ "$ACTUAL_MANAGED_MAIL" != "$EXPECTED_MANAGED_MAIL" ]; then
+              echo "::error::profile $PROFILE reported mailManaged=$ACTUAL_MANAGED_MAIL, expected $EXPECTED_MANAGED_MAIL"
+              echo "CONNEX_MAIL_MANAGED=true is set for every boot, so this asserts the deployment-edition matrix"
+              kill "$PID" 2>/dev/null || true
+              exit 1
+            fi
+            echo "profile $PROFILE booted OK with mailManaged=$ACTUAL_MANAGED_MAIL"
             kill "$PID" 2>/dev/null || true
             wait "$PID" 2>/dev/null || true
             sleep 3
