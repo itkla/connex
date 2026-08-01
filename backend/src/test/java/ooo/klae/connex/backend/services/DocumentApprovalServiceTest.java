@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.Company;
@@ -35,6 +36,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     @Autowired DocumentTemplateService templateService;
     @Autowired DealLineItemService lineItemService;
     @Autowired ProductService productService;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();
@@ -79,6 +81,12 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         return documentService.generate(deal.getId(), template().getId());
     }
 
+    private User approver() {
+        User approver = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), approver.getId(), "admin");
+        return approver;
+    }
+
     @Test
     void requestMovesDraftToPendingAndRecordsTriggeringPolicy() {
         ApprovalPolicy policy = jpyTotalPolicy("100");
@@ -99,7 +107,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void approvalUnlocksFinalization() {
+    void differentApproverCanApprove() {
         jpyTotalPolicy("100");
         Deal deal = jpyDeal();
         addLine(deal, "150.00", "1");
@@ -109,13 +117,87 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
             () -> documentService.updateStatus(deal.getId(), doc.id(), "final"));
 
         approvalService.requestApproval(deal.getId(), doc.id(), null);
+        authenticateAs(approver(), workspace.getId());
         DocumentApprovalDto decided = approvalService.decide(deal.getId(), doc.id(), "approved", "looks good");
         assertEquals("approved", decided.status());
         assertEquals("looks good", decided.decisionComment());
         assertNotNull(decided.decidedAt());
 
         assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
+        authenticateAs(currentUser, workspace.getId());
         assertEquals("final", documentService.updateStatus(deal.getId(), doc.id(), "final").status());
+    }
+
+    @Test
+    void requesterCannotApproveOwnDocument() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
+    }
+
+    @Test
+    void requesterCannotRejectOwnDocument() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "rejected", null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
+    }
+
+    @Test
+    void authorCannotApproveOwnDocumentRequestedByAnotherMember() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        User requester = newUser();
+        authenticateAs(requester, workspace.getId());
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        authenticateAs(currentUser, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
+    }
+
+    @Test
+    void authorCannotApproveAfterCancellingAndAnotherMemberRequests() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+        approvalService.cancel(deal.getId(), doc.id());
+        User requester = newUser();
+        authenticateAs(requester, workspace.getId());
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        authenticateAs(currentUser, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
+    }
+
+    @Test
+    void unknownRequesterFailsClosed() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        jdbcTemplate.update(
+                "UPDATE document_approval SET requested_by = NULL WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), approval.id());
+        authenticateAs(approver(), workspace.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
     }
 
     @Test
@@ -126,6 +208,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DealDocumentDto doc = generate(deal);
         approvalService.requestApproval(deal.getId(), doc.id(), null);
 
+        authenticateAs(approver(), workspace.getId());
         DocumentApprovalDto rejected = approvalService.decide(deal.getId(), doc.id(), "rejected", "too steep");
         assertEquals("rejected", rejected.status());
 
@@ -186,22 +269,54 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void supersedingAPendingDocumentCancelsItsApproval() {
+    void onlyAdminOrOwnerCanCancelAnApprovalWithUnknownRequester() {
         Deal deal = jpyDeal();
         DealDocumentDto doc = generate(deal);
         DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        jdbcTemplate.update(
+                "UPDATE document_approval SET requested_by = NULL WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), approval.id());
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
 
-        User superseder = newUser();
-        authenticateAs(superseder, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.cancel(deal.getId(), doc.id()));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+
+        authenticateAs(currentUser, workspace.getId());
+        DocumentApprovalDto cancelled = approvalService.cancel(deal.getId(), doc.id());
+        assertEquals("cancelled", cancelled.status());
+        assertEquals("draft", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void supersedeByRequesterCancelsPendingApproval() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
         DealDocumentDto superseded = documentService.updateStatus(deal.getId(), doc.id(), "superseded");
         assertEquals("superseded", superseded.status());
         assertEquals("cancelled", superseded.latestApproval().status());
-        assertNotNull(notificationMapper.findByDedupe(workspace.getId(), currentUser.getId(),
-            "document.approval_decision:" + approval.id() + ":" + currentUser.getId()));
 
-        authenticateAs(currentUser, workspace.getId());
         assertThrows(BadRequestException.class,
             () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+    }
+
+    @Test
+    void differentMemberCanSupersedeAndCancelAnotherMembersPendingApproval() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        User superseder = newUser();
+        authenticateAs(superseder, workspace.getId());
+
+        DealDocumentDto superseded = documentService.updateStatus(
+            deal.getId(), doc.id(), "superseded");
+
+        assertEquals("superseded", superseded.status());
+        assertEquals("cancelled", superseded.latestApproval().status());
+        assertEquals(currentUser.getId(), approval.requestedBy());
     }
 
     @Test
@@ -240,8 +355,10 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         addLine(deal, "150.00", "1");
         DealDocumentDto first = generate(deal);
         approvalService.requestApproval(deal.getId(), first.id(), null);
+        authenticateAs(approver(), workspace.getId());
         approvalService.decide(deal.getId(), first.id(), "approved", null);
 
+        authenticateAs(currentUser, workspace.getId());
         DealDocumentDto second = generate(deal);
         assertEquals("draft", second.status());
         assertTrue(second.requiresApproval());
@@ -277,7 +394,9 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
         assertNull(approval.policyId());
+        authenticateAs(approver(), workspace.getId());
         approvalService.decide(deal.getId(), doc.id(), "approved", null);
+        authenticateAs(currentUser, workspace.getId());
         assertEquals("final", documentService.updateStatus(deal.getId(), doc.id(), "final").status());
     }
 }

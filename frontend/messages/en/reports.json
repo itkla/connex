@@ -10,7 +10,9 @@
       "documentTitle": "Report",
       "documentDescription": "Generated narrative business report",
       "goalsTitle": "Goals",
-      "goalsDescription": "Revenue targets for report attainment"
+      "goalsDescription": "Revenue targets for report attainment",
+      "snapshotTitle": "Frozen report snapshot",
+      "snapshotDescription": "A report snapshot frozen at the time it was delivered"
     },
     "common": {
       "cancel": "Cancel",
@@ -201,7 +203,13 @@
       "noData": "No data for this period",
       "noCurrentStateData": "No current-state data",
       "source": "Source",
-      "metric": "Metric"
+      "metric": "Metric",
+      "scheduledSnapshot": "Frozen by scheduled delivery",
+      "snapshotUnavailableTitle": "This snapshot is no longer available",
+      "snapshotUnavailableBody": "Frozen snapshots are pruned over time, so an emailed link can outlive the snapshot it points to. The live report is still available.",
+      "snapshotForbiddenTitle": "You don't have access to this snapshot",
+      "snapshotForbiddenBody": "Ask a workspace admin if you need access to this report.",
+      "viewLiveReport": "View live report"
     },
     "cadence": {
       "weekly": "Weekly",

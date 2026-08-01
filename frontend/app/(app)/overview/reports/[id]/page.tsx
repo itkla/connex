@@ -40,6 +40,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
             definition={report}
             initialSnapshots={snapshots}
             canUpdateReports={effectivePermissions.includes('REPORT_UPDATE')}
+            canDeleteReports={effectivePermissions.includes('REPORT_DELETE')}
+            currentUserId={user.id}
             defaultTimezone={user.timezone}
         />
     );

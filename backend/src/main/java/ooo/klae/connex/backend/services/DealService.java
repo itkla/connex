@@ -73,6 +73,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -96,6 +97,7 @@ import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 @RequiredArgsConstructor
 public class DealService {
     private final DealMapper dealMapper;
+    private final DealDocumentMapper dealDocumentMapper;
     private final DealLineItemMapper dealLineItemMapper;
     private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
@@ -1246,6 +1248,9 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        if (dealDocumentMapper.countNonDraftByDeal(workspaceId, id) > 0) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        }
         customFieldValueService.deleteByEntity("deal", id);
         dealMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_DEAL, id);

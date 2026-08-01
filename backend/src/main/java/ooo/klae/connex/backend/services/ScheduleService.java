@@ -124,6 +124,7 @@ public class ScheduleService {
         if (scheduleMapper.deleteByReport(workspaceId, reportDefinitionId) == 0) {
             throw new ResourceNotFoundException("Report delivery schedule not found");
         }
+        reportMapper.deleteOrphanedScheduledSnapshots(workspaceId, reportDefinitionId);
         auditService.record("report.schedule.delete", "report_schedule", schedule.getId(), definition.getName(),
                 "Deleted report delivery schedule", null);
     }

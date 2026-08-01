@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRef;
+import ooo.klae.connex.backend.dto.ReportSnapshotDto;
 import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailMessage;
@@ -70,13 +71,23 @@ public class ReportDeliveryScheduler {
     @Value("${connex.reports.scheduling-enabled:true}")
     private boolean schedulingEnabled;
 
+    /**
+     * Invokes the delivery sweep from Spring's scheduling infrastructure only when operator
+     * scheduling is enabled. Keeping the flag at this wrapper leaves {@link #deliverDue()} usable
+     * for deterministic tests and explicit orchestration without enabling background scheduling.
+     */
     @Scheduled(
         fixedDelayString = "${connex.reports.delivery-delay-ms:300000}",
         initialDelayString = "${connex.reports.initial-delay-ms:300000}")
-    public void deliverDue() {
+    public void deliverDueOnSchedule() {
         if (!schedulingEnabled) {
             return;
         }
+        deliverDue();
+    }
+
+    /** Performs one flag-free delivery sweep across all active tenant catalogs. */
+    public void deliverDue() {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         for (String catalog : placementRegistry.activeCatalogs()) {
             try {
@@ -135,9 +146,17 @@ public class ReportDeliveryScheduler {
             }
             return;
         }
-        ReportDocumentDto document = reportService.generate(
-                claimed.getReportDefinitionId(), null, ReportService.NarrativeMode.FULL);
-        recipients = scheduleService.activeRecipientsForDocument(claimed, document);
+        ReportSnapshotDto snapshot;
+        try {
+            snapshot = reportService.createDeliverySnapshot(
+                    claimed.getReportDefinitionId(), claimed.getId());
+        } catch (RuntimeException exception) {
+            log.warn("Report snapshot could not be frozen for schedule {} in workspace {}: {}",
+                    ref.scheduleId(), ref.workspaceId(), exception.getMessage());
+            auditFailure(ref, "report snapshot persistence failed");
+            return;
+        }
+        recipients = scheduleService.activeRecipientsForDocument(claimed, snapshot.computedResult());
         if (recipients.isEmpty()) {
             if (scheduleService.isCurrentDeliverySchedule(claimed)) {
                 auditFailure(ref, "no eligible report recipients");
@@ -145,12 +164,13 @@ public class ReportDeliveryScheduler {
             return;
         }
         for (User recipient : recipients) {
-            send(recipient, claimed, document);
+            send(recipient, claimed, snapshot);
         }
-        auditQueued(ref, document, recipients.size());
+        auditQueued(ref, snapshot, recipients.size());
     }
 
-    private void send(User recipient, ReportSchedule schedule, ReportDocumentDto document) {
+    private void send(User recipient, ReportSchedule schedule, ReportSnapshotDto snapshot) {
+        ReportDocumentDto document = snapshot.computedResult();
         Locale locale = LocaleSupport.resolve(recipient.getLocale());
         DeliveryCopy copy = deliveryCopy(locale);
         DateTimeFormatter periodDate =
@@ -168,7 +188,9 @@ public class ReportDeliveryScheduler {
         Headline second = headlines.size() < 2 ? new Headline("", "") : headlines.get(1);
         String actionUrl = UriComponentsBuilder.fromUriString(mailProperties.getAppBaseUrl())
                 .path("/overview/reports/")
-                .path(String.valueOf(schedule.getReportDefinitionId()))
+                .path(String.valueOf(snapshot.reportDefinitionId()))
+                .path("/snapshots/")
+                .path(String.valueOf(snapshot.id()))
                 .build()
                 .toUriString();
         String body = templateRenderer.render("report-delivery", locale.getLanguage(), Map.of(
@@ -264,12 +286,14 @@ public class ReportDeliveryScheduler {
         });
     }
 
-    private void auditQueued(ReportScheduleRef ref, ReportDocumentDto document, int recipientCount) {
+    private void auditQueued(ReportScheduleRef ref, ReportSnapshotDto snapshot, int recipientCount) {
         tenantWorkScope.unrouted(() -> {
             auditService.recordScoped(
                     "report.schedule.delivery", "report_schedule", ref.scheduleId(),
-                    ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), document.definition().name(),
-                    "Queued scheduled report delivery", Map.of("recipientCount", recipientCount));
+                    ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()),
+                    snapshot.computedResult().definition().name(),
+                    "Queued scheduled report delivery",
+                    Map.of("recipientCount", recipientCount, "snapshotId", snapshot.id()));
             return null;
         });
     }

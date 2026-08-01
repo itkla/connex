@@ -33,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.beans.ReportGoal;
 import ooo.klae.connex.backend.beans.ReportDefinition;
+import ooo.klae.connex.backend.beans.ReportSchedule;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
@@ -63,6 +64,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.mappers.ScheduleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
@@ -79,11 +81,17 @@ public class ReportService {
 
     private static final int MAX_CONFIG_BYTES = 131_072;
     private static final int MAX_SNAPSHOT_BYTES = 4_194_304;
-    private static final int MAX_SNAPSHOT_LIST_SIZE = 100;
     private static final int MAX_SNAPSHOTS_PER_REPORT = 100;
+    private static final int MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE = 26;
+    private static final int SCHEDULED_EVICTION_BATCH_SIZE = 16;
+    private static final int MAX_SCHEDULED_EVICTION_BATCHES = 256;
+    private static final int MAX_SNAPSHOT_LIST_SIZE =
+            MAX_SNAPSHOTS_PER_REPORT + MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE;
     private static final int MAX_REPORTS_PER_WORKSPACE = 100;
     private static final int MAX_SNAPSHOTS_PER_WORKSPACE = 1_000;
     private static final long MAX_SNAPSHOT_BYTES_PER_WORKSPACE = 268_435_456;
+    private static final String SNAPSHOT_ORIGIN_MANUAL = "manual";
+    private static final String SNAPSHOT_ORIGIN_SCHEDULED = "scheduled";
     private static final int RISK_ID_BATCH_SIZE = 1_000;
     private static final int FORECAST_HORIZON_MONTHS = 3;
     private static final int FORECAST_HISTORY_PRIOR_DEALS = 10;
@@ -130,6 +138,7 @@ public class ReportService {
             "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves");
 
     private final ReportMapper reportMapper;
+    private final ScheduleMapper scheduleMapper;
     private final GoalMapper goalMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
@@ -138,6 +147,7 @@ public class ReportService {
     private final ReportNetworkService reportNetworkService;
     private final AiReportNarrativeService aiReportNarrativeService;
     private final AuditService auditService;
+    private final DeletionPolicy deletionPolicy;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
@@ -303,12 +313,25 @@ public class ReportService {
     @Transactional
     @RequirePermission(Permission.REPORT_DELETE)
     public void delete(int id) {
-        ReportDefinition definition = requireDefinition(id);
-        if (reportMapper.deleteDefinition(workspaceService.getCurrentWorkspaceId(), id) == 0) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        reportMapper.lockDefinitions(workspaceId);
+        ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
+        if (definition == null) {
+            throw new ResourceNotFoundException("Report not found with id: " + id);
+        }
+        deletionPolicy.requireDeletable(definition.getCreatedBy());
+        int currentUserId = workspaceService.getCurrentUserId();
+        int destroyedSnapshotCount = reportMapper.countSnapshots(workspaceId, id);
+        if (reportMapper.countSnapshotsNotGeneratedBy(workspaceId, id, currentUserId) > 0
+                || reportMapper.countScheduledSnapshots(workspaceId, id) > 0) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        }
+        if (reportMapper.deleteDefinition(workspaceId, id) == 0) {
             throw new ResourceNotFoundException("Report not found with id: " + id);
         }
         auditService.record("report.delete", "report", id, definition.getName(),
-                "Deleted report " + definition.getName(), null);
+                "Deleted report " + definition.getName(),
+                Map.of("destroyedSnapshotCount", destroyedSnapshotCount));
     }
 
     /**
@@ -329,7 +352,7 @@ public class ReportService {
         ReportDocumentDto document = generateInternal(id, request, NarrativeMode.FULL);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String computedResult = serialize(document, MAX_SNAPSHOT_BYTES, "Report snapshot is too large");
-        ReportSnapshot persisted = transactionTemplate.execute(status -> persistSnapshot(
+        ReportSnapshot persisted = transactionTemplate.execute(status -> persistManualSnapshot(
                 workspaceId, id, document, computedResult, authService.getCurrentUser().getId()));
         if (persisted == null) {
             throw new ResourceNotFoundException("Report snapshot could not be created");
@@ -337,7 +360,34 @@ public class ReportService {
         return toSnapshotDto(persisted);
     }
 
-    private ReportSnapshot persistSnapshot(
+    /**
+     * Freezes one claimed scheduled delivery under the run-as identity. Authorization derives from
+     * {@link ScheduleService#deliveryAccess(ReportSchedule)}, which re-derives the run-as user's
+     * permissions immediately before the occurrence is claimed. This boundary deliberately does
+     * not require {@link Permission#REPORT_CREATE}: delivery access validates
+     * {@link Permission#REPORT_READ}, plus {@link Permission#GOAL_READ} for attainment, through
+     * {@link ReportPermissionPolicy}, and adding snapshot-create authorization after the committed
+     * claim would burn a valid read-only run-as occurrence without delivering it. The method is
+     * package-private so the same-package scheduler can call it while it remains outside the
+     * public-mutator architecture rule. The workspace-scoped schedule row lock enforces tenant
+     * equality for the migration's deliberately single-column schedule foreign key; a composite
+     * foreign key including the non-null workspace id cannot use {@code ON DELETE SET NULL}.
+     */
+    ReportSnapshotDto createDeliverySnapshot(int reportId, int scheduleId) {
+        workspaceService.requirePermission(Permission.REPORT_READ);
+        ReportDocumentDto document = generateInternal(reportId, null, NarrativeMode.FULL);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String computedResult = serialize(document, MAX_SNAPSHOT_BYTES, "Report snapshot is too large");
+        ReportSnapshot persisted = transactionTemplate.execute(status -> persistDeliverySnapshot(
+                workspaceId, reportId, scheduleId, document, computedResult,
+                authService.getCurrentUser().getId()));
+        if (persisted == null) {
+            throw new ResourceNotFoundException("Report snapshot could not be created");
+        }
+        return toSnapshotDto(persisted);
+    }
+
+    private ReportSnapshot persistManualSnapshot(
             int workspaceId,
             int reportId,
             ReportDocumentDto document,
@@ -347,20 +397,56 @@ public class ReportService {
         if (reportMapper.getDefinition(workspaceId, reportId) == null) {
             throw new ResourceNotFoundException("Report not found with id: " + reportId);
         }
-        if (reportMapper.countSnapshots(workspaceId, reportId) >= MAX_SNAPSHOTS_PER_REPORT) {
+        if (reportMapper.countManualSnapshots(workspaceId, reportId) >= MAX_SNAPSHOTS_PER_REPORT) {
             throw new BadRequestException("A report cannot have more than 100 snapshots");
         }
-        if (reportMapper.countWorkspaceSnapshots(workspaceId) >= MAX_SNAPSHOTS_PER_WORKSPACE
-                || reportMapper.workspaceSnapshotBytes(workspaceId)
-                        + computedResult.getBytes(StandardCharsets.UTF_8).length > MAX_SNAPSHOT_BYTES_PER_WORKSPACE) {
-            throw new BadRequestException("The workspace report snapshot quota has been reached");
+        requireWorkspaceSnapshotCapacity(workspaceId, computedResult);
+        return insertSnapshot(
+                workspaceId, reportId, document, computedResult, generatedBy,
+                SNAPSHOT_ORIGIN_MANUAL, null);
+    }
+
+    private ReportSnapshot persistDeliverySnapshot(
+            int workspaceId,
+            int reportId,
+            int scheduleId,
+            ReportDocumentDto document,
+            String computedResult,
+            int generatedBy) {
+        reportMapper.lockDefinitions(workspaceId);
+        if (reportMapper.getDefinition(workspaceId, reportId) == null) {
+            throw new ResourceNotFoundException("Report not found with id: " + reportId);
         }
+        ReportSchedule schedule = scheduleMapper.lockById(workspaceId, scheduleId);
+        if (schedule == null || !schedule.isEnabled()
+                || schedule.getReportDefinitionId() != reportId
+                || schedule.getRunAsUserId() != generatedBy) {
+            throw new ResourceNotFoundException("Report delivery schedule is unavailable");
+        }
+        reportMapper.deleteScheduledSnapshotsBeyondRetention(
+                workspaceId, scheduleId, reportId, MAX_SCHEDULED_SNAPSHOTS_PER_SCHEDULE - 1);
+        requireDeliverySnapshotCapacity(workspaceId, computedResult);
+        return insertSnapshot(
+                workspaceId, reportId, document, computedResult, generatedBy,
+                SNAPSHOT_ORIGIN_SCHEDULED, scheduleId);
+    }
+
+    private ReportSnapshot insertSnapshot(
+            int workspaceId,
+            int reportId,
+            ReportDocumentDto document,
+            String computedResult,
+            int generatedBy,
+            String origin,
+            Integer reportScheduleId) {
         ReportSnapshot snapshot = new ReportSnapshot();
         snapshot.setWorkspaceId(workspaceId);
         snapshot.setReportDefinitionId(reportId);
         snapshot.setPeriodStart(document.periodStart());
         snapshot.setPeriodEnd(document.periodEnd());
         snapshot.setComputedResult(computedResult);
+        snapshot.setOrigin(origin);
+        snapshot.setReportScheduleId(reportScheduleId);
         snapshot.setGeneratedBy(generatedBy);
         reportMapper.insertSnapshot(snapshot);
         auditService.record("report.snapshot.create", "report", reportId, document.definition().name(),
@@ -370,6 +456,44 @@ public class ReportService {
             throw new ResourceNotFoundException("Report snapshot not found with id: " + snapshot.getId());
         }
         return persisted;
+    }
+
+    private boolean hasWorkspaceSnapshotCapacity(int workspaceId, String computedResult) {
+        return reportMapper.countWorkspaceSnapshots(workspaceId) < MAX_SNAPSHOTS_PER_WORKSPACE
+                && reportMapper.workspaceSnapshotBytes(workspaceId)
+                        + computedResult.getBytes(StandardCharsets.UTF_8).length
+                                <= MAX_SNAPSHOT_BYTES_PER_WORKSPACE;
+    }
+
+    private void requireWorkspaceSnapshotCapacity(int workspaceId, String computedResult) {
+        if (!hasWorkspaceSnapshotCapacity(workspaceId, computedResult)) {
+            throw new BadRequestException("The workspace report snapshot quota has been reached");
+        }
+    }
+
+    /**
+     * Preserves scheduled-delivery continuity by evicting the oldest scheduled-origin snapshots
+     * workspace-wide when the workspace quota is exhausted. Eviction runs in small batches and
+     * stops as soon as the snapshot fits, so a workspace that is marginally over its quota loses
+     * only the few oldest scheduled rows rather than its whole evidence tail.
+     *
+     * <p>This deliberately trades the oldest scheduled evidence for delivery continuity: without
+     * it, a workspace reaching its quota would fail every future scheduled delivery permanently
+     * and silently, because the occurrence is already claimed by the time this runs. Manual
+     * snapshots are never evicted, and a workspace that still cannot fit the snapshot fails closed
+     * so the scheduler audits the failure and sends nothing.
+     */
+    private void requireDeliverySnapshotCapacity(int workspaceId, String computedResult) {
+        for (int batch = 0; batch < MAX_SCHEDULED_EVICTION_BATCHES; batch++) {
+            if (hasWorkspaceSnapshotCapacity(workspaceId, computedResult)) {
+                return;
+            }
+            if (reportMapper.deleteOldestScheduledSnapshots(
+                    workspaceId, SCHEDULED_EVICTION_BATCH_SIZE) == 0) {
+                break;
+            }
+        }
+        requireWorkspaceSnapshotCapacity(workspaceId, computedResult);
     }
 
     /** Lists frozen snapshots for a report definition. */
@@ -398,7 +522,13 @@ public class ReportService {
     @RequirePermission(Permission.REPORT_DELETE)
     public void deleteSnapshot(int reportId, int snapshotId) {
         requireDefinition(reportId);
-        if (reportMapper.deleteSnapshot(workspaceService.getCurrentWorkspaceId(), reportId, snapshotId) == 0) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        ReportSnapshot snapshot = reportMapper.getSnapshot(workspaceId, reportId, snapshotId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException("Report snapshot not found with id: " + snapshotId);
+        }
+        deletionPolicy.requireDeletable(snapshot.getGeneratedBy());
+        if (reportMapper.deleteSnapshot(workspaceId, reportId, snapshotId) == 0) {
             throw new ResourceNotFoundException("Report snapshot not found with id: " + snapshotId);
         }
         auditService.record("report.snapshot.delete", "report", reportId, null,
@@ -1359,7 +1489,7 @@ public class ReportService {
         }
         return new ReportSnapshotDto(snapshot.getId(), snapshot.getReportDefinitionId(),
                 snapshot.getPeriodStart(), snapshot.getPeriodEnd(), document,
-                snapshot.getGeneratedBy(), snapshot.getGeneratedAt());
+                snapshot.getOrigin(), snapshot.getGeneratedBy(), snapshot.getGeneratedAt());
     }
 
     private ReportConfig parseConfig(String configJson) {

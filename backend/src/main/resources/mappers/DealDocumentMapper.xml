@@ -47,6 +47,13 @@
     SELECT MAX(version) FROM deal_document WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
   </select>
 
+  <select id="countNonDraftByDeal" resultType="int">
+    SELECT COUNT(*) FROM deal_document
+    WHERE workspace_id = #{workspaceId}
+      AND deal_id = #{dealId}
+      AND status &lt;&gt; 'draft'
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal_document (
       workspace_id, deal_id, template_id, type, locale, status, version, title, content, currency, created_by

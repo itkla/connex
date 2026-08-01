@@ -115,9 +115,14 @@ public class DocumentApprovalService {
             throw new BadRequestException("No pending approval on this document");
         }
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
+        if (actor == null || approval.getRequestedBy() == null || document.getCreatedBy() == null
+                || approval.getRequestedBy() == actor.getId() || document.getCreatedBy() == actor.getId()) {
+            throw new ForbiddenException(
+                "You cannot decide an approval for a document you authored or requested");
+        }
         boolean approved = "approved".equals(decision);
         approvalMapper.decide(workspaceId, approval.getId(), decision,
-            actor == null ? null : actor.getId(), blankToNull(comment));
+            actor.getId(), blankToNull(comment));
         documentMapper.updateStatus(workspaceId, documentId, approved ? "approved" : "draft");
 
         auditService.record("document_approval.decide", "deal", dealId, deal.getName(),
@@ -159,7 +164,9 @@ public class DocumentApprovalService {
             throw new BadRequestException("No pending approval on this document");
         }
         int currentUserId = workspaceService.getCurrentUserId();
-        if (approval.getRequestedBy() == null || approval.getRequestedBy() != currentUserId) {
+        if (approval.getRequestedBy() == null) {
+            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        } else if (approval.getRequestedBy() != currentUserId) {
             throw new ForbiddenException("Only the requester can cancel an approval request");
         }
         approvalMapper.decide(workspaceId, approval.getId(), "cancelled", currentUserId, null);

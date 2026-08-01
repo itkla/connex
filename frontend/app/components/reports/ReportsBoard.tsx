@@ -28,7 +28,9 @@ import {
     groupReportTemplates,
     reportTemplateMeasures,
 } from '@/app/components/reports/reportConfig';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { createReport, deleteReport } from '@/app/lib/api';
+import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { ReportDefinition, ReportTemplate } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -68,14 +70,18 @@ export default function ReportsBoard({
     templates,
     initialReports,
     effectivePermissions,
+    currentUserId,
 }: {
     templates: ReportTemplate[];
     initialReports: ReportDefinition[];
     effectivePermissions: string[];
+    currentUserId: number;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
     const router = useRouter();
+    const { activeWorkspace } = useWorkspace();
+    const canDeleteReports = effectivePermissions.includes('REPORT_DELETE');
     const [reports, setReports] = useState(initialReports);
     const [deleting, setDeleting] = useState<ReportDefinition | null>(null);
     const [busy, setBusy] = useState(false);
@@ -320,11 +326,16 @@ export default function ReportsBoard({
                                                                 <DocumentDuplicateIcon />
                                                                 {t('landing.duplicate')}
                                                             </DropdownMenuItem>
-                                                            <DropdownMenuSeparator />
-                                                            <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(report)}>
-                                                                <TrashIcon />
-                                                                {t('common.delete')}
-                                                            </DropdownMenuItem>
+                                                            {canDeleteReports
+                                                                && canDeleteOwnedRecord(report.createdBy, currentUserId, activeWorkspace?.role) ? (
+                                                                <>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(report)}>
+                                                                        <TrashIcon />
+                                                                        {t('common.delete')}
+                                                                    </DropdownMenuItem>
+                                                                </>
+                                                            ) : null}
                                                         </DropdownMenuContent>
                                                     </DropdownMenu>
                                                 </li>
