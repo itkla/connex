@@ -110,6 +110,7 @@
     "navIntroductions": "紹介",
     "navAnalytics": "分析",
     "navReports": "レポート",
+    "navGoals": "目標",
     "navCompanies": "企業",
     "navContacts": "コンタクト",
     "navDeals": "案件",
@@ -122,6 +123,7 @@
     "navFiles": "ファイル",
     "navUsers": "ユーザー",
     "navWorkflows": "ワークフロー",
+    "navCaptureReviews": "取り込みレビュー",
     "navAuditLog": "監査ログ",
     "navSettings": "設定",
     "navOrganization": "組織",
@@ -140,7 +142,9 @@
     "languageSaveFailed": "言語を更新できませんでした。もう一度お試しください。",
     "profilePictureAlt": "{name}さんのプロフィール画像",
     "navProducts": "商品",
-    "navDocuments": "ドキュメント"
+    "navDocuments": "ドキュメント",
+    "navNotifications": "通知",
+    "navApprovalPolicies": "承認ポリシー"
   },
   "CommonContentShell": {
     "hideSidebar": "サイドバーを非表示",

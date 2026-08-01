@@ -28,8 +28,30 @@
       "pipelines": "Pipelines",
       "analytics": "Analytics",
       "calendar": "Calendar",
+      "reports": "Reports",
+      "goals": "Goals",
       "settings": "Settings",
+      "products": "Products",
       "organization": "Organization",
+      "tasks": "Tasks",
+      "activities": "Activities",
+      "notes": "Notes",
+      "notifications": "Notifications",
+      "introductions": "Introductions",
+      "map": "Map",
+      "campaigns": "Campaigns",
+      "documents": "Documents",
+      "tags": "Tags",
+      "files": "Files",
+      "workflows": "Workflows",
+      "captureReviews": "Capture reviews",
+      "users": "Users",
+      "approvalPolicies": "Approval policies",
+      "auditLog": "Audit log",
+      "me": "Profile",
+      "account": "Account settings",
+      "search": "Search",
+      "docs": "Documentation",
       "savedView": "Saved view",
       "recentRecord": "Recent record"
     },
@@ -94,7 +116,8 @@
     },
     "keywords": {
       "navigate": {
-        "contacts": "contacts, people, persons"
+        "contacts": "contacts, people, persons",
+        "captureReviews": "capture, reviews, queue, matching, inbox, mail, calendar"
       },
       "create": {
         "company": "company, org, organization, account",

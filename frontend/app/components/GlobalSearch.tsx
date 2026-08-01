@@ -24,6 +24,13 @@ const DEBOUNCE_MS = 250;
 
 const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate', 'workspace'];
 
+/**
+ * Caps how many actions a group contributes to the zero-query palette, keeping the resting list
+ * scannable as the registry grows. Groups omitted here are listed in full, and every action stays
+ * reachable by typing.
+ */
+const EMPTY_GROUP_LIMITS: Partial<Record<ActionGroup, number>> = { navigate: 8 };
+
 const PANEL_COLLAPSED = 168;
 const PANEL_EXPANDED = 452;
 const PANEL_VIEWPORT_CLEARANCE = 44;
@@ -167,7 +174,9 @@ export default function GlobalSearch() {
                 (action) => action.group === group && (!lowerQuery || actionSearchText(action, tActions).includes(lowerQuery)),
             );
             if (lowerQuery) actions.sort((a, b) => rankAction(a, lowerQuery, tActions) - rankAction(b, lowerQuery, tActions));
-            return actions.length > 0 ? [{ group, actions }] : [];
+            const limit = lowerQuery ? undefined : EMPTY_GROUP_LIMITS[group];
+            const visible = limit === undefined ? actions : actions.slice(0, limit);
+            return visible.length > 0 ? [{ group, actions: visible }] : [];
         });
     }, [available, lowerQuery, tActions]);
 

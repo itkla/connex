@@ -2,6 +2,7 @@
 
 import {
     ArrowRightStartOnRectangleIcon,
+    BellIcon,
     BriefcaseIcon,
     BuildingOffice2Icon,
     ChatBubbleLeftRightIcon,
@@ -10,10 +11,13 @@ import {
     CubeIcon,
     DocumentDuplicateIcon,
     DocumentTextIcon,
+    FlagIcon,
     FolderIcon,
     FunnelIcon,
     HomeIcon,
+    InboxIcon,
     MegaphoneIcon,
+    ShieldCheckIcon,
     TagIcon,
     UserCircleIcon,
     UserGroupIcon,
@@ -64,6 +68,7 @@ import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken } from '@/app/lib/savedViewLink';
 import { recentRecordHref } from '@/app/lib/recentRecords';
 import type { SidebarSectionId } from '@/app/lib/sidebarSections';
+import type { NavAccess } from '@/app/lib/navAccess';
 import { useSidebarSections } from '@/app/hooks/useSidebarSections';
 
 /** Maximum number of recent records surfaced in the sidebar; the store retains more for the palette. */
@@ -84,13 +89,16 @@ type NavSection = {
     activePaths?: readonly string[];
 };
 
-function useSections(): NavSection[] {
+function useSections(navAccess: NavAccess): NavSection[] {
     const t = useTranslations("CommonSidebar");
     const { activeWorkspace } = useWorkspace();
     const isOrgAdmin = activeWorkspace?.orgRole != null;
     const workspaceItems: NavItem[] = [
         { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
         { label: t("navWorkflows"), href: "/workflows", icon: BoltIcon },
+        ...(navAccess.captureReviews
+            ? [{ label: t("navCaptureReviews"), href: "/account/connections/reviews", icon: InboxIcon }]
+            : []),
         { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
         ...(isOrgAdmin
             ? [{ label: t("navOrganization"), href: "/organization/members", icon: BuildingLibraryIcon }]
@@ -108,7 +116,10 @@ function useSections(): NavSection[] {
                 { label: t("navMap"), href: "/overview/map", icon: MapIcon },
                 { label: t("navIntroductions"), href: "/overview/introductions", icon: ArrowsRightLeftIcon },
                 { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon },
-                { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon }
+                { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon },
+                ...(navAccess.goals
+                    ? [{ label: t("navGoals"), href: "/overview/reports/goals", icon: FlagIcon }]
+                    : []),
             ]
         },
         {
@@ -121,6 +132,7 @@ function useSections(): NavSection[] {
                 { label: t("navDeals"), href: "/records/deals", icon: BriefcaseIcon },
                 { label: t("navPipelines"), href: "/records/pipelines", icon: FunnelIcon },
                 { label: t("navProducts"), href: "/records/products", icon: CubeIcon },
+                { label: t("navApprovalPolicies"), href: "/records/approval-policies", icon: ShieldCheckIcon },
             ],
         },
         {
@@ -139,6 +151,7 @@ function useSections(): NavSection[] {
                 { label: t("navActivities"), href: "/activity/all", icon: ChatBubbleLeftRightIcon },
                 { label: t("navTasks"), href: "/activity/tasks", icon: CheckCircleIcon },
                 { label: t("navNotes"), href: "/activity/notes", icon: DocumentTextIcon },
+                { label: t("navNotifications"), href: "/notifications", icon: BellIcon },
             ],
         },
         {
@@ -168,9 +181,26 @@ function useSections(): NavSection[] {
 
 function isActive(pathname: string, href: string): boolean {
     if (href === "/dashboard") return pathname === "/dashboard";
-    // handle discrepancy between /activity and /activity/tasks both showing as active in the Sidebar; unintended behavior
-    // if (href === "/activity") return pathname === "/activity" || pathname.startsWith("/activity/");
     return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * Resolves which item in a section owns the active state. Nested destinations (e.g. Goals under
+ * Reports) match more than one item's prefix, so the longest matching href wins and only one item is
+ * ever highlighted. Items carrying an explicit {@link NavItem.active} override are excluded.
+ *
+ * @param items - the section's navigation items
+ * @param pathname - the current pathname
+ * @returns the winning href, or null when nothing matches
+ */
+function activeHrefFor(items: readonly NavItem[], pathname: string): string | null {
+    let best: string | null = null;
+    for (const item of items) {
+        if (item.active !== undefined) continue;
+        if (!isActive(pathname, item.href)) continue;
+        if (best === null || item.href.length > best.length) best = item.href;
+    }
+    return best;
 }
 
 // function toggleSidebar() {
@@ -195,7 +225,8 @@ function NavGroup({
     navigationKey: string;
     onCollapsedChange: (sectionId: SidebarSectionId, collapsed: boolean) => void;
 }) {
-    const itemActive = section.items.some((item) => item.active ?? isActive(pathname, item.href));
+    const activeHref = activeHrefFor(section.items, pathname);
+    const itemActive = activeHref !== null || section.items.some((item) => item.active === true);
     const groupActive = itemActive || section.activePaths?.some((href) => isActive(pathname, href)) === true;
     const [manualState, setManualState] = useState<{ navigationKey: string; collapsed: boolean } | null>(null);
     const manualStateCurrent = manualState?.navigationKey === navigationKey && manualState.collapsed === collapsed;
@@ -205,7 +236,7 @@ function NavGroup({
         return (
             <ul aria-label={section.label} className="flex flex-col items-center gap-1">
                 {section.items.map((item) => (
-                    <NavLink key={item.href} item={item} active={item.active ?? isActive(pathname, item.href)} rail />
+                    <NavLink key={item.href} item={item} active={item.active ?? item.href === activeHref} rail />
                 ))}
             </ul>
         );
@@ -237,7 +268,7 @@ function NavGroup({
                         <NavLink
                             key={item.href}
                             item={item}
-                            active={item.active ?? isActive(pathname, item.href)}
+                            active={item.active ?? item.href === activeHref}
                             rail={false}
                         />
                     ))}
@@ -484,15 +515,17 @@ function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; 
 
 export default function Sidebar({
     user,
+    navAccess,
     className,
 }: {
     user: User;
+    navAccess: NavAccess;
     className?: string;
 }) {
     const pathname = usePathname() ?? "";
     const router = useRouter();
     const t = useTranslations("CommonSidebar");
-    const sections = useSections();
+    const sections = useSections(navAccess);
     const { activeWorkspaceId } = useWorkspace();
     const { isCollapsed, setCollapsed } = useSidebarSections(user.id, activeWorkspaceId);
     const { pins } = usePinnedViews();

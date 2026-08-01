@@ -1,7 +1,13 @@
 import type { Viewport } from "next";
 import Sidebar from "@/app/components/Sidebar";
 import ContentShell from "@/app/components/ContentShell";
-import { getCurrentUserFromCookie, getMyWorkspacesFromCookie } from "@/app/lib/api";
+import {
+    DEFAULT_CAPABILITIES,
+    getCapabilities,
+    getCurrentUserFromCookie,
+    getEffectivePermissionsResultFromCookie,
+    getMyWorkspacesFromCookie,
+} from "@/app/lib/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { NotificationProvider } from "@/app/hooks/useNotifications";
@@ -16,6 +22,8 @@ import PinnedViewsActionsBridge from "@/app/components/actions/PinnedViewsAction
 import RecentRecordsActionsBridge from "@/app/components/actions/RecentRecordsActionsBridge";
 import DraftResumeBridge from "@/app/components/DraftResumeBridge";
 import { SidebarModeProvider } from "@/app/hooks/useSidebarMode";
+import NavActionsBridge from "@/app/components/actions/NavActionsBridge";
+import { resolveNavAccess } from "@/app/lib/navAccess";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
 
 /** `viewportFit: cover` lets `env(safe-area-inset-*)` resolve to real values on notched devices, which the mobile bottom bar relies on. Scoped to the app shell so marketing/auth pages keep the default. */
@@ -43,6 +51,15 @@ export default async function AppLayout({
         redirect('/onboarding');
     }
 
+    const [capabilities, permissionsResult] = await Promise.all([
+        getCapabilities(cookie ? { headers: { cookie } } : {}).catch(() => DEFAULT_CAPABILITIES),
+        getEffectivePermissionsResultFromCookie(cookie),
+    ]);
+    const navAccess = resolveNavAccess(
+        capabilities,
+        permissionsResult.ok ? permissionsResult.data : [],
+    );
+
     return (
         <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
             <NotificationProvider key={user.id} recipientId={user.id}>
@@ -54,6 +71,7 @@ export default async function AppLayout({
                             cookieLocale={localePreferenceFromCookieHeader(cookie)}
                         />
                         <DraftResumeBridge />
+                        <NavActionsBridge navAccess={navAccess} />
                         <PinnedViewsProvider>
                             <PinnedViewsActionsBridge />
                             <RecentRecordsProvider>
@@ -63,6 +81,7 @@ export default async function AppLayout({
                                         sidebar={
                                             <Sidebar
                                                 user={user}
+                                                navAccess={navAccess}
                                                 className="bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl"
                                             />
                                         }

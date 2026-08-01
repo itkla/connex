@@ -265,6 +265,10 @@
     }
   },
   "AccountCaptureReviews": {
+    "metadata": {
+      "title": "Capture reviews",
+      "description": "Resolve unmatched participants and approve held capture evidence."
+    },
     "title": "{provider} review queue",
     "description": "Resolve unmatched participants and approve held evidence before it enters relationship history.",
     "loading": "Loading capture reviews",
