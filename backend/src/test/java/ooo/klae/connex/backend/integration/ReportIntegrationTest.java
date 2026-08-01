@@ -7,7 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,6 +41,7 @@ import jakarta.servlet.Filter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,6 +50,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -54,6 +59,7 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -63,6 +69,7 @@ import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -492,9 +499,11 @@ class ReportIntegrationTest {
     @Autowired private ReportDeliveryScheduler reportDeliveryScheduler;
 
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
+    @MockitoBean private AiRestrictionEpoch aiRestrictionEpoch;
     @MockitoBean private Clock clock;
     @MockitoBean private MailService mailService;
     @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
+    @MockitoSpyBean private PersonEdgeMapper personEdgeMapper;
 
     private MockMvc mockMvc;
 
@@ -513,7 +522,7 @@ class ReportIntegrationTest {
                 .addFilters(springSecurityFilterChain)
                 .build();
         when(aiReportNarrativeService.generate(
-                anyInt(), anyString(), any(LocalDate.class), any(LocalDate.class), anyList()))
+                anyInt(), anyString(), any(LocalDate.class), any(LocalDate.class), anyList(), anyLong()))
                 .thenReturn(new ReportNarrativeDto(
                         true,
                         List.of(new ReportNarrativeSectionDto(
@@ -1509,6 +1518,7 @@ class ReportIntegrationTest {
     void networkGenerationRanksPathsWeightsValueAndEnforcesShareAndTenantBoundaries() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
+        when(aiRestrictionEpoch.current(workspace.getId())).thenReturn(23L);
         User member = newMember(workspace, "member");
         MockHttpSession session = login(member.getUsername());
         Integer orgId = workspaceMapper.getOrgId(workspace.getId());
@@ -1579,6 +1589,7 @@ class ReportIntegrationTest {
 
         int reportId = createReport(session, workspace, NETWORK_REPORT_BODY);
         MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .queryParam("narrative", "full")
                 .header("X-Workspace-Id", workspace.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
@@ -1611,6 +1622,13 @@ class ReportIntegrationTest {
         assertTrue(!document.contains("Already Warm"));
         assertTrue(!document.contains("Weak Path"));
         assertTrue(widgets.get(4).get("total").decimalValue().compareTo(BigDecimal.ZERO) > 0);
+        InOrder generationOrder = inOrder(
+                aiRestrictionEpoch, personEdgeMapper, aiReportNarrativeService);
+        generationOrder.verify(aiRestrictionEpoch).current(workspace.getId());
+        generationOrder.verify(personEdgeMapper).getEdgesForNetworkReport(
+                anyInt(), anyString(), anyInt());
+        generationOrder.verify(aiReportNarrativeService).generate(
+                eq(reportId), anyString(), any(LocalDate.class), any(LocalDate.class), anyList(), eq(23L));
     }
 
     @Test

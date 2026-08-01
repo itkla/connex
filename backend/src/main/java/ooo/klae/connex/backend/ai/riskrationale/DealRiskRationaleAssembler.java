@@ -6,10 +6,12 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
@@ -78,16 +80,19 @@ public class DealRiskRationaleAssembler {
         List<MaskedFactor> factors = registerFactorPeople(risk.getFactors(), stakeholderTokens);
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(
                 scoringService.scoreContacts(workspaceId, stakeholderTokens.keySet()));
+        Set<Integer> connectionPersonIds = new LinkedHashSet<>();
 
         String userPrompt = userPrompt(
                 risk, overallLevel(factors), score(factors), summary, deal,
-                factors, stakeholderTokens, warmth, companyToken, ownerToken, context);
+                factors, stakeholderTokens, warmth, companyToken, ownerToken, context,
+                connectionPersonIds);
         MaskedPrompt prompt = PromptAssembly.builder()
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
         return new RationaleAssembly(
-                context, prompt, !factors.isEmpty(), stakeholderTokens.keySet().stream().sorted().toList());
+                context, prompt, !factors.isEmpty(), contributorPersonIds(
+                        stakeholderTokens.keySet(), connectionPersonIds));
     }
 
     private String userPrompt(
@@ -101,7 +106,8 @@ public class DealRiskRationaleAssembler {
             Map<Integer, RelationshipTemperatureDto> warmth,
             String companyToken,
             String ownerToken,
-            MaskingContext context) {
+            MaskingContext context,
+            Set<Integer> connectionPersonIds) {
         int companyId = deal == null || deal.getCompanyId() == null ? 0 : deal.getCompanyId();
         StringBuilder prompt = new StringBuilder("CRM_CONTEXT_BEGIN\nRISK\n");
         appendValue(prompt, "Level", level);
@@ -110,7 +116,7 @@ public class DealRiskRationaleAssembler {
         appendStakeholders(prompt, stakeholderTokens, warmth, context);
         appendDealContext(prompt, summary, risk, companyToken, ownerToken, context);
         aiRelationshipContext.appendAccountHistory(prompt, companyId, deal == null ? 0 : deal.getId(), context);
-        appendStakeholderBackground(prompt, stakeholderTokens, context);
+        appendStakeholderBackground(prompt, stakeholderTokens, context, connectionPersonIds);
         return prompt.append("CRM_CONTEXT_END").toString();
     }
 
@@ -144,21 +150,34 @@ public class DealRiskRationaleAssembler {
     }
 
     private void appendStakeholderBackground(
-            StringBuilder prompt, Map<Integer, String> stakeholderTokens, MaskingContext context) {
+            StringBuilder prompt,
+            Map<Integer, String> stakeholderTokens,
+            MaskingContext context,
+            Set<Integer> connectionPersonIds) {
         StringBuilder block = new StringBuilder();
         int enriched = 0;
         for (Map.Entry<Integer, String> stakeholder : stakeholderTokens.entrySet()) {
             if (stakeholder.getKey() <= 0) {
                 continue;
             }
-            aiRelationshipContext.appendStakeholderBackground(
+            List<Integer> appended = aiRelationshipContext.appendStakeholderBackground(
                     block, stakeholder.getKey(), stakeholder.getValue(), context);
+            if (appended != null) {
+                connectionPersonIds.addAll(appended);
+            }
             if (++enriched == MAX_ENRICHED_STAKEHOLDERS) {
                 break;
             }
         }
         prompt.append("\nSTAKEHOLDER_BACKGROUND\n");
         prompt.append(block.isEmpty() ? "- none\n" : block);
+    }
+
+    private static List<Integer> contributorPersonIds(
+            Set<Integer> stakeholderPersonIds, Set<Integer> connectionPersonIds) {
+        Set<Integer> contributorPersonIds = new LinkedHashSet<>(stakeholderPersonIds);
+        contributorPersonIds.addAll(connectionPersonIds);
+        return contributorPersonIds.stream().sorted().toList();
     }
 
     private static Map<Integer, RelationshipTemperatureDto> warmthByPerson(

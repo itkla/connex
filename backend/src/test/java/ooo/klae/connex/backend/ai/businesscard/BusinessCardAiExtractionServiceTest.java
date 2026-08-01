@@ -19,6 +19,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
@@ -44,7 +45,7 @@ class BusinessCardAiExtractionServiceTest {
 
     @Test
     void extractSendsOneSanitizedImageAndReturnsBoundedReviewFields() {
-        when(aiFeatureGate.isAiImageUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(true);
         when(aiInvocationService.completeStructured(any(), eq(BusinessCardAiExtraction.class)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new BusinessCardAiExtraction(
@@ -74,7 +75,7 @@ class BusinessCardAiExtractionServiceTest {
         verify(aiInvocationService).completeStructured(
                 invocationCaptor.capture(), eq(BusinessCardAiExtraction.class));
         AiInvocation invocation = invocationCaptor.getValue();
-        assertEquals("business_card.scan", invocation.feature());
+        assertEquals(AiFeature.BUSINESS_CARD_EXTRACTION, invocation.feature());
         assertEquals(1, invocation.images().size());
         assertEquals(validated.content().length, invocation.images().getFirst().size());
         assertTrue(invocation.prompt().getSystemPrompt().contains("untrusted data"));
@@ -83,7 +84,7 @@ class BusinessCardAiExtractionServiceTest {
 
     @Test
     void extractReturnsEmptyWhenAiIsNotAuthorized() {
-        when(aiFeatureGate.isAiImageUsable()).thenReturn(false);
+        when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(false);
 
         assertTrue(service.extract(validated).isEmpty());
 
@@ -92,7 +93,7 @@ class BusinessCardAiExtractionServiceTest {
 
     @Test
     void extractRejectsImagesOutsideTheSharedProviderEnvelope() {
-        when(aiFeatureGate.isAiImageUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(true);
         byte[] oversized = new byte[AiInputImage.MAX_BYTES + 1];
         oversized[0] = (byte) 0xff;
         oversized[1] = (byte) 0xd8;
@@ -107,7 +108,7 @@ class BusinessCardAiExtractionServiceTest {
 
     @Test
     void extractRejectsMalformedOrUnboundedProviderFields() {
-        when(aiFeatureGate.isAiImageUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(true);
         when(aiInvocationService.completeStructured(any(), eq(BusinessCardAiExtraction.class)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new BusinessCardAiExtraction("Ada Lovelace", "not-an-email", null, null, null),
@@ -121,7 +122,7 @@ class BusinessCardAiExtractionServiceTest {
 
     @Test
     void extractDegradesWhenTheConfiguredModelRejectsImageInput() {
-        when(aiFeatureGate.isAiImageUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(true);
         when(aiInvocationService.completeStructured(any(), eq(BusinessCardAiExtraction.class)))
                 .thenThrow(new AiProviderException("Configured model does not accept images"));
 
@@ -130,7 +131,7 @@ class BusinessCardAiExtractionServiceTest {
 
     @Test
     void extractKeepsEmptyResultsReviewableWithoutInventingValues() {
-        when(aiFeatureGate.isAiImageUsable()).thenReturn(true);
+        when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(true);
         when(aiInvocationService.completeStructured(any(), eq(BusinessCardAiExtraction.class)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         new BusinessCardAiExtraction(null, null, null, null, null),

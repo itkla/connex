@@ -14,7 +14,7 @@ import lombok.Getter;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class IntroRationaleDto {
     private static final Set<String> UNAVAILABLE_REASONS = Set.of(
-            "not_configured", "provider_error", "not_a_suggestion");
+            "not_configured", "provider_error", "not_a_suggestion", "rate_limited");
 
     private final int personAId;
     private final int personBId;

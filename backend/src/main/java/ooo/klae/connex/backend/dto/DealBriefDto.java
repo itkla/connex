@@ -16,7 +16,8 @@ import lombok.Getter;
 @Getter
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class DealBriefDto {
-    private static final Set<String> UNAVAILABLE_REASONS = Set.of("not_configured", "provider_error");
+    private static final Set<String> UNAVAILABLE_REASONS = Set.of(
+            "not_configured", "provider_error", "rate_limited");
 
     private final int dealId;
     private final boolean available;

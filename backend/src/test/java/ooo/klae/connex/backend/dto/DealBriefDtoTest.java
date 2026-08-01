@@ -35,7 +35,7 @@ class DealBriefDtoTest {
 
     @Test
     void unavailable_acceptsSupportedReasons() {
-        for (String reason : List.of("not_configured", "provider_error")) {
+        for (String reason : List.of("not_configured", "provider_error", "rate_limited")) {
             DealBriefDto result = DealBriefDto.unavailable(DEAL_ID, reason);
 
             assertEquals(DEAL_ID, result.getDealId());

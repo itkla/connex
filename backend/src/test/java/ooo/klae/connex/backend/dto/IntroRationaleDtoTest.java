@@ -35,7 +35,7 @@ class IntroRationaleDtoTest {
 
     @Test
     void unavailable_acceptsSupportedReasons() {
-        for (String reason : List.of("not_configured", "provider_error", "not_a_suggestion")) {
+        for (String reason : List.of("not_configured", "provider_error", "not_a_suggestion", "rate_limited")) {
             IntroRationaleDto result = IntroRationaleDto.unavailable(PERSON_A_ID, PERSON_B_ID, reason);
 
             assertEquals(PERSON_A_ID, result.getPersonAId());

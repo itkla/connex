@@ -21,11 +21,20 @@
     JOIN workspace cache_workspace
       ON cache_workspace.id = c.workspace_id AND cache_workspace.org_id = owner_workspace.org_id
     WHERE (
-      (c.feature LIKE 'intro.rationale:%'
+      c.feature LIKE 'report.narrative:%'
+      OR (c.feature LIKE 'intro.rationale:%'
         AND (c.subject_a_id = #{personId} OR c.subject_b_id = #{personId}))
       OR (c.feature LIKE 'deal.risk_rationale:%'
         AND c.subject_a_id IN (
           SELECT dp.deal_id FROM deal_person dp WHERE dp.person_id = #{personId}
+          UNION
+          SELECT dp.deal_id
+          FROM deal_person dp
+          JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = c.workspace_id
+          JOIN person_edge e
+            ON e.workspace_id = c.workspace_id
+           AND ((e.source_person_id = dp.person_id AND e.target_person_id = #{personId})
+             OR (e.target_person_id = dp.person_id AND e.source_person_id = #{personId}))
         ))
       OR (c.feature LIKE 'deal.brief:%'
         AND c.subject_a_id IN (
@@ -39,6 +48,14 @@
           UNION
           SELECT t.deal_id FROM task t
           WHERE t.person_id = #{personId} AND t.deal_id IS NOT NULL
+          UNION
+          SELECT dp.deal_id
+          FROM deal_person dp
+          JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = c.workspace_id
+          JOIN person_edge e
+            ON e.workspace_id = c.workspace_id
+           AND ((e.source_person_id = dp.person_id AND e.target_person_id = #{personId})
+             OR (e.target_person_id = dp.person_id AND e.source_person_id = #{personId}))
         ))
     )
   </delete>

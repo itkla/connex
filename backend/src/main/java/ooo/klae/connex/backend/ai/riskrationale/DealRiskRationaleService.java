@@ -10,8 +10,15 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
+import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiInvocation;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -35,13 +42,14 @@ public class DealRiskRationaleService {
     static final int MAX_ACTION_CHARS = 280;
     static final double TEMPERATURE = 0.2;
 
-    private static final String FEATURE = "deal.risk_rationale";
     private static final String NOT_CONFIGURED = "not_configured";
     private static final String PROVIDER_ERROR = "provider_error";
     private static final String NOT_AT_RISK = "not_at_risk";
+    private static final String RATE_LIMITED = "rate_limited";
 
     private final DealRiskRationaleAssembler dealRiskRationaleAssembler;
     private final AiInvocationService aiInvocationService;
+    private final AiInvocationAdmissionService aiInvocationAdmissionService;
     private final AiFeatureGate aiFeatureGate;
     private final DealRiskService dealRiskService;
     private final AiOutputCacheStore aiOutputCacheStore;
@@ -65,7 +73,9 @@ public class DealRiskRationaleService {
      */
     public DealRationaleDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (!aiFeatureGate.isAiUsable()) {
+        Optional<AiGenerationProfile> profile = aiFeatureGate.generationProfileIfUsable(
+                AiFeature.DEAL_RISK_RATIONALE, MAX_TOKENS, TEMPERATURE);
+        if (profile.isEmpty()) {
             return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
         }
 
@@ -80,7 +90,8 @@ public class DealRiskRationaleService {
             return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);
         }
         String cacheFeature = cacheFeature();
-        String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
+        String contentHash = aiOutputCacheStore.contentHash(
+                profile.get(), assembly.prompt(), assembly.context());
         if (!refresh) {
             DealRationaleDto cached = cached(workspaceId, cacheFeature, dealId, contentHash);
             if (cached != null) {
@@ -88,32 +99,69 @@ public class DealRiskRationaleService {
             }
         }
 
-        try {
-            AiStructuredOutcome<DealRiskRationaleContent> outcome = aiInvocationService.completeStructured(
-                    new AiInvocation(FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE),
-                    DealRiskRationaleContent.class);
-            if (!(outcome instanceof AiStructuredOutcome.Parsed<DealRiskRationaleContent> parsed)) {
-                return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+        CacheIdentity identity = CacheIdentity.forSubject(
+                workspaceId, AiFeature.DEAL_RISK_RATIONALE, dealId, LocaleContextHolder.getLocale());
+        boolean admissionRefresh = refresh;
+        while (true) {
+            try (Admission admission = aiInvocationAdmissionService.acquire(
+                    identity, contentHash, admissionRefresh)) {
+                if (admission.decision() == Decision.RATE_LIMITED) {
+                    return DealRationaleDto.unavailable(dealId, RATE_LIMITED);
+                }
+                if (admission.decision() == Decision.FOLLOWER) {
+                    LeaderOutcome leaderOutcome = admission.awaitLeader();
+                    if (leaderOutcome == LeaderOutcome.FAILED) {
+                        admissionRefresh = false;
+                        continue;
+                    }
+                    DealRationaleDto joined = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    return joined != null ? joined : DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+                }
+                if (!refresh) {
+                    DealRationaleDto rechecked = cached(workspaceId, cacheFeature, dealId, contentHash);
+                    if (rechecked != null) {
+                        admission.completeLeader(LeaderOutcome.CACHE_READY);
+                        return rechecked;
+                    }
+                }
+                try {
+                    AiStructuredOutcome<DealRiskRationaleContent> outcome =
+                            aiInvocationService.completeStructured(
+                                    new AiInvocation(
+                                            AiFeature.DEAL_RISK_RATIONALE,
+                                            assembly.context(),
+                                            assembly.prompt(),
+                                            MAX_TOKENS,
+                                            TEMPERATURE),
+                                    DealRiskRationaleContent.class,
+                                    admission);
+                    if (!(outcome
+                            instanceof AiStructuredOutcome.Parsed<DealRiskRationaleContent> parsed)) {
+                        return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+                    }
+                    DealRiskRationaleContent content = parsed.value();
+                    if (content == null || isBlank(content.narrative())) {
+                        return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+                    }
+                    String narrative = truncate(content.narrative().strip(), MAX_NARRATIVE_CHARS);
+                    List<String> actions = actions(content.actions());
+                    String generatedAt = Instant.now(clock).toString();
+                    boolean safeToServe = aiOutputCacheStore.saveForPersons(
+                            workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
+                            contentHash, new DealRiskRationaleContent(narrative, actions),
+                            parsed.demaskWarnings(), generatedAt, assembly.contributorPersonIds());
+                    if (!safeToServe) {
+                        return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+                    }
+                    admission.completeLeader(LeaderOutcome.CACHE_READY);
+                    return DealRationaleDto.of(
+                            dealId, narrative, actions, generatedAt, parsed.demaskWarnings());
+                } catch (ForbiddenException exception) {
+                    return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
+                } catch (RuntimeException exception) {
+                    return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+                }
             }
-            DealRiskRationaleContent content = parsed.value();
-            if (content == null || isBlank(content.narrative())) {
-                return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
-            }
-            String narrative = truncate(content.narrative().strip(), MAX_NARRATIVE_CHARS);
-            List<String> actions = actions(content.actions());
-            String generatedAt = Instant.now(clock).toString();
-            boolean safeToServe = aiOutputCacheStore.saveForPersons(
-                    workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
-                    contentHash, new DealRiskRationaleContent(narrative, actions),
-                    parsed.demaskWarnings(), generatedAt, assembly.contributorPersonIds());
-            if (!safeToServe) {
-                return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
-            }
-            return DealRationaleDto.of(dealId, narrative, actions, generatedAt, parsed.demaskWarnings());
-        } catch (ForbiddenException exception) {
-            return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
-        } catch (RuntimeException exception) {
-            return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
         }
     }
 
@@ -155,7 +203,7 @@ public class DealRiskRationaleService {
 
     private static String cacheFeature() {
         String language = LocaleContextHolder.getLocale().getLanguage();
-        return FEATURE + ':' + (language.isBlank() ? "en" : language);
+        return AiFeature.DEAL_RISK_RATIONALE.wireKey() + ':' + (language.isBlank() ? "en" : language);
     }
 
     private static String truncate(String value, int maxCodePoints) {

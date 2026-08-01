@@ -4,6 +4,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 import javax.imageio.ImageIO;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -35,6 +37,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
@@ -63,6 +66,7 @@ class PersonServiceTest extends AbstractServiceTest {
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
     @Autowired DuplicatePreflightService duplicatePreflightService;
+    @MockitoBean AiRestrictionEpoch aiRestrictionEpoch;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
 
@@ -479,7 +483,12 @@ class PersonServiceTest extends AbstractServiceTest {
         assertNull(aiOutputCacheMapper.getBySubject(
             workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0));
         assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0));
-        assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
+        assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
+        ArgumentCaptor<List<Integer>> bumpedWorkspaceIds = ArgumentCaptor.captor();
+        verify(aiRestrictionEpoch).bumpAll(bumpedWorkspaceIds.capture());
+        assertEquals(
+            Set.of(workspace.getId(), grantee.getId()),
+            Set.copyOf(bumpedWorkspaceIds.getValue()));
 
         String changes = jdbcTemplate.queryForObject(
             "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
@@ -802,6 +811,7 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(ActivityMapper.class),
             mock(NoteMapper.class),
             mock(TaskMapper.class),
+            mock(ooo.klae.connex.backend.mappers.WorkspaceMapper.class),
             mock(AuthService.class),
             mock(AuditService.class),
             mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
@@ -814,7 +824,8 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(IdentityIntakeService.class),
             mock(DuplicatePreflightService.class),
             mock(DuplicateDecisionLockService.class),
-            mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class)
+            mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class),
+            mock(AiRestrictionEpoch.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(
