@@ -96,6 +96,16 @@ export function parseListInt(value: string | null, fallback: number, max = Numbe
     return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
 }
 
+/**
+ * Parses a deep-linked record id param, rejecting anything that is not a plain positive integer so a
+ * crafted `?task=0` or `?file=1e3` never reaches a record fetcher.
+ */
+export function parseDeepLinkId(value: string | null): number | null {
+    if (value === null || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 /** The list state a server-list browser reflects into the URL. Omit `q` to leave the `q` param
  * untouched (for browsers whose query lives in another writer). */
 export type ListUrlState = {

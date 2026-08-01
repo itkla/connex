@@ -51,7 +51,8 @@ import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
 import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
-import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
+import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
 import { effectiveListView } from '@/app/hooks/viewPreference';
@@ -278,14 +279,19 @@ export default function TasksBrowser({
     }, [pageCurrent]);
 
     const searchParams = useSearchParams();
+    const [deepLinkSettled, setDeepLinkSettled] = useState(
+        () => parseDeepLinkId(searchParams.get('task')) === null,
+    );
     useEffect(() => {
-        const taskId = searchParams.get('task');
-        if (taskId && /^\d+$/.test(taskId)) {
-            getTaskById(Number(taskId)).then(setEditingTask).catch(() => {});
-        }
+        const taskId = parseDeepLinkId(searchParams.get('task'));
+        if (taskId === null) return;
+        getTaskById(taskId)
+            .then(setEditingTask)
+            .catch(() => {})
+            .finally(() => setDeepLinkSettled(true));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    useUrlSync({ task: editingTask ? String(editingTask.id) : undefined });
+    useOwnedUrlParams({ task: editingTask ? String(editingTask.id) : undefined }, deepLinkSettled);
 
     useEffect(() => {
         const stored = window.localStorage.getItem(QUEUE_STORAGE_KEY);
