@@ -50,7 +50,6 @@
     "dealLabel": "Deal",
     "dealPlaceholder": "Link a deal",
     "noDealFound": "No deal found.",
-    "searching": "Searching…",
     "relationshipTargetRequired": "Link a contact or deal so this activity becomes relationship evidence.",
     "cancel": "Cancel",
     "create": "Create",
@@ -450,5 +449,21 @@
     "capturedAt": "Captured",
     "captureAsOf": "Evidence as of",
     "readOnly": "Provider projections cannot be edited or deleted in Connex."
+  },
+  "ActivityAllLayout": {
+    "title": "Activity / Activities",
+    "description": "Track every interaction"
+  },
+  "ActivityTasksLayout": {
+    "title": "Activity / Tasks",
+    "description": "Manage your tasks"
+  },
+  "ActivityNotesLayout": {
+    "title": "Activity / Notes",
+    "description": "Capture and revisit your notes"
+  },
+  "LibraryTagsLayout": {
+    "title": "Library / Tags",
+    "description": "Organize records with tags"
   }
 }

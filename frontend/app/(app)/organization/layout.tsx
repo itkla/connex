@@ -1,8 +1,17 @@
+import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 
 import Rise from "@/app/components/motion/Rise";
 import OrgTabs from "@/app/components/organization/OrgTabs";
 import { DEFAULT_CAPABILITIES, getCapabilities } from "@/app/lib/api";
+
+export async function generateMetadata(): Promise<Metadata> {
+    const t = await getTranslations("Organization");
+    return {
+        title: t("title"),
+        description: t("subtitle"),
+    };
+}
 
 export default async function OrganizationLayout({ children }: { children: React.ReactNode }) {
     const t = await getTranslations("Organization");

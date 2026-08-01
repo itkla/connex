@@ -172,5 +172,9 @@
     "made": "実施した紹介",
     "madeInPeriod": "今期間の実施数",
     "emptyMade": "今期間に記録された紹介はありません"
+  },
+  "AnalyticsLayout": {
+    "title": "分析",
+    "description": "売上・パイプライン・チームの活動をひと目で確認"
   }
 }

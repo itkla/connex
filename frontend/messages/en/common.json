@@ -251,5 +251,9 @@
     "noHistoryTooltip": "Not enough interaction history to score this relationship yet.",
     "tooltip": "{score}% warm · last touch {lastTouch}",
     "goesCold": "goes cold {when}"
+  },
+  "SearchLayout": {
+    "title": "Search",
+    "description": "Search across your workspace"
   }
 }

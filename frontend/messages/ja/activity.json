@@ -449,5 +449,21 @@
     "capturedAt": "取り込み日時",
     "captureAsOf": "根拠の基準日時",
     "readOnly": "プロバイダーから作成されたアクティビティは Connex で編集・削除できません。"
+  },
+  "ActivityAllLayout": {
+    "title": "活動記録 / アクティビティ",
+    "description": "すべてのやり取りを記録"
+  },
+  "ActivityTasksLayout": {
+    "title": "活動記録 / タスク",
+    "description": "タスクを管理"
+  },
+  "ActivityNotesLayout": {
+    "title": "活動記録 / メモ",
+    "description": "メモを記録して振り返る"
+  },
+  "LibraryTagsLayout": {
+    "title": "ライブラリ / タグ",
+    "description": "タグでレコードを整理"
   }
 }

@@ -57,5 +57,9 @@
     "create": "Create",
     "toastCreated": "User created",
     "toastFailed": "Failed to create user"
+  },
+  "UsersLayout": {
+    "title": "Users",
+    "description": "Manage workspace users"
   }
 }

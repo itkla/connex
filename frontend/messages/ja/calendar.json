@@ -72,5 +72,9 @@
     "neverTouched": "未接触",
     "alreadyCold": "疎遠 — 再接触を",
     "goesColdIn": "{count, plural, =0 {今日疎遠に} =1 {明日疎遠に} other {#日後に疎遠に}}"
+  },
+  "CalendarLayout": {
+    "title": "概要 / カレンダー",
+    "description": "予定をひと目で確認"
   }
 }

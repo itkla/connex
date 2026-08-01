@@ -67,5 +67,9 @@
         "open": "マップを検索",
         "placeholder": "人物・会社を検索…",
         "close": "検索を閉じる"
+    },
+    "MapLayout": {
+        "title": "概要 / マップ",
+        "description": "関係性を地図で確認"
     }
 }

@@ -67,5 +67,9 @@
         "open": "Search the map",
         "placeholder": "Search people & companies…",
         "close": "Close search"
+    },
+    "MapLayout": {
+        "title": "Overview / Map",
+        "description": "Your relationships on a map"
     }
 }

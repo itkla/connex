@@ -230,5 +230,9 @@
     "a11yDropped": "{name}を{target}にドロップしました。",
     "a11yCancelled": "{name}の並べ替えをキャンセルしました。",
     "a11yInstructions": "ウィジェットを並べ替えるには、スペースまたはEnterキーで持ち上げ、矢印キーで移動し、もう一度スペースまたはEnterキーでドロップします。"
+  },
+  "DashboardLayout": {
+    "title": "ダッシュボード",
+    "description": "組織の状況をひと目で確認"
   }
 }

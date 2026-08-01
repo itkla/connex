@@ -172,5 +172,9 @@
     "made": "Intros made",
     "madeInPeriod": "Made this period",
     "emptyMade": "No introductions logged this period"
+  },
+  "AnalyticsLayout": {
+    "title": "Analytics",
+    "description": "Revenue, pipeline, and team activity at a glance"
   }
 }

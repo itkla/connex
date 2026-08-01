@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 
 import {
     getContactsFromCookie,
@@ -10,10 +11,13 @@ import {
 } from '@/app/lib/api';
 import IntroductionsBoard from '@/app/components/introductions/IntroductionsBoard';
 
-export const metadata: Metadata = {
-    title: 'Introductions',
-    description: 'People in your network worth introducing to each other',
-};
+export async function generateMetadata(): Promise<Metadata> {
+    const t = await getTranslations('IntroductionsLayout');
+    return {
+        title: t('title'),
+        description: t('description'),
+    };
+}
 
 /**
  * Server entry for the Introductions page. The suggestions and lineage fetches are failure-aware
