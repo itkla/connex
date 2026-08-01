@@ -86,7 +86,9 @@ public class DealBriefDto {
      * A single titled brief section.
      * @param title short section heading
      * @param body plain-text section body
-     * @param citations real server-side records supporting the section
+     * @param citations real, in-context records that informed the section — structurally grounded
+     *     (each id is a current workspace record that was in the prompt), not a semantic claim that
+     *     any single sentence is proven by a given record
      */
     public record Section(String title, String body, List<Citation> citations) {
 

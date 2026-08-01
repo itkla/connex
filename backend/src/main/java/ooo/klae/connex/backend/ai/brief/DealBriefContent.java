@@ -13,7 +13,7 @@ public record DealBriefContent(List<Section> sections) {
      * A single titled brief section.
      * @param title short section heading
      * @param body plain-text section body
-     * @param sourceIds positional prompt sources supporting the section
+     * @param sourceIds positional prompt sources that informed the section
      */
     public record Section(String title, String body, List<String> sourceIds) {
     }

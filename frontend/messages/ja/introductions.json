@@ -75,7 +75,8 @@
     "IntroRationale": {
         "label": "AIインサイト",
         "integrityWarning": "一部の参照を確認できませんでした",
-        "attribution": "AI生成 · {time}"
+        "attribution": "AI生成 · {time}",
+        "rateLimited": "リクエストが集中しているため、AIインサイトは一時的に利用できません。"
     },
     "IntroductionsLayout": {
         "title": "概要 / 紹介",

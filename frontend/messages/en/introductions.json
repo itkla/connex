@@ -75,7 +75,8 @@
     "IntroRationale": {
         "label": "AI insight",
         "integrityWarning": "Some references could not be verified",
-        "attribution": "AI-generated · {time}"
+        "attribution": "AI-generated · {time}",
+        "rateLimited": "AI insight is temporarily unavailable — too many requests right now."
     },
     "IntroductionsLayout": {
         "title": "Overview / Introductions",

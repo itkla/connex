@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 type RationaleState =
     | { status: 'loading' }
     | { status: 'hidden' }
+    | { status: 'rateLimited' }
     | { status: 'ready'; rationale: IntroRationale };
 
 type IntroRationaleState = RationaleState & { pairKey: string };
@@ -45,6 +46,8 @@ export default function IntroRationaleLine({
                 if (cancelled) return;
                 if (rationale.available && rationale.rationale) {
                     setStoredState({ pairKey, status: 'ready', rationale });
+                } else if (rationale.reason === 'rate_limited') {
+                    setStoredState({ pairKey, status: 'rateLimited' });
                 } else {
                     setStoredState({ pairKey, status: 'hidden' });
                 }
@@ -61,6 +64,15 @@ export default function IntroRationaleLine({
 
     if (state.status === 'loading') {
         return <Skeleton className="mt-4 h-4 w-3/4" aria-busy />;
+    }
+
+    if (state.status === 'rateLimited') {
+        return (
+            <p className="mt-4 flex max-w-[70ch] items-start gap-1.5 text-sm leading-relaxed text-muted-foreground">
+                <LightBulbIcon className="mt-0.5 size-3.5 shrink-0" aria-label={t('label')} />
+                <span>{t('rateLimited')}</span>
+            </p>
+        );
     }
 
     return (

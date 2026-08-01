@@ -206,6 +206,16 @@ public class DealBriefService {
                 .toList();
     }
 
+    /**
+     * Structural evidence floor: the assembled registry must hold the current deal source plus at
+     * least one other distinct in-context source of any kind. A bare stakeholder ({@code person})
+     * therefore currently satisfies the supporting source; requiring an interaction source
+     * (activity/note/task/prior-deal history) instead is tracked as a follow-up hardening. This gate
+     * is structural only — it counts grounded sources, it does not judge their semantic relevance.
+     * @param sourceRegistry positional prompt sources mapped to their real records
+     * @param currentDealId the deal being summarized
+     * @return whether the deal has enough grounded context to attempt a brief
+     */
     private static boolean hasSufficientEvidence(
             Map<String, DealBriefSource> sourceRegistry, int currentDealId) {
         if (sourceRegistry.size() < MIN_EVIDENCE_SOURCES) {

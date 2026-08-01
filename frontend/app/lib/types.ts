@@ -392,13 +392,16 @@ export type DealBriefUnavailableReason =
  */
 export type DealBriefCitationKind = 'deal' | 'person' | 'act' | 'note' | 'task';
 
-/** A grounded reference from a brief section back to a real CRM record. */
+/**
+ * A source record that informed a brief section — a real, in-context CRM record. Structurally
+ * grounded (never fabricated), but not a semantic claim that the section is proven by this record.
+ */
 export type DealBriefCitation = {
     kind: DealBriefCitationKind;
     id: number;
 };
 
-/** One titled section of an AI deal brief, with the records it is grounded in. */
+/** One titled section of an AI deal brief, with the source records that informed it. */
 export type DealBriefSection = {
     title: string;
     body: string;
