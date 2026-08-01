@@ -445,7 +445,7 @@ export default function AnalyticsBoard({
         <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
             <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">{t('title')}</h1>
+                    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('title')}</h1>
                     <p className="mt-1.5 text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
                 {(hasDeals || hasRelationshipData) && (

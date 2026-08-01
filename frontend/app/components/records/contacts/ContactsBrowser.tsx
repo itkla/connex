@@ -718,7 +718,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
+                        <h1 className="text-4xl font-extrabold tracking-tight">{t('heading')}</h1>
                         <div className="flex items-center gap-2">
                             {!showArchived && (
                                 <RecordsActions

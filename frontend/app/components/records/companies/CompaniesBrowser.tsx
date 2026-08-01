@@ -850,7 +850,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
                         <div className="flex items-center gap-2">
                             {!showArchived && (
                                 <RecordsActions

@@ -134,7 +134,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
             <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
                         <RecordsActions
                             entity="products"
                             onNew={() => setDialog({ mode: 'create' })}

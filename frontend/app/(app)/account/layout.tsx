@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
+import { PageHeader } from "@/app/components/PageHeader";
 import AccountTabs from "@/app/components/account/AccountTabs";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -18,10 +19,7 @@ export default async function AccountLayout({ children }: { children: React.Reac
     return (
         <PageShell tier="reading">
             <Rise>
-                <header>
-                    <h1 className="text-4xl font-extrabold tracking-tight">{t("title")}</h1>
-                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t("subtitle")}</p>
-                </header>
+                <PageHeader title={t("title")} description={t("subtitle")} />
             </Rise>
             <AccountTabs />
             <div>{children}</div>

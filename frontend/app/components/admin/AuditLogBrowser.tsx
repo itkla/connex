@@ -27,6 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { getAuditLogs } from "@/app/lib/api";
 import Rise from "@/app/components/motion/Rise";
+import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
 import {
     SearchField,
@@ -466,21 +467,21 @@ export default function AuditLogBrowser({
     return (
         <PageShell tier="wide">
                 <Rise delay={0}>
-                    <header className="flex flex-wrap items-end justify-between gap-4">
-                        <div>
-                            <h1 className="text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl">{t("heading")}</h1>
-                            <p className="mt-1.5 text-sm text-muted-foreground">{t("subtitle")}</p>
-                        </div>
-                        {entries.length > 0 && (
-                            <StatCluster
-                                stats={stats}
-                                lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
-                                now={now}
-                                locale={locale}
-                                t={t}
-                            />
-                        )}
-                    </header>
+                    <PageHeader
+                        title={t("heading")}
+                        description={t("subtitle")}
+                        actions={
+                            entries.length > 0 ? (
+                                <StatCluster
+                                    stats={stats}
+                                    lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
+                                    now={now}
+                                    locale={locale}
+                                    t={t}
+                                />
+                            ) : undefined
+                        }
+                    />
                 </Rise>
 
                 {entries.length > 0 && (

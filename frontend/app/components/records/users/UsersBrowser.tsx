@@ -106,7 +106,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
         <PageShell tier="wide">
                 <Rise>
                     <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold">{t("heading")}</h1>
+                        <h1 className="text-4xl font-extrabold tracking-tight">{t("heading")}</h1>
                         <NewUserDialog />
                     </div>
                 </Rise>

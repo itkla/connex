@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import Rise from "@/app/components/motion/Rise";
+import { PageHeader } from "@/app/components/PageHeader";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { PageShell } from "@/app/components/PageShell";
 import { buildSearchGroups } from "@/app/lib/search/resultGroups";
@@ -24,11 +25,7 @@ export default function SearchResultsView({
     return (
         <PageShell tier="wide">
                 <Rise delay={0}>
-                    <header className="px-4 sm:px-6">
-                        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                            {t("resultsHeading", { query })}
-                        </h1>
-                    </header>
+                    <PageHeader className="px-4 sm:px-6" title={t("resultsHeading", { query })} />
                 </Rise>
 
                 {!hasResults ? (

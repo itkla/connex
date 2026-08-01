@@ -14,6 +14,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import Rise from '@/app/components/motion/Rise';
+import { PageHeader } from '@/app/components/PageHeader';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
@@ -68,19 +69,21 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <h1 className="text-3xl font-extrabold sm:text-4xl">{t('title')}</h1>
-                        <div className="flex items-center gap-2">
-                            <Button variant="outline" onClick={() => router.push('/records/approval-policies')}>
-                                <ShieldCheckIcon className="size-4" />
-                                {t('approvalPoliciesLink')}
-                            </Button>
-                            <Button variant="brand" onClick={openNew}>
-                                <PlusIcon className="size-4" />
-                                {t('newButton')}
-                            </Button>
-                        </div>
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            <>
+                                <Button variant="outline" onClick={() => router.push('/records/approval-policies')}>
+                                    <ShieldCheckIcon className="size-4" />
+                                    {t('approvalPoliciesLink')}
+                                </Button>
+                                <Button variant="brand" onClick={openNew}>
+                                    <PlusIcon className="size-4" />
+                                    {t('newButton')}
+                                </Button>
+                            </>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>
