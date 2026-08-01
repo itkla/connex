@@ -123,7 +123,7 @@
     "navFiles": "ファイル",
     "navUsers": "ユーザー",
     "navWorkflows": "ワークフロー",
-    "navCaptureReviews": "取り込みレビュー",
+    "navCaptureReviews": "取り込みの確認",
     "navAuditLog": "監査ログ",
     "navSettings": "設定",
     "navOrganization": "組織",
@@ -144,7 +144,8 @@
     "navProducts": "商品",
     "navDocuments": "ドキュメント",
     "navNotifications": "通知",
-    "navApprovalPolicies": "承認ポリシー"
+    "navApprovalPolicies": "承認ポリシー",
+    "navSearch": "検索"
   },
   "CommonContentShell": {
     "hideSidebar": "サイドバーを非表示",

@@ -174,7 +174,7 @@
     "emptyMade": "No introductions logged this period"
   },
   "AnalyticsLayout": {
-    "title": "Analytics",
+    "title": "Overview / Analytics",
     "description": "Revenue, pipeline, and team activity at a glance"
   }
 }

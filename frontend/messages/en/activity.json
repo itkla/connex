@@ -451,7 +451,7 @@
     "readOnly": "Provider projections cannot be edited or deleted in Connex."
   },
   "ActivityAllLayout": {
-    "title": "Activity / Activities",
+    "title": "Activity / All",
     "description": "Track every interaction"
   },
   "ActivityTasksLayout": {

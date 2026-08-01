@@ -144,7 +144,8 @@
     "navProducts": "Products",
     "navDocuments": "Documents",
     "navNotifications": "Notifications",
-    "navApprovalPolicies": "Approval policies"
+    "navApprovalPolicies": "Approval policies",
+    "navSearch": "Search"
   },
   "CommonContentShell": {
     "hideSidebar": "Hide sidebar",

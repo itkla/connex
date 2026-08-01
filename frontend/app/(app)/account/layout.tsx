@@ -5,10 +5,10 @@ import Rise from "@/app/components/motion/Rise";
 import AccountTabs from "@/app/components/account/AccountTabs";
 
 export async function generateMetadata(): Promise<Metadata> {
-    const t = await getTranslations("Account");
+    const t = await getTranslations("AccountLayout");
     return {
         title: t("title"),
-        description: t("subtitle"),
+        description: t("description"),
     };
 }
 

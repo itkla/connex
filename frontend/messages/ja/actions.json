@@ -44,7 +44,7 @@
       "tags": "タグ",
       "files": "ファイル",
       "workflows": "ワークフロー",
-      "captureReviews": "取り込みレビュー",
+      "captureReviews": "取り込みの確認",
       "users": "ユーザー",
       "approvalPolicies": "承認ポリシー",
       "auditLog": "監査ログ",
@@ -56,11 +56,11 @@
       "recentRecord": "最近のレコード"
     },
     "create": {
-      "company": "新しい会社",
-      "person": "新しい連絡先",
-      "deal": "新しい取引",
+      "company": "新しい企業",
+      "person": "新しいコンタクト",
+      "deal": "新しい案件",
       "task": "新しいタスク",
-      "note": "新しいノート",
+      "note": "新しいメモ",
       "activity": "アクティビティを記録"
     },
     "record": {
@@ -78,19 +78,19 @@
     "utility": {
       "copyPageLink": "このページのリンクをコピー",
       "markAllNotificationsRead": "すべての通知を既読にする",
-      "importCompanies": "会社をインポート",
-      "importContacts": "連絡先をインポート",
-      "importDeals": "取引をインポート",
-      "exportCurrentCompanies": "現在の会社ビューをエクスポート",
-      "exportCurrentContacts": "現在の連絡先ビューをエクスポート",
-      "exportCurrentDeals": "現在の取引ビューをエクスポート",
+      "importCompanies": "企業をインポート",
+      "importContacts": "コンタクトをインポート",
+      "importDeals": "案件をインポート",
+      "exportCurrentCompanies": "現在の企業ビューをエクスポート",
+      "exportCurrentContacts": "現在のコンタクトビューをエクスポート",
+      "exportCurrentDeals": "現在の案件ビューをエクスポート",
       "exportCurrentProducts": "現在の商品ビューをエクスポート"
     },
     "description": {
       "utility": {
-        "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
-        "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",
-        "exportCurrentDeals": "このビューの検索・フィルター・通貨に一致する取引をすべてダウンロードします。",
+        "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する企業をすべてダウンロードします。",
+        "exportCurrentContacts": "このビューの検索とフィルターに一致するコンタクトをすべてダウンロードします。",
+        "exportCurrentDeals": "このビューの検索・フィルター・通貨に一致する案件をすべてダウンロードします。",
         "exportCurrentProducts": "このビューの検索に一致する商品をすべてダウンロードします。"
       }
     },
@@ -99,32 +99,32 @@
       "recordLinkCopied": "{label} のリンクをコピーしました",
       "allNotificationsRead": "すべての通知を既読にしました",
       "runFailed": "問題が発生しました。もう一度お試しください。",
-      "companyCreated": "会社を作成しました",
-      "companyLogoUploadFailed": "会社は作成しましたが、ロゴをアップロードできませんでした。会社プロフィールから追加してください。",
-      "personCreated": "連絡先を作成しました",
+      "companyCreated": "企業を作成しました",
+      "companyLogoUploadFailed": "企業は作成しましたが、ロゴをアップロードできませんでした。企業プロフィールから追加してください。",
+      "personCreated": "コンタクトを作成しました",
       "businessCardAttached": "名刺を添付しました",
-      "dealCreated": "取引を作成しました",
+      "dealCreated": "案件を作成しました",
       "createFailed": "作成できませんでした。もう一度お試しください。",
       "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",
       "restoredLinkUnavailable": "保存されていた人物または案件は利用できません。作成する前に関連レコードを確認してください。",
       "restoredAssigneeUnavailable": "保存されていた担当者は利用できません。タスクを作成する前に担当者を確認してください。",
-      "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
-      "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
+      "companyContactsAllFailed": "企業は作成しましたが、{count} 件のコンタクトを追加できませんでした。",
+      "companyContactsPartial": "{total} 件中 {succeeded} 件のコンタクトを追加しました。",
       "taskCreated": "タスクを作成しました",
-      "noteCreated": "ノートを作成しました",
+      "noteCreated": "メモを作成しました",
       "activityCreated": "アクティビティを記録しました"
     },
     "keywords": {
       "navigate": {
         "contacts": "連絡先, 人, 担当者, コンタクト",
-        "captureReviews": "取り込み, レビュー, 照合, 受信トレイ, メール, カレンダー"
+        "captureReviews": "取り込みの確認, 取り込み, 照合, 受信トレイ, メール, カレンダー"
       },
       "create": {
-        "company": "会社, 組織, 取引先, アカウント",
-        "person": "連絡先, 人, 担当者, リード",
-        "deal": "取引, 商談, 案件",
+        "company": "企業, 会社, 組織, 取引先, アカウント",
+        "person": "コンタクト, 連絡先, 人, 担当者, リード",
+        "deal": "案件, 取引, 商談",
         "task": "タスク, todo, やること, リマインダー",
-        "note": "ノート, メモ",
+        "note": "メモ, ノート",
         "activity": "アクティビティ, ログ, 通話, 会議, メール"
       },
       "workspace": {
@@ -132,12 +132,12 @@
         "language": "言語, ロケール, 翻訳, english, japanese, 日本語"
       },
       "utility": {
-        "importCompanies": "会社をインポート, csv, アップロード, 一括",
-        "importContacts": "連絡先をインポート, 人, 担当者, csv, アップロード, 一括",
-        "importDeals": "取引をインポート, 商談, 案件, csv, アップロード, 一括",
-        "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, csv, 現在のビュー, 絞り込み, セグメント",
-        "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, 人, 担当者, csv, 現在のビュー, 絞り込み",
-        "exportCurrentDeals": "取引をエクスポート, 商談をダウンロード, 案件, csv, 現在のビュー, 絞り込み",
+        "importCompanies": "企業をインポート, 会社, csv, アップロード, 一括",
+        "importContacts": "コンタクトをインポート, 連絡先, 人, 担当者, csv, アップロード, 一括",
+        "importDeals": "案件をインポート, 取引, 商談, csv, アップロード, 一括",
+        "exportCurrentCompanies": "企業をエクスポート, 会社をダウンロード, csv, 現在のビュー, 絞り込み, セグメント",
+        "exportCurrentContacts": "コンタクトをエクスポート, 連絡先をダウンロード, 人, 担当者, csv, 現在のビュー, 絞り込み",
+        "exportCurrentDeals": "案件をエクスポート, 取引をダウンロード, 商談, csv, 現在のビュー, 絞り込み",
         "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 現在のビュー, 絞り込み"
       }
     }

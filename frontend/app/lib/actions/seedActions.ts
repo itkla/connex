@@ -140,7 +140,9 @@ export const SEED_ACTIONS: readonly AppAction[] = [
     navigateAction("navigate.workflows", "navigate.workflows", "/workflows", BoltIcon, 150),
     navigateAction("navigate.users", "navigate.users", "/users", UserGroupIcon, 160),
     navigateAction("navigate.approval-policies", "navigate.approvalPolicies", "/records/approval-policies", ShieldCheckIcon, 165),
-    navigateAction("navigate.audit-log", "navigate.auditLog", "/admin/logs", ClipboardDocumentListIcon, 170),
+    navigateAction("navigate.audit-log", "navigate.auditLog", "/admin/logs", ClipboardDocumentListIcon, 170, {
+        isAvailable: (context) => context.can("AUDIT_READ"),
+    }),
     navigateAction("navigate.me", "navigate.me", "/me", UserCircleIcon, 175),
     navigateAction("navigate.account", "navigate.account", "/account", IdentificationIcon, 180),
     navigateAction("navigate.search", "navigate.search", "/search", MagnifyingGlassIcon, 185),

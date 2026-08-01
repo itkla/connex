@@ -9,24 +9,23 @@ function isDynamicSegment(entry: string): boolean {
     return entry.startsWith("[") && entry.endsWith("]");
 }
 
-function resolveSegment(directory: string, segment: string): string | null {
+function resolveLiteralSegment(directory: string, segment: string): string | null {
     const literal = join(directory, segment);
-    if (existsSync(literal)) return literal;
-    const dynamic = readdirSync(directory, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && isDynamicSegment(entry.name))
-        .map((entry) => entry.name)
-        .sort()[0];
-    return dynamic ? join(directory, dynamic) : null;
+    return existsSync(literal) ? literal : null;
 }
 
-/** Reports whether an in-app path resolves to a rendered route under the App Router tree. */
+/**
+ * Reports whether a static in-app path resolves to a rendered route. Resolution is literal only: a
+ * navigation target is a path the product declares, so a typo must fail rather than be absorbed by a
+ * dynamic sibling segment (which would let `/records/deals/NOPE` masquerade as `[id]`).
+ */
 function routeExists(path: string): boolean {
     const segments = path.split("/").filter(Boolean);
     return ROUTE_ROOTS.some((root) => {
         let current = root;
         if (!existsSync(current)) return false;
         for (const segment of segments) {
-            const next = resolveSegment(current, segment);
+            const next = resolveLiteralSegment(current, segment);
             if (next === null) return false;
             current = next;
         }
@@ -64,8 +63,45 @@ const recordDetailBases = uniqueSorted(
 );
 
 describe("navigation targets resolve to real routes", () => {
-    it("registers the expected number of palette destinations", () => {
-        expect(paletteTargets.length).toBeGreaterThanOrEqual(28);
+    it("registers exactly the expected palette destinations", () => {
+        expect(paletteTargets).toEqual([
+            "/account",
+            "/account/connections/reviews",
+            "/activity/all",
+            "/activity/notes",
+            "/activity/tasks",
+            "/admin/logs",
+            "/dashboard",
+            "/docs",
+            "/library/documents",
+            "/library/files",
+            "/library/tags",
+            "/marketing/campaigns",
+            "/me",
+            "/notifications",
+            "/organization/members",
+            "/overview/analytics",
+            "/overview/calendar",
+            "/overview/introductions",
+            "/overview/map",
+            "/overview/reports",
+            "/overview/reports/goals",
+            "/records/approval-policies",
+            "/records/companies",
+            "/records/contacts",
+            "/records/deals",
+            "/records/pipelines",
+            "/records/products",
+            "/search",
+            "/settings/members",
+            "/users",
+            "/workflows",
+        ]);
+    });
+
+    it("rejects a path that only a dynamic sibling could absorb", () => {
+        expect(routeExists("/records/deals/NOPE")).toBe(false);
+        expect(routeExists("/records/deals")).toBe(true);
     });
 
     it.each(paletteTargets)("palette destination %s exists", (target) => {
@@ -84,7 +120,7 @@ describe("navigation targets resolve to real routes", () => {
         const segments = base.split("/").filter(Boolean);
         const resolved = ROUTE_ROOTS.map((root) =>
             segments.reduce<string | null>(
-                (current, segment) => (current === null ? null : resolveSegment(current, segment)),
+                (current, segment) => (current === null ? null : resolveLiteralSegment(current, segment)),
                 existsSync(root) ? root : null,
             ),
         ).find((candidate) => candidate !== null && existsSync(candidate));

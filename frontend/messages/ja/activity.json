@@ -451,7 +451,7 @@
     "readOnly": "プロバイダーから作成されたアクティビティは Connex で編集・削除できません。"
   },
   "ActivityAllLayout": {
-    "title": "活動記録 / アクティビティ",
+    "title": "活動記録 / すべて",
     "description": "すべてのやり取りを記録"
   },
   "ActivityTasksLayout": {
@@ -460,7 +460,7 @@
   },
   "ActivityNotesLayout": {
     "title": "活動記録 / メモ",
-    "description": "メモを記録して振り返る"
+    "description": "メモの記録と振り返り"
   },
   "LibraryTagsLayout": {
     "title": "ライブラリ / タグ",

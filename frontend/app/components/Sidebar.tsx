@@ -93,11 +93,20 @@ function useSections(navAccess: NavAccess): NavSection[] {
     const t = useTranslations("CommonSidebar");
     const { activeWorkspace } = useWorkspace();
     const isOrgAdmin = activeWorkspace?.orgRole != null;
+    const sectionPathname = usePathname() ?? "";
+    const sectionSearchParams = useSearchParams();
+    const captureReviewsActive =
+        sectionPathname === "/account/connections" && sectionSearchParams.get("panel") === "reviews";
     const workspaceItems: NavItem[] = [
         { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
         { label: t("navWorkflows"), href: "/workflows", icon: BoltIcon },
         ...(navAccess.captureReviews
-            ? [{ label: t("navCaptureReviews"), href: "/account/connections/reviews", icon: InboxIcon }]
+            ? [{
+                label: t("navCaptureReviews"),
+                href: "/account/connections/reviews",
+                icon: InboxIcon,
+                active: captureReviewsActive,
+            }]
             : []),
         { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
         ...(isOrgAdmin

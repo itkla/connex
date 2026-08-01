@@ -27,9 +27,21 @@ const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate
 /**
  * Caps how many actions a group contributes to the zero-query palette, keeping the resting list
  * scannable as the registry grows. Groups omitted here are listed in full, and every action stays
- * reachable by typing.
+ * reachable by typing. The cap applies only to the statically seeded actions: contributions carrying
+ * a dynamic {@code label} (pinned saved views, recent records) are the user's own context and are
+ * always listed.
  */
 const EMPTY_GROUP_LIMITS: Partial<Record<ActionGroup, number>> = { navigate: 8 };
+
+function capRestingActions(actions: readonly AppAction[], limit: number | undefined): AppAction[] {
+    if (limit === undefined) return [...actions];
+    let seeded = 0;
+    return actions.filter((action) => {
+        if (action.label !== undefined) return true;
+        seeded += 1;
+        return seeded <= limit;
+    });
+}
 
 const PANEL_COLLAPSED = 168;
 const PANEL_EXPANDED = 452;
@@ -174,8 +186,7 @@ export default function GlobalSearch() {
                 (action) => action.group === group && (!lowerQuery || actionSearchText(action, tActions).includes(lowerQuery)),
             );
             if (lowerQuery) actions.sort((a, b) => rankAction(a, lowerQuery, tActions) - rankAction(b, lowerQuery, tActions));
-            const limit = lowerQuery ? undefined : EMPTY_GROUP_LIMITS[group];
-            const visible = limit === undefined ? actions : actions.slice(0, limit);
+            const visible = lowerQuery ? actions : capRestingActions(actions, EMPTY_GROUP_LIMITS[group]);
             return visible.length > 0 ? [{ group, actions: visible }] : [];
         });
     }, [available, lowerQuery, tActions]);
