@@ -75,6 +75,15 @@ sudo install -m 0755 /opt/connex-staging/deploy/staging/connex-staging-deploy-wr
 
 Optional: staging is now invite-only workspace creation; if QA needs self-service registration there, root must add `CONNEX_WORKSPACES_ALLOW_CREATION=true` to the root-600 `backend.env`. See [STAGING_DEPLOY.md](STAGING_DEPLOY.md).
 
+**Required deployment profile (added 2026-07-31, Wave 4 WS1 — do before or immediately after merging the profile-enforcement PR):** `CONNEX_DEPLOYMENT_PROFILE` becomes mandatory, and staging runs the default Spring profile with no value set. Root action:
+
+```bash
+sudo sh -c 'printf "CONNEX_DEPLOYMENT_PROFILE=silo\n" >> /etc/connex-staging/backend.env'
+sudo systemctl restart connex-staging-backend
+```
+
+`silo` is correct: staging is Connex-operated on a dedicated database. **The running instance is not at risk** — a backend that fails the mandatory-profile check fails its health gate, and the deploy script rolls back to the previous JAR. The consequence is that every deploy cycle fails (and staging stops tracking `main`) until the variable is added.
+
 **Backup timers (added 2026-07-25, Wave 1 backup workstream):** the 30-day backup/PITR tooling ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)) is merged but cannot be installed on staging as `dev` — systemd unit installation, `/etc/connex-backup`, and the Docker socket are all root-only there (`dev` is not in the `docker` group and MySQL runs in Docker with no host client tools). Root actions:
 
 ```bash

@@ -1,0 +1,120 @@
+# Deployment editions
+
+Connex ships as **one artifact**. What differs between a shared-SaaS tenant, a Connex-operated
+silo, and a customer-run on-prem installation is the **deployment profile** selected at runtime,
+not the build. `CONNEX_DEPLOYMENT_PROFILE` (`connex.deployment.profile`) is that selector.
+
+Related: [DEPLOYMENT.md](DEPLOYMENT.md) for the operator runbook, [SECURITY.md](SECURITY.md) for the
+posture rationale, [STAGING_DEPLOY.md](STAGING_DEPLOY.md) for the staging instance.
+
+## The profiles
+
+| Profile | Who runs it | Database | Intended posture |
+|---|---|---|---|
+| `saas` | Connex | Pooled, shared | Hardened. Internal-network escape hatches are refused outright. |
+| `silo` | Connex, per customer | Dedicated | Hardened, but the operator may reach internal infrastructure. |
+| `on-prem` | The customer | Customer-owned | Customer controls the network; Connex operates nothing. |
+
+## Setting the profile is mandatory
+
+A deployed instance **must** declare its edition. If `CONNEX_DEPLOYMENT_PROFILE` is unset, blank,
+or not one of the three values, startup **fails loudly**:
+
+```text
+CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem outside dev/test/seeder
+```
+
+This is deliberate. Posture enforcement that silently does nothing is worse than no enforcement,
+because it reads as protection in a review. There is no soft-launch warning mode any more.
+
+**Exempt:** the `dev`, `test`, and `seeder` Spring profiles. The seeder is exempt in the opposite
+direction — `SeederStartupConfigurationValidator` *refuses* a set deployment profile, because a
+fixture-loading run is not a deployment. Bean validation still rejects an invalid value everywhere.
+
+The bundled templates already set it: [`deploy/silo.env.example`](../deploy/silo.env.example),
+[`deploy/onprem.env.example`](../deploy/onprem.env.example), and
+[`deploy/eval.env.example`](../deploy/eval.env.example) (which uses `silo` so profile behaviour is
+still exercised during evaluation).
+
+## What the profile controls
+
+### 1. Internal-access opt-ins
+
+`saas` refuses four settings that would let an instance reach private network space. `silo` and
+`on-prem` allow them, because reaching internal infrastructure is the point of those editions.
+
+| Setting | `saas` | `silo` | `on-prem` |
+|---|---|---|---|
+| `connex.bootstrap.enabled` | forbidden | allowed | allowed |
+| `connex.sso.allow-private-issuer-hosts` | forbidden | allowed | allowed |
+| `connex.ai.allow-internal-endpoints` | forbidden | allowed | allowed |
+| `connex.mail.allow-internal-hosts` | forbidden | allowed | allowed |
+
+Setting any of these to `true` under `saas` fails startup:
+
+```text
+connex.deployment.profile=saas forbids: connex.bootstrap.enabled=true
+```
+
+### 2. Capability × profile matrix
+
+| Capability | `saas` | `silo` | `on-prem` |
+|---|---|---|---|
+| `SSO` | allowed | allowed | allowed |
+| `SOCIAL_LOGIN_GOOGLE` | allowed | allowed | allowed |
+| `SOCIAL_LOGIN_MICROSOFT` | allowed | allowed | allowed |
+| `CONNECTED_ACCOUNTS_GOOGLE` | allowed | allowed | allowed |
+| `CONNECTED_ACCOUNTS_MICROSOFT` | allowed | allowed | allowed |
+| `CONNECTED_CAPTURE_GOOGLE` | allowed | allowed | allowed |
+| `CONNECTED_CAPTURE_MICROSOFT` | allowed | allowed | allowed |
+| **`MANAGED_MAIL`** | allowed | allowed | **forbidden** |
+| `BUSINESS_CARD_SCANNING` | allowed | allowed | allowed |
+| `BUSINESS_CARD_IMPORT` | allowed | allowed | allowed |
+| `CAMPAIGN_DELIVERY` | allowed | allowed | allowed |
+
+**Managed mail is the only profile-constrained capability.** It is mail transport Connex operates
+on the customer's behalf, which cannot exist in an installation Connex does not run; an on-prem
+operator configures their own SMTP instead. Every other capability is profile-neutral because its
+availability is already decided by its own operator setting — the edition says nothing about
+whether an operator wants SSO, social login, connected accounts, card scanning, or campaigns.
+
+**"Allowed" is not "enabled."** The profile gate is one of four. A capability is available only
+when the profile permits it *and* entitlement permits it *and* rollout permits it *and* the
+operator has configured it. `CAMPAIGN_DELIVERY` being allowed on every profile does not mean any
+given instance has campaign delivery turned on.
+
+The effective matrix for the running instance is logged once at startup:
+
+```text
+Deployment capability matrix: profile=on-prem, forbidden=[MANAGED_MAIL], allowed=[SSO, ...]
+```
+
+Grep for `Deployment capability matrix` to see what an instance actually decided, rather than
+inferring it from source.
+
+## Demonstrating the difference
+
+`/api/capabilities` is public and reports the composed result, so the edition difference is
+observable without a login:
+
+```bash
+curl -s http://localhost:8080/api/capabilities | jq .mailManaged
+```
+
+With instance-managed mail configured, that is `true` under `saas` and `silo` and `false` under
+`on-prem`, from the identical artifact and identical mail configuration.
+
+[`deploy-smoke.yml`](../.github/workflows/deploy-smoke.yml) enforces exactly this in CI: it boots
+the built WAR under all three profiles with managed mail configured and asserts the `mailManaged`
+split, so collapsing the matrix back to "everything everywhere" fails the build.
+
+The fail-loud contract itself is covered by unit tests rather than a boot case, because the
+profile-boot job runs with dev-relaxed database transport and the `dev` profile is exempt by
+design — a negative boot there would pass for the wrong reason.
+
+## Adding a capability
+
+`CapabilityRegistry.FORBIDDEN_PROFILES` lists every capability explicitly, including the ones that
+forbid nothing, and `CapabilityRegistryTest` pins the whole table literally. Adding a `Capability`
+without deciding its profile policy fails that test. Update this document's matrix in the same
+change.

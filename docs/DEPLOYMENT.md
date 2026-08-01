@@ -157,9 +157,25 @@ sweep gives each selected workspace its own bounded batch of up to 100 expired c
 `CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_PER_WORKSPACE_BATCH_SIZE=100`) without loading private
 import drafts into the control plane. Keep the submission lease shorter than the replay horizon.
 
-`CONNEX_DEPLOYMENT_PROFILE` drives fail-closed posture enforcement (issue #497): `saas` forbids the
-internal-access opt-ins (bootstrap, private SSO issuer hosts, internal AI/SMTP hosts); `silo` and
-`on-prem` allow them. Leaving it unset boots with a warning (soft-launch).
+`CONNEX_DEPLOYMENT_PROFILE` drives fail-closed posture enforcement (issues #497, #856) and is
+**mandatory**. Set it to `saas`, `silo`, or `on-prem`; leaving it unset or blank now **fails
+startup** rather than warning:
+
+```text
+CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem outside dev/test/seeder
+```
+
+Only the `dev`, `test`, and `seeder` profiles are exempt (seeder runs in fact require it unset).
+The bundled `deploy/*.env.example` templates already set it — an operator starting from one needs
+no action. **An existing deployment that relied on the old soft-launch behaviour must add the
+variable before taking this upgrade.**
+
+`saas` additionally forbids the internal-access opt-ins (bootstrap, private SSO issuer hosts,
+internal AI/SMTP hosts); `silo` and `on-prem` allow them. The profile also gates instance-managed
+mail, which is unavailable on `on-prem`.
+
+Full profile semantics, the capability×profile matrix, and how to demonstrate the difference are
+in [DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md).
 
 ### Database TLS
 
@@ -494,6 +510,9 @@ To include local OCR, set the OCR token and timeout variables described above an
 
 [`deploy-smoke.yml`](../.github/workflows/deploy-smoke.yml) validates the compose bundle and boots
 the backend under **all three deployment profiles** (`saas`, `silo`, `on-prem`), smoking
-`/api/version` + `/api/capabilities` for each so a profile-specific startup regression fails CI. The
-profile-boot job runs with dev-relaxed transport to isolate the profile dimension; a full
-image-and-Caddy end-to-end bring-up is exercised locally and on release rather than per-PR.
+`/api/version` + `/api/capabilities` for each so a profile-specific startup regression fails CI. It
+boots every profile with instance-managed mail configured and asserts the resulting split —
+`mailManaged` true under `saas`/`silo`, false under `on-prem` — so collapsing the capability×profile
+matrix fails the build. The profile-boot job runs with dev-relaxed transport to isolate the profile
+dimension; a full image-and-Caddy end-to-end bring-up is exercised locally and on release rather
+than per-PR.
