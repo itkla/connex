@@ -7,7 +7,9 @@ import type { DocumentTemplate } from "@/app/lib/types";
 import TemplateBuilder from "@/app/components/library/documents/TemplateBuilder";
 
 export default async function EditDocumentTemplatePage({ params }: { params: Promise<{ id: string }> }) {
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id < 1) notFound();
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
@@ -17,7 +19,7 @@ export default async function EditDocumentTemplatePage({ params }: { params: Pro
 
     const init: RequestInit = { headers: cookie ? { cookie } : {}, cache: 'no-store' };
     const templateAccess = await loadRecord<DocumentTemplate>(
-        () => getDocumentTemplateById(Number(id), init),
+        () => getDocumentTemplateById(id, init),
     );
 
     if (templateAccess.kind === 'forbidden') {

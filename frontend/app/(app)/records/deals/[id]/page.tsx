@@ -90,7 +90,9 @@ type DealPageProps = {
 };
 
 export default async function DealPage({ params, searchParams }: DealPageProps) {
-    const [{ id }, query] = await Promise.all([params, searchParams]);
+    const [{ id: rawId }, query] = await Promise.all([params, searchParams]);
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id < 1) notFound();
     const returnPath = resolveRecordReturnPath('deals', query.returnTo);
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
