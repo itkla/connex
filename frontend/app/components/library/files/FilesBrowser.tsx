@@ -153,14 +153,15 @@ export default function FilesBrowser() {
     const { items, total, loading, page, setPage, size, setSize, query, setQuery, reload } = useServerRecords<
         Attachment,
         AttachmentsPageParams
-    >(getAttachmentsPage, extraParams, { defaultSize: PAGE_SIZE });
+    >(getAttachmentsPage, extraParams, {
+        defaultSize: PAGE_SIZE,
+        seedQuery: searchParams.get('q') ?? undefined,
+    });
 
     const [deepLinkSettled, setDeepLinkSettled] = useState(
         () => parseDeepLinkId(searchParams.get('file')) === null,
     );
     useEffect(() => {
-        const q = searchParams.get('q');
-        if (q) setQuery(q);
         const fileId = parseDeepLinkId(searchParams.get('file'));
         if (fileId === null) return;
         getAttachment(fileId)
@@ -189,8 +190,8 @@ export default function FilesBrowser() {
         sort: sort !== 'newest' ? sort : undefined,
         tags: tagIds.length ? tagIds.join(',') : undefined,
         orphaned: orphaned ? '1' : undefined,
-        file: detailFile ? String(detailFile.id) : undefined,
-    }, deepLinkSettled);
+    });
+    useOwnedUrlParams({ file: detailFile ? String(detailFile.id) : undefined }, deepLinkSettled);
 
     // selection is scoped to the loaded page; drop it whenever the result set changes
     // eslint-disable-next-line react-hooks/set-state-in-effect

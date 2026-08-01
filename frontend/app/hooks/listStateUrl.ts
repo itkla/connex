@@ -44,6 +44,9 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
  * untouched. An `undefined` or empty value deletes its key, which is how a closed deep-linked record
  * clears itself without disturbing the surrounding query, sort, and filter state.
  *
+ * The existing `history.state` is carried through rather than overwritten with null, so the router's own
+ * bookkeeping and the record-return marker stamped on a list entry both survive a URL write.
+ *
  * @param pathname - the current path, used to rebuild the URL without a full navigation
  * @param owned - the complete set of keys this writer owns, mapped to their current values
  */
@@ -58,7 +61,7 @@ export function writeOwnedParamsToUrl(
     }
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(window.history.state, '', next ? `${pathname}?${next}` : pathname);
 }
 
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */

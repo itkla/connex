@@ -143,6 +143,28 @@ describe('record return paths', () => {
         expect(consumeRecordReturnSelection('contacts', 7, 11)).toBeNull();
     });
 
+    it('leaves another collection\'s pending snapshot in storage when passing through a list', () => {
+        recordDetailNavigationPath('contacts', 42, {
+            userId: 7,
+            workspaceId: 11,
+            ids: [42, 17],
+        });
+
+        location.pathname = '/activity/all';
+        location.search = '';
+        expect(consumeRecordReturnSelection('activities', 7, 11)).toBeNull();
+
+        location.pathname = '/activity/notes';
+        expect(consumeRecordReturnSelection('notes', 7, 11)).toBeNull();
+
+        location.pathname = '/records/contacts';
+        location.search = '?view=table&page=2&peek=person%3A42';
+        expect(consumeRecordReturnSelection('contacts', 7, 11)).toEqual({
+            ids: [42, 17],
+            scrollTop: 417,
+        });
+    });
+
     it('restores scroll for a widened collection with no multi-selection', () => {
         location.pathname = '/activity/notes';
         location.search = '?group=record';

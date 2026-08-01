@@ -8,8 +8,8 @@ export type RecordCollection =
     | 'files';
 
 /**
- * The collections that have a record-detail route. Files are browsed and opened entirely in-page, so
- * they can carry return context for their own list but can never be a detail-navigation target — the
+ * The collections that have a record-detail route. Files are browsed and opened entirely in an in-page
+ * drawer and have no detail route at all, so they can never be a detail-navigation target — the
  * exclusion makes that a compile error rather than a fabricated URL.
  */
 export type DetailRecordCollection = Exclude<RecordCollection, 'files'>;
@@ -275,7 +275,13 @@ export function consumeRecordHistoryReturn(returnTo: string): boolean {
     return false;
 }
 
-/** Consumes a recent selection snapshot scoped to the exact restored list and active owner. */
+/**
+ * Consumes a recent selection snapshot scoped to the exact restored list and active owner.
+ *
+ * A snapshot belonging to another collection is left in storage untouched: every list mounts a consumer,
+ * so passing through one list on the way back to another must not destroy the snapshot that list is
+ * still waiting to restore. Only a snapshot this collection owns — or unreadable garbage — is discarded.
+ */
 export function consumeRecordReturnSelection(
     collection: RecordCollection,
     userId: number,
@@ -284,20 +290,29 @@ export function consumeRecordReturnSelection(
     let raw: string | null;
     try {
         raw = window.sessionStorage.getItem(RETURN_SELECTION_KEY);
-        if (raw) window.sessionStorage.removeItem(RETURN_SELECTION_KEY);
     } catch {
         return null;
     }
     if (!raw) return null;
 
+    const discard = () => {
+        try {
+            window.sessionStorage.removeItem(RETURN_SELECTION_KEY);
+        } catch {}
+    };
+
     try {
         const selection: unknown = JSON.parse(raw);
-        if (!isRecordReturnSelection(selection)) return null;
+        if (!isRecordReturnSelection(selection)) {
+            discard();
+            return null;
+        }
+        if (selection.collection !== collection) return null;
+        discard();
         const currentPath = `${window.location.pathname}${window.location.search}`;
         const age = Date.now() - selection.createdAt;
         if (
-            selection.collection !== collection
-            || selection.userId !== userId
+            selection.userId !== userId
             || selection.workspaceId !== workspaceId
             || selection.returnTo !== currentPath
             || resolveRecordReturnPath(collection, selection.returnTo) !== selection.returnTo
@@ -313,6 +328,7 @@ export function consumeRecordReturnSelection(
             scrollTop: selection.scrollTop,
         };
     } catch {
+        discard();
         return null;
     }
 }

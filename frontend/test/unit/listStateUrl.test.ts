@@ -37,10 +37,10 @@ describe("parseListInt", () => {
 describe("URL writers (multi-writer coexistence contract)", () => {
     const replaceState = vi.fn();
 
-    function stubLocation(search: string): void {
+    function stubLocation(search: string, state: unknown = null): void {
         vi.stubGlobal("window", {
             location: { search },
-            history: { replaceState },
+            history: { replaceState, state },
         });
     }
 
@@ -124,6 +124,12 @@ describe("URL writers (multi-writer coexistence contract)", () => {
         expect(replaceState).toHaveBeenCalledWith(null, "", "/activity/tasks");
     });
 
+    it("writeOwnedParamsToUrl preserves the record-return marker in history state", () => {
+        stubLocation("?q=foo", { connexRecordReturn: "5f0c" });
+        writeOwnedParamsToUrl("/activity/all", { activity: "9" });
+        expect(replaceState.mock.calls[0][0]).toEqual({ connexRecordReturn: "5f0c" });
+    });
+
     it("writeSavedViewToUrl sets and clears only sv", () => {
         stubLocation("?q=acme");
         writeSavedViewToUrl("/records/contacts", "5:9");
@@ -163,6 +169,7 @@ describe("shared-link survival across a browser session", () => {
                 },
             },
             history: {
+                state: null,
                 replaceState: (_data: unknown, _title: string, url: string) => {
                     state.search = new URL(`http://x${url}`).search;
                 },

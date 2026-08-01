@@ -16,22 +16,25 @@ export { SERVER_RECORDS_URL_KEYS } from '@/app/hooks/listStateUrl';
  * owned by other writers, and it resets to defaults on a workspace switch so state never leaks across
  * workspaces. Leave `urlSync` off for consumers that own the URL themselves (e.g. FilesBrowser).
  *
+ * A consumer that owns the URL itself can still restore the search box on first render by passing
+ * `seedQuery`, which avoids seeding it from an effect and refetching once the value lands.
+ *
  * @param fetcher - loads a page of results for the given params
  * @param extraParams - non-paging params merged into every fetch
- * @param options - `defaultSize` and whether to sync list state to the URL
+ * @param options - `defaultSize`, an optional initial query, and whether to sync list state to the URL
  */
 export function useServerRecords<T, P extends PageParams = PageParams>(
     fetcher: (params: P) => Promise<Page<T>>,
     extraParams: Omit<P, keyof PageParams> = {} as Omit<P, keyof PageParams>,
-    options: { defaultSize?: number; urlSync?: boolean } = {},
+    options: { defaultSize?: number; urlSync?: boolean; seedQuery?: string } = {},
 ) {
-    const { defaultSize = 25, urlSync = false } = options;
+    const { defaultSize = 25, urlSync = false, seedQuery } = options;
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
 
     const seed = urlSync ? searchParams : null;
-    const seededQuery = seed?.get('q')?.trim() ?? '';
+    const seededQuery = (urlSync ? seed?.get('q') : seedQuery)?.trim() ?? '';
 
     const [items, setItems] = useState<T[]>([]);
     const [total, setTotal] = useState(0);
