@@ -59,6 +59,7 @@ public class IntroRationaleService {
 
     /**
      * Generates or reuses a fresh rationale for a workspace-scoped introduction suggestion.
+     * The admitted contributors are exactly the two endpoint people whose data reaches the prompt.
      * @param personAId first requested person id
      * @param personBId second requested person id
      * @return available rationale or a graceful unavailability response
@@ -89,29 +90,35 @@ public class IntroRationaleService {
         String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(
                 profile.get(), assembly.prompt(), assembly.context());
-        IntroRationaleDto cached = cached(workspaceId, cacheFeature, lo, hi, contentHash);
+        IntroRationaleDto cached = cached(
+                workspaceId, cacheFeature, lo, hi, contentHash, assembly);
         if (cached != null) {
             return cached;
         }
 
         CacheIdentity identity = CacheIdentity.forPair(
                 workspaceId, AiFeature.INTRO_RATIONALE, lo, hi, LocaleContextHolder.getLocale());
+        boolean admissionRefresh = false;
         while (true) {
-            try (Admission admission = aiInvocationAdmissionService.acquire(identity, contentHash, false)) {
+            try (Admission admission = aiInvocationAdmissionService.acquire(
+                    identity, contentHash, admissionRefresh)) {
                 if (admission.decision() == Decision.RATE_LIMITED) {
                     return IntroRationaleDto.unavailable(lo, hi, RATE_LIMITED);
                 }
                 if (admission.decision() == Decision.FOLLOWER) {
                     LeaderOutcome leaderOutcome = admission.awaitLeader();
                     if (leaderOutcome == LeaderOutcome.FAILED) {
+                        admissionRefresh = false;
                         continue;
                     }
-                    IntroRationaleDto joined = cached(workspaceId, cacheFeature, lo, hi, contentHash);
+                    IntroRationaleDto joined = cached(
+                            workspaceId, cacheFeature, lo, hi, contentHash, assembly);
                     return joined != null
                             ? joined
                             : IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
                 }
-                IntroRationaleDto rechecked = cached(workspaceId, cacheFeature, lo, hi, contentHash);
+                IntroRationaleDto rechecked = cached(
+                        workspaceId, cacheFeature, lo, hi, contentHash, assembly);
                 if (rechecked != null) {
                     admission.completeLeader(LeaderOutcome.CACHE_READY);
                     return rechecked;
@@ -130,22 +137,30 @@ public class IntroRationaleService {
                     if (!(outcome instanceof AiStructuredOutcome.Parsed<IntroRationaleContent> parsed)) {
                         return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
                     }
-                    IntroRationaleContent content = parsed.value();
-                    if (content == null || isBlank(content.rationale())) {
+                    Optional<IntroRationaleContent> validated = IntroRationaleValidator.validate(
+                            parsed.value(), assembly.reasonCodes());
+                    if (validated.isEmpty()) {
                         return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
                     }
-                    String rationale = truncate(content.rationale().strip(), MAX_RATIONALE_CHARS);
+                    IntroRationaleContent content = new IntroRationaleContent(
+                            truncate(validated.get().rationale().strip(), MAX_RATIONALE_CHARS),
+                            List.copyOf(validated.get().reasonCodes()));
                     String generatedAt = Instant.now(clock).toString();
                     boolean safeToServe = aiOutputCacheStore.saveForPersons(
                             workspaceId, cacheFeature, lo, hi, contentHash,
-                            new IntroRationaleContent(rationale), parsed.demaskWarnings(), generatedAt,
+                            content, parsed.demaskWarnings(), generatedAt,
                             List.of(lo, hi));
                     if (!safeToServe) {
                         return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
                     }
                     admission.completeLeader(LeaderOutcome.CACHE_READY);
                     return IntroRationaleDto.of(
-                            lo, hi, rationale, generatedAt, parsed.demaskWarnings());
+                            lo,
+                            hi,
+                            content.rationale(),
+                            content.reasonCodes(),
+                            generatedAt,
+                            parsed.demaskWarnings());
                 } catch (ForbiddenException exception) {
                     return IntroRationaleDto.unavailable(lo, hi, NOT_CONFIGURED);
                 } catch (RuntimeException exception) {
@@ -155,20 +170,31 @@ public class IntroRationaleService {
         }
     }
 
-    private IntroRationaleDto cached(int workspaceId, String cacheFeature, int lo, int hi, String contentHash) {
+    private IntroRationaleDto cached(
+            int workspaceId,
+            String cacheFeature,
+            int lo,
+            int hi,
+            String contentHash,
+            IntroRationaleAssembly assembly) {
         Optional<AiOutputCache> row = aiOutputCacheStore.find(workspaceId, cacheFeature, lo, hi);
         if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
             return null;
         }
         Optional<IntroRationaleContent> content = aiOutputCacheStore.read(
                 row.get().getPayload(), IntroRationaleContent.class);
-        if (content.isEmpty() || isBlank(content.get().rationale())) {
+        Optional<IntroRationaleContent> validated = content.flatMap(
+                value -> IntroRationaleValidator.validate(value, assembly.reasonCodes()));
+        if (validated.isEmpty()) {
+            aiOutputCacheStore.deleteIfContentHashMatches(
+                    workspaceId, cacheFeature, lo, hi, row.get().getContentHash());
             return null;
         }
         return IntroRationaleDto.of(
                 lo,
                 hi,
-                truncate(content.get().rationale().strip(), MAX_RATIONALE_CHARS),
+                truncate(validated.get().rationale().strip(), MAX_RATIONALE_CHARS),
+                validated.get().reasonCodes(),
                 row.get().getGeneratedAt(),
                 row.get().getWarnings());
     }
@@ -191,7 +217,4 @@ public class IntroRationaleService {
         return value.substring(0, end) + "…";
     }
 
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
-    }
 }

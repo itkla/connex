@@ -31,10 +31,10 @@ import tools.jackson.databind.ObjectMapper;
  * Persistent, workspace-scoped store for generated AI outputs. Replaces the per-JVM in-memory caches
  * so a brief/rationale is re-prompted only when the deal's assembled context changes, not on every
  * page load. Validity is keyed on
- * {@link #contentHash(AiGenerationProfile, MaskedPrompt, MaskingContext)} — a fingerprint of the
- * credential-free provider profile, masked prompt, and request-local identity bindings — so a
- * stored row is reused only when the output-shaping inputs are identical. Payloads are stored
- * demasked as JSON.
+ * {@link #contentHash(AiGenerationProfile, MaskedPrompt, MaskingContext, List)} — a fingerprint of
+ * the credential-free provider profile, masked prompt, request-local identity bindings, and any
+ * machine-readable grounding bindings — so a stored row is reused only when the output-shaping
+ * inputs are identical. Payloads are stored demasked as JSON.
  */
 @Service
 @RequiredArgsConstructor
@@ -67,9 +67,26 @@ public class AiOutputCacheStore {
             AiGenerationProfile profile,
             MaskedPrompt prompt,
             MaskingContext context) {
+        return contentHash(profile, prompt, context, List.of());
+    }
+
+    /**
+     * Fingerprints the generation inputs together with ordered machine-readable grounding bindings.
+     * @param profile credential-free provider and sampling profile
+     * @param prompt masked prompt
+     * @param context request-local masking context
+     * @param groundingBindings ordered bindings needed to interpret the structured output
+     * @return hex SHA-256 of the serialized prompt, identity bindings, and grounding bindings
+     */
+    public String contentHash(
+            AiGenerationProfile profile,
+            MaskedPrompt prompt,
+            MaskingContext context,
+            List<String> groundingBindings) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(serialized(profile, prompt, context).getBytes(StandardCharsets.UTF_8));
+            digest.update(serialized(profile, prompt, context, groundingBindings)
+                    .getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is not available", exception);
@@ -87,6 +104,24 @@ public class AiOutputCacheStore {
     public Optional<AiOutputCache> find(int workspaceId, String feature, int subjectAId, int subjectBId) {
         return Optional.ofNullable(
                 aiOutputCacheMapper.getBySubject(workspaceId, feature, subjectAId, subjectBId));
+    }
+
+    /**
+     * Deletes a cache row only while its content hash still matches the version the caller read.
+     * @param workspaceId active workspace
+     * @param feature feature key
+     * @param subjectAId primary subject id
+     * @param subjectBId secondary subject id, or {@link #NO_SUBJECT}
+     * @param contentHash hash observed on the invalid row
+     * @return true when a row matching the observed hash was deleted
+     */
+    public boolean deleteIfContentHashMatches(
+            int workspaceId, String feature, int subjectAId, int subjectBId, String contentHash) {
+        if (contentHash == null || contentHash.isBlank()) {
+            return false;
+        }
+        return aiOutputCacheMapper.deleteBySubjectAndContentHash(
+                workspaceId, feature, subjectAId, subjectBId, contentHash) == 1;
     }
 
     /**
@@ -218,10 +253,12 @@ public class AiOutputCacheStore {
     private static String serialized(
             AiGenerationProfile profile,
             MaskedPrompt prompt,
-            MaskingContext context) {
+            MaskingContext context,
+            List<String> groundingBindings) {
         Objects.requireNonNull(profile, "profile");
         Objects.requireNonNull(prompt, "prompt");
         Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(groundingBindings, "groundingBindings");
         StringBuilder serialized = new StringBuilder();
         appendPart(serialized, HASH_VERSION);
         appendPart(serialized, profile.provider());
@@ -246,6 +283,12 @@ public class AiOutputCacheStore {
         for (Map.Entry<String, String> binding : bindings) {
             appendPart(serialized, binding.getKey());
             appendPart(serialized, binding.getValue());
+        }
+        if (!groundingBindings.isEmpty()) {
+            appendPart(serialized, Integer.toString(groundingBindings.size()));
+            for (String groundingBinding : groundingBindings) {
+                appendPart(serialized, groundingBinding);
+            }
         }
         return serialized.toString();
     }

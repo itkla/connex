@@ -34,10 +34,11 @@ public record BusinessCardScanResponse(
      *
      * @param value recognized value
      * @param confidence confidence from zero to one
+     * @param origin extraction path that supplied the value
      */
-    public record FieldCandidate(String value, Double confidence) {
+    public record FieldCandidate(String value, Double confidence, ExtractionOrigin origin) {
         public static FieldCandidate empty() {
-            return new FieldCandidate(null, null);
+            return new FieldCandidate(null, null, null);
         }
     }
 
@@ -46,8 +47,21 @@ public record BusinessCardScanResponse(
      *
      * @param value recognized company name
      * @param confidence confidence from zero to one
+     * @param origin extraction path that supplied the value
      * @param matchedCompanyId unique visible match, when one exists
      */
-    public record CompanyCandidate(String value, Double confidence, Integer matchedCompanyId) {
+    public record CompanyCandidate(
+            String value,
+            Double confidence,
+            ExtractionOrigin origin,
+            Integer matchedCompanyId) {
+    }
+
+    /**
+     * Extraction path responsible for a populated candidate.
+     */
+    public enum ExtractionOrigin {
+        OCR,
+        AI
     }
 }

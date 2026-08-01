@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
+import ooo.klae.connex.backend.dto.BusinessCardScanResponse.ExtractionOrigin;
 
 class BusinessCardExtractorTest {
     private final BusinessCardExtractor extractor = new BusinessCardExtractor();
@@ -33,6 +34,11 @@ class BusinessCardExtractorTest {
         assertEquals("+12025550199", response.fields().phone().value());
         assertEquals("Principal Engineer", response.fields().title().value());
         assertEquals("ANALYTICAL LABS", response.company().value());
+        assertEquals(ExtractionOrigin.OCR, response.fields().name().origin());
+        assertEquals(ExtractionOrigin.OCR, response.fields().email().origin());
+        assertEquals(ExtractionOrigin.OCR, response.fields().phone().origin());
+        assertEquals(ExtractionOrigin.OCR, response.fields().title().origin());
+        assertEquals(ExtractionOrigin.OCR, response.company().origin());
         assertTrue(response.warnings().isEmpty());
     }
 
@@ -84,6 +90,11 @@ class BusinessCardExtractorTest {
         assertNull(response.fields().phone().value());
         assertNull(response.fields().title().value());
         assertNull(response.company().value());
+        assertNull(response.fields().name().origin());
+        assertNull(response.fields().email().origin());
+        assertNull(response.fields().phone().origin());
+        assertNull(response.fields().title().origin());
+        assertNull(response.company().origin());
         assertEquals(List.of("no_recognizable_fields"), response.warnings());
     }
 

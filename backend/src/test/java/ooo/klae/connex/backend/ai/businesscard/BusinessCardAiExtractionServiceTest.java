@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
+import ooo.klae.connex.backend.dto.BusinessCardScanResponse.ExtractionOrigin;
 
 @ExtendWith(MockitoExtension.class)
 class BusinessCardAiExtractionServiceTest {
@@ -69,6 +70,12 @@ class BusinessCardAiExtractionServiceTest {
         assertEquals("Engineer", response.fields().title().value());
         assertEquals("Analytical Labs", response.company().value());
         assertNull(response.fields().name().confidence());
+        assertNull(response.company().confidence());
+        assertEquals(ExtractionOrigin.AI, response.fields().name().origin());
+        assertEquals(ExtractionOrigin.AI, response.fields().email().origin());
+        assertEquals(ExtractionOrigin.AI, response.fields().phone().origin());
+        assertEquals(ExtractionOrigin.AI, response.fields().title().origin());
+        assertEquals(ExtractionOrigin.AI, response.company().origin());
         assertTrue(response.warnings().contains("ai_extraction_requires_review"));
 
         ArgumentCaptor<AiInvocation> invocationCaptor = ArgumentCaptor.forClass(AiInvocation.class);
@@ -144,6 +151,10 @@ class BusinessCardAiExtractionServiceTest {
 
         assertFalse(outcome.isEmpty());
         assertNull(outcome.orElseThrow().fields().name().value());
+        assertNull(outcome.orElseThrow().fields().name().confidence());
+        assertNull(outcome.orElseThrow().fields().name().origin());
+        assertNull(outcome.orElseThrow().company().confidence());
+        assertNull(outcome.orElseThrow().company().origin());
         assertTrue(outcome.orElseThrow().warnings().contains("no_recognizable_fields"));
     }
 

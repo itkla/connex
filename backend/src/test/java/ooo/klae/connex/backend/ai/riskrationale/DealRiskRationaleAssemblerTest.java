@@ -97,6 +97,7 @@ class DealRiskRationaleAssemblerTest {
         String serialized = serialized(assembly.prompt());
 
         assertEquals(List.of(PERSON_ID, 99), assembly.contributorPersonIds());
+        assertEquals(java.util.Set.of("stakeholder_cold"), assembly.factorCodes());
         assertTrue(serialized.contains("{{C1}}"));
         assertTrue(serialized.contains("{{P1}}"));
         assertTrue(serialized.contains("person={{P2}}"));
@@ -170,19 +171,23 @@ class DealRiskRationaleAssemblerTest {
     }
 
     @Test
-    void assemble_japaneseLocaleTranslatesOnlyJsonStringValues() {
+    void assemble_japaneseLocaleTranslatesProseAndPreservesFactorCodes() {
         DealRiskDto risk = new DealRiskDto(
                 DEAL_ID, 0, "JPY", "medium", 25, List.of(), "2026-07-09 18:30:00");
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         try {
             String systemPrompt = assembler.assemble(WORKSPACE_ID, DEAL_ID, risk).prompt().getSystemPrompt();
 
-            assertTrue(systemPrompt.contains("Write every JSON string value in Japanese"));
-            assertTrue(systemPrompt.contains("keep all JSON property names"));
+            assertTrue(systemPrompt.contains(
+                    "Use Japanese only for the natural-language \"narrative\" and \"text\" values"));
+            assertTrue(systemPrompt.contains("Keep all JSON property names"));
             assertTrue(systemPrompt.contains("in English exactly as specified"));
-            assertTrue(systemPrompt.contains("do not translate the keys"));
+            assertTrue(systemPrompt.contains(
+                    "Copy every \"narrativeFactorCodes\" and \"factorCodes\" value verbatim"));
+            assertTrue(systemPrompt.contains("do not translate grounding identifiers"));
             assertTrue(systemPrompt.contains("\"narrative\""));
-            assertTrue(systemPrompt.contains("\"actions\""));
+            assertTrue(systemPrompt.contains("\"narrativeFactorCodes\""));
+            assertTrue(systemPrompt.contains("\"recommendedActions\""));
         } finally {
             LocaleContextHolder.resetLocaleContext();
         }

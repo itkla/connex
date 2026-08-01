@@ -6,15 +6,26 @@ import { ArrowPathIcon, LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { generateDealRationale } from '@/app/lib/api';
 import { recoverAiResult } from '@/app/lib/aiRecovery';
-import type { DealRationale } from '@/app/lib/types';
+import type { DealRationale, DealRiskFactorCode } from '@/app/lib/types';
+import { formatDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+
+const FACTOR_CHIP_KEYS: Record<DealRiskFactorCode, string> = {
+    close_overdue: 'factorChipCloseOverdue',
+    closing_soon_quiet: 'factorChipClosingSoonQuiet',
+    stalled: 'factorChipStalled',
+    stakeholder_cold: 'factorChipStakeholderCold',
+    no_stakeholders: 'factorChipNoStakeholders',
+};
 
 type RationaleState =
     | { status: 'loading' }
     | { status: 'hidden' }
     | { status: 'error' }
+    | { status: 'rateLimited' }
     | { status: 'ready'; rationale: DealRationale };
 
 type DealRationaleState = RationaleState & { dealId: number };
@@ -48,6 +59,8 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
                     setStoredState({ dealId, status: 'ready', rationale });
                 } else if (rationale.reason === 'provider_error') {
                     setStoredState({ dealId, status: 'error' });
+                } else if (rationale.reason === 'rate_limited') {
+                    setStoredState({ dealId, status: 'rateLimited' });
                 } else {
                     setStoredState({ dealId, status: 'hidden' });
                 }
@@ -103,13 +116,66 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
                         {t('retry')}
                     </Button>
                 </div>
+            ) : state.status === 'rateLimited' ? (
+                <div className="flex flex-1 items-center justify-between gap-3 rounded-lg border px-4 py-3">
+                    <p className="text-sm text-muted-foreground">{t('rateLimited')}</p>
+                    <Button variant="ghost" size="sm" onClick={retry} className="shrink-0">
+                        <ArrowPathIcon className="size-4" aria-hidden />
+                        {t('retry')}
+                    </Button>
+                </div>
             ) : (
                 <div className="flex flex-1 flex-col gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
                     <div className="grid max-w-[70ch] flex-1 gap-3">
                         <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                             {state.rationale.narrative ?? state.rationale.rationale}
                         </p>
-                        {state.rationale.actions && state.rationale.actions.length > 0 ? (
+                        {state.rationale.narrativeFactorCodes
+                        && state.rationale.narrativeFactorCodes.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                                {state.rationale.narrativeFactorCodes.map((code) => (
+                                    <Badge
+                                        key={code}
+                                        variant="outline"
+                                        className="font-normal text-muted-foreground"
+                                    >
+                                        {t(FACTOR_CHIP_KEYS[code])}
+                                    </Badge>
+                                ))}
+                            </div>
+                        ) : null}
+                        {state.rationale.recommendedActions
+                        && state.rationale.recommendedActions.length > 0 ? (
+                            <ul className="grid gap-2">
+                                {state.rationale.recommendedActions.map((action, index) => (
+                                    <li
+                                        key={index}
+                                        className="grid gap-1 text-sm leading-relaxed text-muted-foreground"
+                                    >
+                                        <div className="flex gap-2">
+                                            <span
+                                                aria-hidden
+                                                className="mt-[0.5rem] size-1 shrink-0 rounded-full bg-muted-foreground/50"
+                                            />
+                                            <span>{action.text}</span>
+                                        </div>
+                                        {action.factorCodes.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1 pl-4">
+                                                {action.factorCodes.map((code) => (
+                                                    <Badge
+                                                        key={code}
+                                                        variant="outline"
+                                                        className="font-normal text-muted-foreground"
+                                                    >
+                                                        {t(FACTOR_CHIP_KEYS[code])}
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : state.rationale.actions && state.rationale.actions.length > 0 ? (
                             <ul className="grid gap-1.5">
                                 {state.rationale.actions.map((action, index) => (
                                     <li
@@ -129,11 +195,7 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
                     <div className="flex items-center justify-between gap-3">
                         <p className="text-xs text-muted-foreground">
                             {t('attribution', {
-                                time: state.rationale.generatedAt
-                                    ? new Intl.DateTimeFormat(locale, { timeStyle: 'short' }).format(
-                                          new Date(state.rationale.generatedAt),
-                                      )
-                                    : '',
+                                time: formatDateTime(state.rationale.generatedAt ?? undefined, locale),
                             })}
                             {state.rationale.warnings > 0 ? <> · {t('integrityWarning')}</> : null}
                         </p>

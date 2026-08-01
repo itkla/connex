@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -30,8 +31,8 @@ import ooo.klae.connex.backend.services.PersonService;
  * Assembles the masked relationship-graph and history context shared by the deal-brief and
  * risk-rationale prompts — account win/loss history, stakeholder employment history, and network
  * connections — the differentiated signal a deterministic summary cannot synthesize. Every block is
- * best-effort: a fetch failure appends {@code none} rather than breaking the feature, and every
- * identifier is tokenized through {@link MaskingEngine} exactly as the assemblers do.
+ * best-effort: missing data and failed fetches remain distinguishable, and every identifier is
+ * tokenized through {@link MaskingEngine} exactly as the assemblers do.
  */
 @Service
 @RequiredArgsConstructor
@@ -41,6 +42,8 @@ public class AiRelationshipContext {
     static final int MAX_CONNECTIONS = 5;
     static final int MAX_ALLOWED_TEXT_CHARS = 120;
     static final int MAX_FREE_TEXT_CHARS = 200;
+
+    private static final SourceIdProvider NO_SOURCE_IDS = (kind, id) -> "";
 
     private final DealService dealService;
     private final PersonService personService;
@@ -53,19 +56,25 @@ public class AiRelationshipContext {
      * @param prompt prompt under construction
      * @param companyId company to profile
      * @param context request-local masking context
+     * @return whether the optional company fetch failed
      */
-    public void appendCompanyProfile(StringBuilder prompt, int companyId, MaskingContext context) {
+    public boolean appendCompanyProfile(StringBuilder prompt, int companyId, MaskingContext context) {
         if (companyId <= 0) {
-            return;
+            prompt.append("Industry: none\n");
+            return false;
         }
         try {
             Company company = companyService.getCompanyById(companyId);
             String industry = company == null ? "" : maskAllowed(company.getIndustry(), context);
-            if (!isBlank(industry)) {
+            if (isUsableMasked(industry)) {
                 prompt.append("Industry: ").append(industry).append('\n');
+            } else {
+                prompt.append("Industry: none\n");
             }
+            return false;
         } catch (RuntimeException exception) {
-            return;
+            prompt.append("Industry: unavailable\n");
+            return true;
         }
     }
 
@@ -75,15 +84,41 @@ public class AiRelationshipContext {
      * @param companyId company whose deal history to summarize
      * @param currentDealId deal being analysed, excluded from the history
      * @param context request-local masking context
+     * @return whether the optional history fetch failed
      */
-    public void appendAccountHistory(StringBuilder prompt, int companyId, int currentDealId, MaskingContext context) {
+    public boolean appendAccountHistory(
+            StringBuilder prompt, int companyId, int currentDealId, MaskingContext context) {
+        return appendAccountHistory(prompt, companyId, currentDealId, context, NO_SOURCE_IDS);
+    }
+
+    /**
+     * Appends prior and concurrent deals and assigns positional ids to the records that are emitted.
+     * @param prompt prompt under construction
+     * @param companyId company whose deal history to summarize
+     * @param currentDealId deal being analysed, excluded from the history
+     * @param context request-local masking context
+     * @param sourceIds positional source-id provider
+     * @return whether the optional history fetch failed
+     */
+    public boolean appendAccountHistory(
+            StringBuilder prompt,
+            int companyId,
+            int currentDealId,
+            MaskingContext context,
+            SourceIdProvider sourceIds) {
+        Objects.requireNonNull(sourceIds, "sourceIds");
         prompt.append("\nACCOUNT_HISTORY\n");
-        List<String> lines = accountHistoryLines(companyId, currentDealId, context);
-        if (lines.isEmpty()) {
-            prompt.append("- none\n");
-            return;
+        FetchResult result = accountHistoryLines(companyId, currentDealId, context, sourceIds);
+        if (result.failed()) {
+            prompt.append("- unavailable\n");
+            return true;
         }
-        lines.forEach(prompt::append);
+        if (result.lines().isEmpty()) {
+            prompt.append("- none\n");
+        } else {
+            result.lines().forEach(prompt::append);
+        }
+        return false;
     }
 
     /**
@@ -96,40 +131,84 @@ public class AiRelationshipContext {
      */
     public List<Integer> appendStakeholderBackground(
             StringBuilder prompt, int personId, String personToken, MaskingContext context) {
-        if (personId <= 0 || isBlank(personToken)) {
-            return List.of();
-        }
         Set<Integer> connectionPersonIds = new LinkedHashSet<>();
-        List<String> lines = stakeholderBackgroundLines(personId, context, connectionPersonIds);
-        if (lines.isEmpty()) {
-            return List.of();
-        }
-        prompt.append("- Person: ").append(personToken).append('\n');
-        lines.forEach(prompt::append);
+        appendStakeholderBackground(
+                prompt, personId, personToken, context, NO_SOURCE_IDS, connectionPersonIds);
         return connectionPersonIds.stream().sorted().toList();
     }
 
-    private List<String> accountHistoryLines(int companyId, int currentDealId, MaskingContext context) {
+    /**
+     * Appends stakeholder background and assigns positional ids to emitted person records.
+     * @param prompt prompt under construction
+     * @param personId stakeholder person id
+     * @param personToken the stakeholder's issued mask token
+     * @param context request-local masking context
+     * @param sourceIds positional source-id provider
+     * @return whether either optional background fetch failed
+     */
+    public boolean appendStakeholderBackground(
+            StringBuilder prompt,
+            int personId,
+            String personToken,
+            MaskingContext context,
+            SourceIdProvider sourceIds) {
+        return appendStakeholderBackground(
+                prompt, personId, personToken, context, sourceIds, new LinkedHashSet<>());
+    }
+
+    private boolean appendStakeholderBackground(
+            StringBuilder prompt,
+            int personId,
+            String personToken,
+            MaskingContext context,
+            SourceIdProvider sourceIds,
+            Set<Integer> connectionPersonIds) {
+        Objects.requireNonNull(sourceIds, "sourceIds");
+        if (personId <= 0 || isBlank(personToken)) {
+            prompt.append("- Person: none\n  Employment: none\n  Connection: none\n");
+            return false;
+        }
+        String stakeholderSourceId = sourceIds.sourceId("person", personId);
+        prompt.append("- Person: ").append(personToken);
+        appendSource(prompt, stakeholderSourceId);
+        prompt.append('\n');
+        FetchResult employment = employmentLines(personId, stakeholderSourceId, context);
+        appendSubsection(prompt, "Employment", employment);
+        FetchResult connections = connectionLines(
+                personId, context, sourceIds, connectionPersonIds);
+        appendSubsection(prompt, "Connection", connections);
+        return employment.failed() || connections.failed();
+    }
+
+    private FetchResult accountHistoryLines(
+            int companyId,
+            int currentDealId,
+            MaskingContext context,
+            SourceIdProvider sourceIds) {
         if (companyId <= 0) {
-            return List.of();
+            return FetchResult.available(List.of());
         }
         try {
             List<Deal> deals = safeList(
                 dealService.getAccountHistoryDeals(companyId, currentDealId, MAX_ACCOUNT_DEALS));
             List<String> lines = new ArrayList<>();
             for (Deal deal : deals) {
-                lines.add(accountHistoryLine(deal, context));
+                if (deal == null || deal.getId() <= 0) {
+                    continue;
+                }
+                lines.add(accountHistoryLine(
+                        deal, context, sourceIds.sourceId("deal", deal.getId())));
                 if (lines.size() == MAX_ACCOUNT_DEALS) {
                     break;
                 }
             }
-            return lines;
+            return FetchResult.available(lines);
         } catch (RuntimeException exception) {
-            return List.of();
+            return FetchResult.failure();
         }
     }
 
-    private String accountHistoryLine(Deal deal, MaskingContext context) {
+    private String accountHistoryLine(Deal deal, MaskingContext context, String sourceId) {
         StringBuilder line = new StringBuilder("- Outcome: ").append(outcome(deal.getWon()));
         double value = deal.getWon() != null && deal.getWon() && deal.getActualValue() > 0
                 ? deal.getActualValue()
@@ -143,19 +222,14 @@ public class AiRelationshipContext {
             appendInline(line, "Expected close", relativeAge(deal.getExpectedCloseDate()));
         }
         appendInline(line, "Reason", maskFree(deal.getClosedReason(), context));
+        appendSource(line, sourceId);
         return line.append('\n').toString();
     }
 
-    private List<String> stakeholderBackgroundLines(
-            int personId, MaskingContext context, Set<Integer> connectionPersonIds) {
-        List<String> lines = new ArrayList<>();
-        appendEmploymentLines(lines, personId, context);
-        appendConnectionLines(lines, personId, context, connectionPersonIds);
-        return lines;
-    }
-
-    private void appendEmploymentLines(List<String> lines, int personId, MaskingContext context) {
+    private FetchResult employmentLines(
+            int personId, String stakeholderSourceId, MaskingContext context) {
         try {
+            List<String> lines = new ArrayList<>();
             int appended = 0;
             for (PersonEmployment employment : safeList(personService.getEmploymentHistory(personId))) {
                 if (employment == null || isBlank(employment.getCompanyName())) {
@@ -170,32 +244,36 @@ public class AiRelationshipContext {
                 } else {
                     appendInline(line, "Left", relativeAge(employment.getEndedAt()));
                 }
+                appendSource(line, stakeholderSourceId);
                 lines.add(line.append('\n').toString());
                 if (++appended == MAX_EMPLOYMENT) {
                     break;
                 }
             }
+            return FetchResult.available(lines);
         } catch (RuntimeException exception) {
-            return;
+            return FetchResult.failure();
         }
     }
 
-    private void appendConnectionLines(
-            List<String> lines,
+    private FetchResult connectionLines(
             int personId,
             MaskingContext context,
+            SourceIdProvider sourceIds,
             Set<Integer> connectionPersonIds) {
         try {
             List<PersonConnectionDto> connections = new ArrayList<>();
             for (PersonConnectionDto connection : safeList(
                     connectionService.getTopConnections(personId, MAX_CONNECTIONS))) {
-                if (connection != null && !isBlankConnectionName(connection.getPersonName())
+                if (connection != null && connection.getPersonId() > 0
+                        && !isBlankConnectionName(connection.getPersonName())
                         && connection.getSuspendedAt() == null
                         && connection.getProvisionCeasedAt() == null) {
                     connections.add(connection);
                 }
             }
             connections.sort(Comparator.comparingInt(PersonConnectionDto::getStrength).reversed());
+            List<String> lines = new ArrayList<>();
             int appended = 0;
             for (PersonConnectionDto connection : connections) {
                 StringBuilder line = new StringBuilder("  Connection: ")
@@ -203,16 +281,26 @@ public class AiRelationshipContext {
                 appendInline(line, "Type", maskAllowed(connection.getType(), context));
                 line.append("; Strength: ").append(connection.getStrength());
                 appendInline(line, "Note", maskFree(connection.getNote(), context));
+                appendSource(line, sourceIds.sourceId("person", connection.getPersonId()));
                 lines.add(line.append('\n').toString());
-                if (connection.getPersonId() > 0) {
-                    connectionPersonIds.add(connection.getPersonId());
-                }
+                connectionPersonIds.add(connection.getPersonId());
                 if (++appended == MAX_CONNECTIONS) {
                     break;
                 }
             }
+            return FetchResult.available(lines);
         } catch (RuntimeException exception) {
-            return;
+            return FetchResult.failure();
+        }
+    }
+
+    private static void appendSubsection(StringBuilder prompt, String label, FetchResult result) {
+        if (result.failed()) {
+            prompt.append("  ").append(label).append(": unavailable\n");
+        } else if (result.lines().isEmpty()) {
+            prompt.append("  ").append(label).append(": none\n");
+        } else {
+            result.lines().forEach(prompt::append);
         }
     }
 
@@ -255,15 +343,21 @@ public class AiRelationshipContext {
     }
 
     private static void appendInline(StringBuilder line, String label, String value) {
-        if (!isBlank(value)) {
+        if (isUsableMasked(value)) {
             line.append("; ").append(label).append(": ").append(value);
+        }
+    }
+
+    private static void appendSource(StringBuilder line, String sourceId) {
+        if (!isBlank(sourceId)) {
+            line.append("; Source: ").append(sourceId);
         }
     }
 
     private static String amount(double value, String currency, MaskingContext context) {
         String amount = BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();
         String safeCurrency = maskAllowedStatic(currency, context);
-        return isBlank(safeCurrency) ? amount : amount + " " + safeCurrency;
+        return isUsableMasked(safeCurrency) ? amount + " " + safeCurrency : amount;
     }
 
     private String maskAllowed(String value, MaskingContext context) {
@@ -305,6 +399,10 @@ public class AiRelationshipContext {
         return value == null || value.isBlank();
     }
 
+    private static boolean isUsableMasked(String value) {
+        return !isBlank(value) && !MaskingEngine.OMITTED_BY_POLICY.equals(value);
+    }
+
     private static boolean isBlankConnectionName(String value) {
         return value == null || value.codePoints().allMatch(AiRelationshipContext::isConnectionWhitespace);
     }
@@ -313,5 +411,33 @@ public class AiRelationshipContext {
         return Character.isWhitespace(codePoint)
                 || Character.isSpaceChar(codePoint)
                 || codePoint == 0x0085;
+    }
+
+    /**
+     * Assigns a positional prompt id for one emitted server-side record.
+     */
+    @FunctionalInterface
+    public interface SourceIdProvider {
+        /**
+         * Returns the positional id for an emitted record.
+         * @param kind stable record kind
+         * @param id real record id
+         * @return positional prompt id, or blank when citations are not requested
+         */
+        String sourceId(String kind, int id);
+    }
+
+    private record FetchResult(List<String> lines, boolean failed) {
+        private FetchResult {
+            lines = List.copyOf(lines);
+        }
+
+        private static FetchResult available(List<String> lines) {
+            return new FetchResult(lines, false);
+        }
+
+        private static FetchResult failure() {
+            return new FetchResult(List.of(), true);
+        }
     }
 }

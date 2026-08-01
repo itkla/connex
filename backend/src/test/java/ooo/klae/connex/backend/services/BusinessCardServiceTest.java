@@ -67,6 +67,7 @@ import ooo.klae.connex.backend.dto.BusinessCardImportReservationResponse;
 import ooo.klae.connex.backend.dto.BusinessCardPersonAction;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.CompanyCandidate;
+import ooo.klae.connex.backend.dto.BusinessCardScanResponse.ExtractionOrigin;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -167,6 +168,7 @@ class BusinessCardServiceTest {
         BusinessCardScanResponse response = service.scan(image);
 
         assertEquals(17, response.company().matchedCompanyId());
+        assertEquals(ExtractionOrigin.OCR, response.company().origin());
         assertTrue(response.warnings().isEmpty());
         verify(workspaceService).requirePermission(Permission.ATTACHMENT_CREATE);
         verify(rateLimiter).requireScanAllowed();
@@ -180,7 +182,7 @@ class BusinessCardServiceTest {
 
     @Test
     void scanUsesConfiguredAiWhenLocalScannerIsUnavailable() {
-        BusinessCardScanResponse draft = draft("Analytical Labs");
+        BusinessCardScanResponse draft = draft("Analytical Labs", ExtractionOrigin.AI);
         when(ocrClient.isReady()).thenReturn(false);
         when(ocrClient.isReadyForScan()).thenReturn(false);
         when(aiExtractionService.isAvailable()).thenReturn(true);
@@ -192,6 +194,8 @@ class BusinessCardServiceTest {
         BusinessCardScanResponse response = service.scan(image);
 
         assertEquals("Analytical Labs", response.company().value());
+        assertEquals(ExtractionOrigin.AI, response.company().origin());
+        assertNull(response.company().confidence());
         InOrder scanOrder = inOrder(ocrClient, aiExtractionService, imageValidator);
         scanOrder.verify(ocrClient).isReady();
         scanOrder.verify(aiExtractionService).isAvailable();
@@ -1098,10 +1102,20 @@ class BusinessCardServiceTest {
     }
 
     private static BusinessCardScanResponse draft(String company) {
-        FieldCandidate name = new FieldCandidate("Ada Lovelace", 0.99);
+        return draft(company, ExtractionOrigin.OCR);
+    }
+
+    private static BusinessCardScanResponse draft(
+            String company, ExtractionOrigin origin) {
+        Double confidence = origin == ExtractionOrigin.OCR ? 0.99 : null;
+        FieldCandidate name = new FieldCandidate("Ada Lovelace", confidence, origin);
         return new BusinessCardScanResponse(
                 new Fields(name, FieldCandidate.empty(), FieldCandidate.empty(), FieldCandidate.empty()),
-                new CompanyCandidate(company, 0.92, null),
+                new CompanyCandidate(
+                        company,
+                        company == null || origin == ExtractionOrigin.AI ? null : 0.92,
+                        company == null ? null : origin,
+                        null),
                 List.of());
     }
 

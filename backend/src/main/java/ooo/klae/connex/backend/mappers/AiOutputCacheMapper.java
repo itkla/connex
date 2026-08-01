@@ -19,6 +19,13 @@ public interface AiOutputCacheMapper {
 
     int upsert(AiOutputCache entry);
 
+    int deleteBySubjectAndContentHash(
+            @Param("workspaceId") int workspaceId,
+            @Param("feature") String feature,
+            @Param("subjectAId") int subjectAId,
+            @Param("subjectBId") int subjectBId,
+            @Param("contentHash") String contentHash);
+
     /**
      * Deletes every cached AI output that retains the person's data across every workspace in the
      * person's organization: person-keyed intro rationales (the person is either subject), and

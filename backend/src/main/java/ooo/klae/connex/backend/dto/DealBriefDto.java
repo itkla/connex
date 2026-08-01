@@ -17,7 +17,7 @@ import lombok.Getter;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class DealBriefDto {
     private static final Set<String> UNAVAILABLE_REASONS = Set.of(
-            "not_configured", "provider_error", "rate_limited");
+            "not_configured", "provider_error", "rate_limited", "insufficient_data");
 
     private final int dealId;
     private final boolean available;
@@ -25,6 +25,7 @@ public class DealBriefDto {
     private final String brief;
     private final String generatedAt;
     private final int warnings;
+    private final boolean degraded;
     private final String reason;
 
     /**
@@ -33,9 +34,15 @@ public class DealBriefDto {
      * @param sections demasked, ordered brief sections
      * @param generatedAt ISO generation instant
      * @param warnings demasking warning count
+     * @param degraded whether optional deterministic context was unavailable
      * @return available response
      */
-    public static DealBriefDto of(int dealId, List<Section> sections, String generatedAt, int warnings) {
+    public static DealBriefDto of(
+            int dealId,
+            List<Section> sections,
+            String generatedAt,
+            int warnings,
+            boolean degraded) {
         List<Section> safe = List.copyOf(Objects.requireNonNull(sections, "sections"));
         return new DealBriefDto(
                 dealId,
@@ -44,6 +51,7 @@ public class DealBriefDto {
                 flatten(safe),
                 Objects.requireNonNull(generatedAt, "generatedAt"),
                 warnings,
+                degraded,
                 null);
     }
 
@@ -57,7 +65,7 @@ public class DealBriefDto {
         if (!UNAVAILABLE_REASONS.contains(reason)) {
             throw new IllegalArgumentException("Unsupported deal brief unavailability reason");
         }
-        return new DealBriefDto(dealId, false, null, null, null, 0, reason);
+        return new DealBriefDto(dealId, false, null, null, null, 0, false, reason);
     }
 
     private static String flatten(List<Section> sections) {
@@ -78,12 +86,31 @@ public class DealBriefDto {
      * A single titled brief section.
      * @param title short section heading
      * @param body plain-text section body
+     * @param citations real, in-context records that informed the section — structurally grounded
+     *     (each id is a current workspace record that was in the prompt), not a semantic claim that
+     *     any single sentence is proven by a given record
      */
-    public record Section(String title, String body) {
+    public record Section(String title, String body, List<Citation> citations) {
 
         public Section {
             Objects.requireNonNull(title, "title");
             Objects.requireNonNull(body, "body");
+            citations = List.copyOf(Objects.requireNonNull(citations, "citations"));
+        }
+    }
+
+    /**
+     * One translated deal-brief citation.
+     * @param kind stable record kind
+     * @param id real workspace-scoped record id
+     */
+    public record Citation(String kind, int id) {
+
+        public Citation {
+            Objects.requireNonNull(kind, "kind");
+            if (id <= 0) {
+                throw new IllegalArgumentException("Citation id must be positive");
+            }
         }
     }
 }

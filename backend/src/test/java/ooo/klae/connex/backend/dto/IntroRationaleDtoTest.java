@@ -21,6 +21,7 @@ class IntroRationaleDtoTest {
                 PERSON_A_ID,
                 PERSON_B_ID,
                 "Alice and Bob share three trusted connections.",
+                List.of("mutual_connections"),
                 GENERATED_AT,
                 2);
 
@@ -28,6 +29,7 @@ class IntroRationaleDtoTest {
         assertEquals(PERSON_B_ID, result.getPersonBId());
         assertTrue(result.isAvailable());
         assertEquals("Alice and Bob share three trusted connections.", result.getRationale());
+        assertEquals(List.of("mutual_connections"), result.getReasonCodes());
         assertEquals(GENERATED_AT, result.getGeneratedAt());
         assertEquals(2, result.getWarnings());
         assertNull(result.getReason());
@@ -42,6 +44,7 @@ class IntroRationaleDtoTest {
             assertEquals(PERSON_B_ID, result.getPersonBId());
             assertFalse(result.isAvailable());
             assertNull(result.getRationale());
+            assertNull(result.getReasonCodes());
             assertNull(result.getGeneratedAt());
             assertEquals(0, result.getWarnings());
             assertEquals(reason, result.getReason());

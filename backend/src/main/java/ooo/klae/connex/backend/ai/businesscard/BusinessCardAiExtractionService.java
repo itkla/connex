@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.CompanyCandidate;
+import ooo.klae.connex.backend.dto.BusinessCardScanResponse.ExtractionOrigin;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 
@@ -104,12 +105,18 @@ public class BusinessCardAiExtractionService {
         }
         return new BusinessCardScanResponse(
                 new Fields(field(name), field(email), field(phone), field(title)),
-                new CompanyCandidate(company, null, null),
+                new CompanyCandidate(
+                        company,
+                        null,
+                        company == null ? null : ExtractionOrigin.AI,
+                        null),
                 List.copyOf(warnings));
     }
 
     private static FieldCandidate field(String value) {
-        return new FieldCandidate(value, null);
+        return value == null
+                ? FieldCandidate.empty()
+                : new FieldCandidate(value, null, ExtractionOrigin.AI);
     }
 
     private static String bounded(String value, int maxLength) {

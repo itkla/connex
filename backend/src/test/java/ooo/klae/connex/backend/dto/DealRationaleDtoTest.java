@@ -19,13 +19,20 @@ class DealRationaleDtoTest {
         DealRationaleDto result = DealRationaleDto.of(
                 DEAL_ID,
                 "The deal is stalled.",
-                List.of("Call the champion today.", "Escalate to the VP."),
+                List.of("stalled"),
+                List.of(
+                        new DealRationaleDto.RecommendedAction(
+                                "Call the champion today.", List.of("stalled")),
+                        new DealRationaleDto.RecommendedAction(
+                                "Escalate to the VP.", List.of("stalled"))),
                 GENERATED_AT,
                 2);
 
         assertEquals(DEAL_ID, result.getDealId());
         assertTrue(result.isAvailable());
         assertEquals("The deal is stalled.", result.getNarrative());
+        assertEquals(List.of("stalled"), result.getNarrativeFactorCodes());
+        assertEquals(2, result.getRecommendedActions().size());
         assertEquals(List.of("Call the champion today.", "Escalate to the VP."), result.getActions());
         assertEquals(
                 "The deal is stalled.\n• Call the champion today.\n• Escalate to the VP.",
@@ -37,7 +44,8 @@ class DealRationaleDtoTest {
 
     @Test
     void of_withoutActions_flattensNarrativeOnly() {
-        DealRationaleDto result = DealRationaleDto.of(DEAL_ID, "The deal is stalled.", List.of(), GENERATED_AT, 0);
+        DealRationaleDto result = DealRationaleDto.of(
+                DEAL_ID, "The deal is stalled.", List.of("stalled"), List.of(), GENERATED_AT, 0);
 
         assertEquals("The deal is stalled.", result.getNarrative());
         assertEquals(List.of(), result.getActions());
@@ -52,6 +60,8 @@ class DealRationaleDtoTest {
             assertEquals(DEAL_ID, result.getDealId());
             assertFalse(result.isAvailable());
             assertNull(result.getNarrative());
+            assertNull(result.getNarrativeFactorCodes());
+            assertNull(result.getRecommendedActions());
             assertNull(result.getActions());
             assertNull(result.getRationale());
             assertNull(result.getGeneratedAt());

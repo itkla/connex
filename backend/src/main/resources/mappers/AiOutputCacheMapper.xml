@@ -15,6 +15,15 @@
       AND subject_b_id = #{subjectBId}
   </select>
 
+  <delete id="deleteBySubjectAndContentHash">
+    DELETE FROM ai_output_cache
+    WHERE workspace_id = #{workspaceId}
+      AND feature = #{feature}
+      AND subject_a_id = #{subjectAId}
+      AND subject_b_id = #{subjectBId}
+      AND content_hash = #{contentHash}
+  </delete>
+
   <delete id="deleteForPerson">
     DELETE c FROM ai_output_cache c
     JOIN workspace owner_workspace ON owner_workspace.id = #{workspaceId}
