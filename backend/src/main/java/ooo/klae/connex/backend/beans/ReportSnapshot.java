@@ -20,6 +20,8 @@ public class ReportSnapshot {
     private LocalDate periodStart;
     private LocalDate periodEnd;
     private String computedResult;
+    private String origin;
+    private Integer reportScheduleId;
     private Integer generatedBy;
     private String generatedAt;
 }

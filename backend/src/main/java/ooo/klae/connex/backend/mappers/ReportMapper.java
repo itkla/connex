@@ -39,7 +39,7 @@ public interface ReportMapper {
         @Param("reportDefinitionId") int reportDefinitionId,
         @Param("limit") int limit);
 
-    int countSnapshots(
+    int countManualSnapshots(
         @Param("workspaceId") int workspaceId,
         @Param("reportDefinitionId") int reportDefinitionId);
 
@@ -53,6 +53,11 @@ public interface ReportMapper {
         @Param("id") int id);
 
     void insertSnapshot(ReportSnapshot snapshot);
+
+    int deleteScheduledSnapshotsBeyondRetention(
+        @Param("workspaceId") int workspaceId,
+        @Param("reportScheduleId") int reportScheduleId,
+        @Param("keepCount") int keepCount);
 
     int deleteSnapshot(
         @Param("workspaceId") int workspaceId,

@@ -8,6 +8,7 @@ import java.time.LocalDate;
  * @param reportDefinitionId owning definition id
  * @param periodStart first included date
  * @param periodEnd last included date
+ * @param origin manual or scheduled creation origin
  * @param generatedBy generator user id
  * @param generatedAt generation timestamp
  */
@@ -16,6 +17,7 @@ public record ReportSnapshotSummaryDto(
         int reportDefinitionId,
         LocalDate periodStart,
         LocalDate periodEnd,
+        String origin,
         Integer generatedBy,
         String generatedAt) {
 }

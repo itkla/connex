@@ -9,6 +9,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -31,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -46,8 +49,10 @@ import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRef;
+import ooo.klae.connex.backend.dto.ReportSnapshotDto;
 import ooo.klae.connex.backend.dto.ReportWidgetConfig;
 import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailMessage;
 import ooo.klae.connex.backend.mail.MailProperties;
@@ -60,6 +65,7 @@ class ReportDeliverySchedulerTest {
     private static final int WORKSPACE_ID = 11;
     private static final int SCHEDULE_ID = 22;
     private static final int REPORT_ID = 33;
+    private static final int SNAPSHOT_ID = 55;
     private static final int USER_ID = 44;
     private static final Instant NOW = Instant.parse("2026-07-14T09:00:00Z");
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
@@ -88,21 +94,23 @@ class ReportDeliverySchedulerTest {
     }
 
     @Test
-    void dueDeliveryGeneratesRenderedEmailWithoutCreatingSnapshot() {
+    void dueDeliveryCreatesSnapshotBeforeRecipientRederivationAndSend() {
         stubAuditScope();
-        ReportDocumentDto document = documentWithContent();
+        ReportSnapshotDto snapshot = snapshotWithContent();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
-        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(user()));
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult()))
+                .thenReturn(List.of(user()));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
-        verify(reportService).generate(REPORT_ID, null, ReportService.NarrativeMode.FULL);
-        verify(reportService, never()).createSnapshot(anyInt(), any());
         ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
-        verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
+        InOrder order = inOrder(reportService, scheduleService, mailService);
+        order.verify(reportService).createDeliverySnapshot(REPORT_ID, SCHEDULE_ID);
+        order.verify(scheduleService).activeRecipientsForDocument(schedule, snapshot.computedResult());
+        order.verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
         assertEquals("recipient@example.com", message.getValue().to());
         assertEquals("Scheduled report: Quota-safe report", message.getValue().subject());
         String body = message.getValue().htmlBody();
@@ -111,22 +119,23 @@ class ReportDeliverySchedulerTest {
         assertTrue(body.contains("Revenue held above target."));
         assertTrue(body.contains(">Won revenue</p>"));
         assertTrue(body.contains(">$125,000</p>"));
-        assertTrue(body.contains("href=\"https://app.example.com/overview/reports/33\""));
+        assertTrue(body.contains("href=\"https://app.example.com/overview/reports/33/snapshots/55\""));
         assertTrue(body.contains(">View report</a>"));
         assertFalse(body.contains("{{"));
         verify(auditService).recordScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
                 WORKSPACE_ID, 77, "Quota-safe report",
-                "Queued scheduled report delivery", Map.of("recipientCount", 1));
+                "Queued scheduled report delivery", Map.of("recipientCount", 1, "snapshotId", SNAPSHOT_ID));
     }
 
     @Test
     void dueDeliveryRendersFallbackWithoutNarrativeOrTotals() {
         stubAuditScope();
-        ReportDocumentDto document = document();
+        ReportSnapshotDto snapshot = snapshot();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
-        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(user()));
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult()))
+                .thenReturn(List.of(user()));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
@@ -143,11 +152,12 @@ class ReportDeliverySchedulerTest {
     @Test
     void dueDeliveryRendersJapaneseFallbackForJapaneseRecipient() {
         stubAuditScope();
-        ReportDocumentDto document = document();
+        ReportSnapshotDto snapshot = snapshot();
         User recipient = user(USER_ID, "recipient@example.com", "ja");
         ReportSchedule schedule = stubClaimedDelivery(List.of(recipient));
-        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
-        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(recipient));
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult()))
+                .thenReturn(List.of(recipient));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
@@ -170,12 +180,13 @@ class ReportDeliverySchedulerTest {
     @Test
     void dueDeliveryLocalizesMixedRecipientsFromOneGeneratedDocument() {
         stubAuditScope();
-        ReportDocumentDto document = documentWithContent();
+        ReportSnapshotDto snapshot = snapshotWithContent();
         User english = user(45, "english@example.com", "en");
         User japanese = user(46, "japanese@example.com", "ja");
         ReportSchedule schedule = stubClaimedDelivery(List.of(english, japanese));
-        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
-        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(english, japanese));
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult()))
+                .thenReturn(List.of(english, japanese));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
@@ -195,21 +206,22 @@ class ReportDeliverySchedulerTest {
         assertTrue(japaneseMessage.htmlBody().contains("$125,000"));
         assertTrue(englishMessage.htmlBody().contains("Revenue held above target."));
         assertTrue(japaneseMessage.htmlBody().contains("Revenue held above target."));
-        verify(reportService).generate(REPORT_ID, null, ReportService.NarrativeMode.FULL);
+        verify(reportService).createDeliverySnapshot(REPORT_ID, SCHEDULE_ID);
         verify(auditService).recordScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
                 WORKSPACE_ID, 77, "Quota-safe report",
-                "Queued scheduled report delivery", Map.of("recipientCount", 2));
+                "Queued scheduled report delivery", Map.of("recipientCount", 2, "snapshotId", SNAPSHOT_ID));
     }
 
     @Test
     void dueDeliveryFallsBackToEnglishForUnsupportedStoredLocale() {
         stubAuditScope();
-        ReportDocumentDto document = document();
+        ReportSnapshotDto snapshot = snapshot();
         User recipient = user(USER_ID, "recipient@example.com", "../../ja");
         ReportSchedule schedule = stubClaimedDelivery(List.of(recipient));
-        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
-        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(recipient));
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult()))
+                .thenReturn(List.of(recipient));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
@@ -230,8 +242,7 @@ class ReportDeliverySchedulerTest {
 
         scheduler.deliverDue();
 
-        verify(reportService, never()).generate(anyInt(), any(), any());
-        verify(reportService, never()).createSnapshot(anyInt(), any());
+        verify(reportService, never()).createDeliverySnapshot(anyInt(), anyInt());
         verify(mailService, never()).sendForWorkspace(anyInt(), any());
         verify(auditService).recordFailureScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
@@ -242,17 +253,17 @@ class ReportDeliverySchedulerTest {
     @Test
     void dueDeliveryAuthorizesRecipientsAgainstGeneratedDocument() {
         stubAuditScope();
-        ReportDocumentDto document = attainmentDocument();
+        ReportSnapshotDto snapshot = attainmentSnapshot();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
-        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of());
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult())).thenReturn(List.of());
         when(scheduleService.isCurrentDeliverySchedule(schedule)).thenReturn(true);
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
-        verify(reportService).generate(REPORT_ID, null, ReportService.NarrativeMode.FULL);
-        verify(scheduleService).activeRecipientsForDocument(schedule, document);
+        verify(reportService).createDeliverySnapshot(REPORT_ID, SCHEDULE_ID);
+        verify(scheduleService).activeRecipientsForDocument(schedule, snapshot.computedResult());
         verify(mailService, never()).sendForWorkspace(anyInt(), any());
         verify(auditService).recordFailureScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
@@ -261,17 +272,35 @@ class ReportDeliverySchedulerTest {
     }
 
     @Test
-    void dueDeliveryCancellationAfterGenerationDoesNotRecordRecipientFailure() {
-        ReportDocumentDto document = document();
+    void dueDeliveryCancellationAfterSnapshotDoesNotRecordRecipientFailure() {
+        ReportSnapshotDto snapshot = snapshot();
         ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
-        when(reportService.generate(REPORT_ID, null, ReportService.NarrativeMode.FULL)).thenReturn(document);
-        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of());
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult())).thenReturn(List.of());
         when(scheduleService.isCurrentDeliverySchedule(schedule)).thenReturn(false);
 
         scheduler.deliverDue();
 
         verify(mailService, never()).sendForWorkspace(anyInt(), any());
         verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void snapshotPersistenceFailureAuditsAndSendsNoMail() {
+        stubAuditScope();
+        stubClaimedDelivery(List.of(user()));
+        doThrow(new BadRequestException("The workspace report snapshot quota has been reached"))
+                .when(reportService).createDeliverySnapshot(REPORT_ID, SCHEDULE_ID);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        verify(auditService).recordFailureScoped(
+                "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
+                WORKSPACE_ID, 77, null,
+                "Scheduled report delivery failed", "report snapshot persistence failed");
+        verify(scheduleService, never()).activeRecipientsForDocument(any(), any());
+        verifyNoInteractions(mailService);
     }
 
     private ReportSchedule stubClaimedDelivery(List<User> beforeGeneration) {
@@ -411,5 +440,29 @@ class ReportDeliverySchedulerTest {
                 base.appendix(),
                 base.citations(),
                 base.generatedAt());
+    }
+
+    private static ReportSnapshotDto snapshot() {
+        return snapshot(document());
+    }
+
+    private static ReportSnapshotDto snapshotWithContent() {
+        return snapshot(documentWithContent());
+    }
+
+    private static ReportSnapshotDto attainmentSnapshot() {
+        return snapshot(attainmentDocument());
+    }
+
+    private static ReportSnapshotDto snapshot(ReportDocumentDto document) {
+        return new ReportSnapshotDto(
+                SNAPSHOT_ID,
+                REPORT_ID,
+                document.periodStart(),
+                document.periodEnd(),
+                document,
+                "scheduled",
+                USER_ID,
+                "2026-07-14 09:00:00");
     }
 }

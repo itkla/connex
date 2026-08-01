@@ -252,6 +252,43 @@ class ReportMapperXmlTest {
         assertTrue(sql.contains("workspace_id, started_at, person_id"));
     }
 
+    @Test
+    void reportSnapshotOriginMigrationKeepsScheduleForeignKeyNullableAndIndexed() throws Exception {
+        String sql = resourceText("db/migration/tenant/V139__report_snapshot_origin.sql");
+
+        assertTrue(sql.contains("ADD COLUMN origin VARCHAR(16) NOT NULL DEFAULT 'manual'"));
+        assertTrue(sql.contains("ADD COLUMN report_schedule_id INT NULL"));
+        assertTrue(sql.contains("CHECK (origin IN ('manual', 'scheduled'))"));
+        assertTrue(sql.contains(
+                "idx_report_snapshot_schedule (report_schedule_id, workspace_id, origin, generated_at, id)"));
+        assertTrue(sql.contains(
+                "FOREIGN KEY (report_schedule_id) REFERENCES report_schedule(id) ON DELETE SET NULL"));
+        assertFalse(sql.contains("FOREIGN KEY (workspace_id, report_schedule_id)"));
+    }
+
+    @Test
+    void snapshotCapAndRetentionStatementsBindTenantScheduleAndOrigin() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        String manualCount = configuration.getMappedStatement(
+                        ReportMapper.class.getName() + ".countManualSnapshots")
+                .getBoundSql(Map.of("workspaceId", 7, "reportDefinitionId", 9))
+                .getSql();
+        assertTrue(manualCount.contains("workspace_id = ?"));
+        assertTrue(manualCount.contains("report_definition_id = ?"));
+        assertTrue(manualCount.contains("origin = 'manual'"));
+
+        String retention = configuration.getMappedStatement(
+                        ReportMapper.class.getName() + ".deleteScheduledSnapshotsBeyondRetention")
+                .getBoundSql(Map.of("workspaceId", 7, "reportScheduleId", 11, "keepCount", 25))
+                .getSql();
+        assertTrue(retention.contains("workspace_id = ?"));
+        assertTrue(retention.contains("report_schedule_id = ?"));
+        assertTrue(retention.contains("origin = 'scheduled'"));
+        assertTrue(retention.contains("SELECT id FROM ("));
+        assertTrue(retention.contains("LIMIT ?"));
+        assertFalse(retention.contains("${"));
+    }
+
     private static void assertWorkspaceScoped(
             Configuration configuration, String statement, ReportAggregateQuery query) {
         String sql = configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
@@ -269,6 +306,19 @@ class ReportMapperXmlTest {
             assertNotNull(input);
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
+    }
+
+    private static Configuration reportMapperConfiguration() throws Exception {
+        Configuration configuration = new Configuration();
+        configuration.getTypeAliasRegistry().registerAlias("ReportDefinition", ReportDefinition.class);
+        configuration.getTypeAliasRegistry().registerAlias("ReportSnapshot", ReportSnapshot.class);
+        configuration.getTypeAliasRegistry().registerAlias("ReportAggregateRow", ReportAggregateRow.class);
+        String resource = "mappers/ReportMapper.xml";
+        try (InputStream input = ReportMapperXmlTest.class.getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+        return configuration;
     }
 
     private static void assertForecastScoped(
