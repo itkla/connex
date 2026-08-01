@@ -19,6 +19,7 @@ import { createNote, updateNote } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
+import RecordReturnLink from "@/app/components/records/RecordReturnLink";
 import BacklinksPanel from "./BacklinksPanel";
 
 const RichNoteEditor = dynamic(() => import("./RichNoteEditor"), { ssr: false });
@@ -37,13 +38,14 @@ type Props = {
     persons: Contact[];
     deals: Deal[];
     users: User[];
+    returnPath: string;
 };
 
 /**
  * Full-page rich note editor. Handles both an existing note and a new draft,
  * persisting via debounced autosave (creating on the first non-empty change).
  */
-export default function NoteEditorView({ note, currentUserId, persons, deals, users }: Props) {
+export default function NoteEditorView({ note, currentUserId, persons, deals, users, returnPath }: Props) {
     const t = useTranslations("ActivityNotesEditor");
 
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
@@ -149,13 +151,13 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
                 <CrumbLabel value={displayTitle} />
                 <div className="flex items-center justify-between gap-4">
-                    <Link
-                        href="/activity/notes"
+                    <RecordReturnLink
+                        href={returnPath}
                         className="inline-flex w-fit items-center gap-2 text-sm text-brand transition-colors hover:text-brand-hover"
                     >
                         <ArrowLeftIcon className="h-4 w-4" />
                         {t("back")}
-                    </Link>
+                    </RecordReturnLink>
                     <SaveIndicator status={status} labels={t} />
                 </div>
 

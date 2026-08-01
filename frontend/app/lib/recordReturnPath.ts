@@ -1,9 +1,40 @@
-export type RecordCollection = 'contacts' | 'companies' | 'deals';
+export type RecordCollection =
+    | 'contacts'
+    | 'companies'
+    | 'deals'
+    | 'tasks'
+    | 'activities'
+    | 'notes'
+    | 'files';
 
-const RETURN_PATHS: Record<RecordCollection, string> = {
+/**
+ * The collections that have a record-detail route. Files are browsed and opened entirely in an in-page
+ * drawer and have no detail route at all, so they can never be a detail-navigation target — the
+ * exclusion makes that a compile error rather than a fabricated URL.
+ */
+export type DetailRecordCollection = Exclude<RecordCollection, 'files'>;
+
+/** Where each collection's list lives. This is the allowlist a return target is validated against. */
+const LIST_PATHS: Record<RecordCollection, string> = {
     contacts: '/records/contacts',
     companies: '/records/companies',
     deals: '/records/deals',
+    tasks: '/activity/tasks',
+    activities: '/activity/all',
+    notes: '/activity/notes',
+    files: '/library/files',
+};
+
+/** Where each collection's detail route lives. Kept separate from {@link LIST_PATHS} because a detail
+ * route is not always the list path plus an id — activities are listed under `/activity/all` but
+ * detailed under `/activity/activities/{id}`. */
+const DETAIL_PATHS: Record<DetailRecordCollection, string> = {
+    contacts: '/records/contacts',
+    companies: '/records/companies',
+    deals: '/records/deals',
+    tasks: '/activity/tasks',
+    activities: '/activity/activities',
+    notes: '/activity/notes',
 };
 
 const MAX_RETURN_PATH_LENGTH = 2048;
@@ -87,7 +118,8 @@ function isRecordReturnSelection(value: unknown): value is RecordReturnSelection
     return typeof value === 'object'
         && value !== null
         && 'collection' in value
-        && (value.collection === 'contacts' || value.collection === 'companies' || value.collection === 'deals')
+        && typeof value.collection === 'string'
+        && Object.hasOwn(LIST_PATHS, value.collection)
         && 'returnTo' in value
         && typeof value.returnTo === 'string'
         && 'userId' in value
@@ -96,7 +128,6 @@ function isRecordReturnSelection(value: unknown): value is RecordReturnSelection
         && isPositiveSafeInteger(value.workspaceId)
         && 'selectedIds' in value
         && Array.isArray(value.selectedIds)
-        && value.selectedIds.length > 0
         && value.selectedIds.length <= MAX_RETURN_SELECTION_SIZE
         && value.selectedIds.every(isPositiveSafeInteger)
         && 'scrollTop' in value
@@ -149,7 +180,6 @@ function normalizeSelection(
         !selection
         || !isPositiveSafeInteger(selection.userId)
         || !isPositiveSafeInteger(selection.workspaceId)
-        || selection.ids.length === 0
         || selection.ids.length > MAX_RETURN_SELECTION_SIZE
     ) {
         return null;
@@ -162,21 +192,21 @@ function normalizeSelection(
 
 /** Builds a record-detail URL carrying its exact originating list state. */
 export function recordDetailPath(
-    collection: RecordCollection,
+    collection: DetailRecordCollection,
     id: number,
     returnTo?: string,
 ): string {
     if (!Number.isInteger(id) || id < 1) {
         throw new RangeError('Record id must be a positive integer');
     }
-    const path = `${RETURN_PATHS[collection]}/${id}`;
+    const path = `${DETAIL_PATHS[collection]}/${id}`;
     if (!returnTo) return path;
     return `${path}?${new URLSearchParams({ returnTo }).toString()}`;
 }
 
 /** Builds a detail URL and records enough history context for an exact browser-backed return. */
 export function recordDetailNavigationPath(
-    collection: RecordCollection,
+    collection: DetailRecordCollection,
     id: number,
     selection?: RecordReturnSelectionSnapshot,
 ): string {
@@ -245,7 +275,13 @@ export function consumeRecordHistoryReturn(returnTo: string): boolean {
     return false;
 }
 
-/** Consumes a recent selection snapshot scoped to the exact restored list and active owner. */
+/**
+ * Consumes a recent selection snapshot scoped to the exact restored list and active owner.
+ *
+ * A snapshot belonging to another collection is left in storage untouched: every list mounts a consumer,
+ * so passing through one list on the way back to another must not destroy the snapshot that list is
+ * still waiting to restore. Only a snapshot this collection owns — or unreadable garbage — is discarded.
+ */
 export function consumeRecordReturnSelection(
     collection: RecordCollection,
     userId: number,
@@ -254,20 +290,29 @@ export function consumeRecordReturnSelection(
     let raw: string | null;
     try {
         raw = window.sessionStorage.getItem(RETURN_SELECTION_KEY);
-        if (raw) window.sessionStorage.removeItem(RETURN_SELECTION_KEY);
     } catch {
         return null;
     }
     if (!raw) return null;
 
+    const discard = () => {
+        try {
+            window.sessionStorage.removeItem(RETURN_SELECTION_KEY);
+        } catch {}
+    };
+
     try {
         const selection: unknown = JSON.parse(raw);
-        if (!isRecordReturnSelection(selection)) return null;
+        if (!isRecordReturnSelection(selection)) {
+            discard();
+            return null;
+        }
+        if (selection.collection !== collection) return null;
+        discard();
         const currentPath = `${window.location.pathname}${window.location.search}`;
         const age = Date.now() - selection.createdAt;
         if (
-            selection.collection !== collection
-            || selection.userId !== userId
+            selection.userId !== userId
             || selection.workspaceId !== workspaceId
             || selection.returnTo !== currentPath
             || resolveRecordReturnPath(collection, selection.returnTo) !== selection.returnTo
@@ -283,6 +328,7 @@ export function consumeRecordReturnSelection(
             scrollTop: selection.scrollTop,
         };
     } catch {
+        discard();
         return null;
     }
 }
@@ -292,7 +338,7 @@ export function resolveRecordReturnPath(
     collection: RecordCollection,
     value: string | string[] | undefined,
 ): string {
-    const fallback = RETURN_PATHS[collection];
+    const fallback = LIST_PATHS[collection];
     if (
         typeof value !== 'string'
         || value.length === 0

@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     MAX_URL_PAGE_SIZE,
     SERVER_RECORDS_URL_KEYS,
+    parseDeepLinkId,
     parseListInt,
     parseListQuery,
     writeListQueryToUrl,
     writeListStateToUrl,
+    writeOwnedParamsToUrl,
     writeSavedViewToUrl,
 } from "@/app/hooks/listStateUrl";
 
@@ -35,10 +37,10 @@ describe("parseListInt", () => {
 describe("URL writers (multi-writer coexistence contract)", () => {
     const replaceState = vi.fn();
 
-    function stubLocation(search: string): void {
+    function stubLocation(search: string, state: unknown = null): void {
         vi.stubGlobal("window", {
             location: { search },
-            history: { replaceState },
+            history: { replaceState, state },
         });
     }
 
@@ -100,6 +102,34 @@ describe("URL writers (multi-writer coexistence contract)", () => {
         expect(url.searchParams.get("peek")).toBe("person:3");
     });
 
+    it("writeOwnedParamsToUrl sets, deletes, and preserves foreign keys", () => {
+        stubLocation("?q=foo&status=open&task=3");
+        writeOwnedParamsToUrl("/activity/tasks", { task: "7", kind: undefined });
+        const url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
+        expect(url.searchParams.get("task")).toBe("7");
+        expect(url.searchParams.get("q")).toBe("foo");
+        expect(url.searchParams.get("status")).toBe("open");
+        expect(url.searchParams.has("kind")).toBe(false);
+    });
+
+    it("writeOwnedParamsToUrl no-ops when the query string already matches", () => {
+        stubLocation("?q=foo&task=7");
+        writeOwnedParamsToUrl("/activity/tasks", { task: "7" });
+        expect(replaceState).not.toHaveBeenCalled();
+    });
+
+    it("writeOwnedParamsToUrl drops the path query when it owns the last key", () => {
+        stubLocation("?task=7");
+        writeOwnedParamsToUrl("/activity/tasks", { task: undefined });
+        expect(replaceState).toHaveBeenCalledWith(null, "", "/activity/tasks");
+    });
+
+    it("writeOwnedParamsToUrl preserves the record-return marker in history state", () => {
+        stubLocation("?q=foo", { connexRecordReturn: "5f0c" });
+        writeOwnedParamsToUrl("/activity/all", { activity: "9" });
+        expect(replaceState.mock.calls[0][0]).toEqual({ connexRecordReturn: "5f0c" });
+    });
+
     it("writeSavedViewToUrl sets and clears only sv", () => {
         stubLocation("?q=acme");
         writeSavedViewToUrl("/records/contacts", "5:9");
@@ -113,5 +143,104 @@ describe("URL writers (multi-writer coexistence contract)", () => {
         url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
         expect(url.searchParams.has("sv")).toBe(false);
         expect(url.searchParams.get("q")).toBe("acme");
+    });
+});
+
+describe("parseDeepLinkId", () => {
+    it("accepts plain positive integers only", () => {
+        expect(parseDeepLinkId("42")).toBe(42);
+        expect(parseDeepLinkId(null)).toBeNull();
+        expect(parseDeepLinkId("0")).toBeNull();
+        expect(parseDeepLinkId("-1")).toBeNull();
+        expect(parseDeepLinkId("1.5")).toBeNull();
+        expect(parseDeepLinkId("1e3")).toBeNull();
+        expect(parseDeepLinkId(" 7 ")).toBeNull();
+        expect(parseDeepLinkId("99999999999999999999")).toBeNull();
+    });
+});
+
+describe("shared-link survival across a browser session", () => {
+    function mountUrl(initial: string): { search: () => string } {
+        const state = { search: initial };
+        vi.stubGlobal("window", {
+            location: {
+                get search() {
+                    return state.search;
+                },
+            },
+            history: {
+                state: null,
+                replaceState: (_data: unknown, _title: string, url: string) => {
+                    state.search = new URL(`http://x${url}`).search;
+                },
+            },
+        });
+        return { search: () => state.search };
+    }
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("keeps every foreign key through mount, filter change, task open, and task close", () => {
+        const url = mountUrl("?q=foo&status=open&sv=3");
+        const foreignKeysIntact = () => {
+            const params = new URLSearchParams(url.search());
+            expect(params.get("q")).toBe("foo");
+            expect(params.get("status")).toBe("open");
+            expect(params.get("sv")).toBe("3");
+        };
+
+        writeOwnedParamsToUrl("/activity/tasks", { task: undefined });
+        foreignKeysIntact();
+        expect(new URLSearchParams(url.search()).has("task")).toBe(false);
+
+        writeListQueryToUrl("/activity/tasks", "foo");
+        foreignKeysIntact();
+
+        writeOwnedParamsToUrl("/activity/tasks", { task: "7" });
+        foreignKeysIntact();
+        expect(new URLSearchParams(url.search()).get("task")).toBe("7");
+
+        writeOwnedParamsToUrl("/activity/tasks", { task: undefined });
+        foreignKeysIntact();
+        expect(new URLSearchParams(url.search()).has("task")).toBe(false);
+    });
+
+    it("lets the files writer own seven keys without disturbing a co-writer's page state", () => {
+        const url = mountUrl("?page=3&size=50&sv=2%3A9");
+
+        writeOwnedParamsToUrl("/library/files", {
+            q: "invoice",
+            kind: "image",
+            source: undefined,
+            sort: "name",
+            tags: "1,2",
+            orphaned: "1",
+            file: undefined,
+        });
+
+        const params = new URLSearchParams(url.search());
+        expect(params.get("page")).toBe("3");
+        expect(params.get("size")).toBe("50");
+        expect(params.get("sv")).toBe("2:9");
+        expect(params.get("q")).toBe("invoice");
+        expect(params.get("kind")).toBe("image");
+        expect(params.get("sort")).toBe("name");
+        expect(params.get("tags")).toBe("1,2");
+        expect(params.get("orphaned")).toBe("1");
+        expect(params.has("source")).toBe(false);
+        expect(params.has("file")).toBe(false);
+    });
+
+    it("clears only the analytics writer's own keys when they return to defaults", () => {
+        const url = mountUrl("?range=30d&granularity=week&currency=JPY&owner=me&peek=deal%3A4");
+
+        writeOwnedParamsToUrl("/overview/analytics", {
+            range: undefined,
+            granularity: undefined,
+            currency: undefined,
+            owner: undefined,
+        });
+
+        expect(url.search()).toBe("?peek=deal%3A4");
     });
 });

@@ -49,7 +49,7 @@ import {
     getTeamLeaderboard,
 } from '@/app/lib/api';
 import { MemberScopeFilter, interpretMemberScope } from '@/app/components/filters';
-import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { resolveCan } from '@/app/lib/actions/permissions';
 import { formatCompactCurrency } from '@/app/lib/utils';
@@ -243,7 +243,7 @@ export default function AnalyticsBoard({
     const currency =
         selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : dominantCurrency;
 
-    useUrlSync({
+    useOwnedUrlParams({
         range: range === '90d' ? undefined : range,
         granularity: granularity === DEFAULT_GRANULARITY[range] ? undefined : granularity,
         currency: selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : undefined,

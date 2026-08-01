@@ -62,7 +62,8 @@ import {
     type SourceType,
 } from '@/app/components/library/files/fileMeta';
 
-import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
+import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import Rise from '@/app/components/motion/Rise';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { type ColumnDef } from '@/app/components/records/types';
@@ -152,18 +153,21 @@ export default function FilesBrowser() {
     const { items, total, loading, page, setPage, size, setSize, query, setQuery, reload } = useServerRecords<
         Attachment,
         AttachmentsPageParams
-    >(getAttachmentsPage, extraParams, { defaultSize: PAGE_SIZE });
+    >(getAttachmentsPage, extraParams, {
+        defaultSize: PAGE_SIZE,
+        seedQuery: searchParams.get('q') ?? undefined,
+    });
 
-    // seed the search box + deep-linked file from the URL once on mount
+    const [deepLinkSettled, setDeepLinkSettled] = useState(
+        () => parseDeepLinkId(searchParams.get('file')) === null,
+    );
     useEffect(() => {
-        const q = searchParams.get('q');
-        if (q) setQuery(q);
-        const fileId = searchParams.get('file');
-        if (fileId && /^\d+$/.test(fileId)) {
-            getAttachment(Number(fileId))
-                .then(setDetailFile)
-                .catch(() => {});
-        }
+        const fileId = parseDeepLinkId(searchParams.get('file'));
+        if (fileId === null) return;
+        getAttachment(fileId)
+            .then(setDetailFile)
+            .catch(() => {})
+            .finally(() => setDeepLinkSettled(true));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -179,16 +183,15 @@ export default function FilesBrowser() {
             .catch(() => setAllTags([]));
     }, [loadFacets]);
 
-    // keep the URL in sync so a filtered view is shareable / deep-linkable
-    useUrlSync({
+    useOwnedUrlParams({
         q: query || undefined,
         kind: kind !== 'all' ? kind : undefined,
         source: source !== 'all' ? source : undefined,
         sort: sort !== 'newest' ? sort : undefined,
         tags: tagIds.length ? tagIds.join(',') : undefined,
         orphaned: orphaned ? '1' : undefined,
-        file: detailFile ? String(detailFile.id) : undefined,
     });
+    useOwnedUrlParams({ file: detailFile ? String(detailFile.id) : undefined }, deepLinkSettled);
 
     // selection is scoped to the loaded page; drop it whenever the result set changes
     // eslint-disable-next-line react-hooks/set-state-in-effect

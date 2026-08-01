@@ -39,7 +39,12 @@ import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { deleteActivity, getActivityById } from '@/app/lib/api';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
-import { useUrlSync } from '@/app/hooks/useUrlSync';
+import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
+import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
+import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
+import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
+import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -119,6 +124,7 @@ export default function ActivitiesBrowser({
     originWorkspaceId,
 }: Props) {
     const router = useRouter();
+    const { activeWorkspaceId } = useWorkspace();
     const t = useTranslations('ActivityPage');
     const tf = useTranslations('Filters');
     const locale = useLocale();
@@ -134,40 +140,38 @@ export default function ActivitiesBrowser({
     const [personFilter, setPersonFilter] = useState<Set<string>>(new Set());
     const [dealFilter, setDealFilter] = useState<Set<string>>(new Set());
     const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
-    const [filter, setFilter] = useState<Filter>('all');
-    const [filterInitialized, setFilterInitialized] = useState(false);
+    const [filter, setFilter] = useScopedViewPreference<Filter>({
+        storageKey: FILTER_STORAGE_KEY,
+        userId: currentUserId,
+        workspaceId: activeWorkspaceId,
+        initialValue: null,
+        fallback: 'all',
+        isValue: isFilter,
+    });
     const [editing, setEditing] = useState<Activity | null>(null);
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<Activity | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const returnSnapshot = useRecordReturnScroll('activities', true);
 
     const searchParams = useSearchParams();
+    const [deepLinkSettled, setDeepLinkSettled] = useState(
+        () => parseDeepLinkId(searchParams.get('activity')) === null,
+    );
     useEffect(() => {
-        const activityId = searchParams.get('activity');
-        if (activityId && /^\d+$/.test(activityId)) {
-            getActivityById(Number(activityId))
-                .then((activity) => {
-                    if (!isProviderOwnedActivity(activity)) {
-                        setEditing(activity);
-                    }
-                })
-                .catch(() => {});
-        }
+        const activityId = parseDeepLinkId(searchParams.get('activity'));
+        if (activityId === null) return;
+        getActivityById(activityId)
+            .then((activity) => {
+                if (!isProviderOwnedActivity(activity)) {
+                    setEditing(activity);
+                }
+            })
+            .catch(() => {})
+            .finally(() => setDeepLinkSettled(true));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    useUrlSync({ activity: editing ? String(editing.id) : undefined });
-
-    useEffect(() => {
-        const stored = window.localStorage.getItem(FILTER_STORAGE_KEY);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (isFilter(stored)) setFilter(stored);
-        setFilterInitialized(true);
-    }, []);
-
-    useEffect(() => {
-        if (!filterInitialized) return;
-        window.localStorage.setItem(FILTER_STORAGE_KEY, filter);
-    }, [filter, filterInitialized]);
+    useOwnedUrlParams({ activity: editing ? String(editing.id) : undefined }, deepLinkSettled);
 
     const typeCounts = useMemo(() => {
         const counts: Record<Filter, number> = { all: 0, Call: 0, Email: 0, Meeting: 0, Note: 0, Other: 0 };
@@ -504,7 +508,11 @@ export default function ActivitiesBrowser({
                                                     plannedLabel={t('planned')}
                                                     onOpen={() => {
                                                         if (isProviderOwnedActivity(activity)) {
-                                                            router.push(`/activity/activities/${activity.id}`);
+                                                            router.push(recordDetailNavigationPath(
+                                                                'activities',
+                                                                activity.id,
+                                                                returnSnapshot,
+                                                            ));
                                                         } else {
                                                             setEditing(activity);
                                                         }
