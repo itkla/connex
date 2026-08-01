@@ -241,14 +241,14 @@ class DealControllerTest {
                 .content("""
                     {"name":"FY27 Renewal"}
                     """))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isUnauthorized());
         mockMvc.perform(put("/api/deals/42/value")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                     {"value":125000.00}
                     """))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(dealService);
     }

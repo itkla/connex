@@ -363,9 +363,9 @@ class WorkflowControllerTest {
     @WithAnonymousUser
     void anonymousReadsAndMutationsAreRejected() throws Exception {
         mockMvc.perform(get("/api/workflows"))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/workflows/42/enable").with(csrf().asHeader()))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(workflowService);
     }

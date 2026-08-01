@@ -113,7 +113,7 @@ class AiGenerationEndpointSecurityTest {
     @WithAnonymousUser
     void businessCardAvailabilityRejectsAnonymousRequests() throws Exception {
         mockMvc.perform(get("/api/business-cards/availability"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
