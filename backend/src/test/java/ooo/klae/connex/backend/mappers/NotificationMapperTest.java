@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -508,8 +509,9 @@ class NotificationMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
-        deal.setValue(50000.0);
-        dealMapper.update(deal);
+        deal.setValue(new BigDecimal("50000.00"));
+        dealMapper.updateValueAndSource(
+            workspace.getId(), deal.getId(), deal.getValue(), "manual");
         dealMapper.updateOwner(workspace.getId(), deal.getId(), owner.getId());
         dealMapper.insertCollaborators(
             workspace.getId(),

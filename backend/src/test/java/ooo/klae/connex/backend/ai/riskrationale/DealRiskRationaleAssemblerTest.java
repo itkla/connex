@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -60,8 +61,8 @@ class DealRiskRationaleAssemblerTest {
         DealSummaryDto summary = new DealSummaryDto(
                 DEAL_ID,
                 "Acme expansion",
-                125000,
-                0,
+                new BigDecimal("125000.00"),
+                new BigDecimal("0.00"),
                 "USD",
                 "open",
                 "2026-07-05",
@@ -81,7 +82,7 @@ class DealRiskRationaleAssemblerTest {
                         "email", "mina.patel@acme.example"));
         DealRiskDto risk = new DealRiskDto(
                 DEAL_ID,
-                125000,
+                new BigDecimal("125000.00"),
                 "USD",
                 "high",
                 75,
@@ -119,8 +120,8 @@ class DealRiskRationaleAssemblerTest {
         DealSummaryDto summary = new DealSummaryDto(
                 DEAL_ID,
                 "Enterprise renewal",
-                5.0E7,
-                0,
+                new BigDecimal("50000000.00"),
+                new BigDecimal("0.00"),
                 "JPY",
                 "open",
                 "2026-08-01",
@@ -130,7 +131,8 @@ class DealRiskRationaleAssemblerTest {
                 "Owner Name");
         DealRiskFactor factor = new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 5));
         DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, 5.0E7, "JPY", "high", 80, List.of(factor), "2026-07-09 18:30:00");
+                DEAL_ID, new BigDecimal("50000000.00"), "JPY", "high", 80,
+                List.of(factor), "2026-07-09 18:30:00");
 
         when(dealService.getDealSummary(DEAL_ID)).thenReturn(summary);
         when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of());
@@ -153,7 +155,7 @@ class DealRiskRationaleAssemblerTest {
                 "high",
                 Map.of("personId", PERSON_ID, "person", "Ceased Contact", "role", "Ceased role"));
         DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, 0, null, "high", 50, List.of(coldFactor), "2026-07-09 18:30:00");
+                DEAL_ID, BigDecimal.ZERO, null, "high", 50, List.of(coldFactor), "2026-07-09 18:30:00");
         when(dealService.getPeopleByDealId(DEAL_ID))
                 .thenReturn(List.of(new DealPerson(person, "Ceased role")));
 
@@ -173,7 +175,7 @@ class DealRiskRationaleAssemblerTest {
     @Test
     void assemble_japaneseLocaleTranslatesProseAndPreservesFactorCodes() {
         DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, 0, "JPY", "medium", 25, List.of(), "2026-07-09 18:30:00");
+                DEAL_ID, BigDecimal.ZERO, "JPY", "medium", 25, List.of(), "2026-07-09 18:30:00");
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         try {
             String systemPrompt = assembler.assemble(WORKSPACE_ID, DEAL_ID, risk).prompt().getSystemPrompt();

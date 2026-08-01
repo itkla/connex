@@ -57,8 +57,6 @@ class DealMapperTest extends AbstractMapperTest {
 
         Deal deal = newDeal(pipeline, stage, company);
 
-        // System.out.println("Deal ID: " + deal.getId());
-        
         assertNotEquals(0, deal.getId());
     }
 
@@ -76,7 +74,8 @@ class DealMapperTest extends AbstractMapperTest {
 
         assertNotNull(found);
         assertEquals(deal.getName(), found.getName());
-        assertEquals(1000.0, found.getValue());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(found.getValue()));
+        assertEquals("manual", found.getValueSource());
         assertEquals("JPY", found.getCurrency());
         assertEquals(pipeline.getId(), found.getPipelineId());
         assertEquals(stage.getId(), found.getStageId());
@@ -944,14 +943,14 @@ class DealMapperTest extends AbstractMapperTest {
      * Updates a deal and checks if the new values are persisted.
      */
     @Test
-    void update_persistsNewValues() {
+    void updatePersistsDetailsWithoutClobberingMoney() {
         Pipeline pipeline = newPipeline();
         Stage stage1 = newStage(pipeline, 0);
         Stage stage2 = newStage(pipeline, 1);
         Deal deal = newDeal(pipeline, stage1, newCompany());
 
         deal.setName("Renamed Deal");
-        deal.setValue(2500.50);
+        deal.setValue(new BigDecimal("2500.50"));
         deal.setCurrency("JPY");
         deal.setStageId(stage2.getId());
         deal.setCompanyId(null);
@@ -960,7 +959,7 @@ class DealMapperTest extends AbstractMapperTest {
 
         Deal found = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals("Renamed Deal", found.getName());
-        assertEquals(2500.50, found.getValue());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(found.getValue()));
         assertEquals("JPY", found.getCurrency());
         assertEquals(stage2.getId(), found.getStageId());
         assertNull(found.getCompanyId());
@@ -974,20 +973,21 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         User owner = newUser();
         deal.setOwnerId(owner.getId());
-        deal.setActualValue(750.0);
+        deal.setActualValue(new BigDecimal("750.00"));
         deal.setExpectedCloseDate("2027-03-31");
         deal.setWon(true);
         deal.setClosedAt("2026-07-01 12:00:00");
         deal.setClosedReason("Signed");
         dealMapper.update(deal);
+        dealMapper.updateActualValue(workspace.getId(), deal.getId(), deal.getActualValue());
         Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
 
         assertEquals(1, dealMapper.updateName(workspace.getId(), deal.getId(), "FY27 Renewal"));
 
         Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals("FY27 Renewal", after.getName());
-        assertEquals(before.getValue(), after.getValue());
-        assertEquals(before.getActualValue(), after.getActualValue());
+        assertEquals(0, before.getValue().compareTo(after.getValue()));
+        assertEquals(0, before.getActualValue().compareTo(after.getActualValue()));
         assertEquals(before.getCurrency(), after.getCurrency());
         assertEquals(before.getPipelineId(), after.getPipelineId());
         assertEquals(before.getStageId(), after.getStageId());
@@ -1001,28 +1001,30 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void updateValueChangesOnlyValue() {
+    void updateValueAndSourceChangesOnlyValueAndSource() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
         User owner = newUser();
         deal.setOwnerId(owner.getId());
-        deal.setActualValue(750.0);
+        deal.setActualValue(new BigDecimal("750.00"));
         deal.setExpectedCloseDate("2027-03-31");
         deal.setWon(false);
         deal.setClosedAt("2026-07-01 12:00:00");
         deal.setClosedReason("Budget unavailable");
         dealMapper.update(deal);
+        dealMapper.updateActualValue(workspace.getId(), deal.getId(), deal.getActualValue());
         Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
 
-        assertEquals(1, dealMapper.updateValue(
-            workspace.getId(), deal.getId(), new BigDecimal("125000.00")));
+        assertEquals(1, dealMapper.updateValueAndSource(
+            workspace.getId(), deal.getId(), new BigDecimal("125000.00"), "manual"));
 
         Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
-        assertEquals(125000.0, after.getValue());
+        assertEquals(0, new BigDecimal("125000.00").compareTo(after.getValue()));
+        assertEquals("manual", after.getValueSource());
         assertEquals(before.getName(), after.getName());
-        assertEquals(before.getActualValue(), after.getActualValue());
+        assertEquals(0, before.getActualValue().compareTo(after.getActualValue()));
         assertEquals(before.getCurrency(), after.getCurrency());
         assertEquals(before.getPipelineId(), after.getPipelineId());
         assertEquals(before.getStageId(), after.getStageId());
@@ -1041,7 +1043,7 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
         String originalName = deal.getName();
-        double originalValue = deal.getValue();
+        BigDecimal originalValue = deal.getValue();
         Workspace other = new Workspace();
         other.setName("Other Workspace");
         other.setSlug("other-targeted-" + unique());
@@ -1050,11 +1052,18 @@ class DealMapperTest extends AbstractMapperTest {
         assertNotNull(dealMapper.getDealByIdForUpdate(workspace.getId(), deal.getId()));
         assertNull(dealMapper.getDealByIdForUpdate(other.getId(), deal.getId()));
         assertEquals(0, dealMapper.updateName(other.getId(), deal.getId(), "Foreign rename"));
-        assertEquals(0, dealMapper.updateValue(other.getId(), deal.getId(), new BigDecimal("999.00")));
+        assertEquals(0, dealMapper.updateValueAndSource(
+            other.getId(), deal.getId(), new BigDecimal("999.00"), "manual"));
+        assertEquals(0, dealMapper.updateValueSource(
+            other.getId(), deal.getId(), "line_items"));
+        assertEquals(0, dealMapper.updateActualValue(
+            other.getId(), deal.getId(), new BigDecimal("888.00")));
 
         Deal unchanged = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals(originalName, unchanged.getName());
-        assertEquals(originalValue, unchanged.getValue());
+        assertEquals(0, originalValue.compareTo(unchanged.getValue()));
+        assertEquals("manual", unchanged.getValueSource());
+        assertEquals(0, BigDecimal.ZERO.setScale(2).compareTo(unchanged.getActualValue()));
     }
 
     /**
@@ -1347,7 +1356,7 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
         deal.setWorkspaceId(ws.getId());
-        deal.setValue(1000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
@@ -1360,12 +1369,14 @@ class DealMapperTest extends AbstractMapperTest {
             int createdDaysAgo, Integer closedDaysAgo, int updatedDaysAgo) {
         Deal deal = newDealIn(ws, pipeline, stage);
         deal.setName(name);
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setWon(won);
         deal.setClosedAt(won == null ? null : "2000-01-01 00:00:00");
         dealMapper.update(deal);
+        dealMapper.updateValueAndSource(ws.getId(), deal.getId(), deal.getValue(), "manual");
+        dealMapper.updateActualValue(ws.getId(), deal.getId(), deal.getActualValue());
         if (won == null) {
             jdbcTemplate.update("""
                 UPDATE deal
@@ -1406,24 +1417,30 @@ class DealMapperTest extends AbstractMapperTest {
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,
             String currency, Boolean won) {
         deal.setName(name);
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setWon(won);
         deal.setClosedAt(won == null ? null : "2026-01-01 00:00:00");
         dealMapper.update(deal);
+        dealMapper.updateValueAndSource(
+            deal.getWorkspaceId(), deal.getId(), deal.getValue(), "manual");
+        dealMapper.updateActualValue(deal.getWorkspaceId(), deal.getId(), deal.getActualValue());
         return deal;
     }
 
     private Deal updateChartDeal(Deal deal, double value, double actualValue, String currency,
             Boolean won, String expectedCloseDate, String closedAt) {
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setWon(won);
         deal.setExpectedCloseDate(expectedCloseDate);
         deal.setClosedAt(closedAt);
         dealMapper.update(deal);
+        dealMapper.updateValueAndSource(
+            deal.getWorkspaceId(), deal.getId(), deal.getValue(), "manual");
+        dealMapper.updateActualValue(deal.getWorkspaceId(), deal.getId(), deal.getActualValue());
         return deal;
     }
 

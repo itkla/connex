@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -279,12 +280,12 @@ public class DealRiskService {
             String currency,
             List<DealRiskDto> risks) {
         Map<String, Long> factorCounts = new HashMap<>();
-        double value = 0;
+        BigDecimal value = BigDecimal.ZERO;
         long high = 0;
         long medium = 0;
         long low = 0;
         for (DealRiskDto risk : risks) {
-            value += risk.getValue();
+            value = value.add(risk.getValue());
             if (HIGH.equals(risk.getLevel())) high++;
             else if (MEDIUM.equals(risk.getLevel())) medium++;
             else if (LOW.equals(risk.getLevel())) low++;
@@ -312,7 +313,7 @@ public class DealRiskService {
         String assessedAt = utc(now);
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) {
-            return new DealRiskDto(dealId, 0.0, null, NONE, 0, List.of(), assessedAt);
+            return new DealRiskDto(dealId, BigDecimal.ZERO, null, NONE, 0, List.of(), assessedAt);
         }
         if (!isOpen(deal) || deal.isRiskExcluded()) {
             return new DealRiskDto(
@@ -589,7 +590,7 @@ public class DealRiskService {
             Map<Integer, RelationshipTemperatureDto> warmth) {
         List<String> values = new ArrayList<>();
         values.add(Integer.toString(deal.getId()));
-        values.add(Double.toString(deal.getValue()));
+        values.add(legacyFingerprintValue(deal.getValue()));
         values.add(deal.getCurrency());
         values.add(deal.getExpectedCloseDate());
         values.add(deal.getCreatedAt());
@@ -613,6 +614,14 @@ public class DealRiskService {
                     ScoringService.emptyContactSourceStateHash()));
             });
         return hashValues(values);
+    }
+
+    /**
+     * Reproduces the legacy double rendering used by persisted risk fingerprints so the
+     * BigDecimal migration cannot invalidate notification suppression baselines.
+     */
+    private static String legacyFingerprintValue(BigDecimal value) {
+        return Double.toString(value.doubleValue());
     }
 
     private static String dealSourceStateHash(List<DealSourceTouch> sourceTouches) {

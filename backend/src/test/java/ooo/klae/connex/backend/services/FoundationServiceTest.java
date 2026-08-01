@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -38,7 +39,7 @@ class FoundationServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = new Deal();
         deal.setName("Owned deal");
-        deal.setValue(100);
+        deal.setValue(new BigDecimal("100.00"));
         deal.setCurrency("USD");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

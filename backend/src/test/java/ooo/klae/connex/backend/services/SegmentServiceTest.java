@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -360,12 +361,12 @@ class SegmentServiceTest extends AbstractServiceTest {
         assertThrows(BadRequestException.class, () -> segmentService.evaluate("person", def("all", predicate("open_deal"))));
     }
 
-    private Deal dealWith(Pipeline pipeline, Stage stage, Company company, double value, String closeDate) {
+    private Deal dealWith(Pipeline pipeline, Stage stage, Company company, String value, String closeDate) {
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
         deal.setWorkspaceId(workspace.getId());
         deal.setOwnerId(currentUser.getId());
-        deal.setValue(value);
+        deal.setValue(new BigDecimal(value));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
@@ -411,8 +412,8 @@ class SegmentServiceTest extends AbstractServiceTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
-        Deal big = dealWith(pipeline, stage, company, 1000.0, null);
-        Deal small = dealWith(pipeline, stage, company, 100.0, null);
+        Deal big = dealWith(pipeline, stage, company, "1000.00", null);
+        Deal small = dealWith(pipeline, stage, company, "100.00", null);
 
         List<Integer> ids = segmentService.evaluate("deal", def("all", field("value", "gte", "500")));
 
@@ -425,8 +426,8 @@ class SegmentServiceTest extends AbstractServiceTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
-        Deal dated = dealWith(pipeline, stage, company, 1000.0, "2030-01-01");
-        Deal undated = dealWith(pipeline, stage, company, 1000.0, null);
+        Deal dated = dealWith(pipeline, stage, company, "1000.00", "2030-01-01");
+        Deal undated = dealWith(pipeline, stage, company, "1000.00", null);
 
         List<Integer> ids = segmentService.evaluate("deal", def("all", field("close_date", "is_set", "")));
 
@@ -638,8 +639,8 @@ class SegmentServiceTest extends AbstractServiceTest {
     void dealPredicate_atRisk_matchesOverdueDeal() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
-        Deal overdue = dealWith(pipeline, stage, newCompany(), 1000.0, "2000-01-01");
-        Deal future = dealWith(pipeline, stage, newCompany(), 1000.0, "2999-01-01");
+        Deal overdue = dealWith(pipeline, stage, newCompany(), "1000.00", "2000-01-01");
+        Deal future = dealWith(pipeline, stage, newCompany(), "1000.00", "2999-01-01");
 
         List<Integer> atRisk = segmentService.evaluate("deal", def("all", predicate("at_risk")));
         List<Integer> riskHigh = segmentService.evaluate("deal", def("all", predicate("risk_high")));
@@ -688,14 +689,14 @@ class SegmentServiceTest extends AbstractServiceTest {
         big.setName("Big " + unique());
         big.setWorkspaceId(workspace.getId());
         big.setOwnerId(currentUser.getId());
-        big.setValue(0.0);
-        big.setActualValue(900.0);
+        big.setValue(new BigDecimal("0.00"));
+        big.setActualValue(new BigDecimal("900.00"));
         big.setCurrency("JPY");
         big.setPipelineId(pipeline.getId());
         big.setStageId(stage.getId());
         big.setCompanyId(company.getId());
         dealMapper.insert(big);
-        Deal small = dealWith(pipeline, stage, company, 0.0, null);
+        Deal small = dealWith(pipeline, stage, company, "0.00", null);
 
         List<Integer> ids = segmentService.evaluate("deal", def("all", field("actual_value", "gte", "500")));
 
@@ -772,7 +773,7 @@ class SegmentServiceTest extends AbstractServiceTest {
         Deal foreignDeal = new Deal();
         foreignDeal.setName("Deal " + unique());
         foreignDeal.setWorkspaceId(other.getId());
-        foreignDeal.setValue(1000.0);
+        foreignDeal.setValue(new BigDecimal("1000.00"));
         foreignDeal.setCurrency("JPY");
         foreignDeal.setPipelineId(foreignPipeline.getId());
         foreignDeal.setStageId(foreignStage.getId());
@@ -805,7 +806,7 @@ class SegmentServiceTest extends AbstractServiceTest {
     void matchesEntity_dealRisk_agreesForOverdueDeal() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
-        Deal overdue = dealWith(pipeline, stage, newCompany(), 1000.0, "2000-01-01");
+        Deal overdue = dealWith(pipeline, stage, newCompany(), "1000.00", "2000-01-01");
 
         assertMatchAgrees("deal", def("all", predicate("at_risk")), overdue.getId());
         assertTrue(segmentService.matchesEntity(

@@ -67,7 +67,6 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -121,6 +120,7 @@ public class DealService {
     private final ObjectMapper objectMapper;
     private final DealRiskService dealRiskService;
     private final SegmentService segmentService;
+    private final DealValueService dealValueService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -135,9 +135,6 @@ public class DealService {
     private static final int MAX_BOARD_DEALS = 2000;
     private static final int POSITION_BATCH_SIZE = 500;
     private static final int MAX_REVENUE_MONTHS = 1200;
-    private static final String LINE_ITEM_VALUE_CONFLICT =
-        "Cannot manually edit the deal value while line items exist; update or remove the line items first";
-
     private static final Set<String> ALL_RISK_LEVELS = Set.of("high", "medium", "low", "none");
 
     private static final Set<String> AUDIT_FIELDS =
@@ -162,7 +159,6 @@ public class DealService {
         } else if ("lost".equals(stageOutcome)) {
             deal.setWon(false);
         }
-        // closed_at follows the outcome: present iff the deal has a won/lost result.
         if (deal.getWon() == null) {
             deal.setClosedAt(null);
             deal.setClosedReason(null);
@@ -212,6 +208,7 @@ public class DealService {
         copy.setName(source.getName());
         copy.setValue(source.getValue());
         copy.setActualValue(source.getActualValue());
+        copy.setValueSource(source.getValueSource());
         copy.setCurrency(source.getCurrency());
         copy.setPipelineId(source.getPipelineId());
         copy.setStageId(source.getStageId());
@@ -978,20 +975,20 @@ public class DealService {
         Deal before = requireDealForUpdate(workspaceId, id);
         boolean currencyChanged = deal.getCurrency() != null
             && !deal.getCurrency().equalsIgnoreCase(before.getCurrency());
-        boolean valueChanged = BigDecimal.valueOf(before.getValue())
-            .compareTo(BigDecimal.valueOf(deal.getValue())) != 0;
-        if ((currencyChanged || valueChanged)
-                && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
-            if (currencyChanged) {
-                throw new BadRequestException(
-                    "Cannot change the deal currency while it has line items; remove the line items first");
-            }
-            throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
+        boolean valueChanged = before.getValue().compareTo(deal.getValue()) != 0;
+        if (currencyChanged && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
+            throw new BadRequestException(
+                "Cannot change the deal currency while it has line items; remove the line items first");
+        }
+        if (valueChanged) {
+            deal.setValue(dealValueService.setManualValue(workspaceId, before, deal.getValue()));
         }
         Boolean previousOutcome = before.getWon();
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(before.getOwnerId());
+        deal.setActualValue(before.getActualValue());
+        deal.setValueSource(valueChanged ? "manual" : before.getValueSource());
         requireVisibleRelations(workspaceId, deal);
         Integer beforeStage = before.getStageId();
         Integer newStage = deal.getStageId();
@@ -1053,14 +1050,11 @@ public class DealService {
     public Deal updateValue(int id, BigDecimal value) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = requireDealForUpdate(workspaceId, id);
-        boolean valueChanged = BigDecimal.valueOf(before.getValue()).compareTo(value) != 0;
+        boolean valueChanged = before.getValue().compareTo(value) != 0;
         if (!valueChanged) {
             return hydrateReferences(workspaceId, before);
         }
-        if (dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
-            throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
-        }
-        dealMapper.updateValue(workspaceId, id, value);
+        dealValueService.setManualValue(workspaceId, before, value);
         Deal after = requireDeal(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
             "Updated deal value for " + after.getName(),
@@ -1133,16 +1127,17 @@ public class DealService {
      */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
-    public Deal close(int id, Boolean won, String reason, Double actualValue) {
+    public Deal close(int id, Boolean won, String reason, BigDecimal actualValue) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        Deal before = requireDealForUpdate(workspaceId, id);
         Deal deal = mutableCopy(before);
         deal.setWon(won != null ? won : Boolean.FALSE);
         if (reason != null && !reason.isBlank()) deal.setClosedReason(reason);
-        if (actualValue != null) deal.setActualValue(actualValue);
         reconcileCloseState(deal);
+        deal.setActualValue(dealValueService.resolveActualValueForClose(
+            workspaceId, before, deal.getWon(), actualValue));
         dealMapper.update(deal);
+        dealMapper.updateActualValue(workspaceId, id, deal.getActualValue());
         auditService.record("deal.close", "deal", id, deal.getName(),
             (Boolean.TRUE.equals(deal.getWon()) ? "Won deal " : "Lost deal ") + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
@@ -1166,7 +1161,7 @@ public class DealService {
         Boolean previousOutcome = before.getWon();
         Deal deal = mutableCopy(before);
         boolean wasClosed = previousOutcome != null;
-        deal.setWon(null); // reconcile clears closedAt + reason
+        deal.setWon(null);
         Integer stageId = deal.getStageId();
         boolean terminal = stageId != null && !"normal".equals(dealMapper.getStageOutcome(workspaceId, stageId));
         if (terminal) {

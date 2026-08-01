@@ -360,7 +360,7 @@ class WarmthReconciliationIntegrationTest {
         Deal deal = new Deal();
         deal.setName("Warmth deal " + UUID.randomUUID().toString().substring(0, 8));
         deal.setWorkspaceId(workspace.getId());
-        deal.setValue(1_000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

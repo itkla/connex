@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -387,7 +388,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
         deal.setWorkspaceId(workspace.getId());
-        deal.setValue(1000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

@@ -260,7 +260,7 @@ public class DealRiskRationaleAssembler {
         }
         appendValue(prompt, "Stage", maskAllowedText(summary.getStageName(), context));
         appendValue(prompt, "Status", maskAllowedText(summary.getStatus(), context));
-        if (Double.isFinite(summary.getValue())) {
+        if (summary.getValue() != null) {
             appendValue(prompt, "Value", amount(summary.getValue(), summary.getCurrency(), context));
         }
         appendValue(prompt, "Close timing", closeTiming(summary.getExpectedCloseDate(), risk.getAssessedAt()));
@@ -385,8 +385,8 @@ public class DealRiskRationaleAssembler {
         return truncate(MaskingEngine.maskFreeText(normalized, context), MAX_ALLOWED_TEXT_CHARS);
     }
 
-    private static String amount(double value, String currency, MaskingContext context) {
-        String amount = BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();
+    private static String amount(BigDecimal value, String currency, MaskingContext context) {
+        String amount = value.stripTrailingZeros().toPlainString();
         String safeCurrency = maskAllowedText(currency, context);
         return isBlank(safeCurrency) ? amount : amount + " " + safeCurrency;
     }

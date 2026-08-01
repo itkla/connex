@@ -95,6 +95,7 @@ public class ImportService {
     private final CompanyService companyService;
     private final DealMapper dealMapper;
     private final DealLineItemMapper dealLineItemMapper;
+    private final DealValueService dealValueService;
     private final TagMapper tagMapper;
     private final TagService tagService;
     private final PipelineMapper pipelineMapper;
@@ -1248,7 +1249,7 @@ public class ImportService {
         Integer beforeStageId = existing.getStageId();
         Boolean beforeOutcome = existing.getWon();
         String beforeName = existing.getName();
-        double beforeValue = existing.getValue();
+        BigDecimal beforeValue = existing.getValue();
         String beforeCurrency = existing.getCurrency();
         Integer beforePipelineId = existing.getPipelineId();
         Integer beforeCompanyId = existing.getCompanyId();
@@ -1259,14 +1260,17 @@ public class ImportService {
         existing.setCurrency(merge(action, existing.getCurrency(), row.std.get("currency")));
         existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
         String value = row.std.get("value");
-        double incomingValue = parseValue(value);
+        BigDecimal incomingValue = parseValue(value);
         boolean shouldUpdateValue = value != null
-            && (OVERWRITE.equals(action) || existing.getValue() == 0d)
-            && Double.compare(existing.getValue(), incomingValue) != 0;
+            && (OVERWRITE.equals(action) || existing.getValue().signum() == 0)
+            && existing.getValue().compareTo(incomingValue) != 0;
+        boolean valueChanged = false;
         if (shouldUpdateValue
                 && dealLineItemMapper.countByDealIdForUpdate(
                     workspaceId, existing.getId()) == 0) {
-            existing.setValue(incomingValue);
+            existing.setValue(dealValueService.setManualValue(
+                workspaceId, existing, incomingValue));
+            valueChanged = true;
         }
         Integer companyId = companyId(row, companyByName);
         if (companyId != null && (OVERWRITE.equals(action) || existing.getCompanyId() == null)) {
@@ -1280,7 +1284,7 @@ public class ImportService {
         Integer afterStageId = existing.getStageId();
         boolean parentChanged =
             !Objects.equals(beforeName, existing.getName())
-                || Double.compare(beforeValue, existing.getValue()) != 0
+                || beforeValue.compareTo(existing.getValue()) != 0
                 || !Objects.equals(beforeCurrency, existing.getCurrency())
                 || !Objects.equals(beforePipelineId, existing.getPipelineId())
                 || !Objects.equals(beforeStageId, afterStageId)
@@ -1308,7 +1312,7 @@ public class ImportService {
             columnToDef,
             action,
             customValues.getOrDefault(existing.getId(), Map.of()));
-        return parentChanged || tagsChanged || peopleChanged || customChanged;
+        return parentChanged || valueChanged || tagsChanged || peopleChanged || customChanged;
     }
 
     private void resolveStages(int workspaceId, List<PlanRow> plan) {
@@ -1501,16 +1505,13 @@ public class ImportService {
         return value.length() + ":" + value;
     }
 
-    private static double parseValue(String raw) {
-        if (raw == null) return 0d;
+    private static BigDecimal parseValue(String raw) {
+        if (raw == null) return BigDecimal.ZERO.setScale(DEAL_VALUE_SCALE);
         String cleaned = raw.replaceAll("[,\\s]", "");
         try {
-            double parsed = Double.parseDouble(cleaned);
-            return BigDecimal.valueOf(parsed)
-                .setScale(DEAL_VALUE_SCALE, RoundingMode.HALF_UP)
-                .doubleValue();
+            return new BigDecimal(cleaned).setScale(DEAL_VALUE_SCALE, RoundingMode.HALF_UP);
         } catch (NumberFormatException e) {
-            return 0d;
+            return BigDecimal.ZERO.setScale(DEAL_VALUE_SCALE);
         }
     }
 
@@ -1586,7 +1587,7 @@ public class ImportService {
         String value = row.std.get("value");
         if (value != null) {
             try {
-                Double.parseDouble(value.replaceAll("[,\\s]", ""));
+                new BigDecimal(value.replaceAll("[,\\s]", ""));
             } catch (NumberFormatException e) {
                 fail(row, "Invalid value: " + value);
             }

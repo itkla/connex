@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.brief;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -128,7 +129,7 @@ public class DealBriefAssembler {
         int companyId = deal.getCompanyId() == null ? 0 : deal.getCompanyId();
         String stage = summary == null ? "" : maskAllowedText(summary.getStageName(), context);
         String expectedClose = maskTemporal(deal.getExpectedCloseDate(), context);
-        String value = Double.isFinite(deal.getValue()) && deal.getValue() > 0
+        String value = deal.getValue() != null && deal.getValue().signum() > 0
                 ? amount(deal.getValue(), deal.getCurrency(), context)
                 : "";
         boolean meaningfulDealFact = isUsableMasked(companyToken)
@@ -499,8 +500,8 @@ public class DealBriefAssembler {
         return truncate(MaskingEngine.maskTemporal(value, context), MAX_ALLOWED_TEXT_CHARS);
     }
 
-    private static String amount(double value, String currency, MaskingContext context) {
-        String amount = Double.toString(value);
+    private static String amount(BigDecimal value, String currency, MaskingContext context) {
+        String amount = value.stripTrailingZeros().toPlainString();
         String safeCurrency = maskAllowedText(currency, context);
         return isUsableMasked(safeCurrency) ? amount + " " + safeCurrency : amount;
     }

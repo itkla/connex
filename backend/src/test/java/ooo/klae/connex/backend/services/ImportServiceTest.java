@@ -1696,6 +1696,32 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void dealImportFillEmptyTreatsScaleTwoZeroAsEmpty() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        dealMapper.updateValueAndSource(
+            workspace.getId(), deal.getId(), new BigDecimal("0.00"), "manual");
+
+        ImportResult result = reviewAndCommitDeals(req(
+            List.of(
+                map("Deal", "name"),
+                map("Value", "value"),
+                map("Company", "company")),
+            List.of(Map.of(
+                "Deal", deal.getName(),
+                "Value", "125.50",
+                "Company", company.getName())),
+            "fill_empty"));
+
+        Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(1, result.getUpdated());
+        assertEquals(0, new BigDecimal("125.50").compareTo(updated.getValue()));
+        assertEquals("manual", updated.getValueSource());
+    }
+
+    @Test
     void dealImportReplayPreservesParticipantRoleWithoutAuditSideEffects() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
@@ -1971,7 +1997,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(1, first.getCreated());
         assertEquals(0, replayed.getUpdated());
-        assertEquals(1.01d, imported.getValue());
+        assertEquals(0, new BigDecimal("1.01").compareTo(imported.getValue()));
         assertEquals(
             auditCountAfterFirst,
             rowCount(
@@ -2033,7 +2059,7 @@ class ImportServiceTest extends AbstractServiceTest {
         Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals(1, result.getUpdated());
         assertTrue(result.getFailed().isEmpty());
-        assertEquals(1000.0, updated.getValue());
+        assertEquals(0, new BigDecimal("25.00").compareTo(updated.getValue()));
         assertEquals("2027-12-31", updated.getExpectedCloseDate());
     }
 

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,6 +15,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
@@ -34,6 +36,32 @@ class ExportServiceTest {
     @Mock private CustomFieldDefinitionMapper customFieldDefinitionMapper;
     @Mock private CustomFieldValueService customFieldValueService;
     @InjectMocks private ExportService exportService;
+
+    @Test
+    void exportDealsPreservesWholeNumberCsvBytesForScaleTwoValues() {
+        Deal deal = new Deal();
+        deal.setId(7);
+        deal.setName("Renewal");
+        deal.setValue(new BigDecimal("1000.00"));
+        deal.setCurrency("USD");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
+        when(dealService.queryDealsForExport(
+            null, null, List.of(), List.of(), List.of(), false, List.of(), List.of(), null))
+            .thenReturn(List.of(deal));
+        when(customFieldDefinitionMapper.getByEntityType(42, "deal")).thenReturn(List.of());
+        when(customFieldValueService.getForEntities("deal", List.of(7))).thenReturn(Map.of());
+        when(tagMapper.getDealTagNames(42)).thenReturn(List.of());
+        when(companyMapper.getCompaniesForDedup(42)).thenReturn(List.of());
+        when(pipelineMapper.getAllPipelines(42)).thenReturn(List.of());
+
+        String csv = exportService.exportDeals(
+            null, null, List.of(), List.of(), List.of(), false, List.of(), List.of(), null);
+
+        assertEquals(
+            "id,name,value,currency,company,pipeline,stage,expectedCloseDate,status,tags\r\n"
+                + "7,Renewal,1000,USD,,,,,open,\r\n",
+            csv);
+    }
 
     @Test
     void exportProductsFormatsEveryColumnAndNeutralizesSpreadsheetFormulas() {

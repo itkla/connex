@@ -1,0 +1,93 @@
+package ooo.klae.connex.backend.services;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
+
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.DealLineItemMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+
+/** Owns the canonical deal-value contract across manual and line-item-derived amounts. */
+@Service
+@RequiredArgsConstructor
+public class DealValueService {
+    private static final String MANUAL = "manual";
+    private static final String LINE_ITEMS = "line_items";
+    private static final String LINE_ITEM_VALUE_CONFLICT =
+        "Cannot manually edit the deal value while line items exist; update or remove the line items first";
+
+    private final DealMapper dealMapper;
+    private final DealLineItemMapper dealLineItemMapper;
+
+    /** Returns the normalized authoritative value for the deal's current source. */
+    @Transactional(readOnly = true)
+    public BigDecimal canonicalValue(int workspaceId, Deal deal) {
+        if (LINE_ITEMS.equals(deal.getValueSource())) {
+            return money(dealLineItemMapper.sumLineTotals(workspaceId, deal.getId()));
+        }
+        return money(deal.getValue());
+    }
+
+    /** Applies a manual value when the locked deal has no conflicting line-item total. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal setManualValue(int workspaceId, Deal lockedDeal, BigDecimal requestedValue) {
+        BigDecimal value = money(requestedValue);
+        if (dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0) {
+            BigDecimal canonical = canonicalValue(workspaceId, lockedDeal);
+            if (canonical.compareTo(value) != 0) {
+                throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
+            }
+            return canonical;
+        }
+        dealMapper.updateValueAndSource(workspaceId, lockedDeal.getId(), value, MANUAL);
+        return value;
+    }
+
+    /** Reconciles the locked deal after a line-item mutation. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal reconcileLineItems(int workspaceId, Deal lockedDeal) {
+        if (dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0) {
+            BigDecimal total = money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
+            dealMapper.updateValueAndSource(workspaceId, lockedDeal.getId(), total, LINE_ITEMS);
+            return total;
+        }
+        dealMapper.updateValueSource(workspaceId, lockedDeal.getId(), MANUAL);
+        return money(lockedDeal.getValue());
+    }
+
+    /**
+     * Resolves the actual value for close. Only a won deal derives its realized value from existing
+     * line items. Lost deals never derive because {@code deal_metrics.closed_revenue} sums
+     * {@code actual_value} for every closed deal, so copying booking value into a lost deal would
+     * inflate reported revenue.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal resolveActualValueForClose(
+            int workspaceId, Deal lockedDeal, Boolean won, BigDecimal requestedActualValue) {
+        boolean hasLineItems = dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0;
+        if (hasLineItems && Boolean.TRUE.equals(won)) {
+            BigDecimal derived = money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
+            if (requestedActualValue != null && money(requestedActualValue).compareTo(derived) != 0) {
+                throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
+            }
+            return derived;
+        }
+        if (hasLineItems) {
+            return requestedActualValue == null ? money(null) : money(requestedActualValue);
+        }
+        return requestedActualValue == null
+            ? money(lockedDeal.getActualValue())
+            : money(requestedActualValue);
+    }
+
+    private static BigDecimal money(BigDecimal value) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+    }
+}

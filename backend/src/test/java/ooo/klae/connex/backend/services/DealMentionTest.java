@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 
@@ -265,7 +266,7 @@ class DealMentionTest extends AbstractServiceTest {
 
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
-        deal.setValue(1000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

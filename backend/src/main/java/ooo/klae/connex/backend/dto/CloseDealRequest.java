@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.dto;
 
+import java.math.BigDecimal;
+
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Size;
 
 import lombok.AllArgsConstructor;
@@ -14,11 +17,11 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class CloseDealRequest {
 
-    // Outcome to record: TRUE = won, FALSE = lost. Null defaults to lost server-side.
     private Boolean won;
 
     @Size(max = 1000)
     private String reason;
 
-    private Double actualValue;
+    @Digits(integer = 13, fraction = 2)
+    private BigDecimal actualValue;
 }

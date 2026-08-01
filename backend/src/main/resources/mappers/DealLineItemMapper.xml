@@ -52,6 +52,11 @@
     FOR UPDATE
   </select>
 
+  <select id="sumLineTotals" resultType="java.math.BigDecimal">
+    SELECT COALESCE(SUM(line_total), 0) FROM deal_line_item
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
+  </select>
+
   <select id="getById" resultMap="DealLineItemResult">
     SELECT <include refid="cols"/> FROM deal_line_item
     WHERE workspace_id = #{workspaceId} AND id = #{id}

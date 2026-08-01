@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class DealLineItemService {
     private final DealLineItemMapper lineItemMapper;
     private final DealMapper dealMapper;
+    private final DealValueService dealValueService;
     private final ProductMapper productMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -52,42 +54,48 @@ public class DealLineItemService {
     }
 
     /** Adds a line item to a deal and returns the refreshed view. */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealLineItemsResponse create(int dealId, DealLineItemRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
         DealLineItem item = new DealLineItem();
         item.setWorkspaceId(workspaceId);
         item.setDealId(deal.getId());
         applyRequest(workspaceId, deal, item, request, true);
         compute(item);
         lineItemMapper.insert(item);
+        dealValueService.reconcileLineItems(workspaceId, deal);
         auditService.record("deal.line_item.create", "deal", deal.getId(), deal.getName(),
             "Added line item " + item.getName() + " to " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
     }
 
     /** Updates a line item on a deal and returns the refreshed view. */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealLineItemsResponse update(int dealId, int itemId, DealLineItemRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
         DealLineItem item = requireLineItem(workspaceId, deal.getId(), itemId);
         applyRequest(workspaceId, deal, item, request, false);
         compute(item);
         lineItemMapper.update(item);
+        dealValueService.reconcileLineItems(workspaceId, deal);
         auditService.record("deal.line_item.update", "deal", deal.getId(), deal.getName(),
             "Updated line item " + item.getName() + " on " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
     }
 
     /** Removes a line item from a deal and returns the refreshed view. */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealLineItemsResponse delete(int dealId, int itemId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
         DealLineItem item = requireLineItem(workspaceId, deal.getId(), itemId);
         lineItemMapper.delete(workspaceId, itemId);
+        dealValueService.reconcileLineItems(workspaceId, deal);
         auditService.record("deal.line_item.delete", "deal", deal.getId(), deal.getName(),
             "Removed line item " + item.getName() + " from " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
@@ -213,6 +221,12 @@ public class DealLineItemService {
 
     private Deal requireDeal(int workspaceId, int dealId) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        return deal;
+    }
+
+    private Deal requireDealForUpdate(int workspaceId, int dealId) {
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         return deal;
     }

@@ -103,8 +103,8 @@ class DealServiceTest extends AbstractServiceTest {
         Deal foreign = new Deal();
         foreign.setWorkspaceId(otherWorkspace.getId());
         foreign.setName("Foreign Won");
-        foreign.setValue(1000.0);
-        foreign.setActualValue(900.0);
+        foreign.setValue(new BigDecimal("1000.00"));
+        foreign.setActualValue(new BigDecimal("900.00"));
         foreign.setCurrency("USD");
         foreign.setPipelineId(otherPipeline.getId());
         foreign.setStageId(otherStage.getId());
@@ -295,8 +295,8 @@ class DealServiceTest extends AbstractServiceTest {
         Deal foreign = new Deal();
         foreign.setWorkspaceId(otherWorkspace.getId());
         foreign.setName("Foreign Won");
-        foreign.setValue(1000.0);
-        foreign.setActualValue(900.0);
+        foreign.setValue(new BigDecimal("1000.00"));
+        foreign.setActualValue(new BigDecimal("900.00"));
         foreign.setCurrency("USD");
         foreign.setPipelineId(otherPipeline.getId());
         foreign.setStageId(otherStage.getId());
@@ -640,7 +640,7 @@ class DealServiceTest extends AbstractServiceTest {
         DealSummaryDto summary = dealService.getDealSummary(deal.getId());
 
         assertEquals(deal.getId(), summary.getId());
-        assertEquals(deal.getActualValue(), summary.getActualValue(), 0.0001);
+        assertEquals(0, deal.getActualValue().compareTo(summary.getActualValue()));
         assertEquals(pipeline.getName(), summary.getPipelineName());
         assertEquals(stage.getName(), summary.getStageName());
         assertEquals(company.getName(), summary.getCompanyName());
@@ -758,7 +758,7 @@ class DealServiceTest extends AbstractServiceTest {
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
         deal.setWorkspaceId(workspace.getId());
-        deal.setValue(1000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
@@ -780,7 +780,7 @@ class DealServiceTest extends AbstractServiceTest {
             Deal deal = new Deal();
             deal.setName("Deal " + unique());
             deal.setWorkspaceId(workspace.getId());
-            deal.setValue(1000.0);
+            deal.setValue(new BigDecimal("1000.00"));
             deal.setCurrency("JPY");
             deal.setPipelineId(pipeline.getId());
             deal.setStageId(stage.getId());
@@ -836,21 +836,24 @@ class DealServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
-        deal.setValue(125000.0);
-        deal.setActualValue(75000.0);
+        deal.setValue(new BigDecimal("125000.00"));
+        deal.setActualValue(new BigDecimal("75000.00"));
         deal.setExpectedCloseDate("2027-03-31");
         deal.setWon(true);
         deal.setClosedAt("2026-07-01 12:00:00");
         deal.setClosedReason("Signed");
         dealMapper.update(deal);
+        dealMapper.updateValueAndSource(
+            workspace.getId(), deal.getId(), deal.getValue(), "manual");
+        dealMapper.updateActualValue(workspace.getId(), deal.getId(), deal.getActualValue());
         addLineItem(deal);
         Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
 
         Deal updated = dealService.updateName(deal.getId(), "FY27 Renewal");
 
         assertEquals("FY27 Renewal", updated.getName());
-        assertEquals(before.getValue(), updated.getValue());
-        assertEquals(before.getActualValue(), updated.getActualValue());
+        assertEquals(0, before.getValue().compareTo(updated.getValue()));
+        assertEquals(0, before.getActualValue().compareTo(updated.getActualValue()));
         assertEquals(before.getCurrency(), updated.getCurrency());
         assertEquals(before.getPipelineId(), updated.getPipelineId());
         assertEquals(before.getStageId(), updated.getStageId());
@@ -892,16 +895,17 @@ class DealServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
-        deal.setActualValue(500.0);
+        deal.setActualValue(new BigDecimal("500.00"));
         deal.setExpectedCloseDate("2027-03-31");
         dealMapper.update(deal);
+        dealMapper.updateActualValue(workspace.getId(), deal.getId(), deal.getActualValue());
         Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
 
         Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("125000.00"));
 
-        assertEquals(125000.0, updated.getValue());
+        assertEquals(0, new BigDecimal("125000.00").compareTo(updated.getValue()));
         assertEquals(before.getName(), updated.getName());
-        assertEquals(before.getActualValue(), updated.getActualValue());
+        assertEquals(0, before.getActualValue().compareTo(updated.getActualValue()));
         assertEquals(before.getCurrency(), updated.getCurrency());
         assertEquals(before.getPipelineId(), updated.getPipelineId());
         assertEquals(before.getStageId(), updated.getStageId());
@@ -914,7 +918,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(before.getWon(), updated.getWon());
         JsonNode changes = auditChanges(deal.getId(), "deal.update");
         assertEquals(1, changes.size());
-        assertEquals(before.getValue(), changes.path("value").path("old").asDouble());
+        assertEquals(before.getValue().doubleValue(), changes.path("value").path("old").asDouble());
         assertEquals(125000.0, changes.path("value").path("new").asDouble());
         assertTrue(hasDealEvent(deal.getId(), "deal.updated"));
         assertTrue(hasDealEvent(deal.getId(), "deal.value_changed"));
@@ -931,10 +935,11 @@ class DealServiceTest extends AbstractServiceTest {
 
         Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("1000.00"));
 
-        assertEquals(1000.0, updated.getValue());
+        assertEquals(0, new BigDecimal("1000.00").compareTo(updated.getValue()));
         assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
         assertEquals(0, applicationEvents.stream().count());
-        verify(dealMapperSpy, never()).updateValue(anyInt(), anyInt(), any(BigDecimal.class));
+        verify(dealMapperSpy, never()).updateValueAndSource(
+            anyInt(), anyInt(), any(BigDecimal.class), any(String.class));
     }
 
     @Test
@@ -947,12 +952,13 @@ class DealServiceTest extends AbstractServiceTest {
         clearInvocations(dealMapperSpy);
         applicationEvents.clear();
 
-        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("1000.00"));
+        Deal updated = dealService.updateValue(deal.getId(), new BigDecimal("25.00"));
 
-        assertEquals(1000.0, updated.getValue());
+        assertEquals(0, new BigDecimal("25.00").compareTo(updated.getValue()));
         assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
         assertEquals(0, applicationEvents.stream().count());
-        verify(dealMapperSpy, never()).updateValue(anyInt(), anyInt(), any(BigDecimal.class));
+        verify(dealMapperSpy, never()).updateValueAndSource(
+            anyInt(), anyInt(), any(BigDecimal.class), any(String.class));
     }
 
     @Test
@@ -971,7 +977,7 @@ class DealServiceTest extends AbstractServiceTest {
         BigDecimal storedValue = jdbcTemplate.queryForObject(
             "SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
             BigDecimal.class, workspace.getId(), deal.getId());
-        assertEquals(0, new BigDecimal("1000.00").compareTo(storedValue));
+        assertEquals(0, new BigDecimal("25.00").compareTo(storedValue));
         assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
     }
 
@@ -982,14 +988,14 @@ class DealServiceTest extends AbstractServiceTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         addLineItem(deal);
         Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
-        edit.setValue(125000.0);
+        edit.setValue(new BigDecimal("125000.00"));
 
         assertThrows(ConflictException.class, () -> dealService.update(deal.getId(), edit));
 
         BigDecimal storedValue = jdbcTemplate.queryForObject(
             "SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
             BigDecimal.class, workspace.getId(), deal.getId());
-        assertEquals(0, new BigDecimal("1000.00").compareTo(storedValue));
+        assertEquals(0, new BigDecimal("25.00").compareTo(storedValue));
     }
 
     @Test
@@ -997,16 +1003,17 @@ class DealServiceTest extends AbstractServiceTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
-        dealMapper.updateValue(workspace.getId(), deal.getId(), new BigDecimal("125000.0"));
-        addLineItem(deal);
+        dealMapper.updateValueAndSource(
+            workspace.getId(), deal.getId(), new BigDecimal("125000.0"), "manual");
+        addLineItem(deal, "125000.00");
         Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
         edit.setName("Scale-insensitive renewal");
-        edit.setValue(new BigDecimal("125000.00").doubleValue());
+        edit.setValue(new BigDecimal("125000.00"));
 
         Deal updated = dealService.update(deal.getId(), edit);
 
         assertEquals("Scale-insensitive renewal", updated.getName());
-        assertEquals(125000.0, updated.getValue());
+        assertEquals(0, new BigDecimal("125000.00").compareTo(updated.getValue()));
         assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
     }
 
@@ -1020,7 +1027,7 @@ class DealServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Deal local = newDeal(pipeline, stage, newCompany());
         String originalName = local.getName();
-        double originalValue = local.getValue();
+        BigDecimal originalValue = local.getValue();
         Workspace foreignWorkspace = newWorkspace();
         workspaceMapper.addMember(foreignWorkspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, foreignWorkspace.getId());
@@ -1033,7 +1040,7 @@ class DealServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, workspace.getId());
         Deal unchanged = dealMapper.getDealById(workspace.getId(), local.getId());
         assertEquals(originalName, unchanged.getName());
-        assertEquals(originalValue, unchanged.getValue());
+        assertEquals(0, originalValue.compareTo(unchanged.getValue()));
     }
 
     @Test
@@ -1186,7 +1193,7 @@ class DealServiceTest extends AbstractServiceTest {
         Deal after = dealService.getDealById(deal.getId());
         assertEquals("2025-06-30", after.getExpectedCloseDate());
         assertEquals(name, after.getName());
-        assertEquals(1000.0, after.getValue(), 0.0001);
+        assertEquals(0, new BigDecimal("1000.00").compareTo(after.getValue()));
         assertEquals(stage.getId(), after.getStageId());
         assertEquals(pipeline.getId(), after.getPipelineId());
     }
@@ -1197,7 +1204,7 @@ class DealServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
-        dealService.close(deal.getId(), Boolean.TRUE, "signed", 1500.0);
+        dealService.close(deal.getId(), Boolean.TRUE, "signed", new BigDecimal("1500.00"));
 
         dealService.reschedule(deal.getId(), "2025-06-30");
 
@@ -1350,7 +1357,7 @@ class DealServiceTest extends AbstractServiceTest {
     private Deal dealDraft(Pipeline pipeline, Stage stage, Company company) {
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
-        deal.setValue(1000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
@@ -1359,9 +1366,13 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     private void addLineItem(Deal deal) {
+        addLineItem(deal, "25.00");
+    }
+
+    private void addLineItem(Deal deal, String unitPrice) {
         DealLineItemRequest request = new DealLineItemRequest();
         request.setName("Ad-hoc line " + unique());
-        request.setUnitPrice(new BigDecimal("25.00"));
+        request.setUnitPrice(new BigDecimal(unitPrice));
         request.setQuantity(BigDecimal.ONE);
         dealLineItemService.create(deal.getId(), request);
     }
@@ -1378,7 +1389,7 @@ class DealServiceTest extends AbstractServiceTest {
         Deal deal = new Deal();
         deal.setWorkspaceId(workspace.getId());
         deal.setName("Bounded Board " + position);
-        deal.setValue(1);
+        deal.setValue(BigDecimal.ONE);
         deal.setCurrency("USD");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
@@ -1405,24 +1416,30 @@ class DealServiceTest extends AbstractServiceTest {
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,
             String currency, Boolean won) {
         deal.setName(name);
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setWon(won);
         deal.setClosedAt(won == null ? null : "2026-01-01 00:00:00");
         dealMapper.update(deal);
+        dealMapper.updateValueAndSource(
+            deal.getWorkspaceId(), deal.getId(), deal.getValue(), "manual");
+        dealMapper.updateActualValue(deal.getWorkspaceId(), deal.getId(), deal.getActualValue());
         return deal;
     }
 
     private Deal updateChartDeal(Deal deal, double value, double actualValue, String currency,
             Boolean won, String expectedCloseDate, String closedAt) {
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setWon(won);
         deal.setExpectedCloseDate(expectedCloseDate);
         deal.setClosedAt(closedAt);
         dealMapper.update(deal);
+        dealMapper.updateValueAndSource(
+            deal.getWorkspaceId(), deal.getId(), deal.getValue(), "manual");
+        dealMapper.updateActualValue(deal.getWorkspaceId(), deal.getId(), deal.getActualValue());
         return deal;
     }
 
@@ -1433,8 +1450,8 @@ class DealServiceTest extends AbstractServiceTest {
         deal.setWorkspaceId(targetWorkspace.getId());
         deal.setOwnerId(targetWorkspace.getId() == workspace.getId() ? currentUser.getId() : null);
         deal.setName(name);
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
@@ -1481,8 +1498,8 @@ class DealServiceTest extends AbstractServiceTest {
         deal.setWorkspaceId(targetWorkspace.getId());
         deal.setOwnerId(targetWorkspace.getId() == workspace.getId() ? currentUser.getId() : null);
         deal.setName(name);
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -678,21 +679,30 @@ class CompanyMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal won = newDeal(pipeline, stage, company);
-        won.setValue(1_000);
-        won.setActualValue(750);
+        won.setValue(new BigDecimal("1000.00"));
+        won.setActualValue(new BigDecimal("750.00"));
         won.setWon(true);
         won.setClosedAt("2026-07-01 00:00:00");
         dealMapper.update(won);
+        dealMapper.updateValueAndSource(
+            workspace.getId(), won.getId(), won.getValue(), "manual");
+        dealMapper.updateActualValue(workspace.getId(), won.getId(), won.getActualValue());
         Deal lost = newDeal(pipeline, stage, company);
-        lost.setValue(500);
-        lost.setActualValue(999);
+        lost.setValue(new BigDecimal("500.00"));
+        lost.setActualValue(new BigDecimal("999.00"));
         lost.setWon(false);
         lost.setClosedAt("2026-07-02 00:00:00");
         dealMapper.update(lost);
+        dealMapper.updateValueAndSource(
+            workspace.getId(), lost.getId(), lost.getValue(), "manual");
+        dealMapper.updateActualValue(workspace.getId(), lost.getId(), lost.getActualValue());
         Deal open = newDeal(pipeline, stage, company);
-        open.setValue(400);
-        open.setActualValue(100);
+        open.setValue(new BigDecimal("400.00"));
+        open.setActualValue(new BigDecimal("100.00"));
         dealMapper.update(open);
+        dealMapper.updateValueAndSource(
+            workspace.getId(), open.getId(), open.getValue(), "manual");
+        dealMapper.updateActualValue(workspace.getId(), open.getId(), open.getActualValue());
 
         List<CompanyRevenueCurrencyDto> revenue = companyMapper.getCompanyRevenueByCurrency(
             workspace.getId(), company.getId());

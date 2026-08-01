@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.beans;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
@@ -24,9 +25,10 @@ public class Deal {
     private int workspaceId;
     private Integer ownerId;
     private String name;
-    private double value;
-    private double actualValue;
-    private String currency; // e.g. "JPY"
+    private BigDecimal value = BigDecimal.ZERO.setScale(2);
+    private BigDecimal actualValue = BigDecimal.ZERO.setScale(2);
+    private String valueSource = "manual";
+    private String currency;
     private Integer pipelineId;
     private Integer stageId;
     private int position;
@@ -39,11 +41,11 @@ public class Deal {
     private String expectedCloseDate;
     private String closedAt;
     private String closedReason;
-    private Boolean won; // outcome when closed: TRUE=won, FALSE=lost, NULL=open. closed_at follows this.
+    private Boolean won;
     private boolean riskExcluded;
     private String createdAt;
     private String updatedAt;
-    private List<EntityReference> references; // @/# references resolved from closedReason
+    private List<EntityReference> references;
 
     public int getId() {
         return id;
@@ -61,19 +63,19 @@ public class Deal {
         this.name = name;
     }
 
-    public double getValue() {
+    public BigDecimal getValue() {
         return value;
     }
 
-    public void setValue(double value) {
+    public void setValue(BigDecimal value) {
         this.value = value;
     }
 
-    public double getActualValue() {
+    public BigDecimal getActualValue() {
         return actualValue;
     }
 
-    public void setActualValue(double actualValue) {
+    public void setActualValue(BigDecimal actualValue) {
         this.actualValue = actualValue;
     }
 

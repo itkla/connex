@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.math.BigDecimal;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -15,8 +17,8 @@ import lombok.NoArgsConstructor;
 public class DealSummaryDto {
     private int id;
     private String name;
-    private double value;
-    private double actualValue;
+    private BigDecimal value;
+    private BigDecimal actualValue;
     private String currency;
     private String status;
     private String expectedCloseDate;

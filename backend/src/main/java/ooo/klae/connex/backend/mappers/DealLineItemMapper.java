@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
@@ -14,6 +15,7 @@ public interface DealLineItemMapper {
     List<DealLineItem> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int countByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int countByDealIdForUpdate(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    BigDecimal sumLineTotals(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     DealLineItem getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(DealLineItem item);
     int update(DealLineItem item);

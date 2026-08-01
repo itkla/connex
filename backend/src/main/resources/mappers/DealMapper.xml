@@ -8,8 +8,9 @@
     <result property="workspaceId" column="workspace_id"/>
     <result property="ownerId" column="owner_id"/>
     <result property="name" column="name"/>
-    <result property="value" column="value"/>
-    <result property="actualValue" column="actual_value"/>
+    <result property="value" column="value" javaType="java.math.BigDecimal" jdbcType="DECIMAL"/>
+    <result property="actualValue" column="actual_value" javaType="java.math.BigDecimal" jdbcType="DECIMAL"/>
+    <result property="valueSource" column="value_source"/>
     <result property="currency" column="currency"/>
     <result property="pipelineId" column="pipeline_id"/>
     <result property="stageId" column="stage_id"/>
@@ -40,12 +41,12 @@
   </resultMap>
 
   <sql id="dealColumns">
-    id, workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
+    id, workspace_id, owner_id, name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
     expected_close_date, closed_at, closed_reason, won, risk_excluded, created_at, updated_at
   </sql>
 
   <sql id="qualifiedDealColumns">
-    d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.currency,
+    d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.value_source, d.currency,
     d.pipeline_id, d.stage_id, d.position, d.company_id, d.expected_close_date, d.closed_at,
     d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
   </sql>
@@ -1038,11 +1039,12 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
+      workspace_id, owner_id, name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won, created_at
     )
     VALUES (
-      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{value}, #{actualValue}, #{currency},
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{value,jdbcType=DECIMAL},
+      #{actualValue,jdbcType=DECIMAL}, #{valueSource}, #{currency},
       #{pipelineId}, #{stageId}, #{position}, #{companyId}, #{expectedCloseDate}, #{closedAt},
       #{closedReason}, #{won}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
     )
@@ -1050,12 +1052,13 @@
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
+      workspace_id, owner_id, name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won
     )
     VALUES
     <foreach collection="list" item="d" separator=",">
-      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name}, #{d.value}, #{d.actualValue}, #{d.currency},
+      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name}, #{d.value,jdbcType=DECIMAL},
+       #{d.actualValue,jdbcType=DECIMAL}, #{d.valueSource}, #{d.currency},
        #{d.pipelineId}, #{d.stageId}, #{d.position}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
        #{d.closedReason}, #{d.won})
     </foreach>
@@ -1064,8 +1067,6 @@
   <update id="update">
     UPDATE deal
     SET name = #{name},
-        value = #{value},
-        actual_value = #{actualValue},
         currency = #{currency},
         pipeline_id = #{pipelineId},
         stage_id = #{stageId},
@@ -1083,8 +1084,18 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <update id="updateValue">
-    UPDATE deal SET value = #{value}
+  <update id="updateValueAndSource">
+    UPDATE deal SET value = #{value,jdbcType=DECIMAL}, value_source = #{valueSource}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateValueSource">
+    UPDATE deal SET value_source = #{valueSource}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateActualValue">
+    UPDATE deal SET actual_value = #{actualValue,jdbcType=DECIMAL}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 

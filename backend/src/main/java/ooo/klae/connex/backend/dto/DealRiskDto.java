@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import lombok.AllArgsConstructor;
@@ -23,7 +24,7 @@ public class DealRiskDto {
     /** Id of the assessed deal. */
     private int dealId;
     /** Forecast value of the assessed deal. */
-    private double value;
+    private BigDecimal value;
     /** Currency of the assessed deal, or {@code null} when the deal is not visible. */
     private String currency;
     /** Overall risk band: {@code "high" | "medium" | "low" | "none"}. */

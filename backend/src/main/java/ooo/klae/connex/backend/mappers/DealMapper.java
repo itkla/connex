@@ -327,10 +327,21 @@ public interface DealMapper {
         @Param("id") int id,
         @Param("name") String name
     );
-    int updateValue(
+    int updateValueAndSource(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
-        @Param("value") BigDecimal value
+        @Param("value") BigDecimal value,
+        @Param("valueSource") String valueSource
+    );
+    int updateValueSource(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("valueSource") String valueSource
+    );
+    int updateActualValue(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("actualValue") BigDecimal actualValue
     );
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

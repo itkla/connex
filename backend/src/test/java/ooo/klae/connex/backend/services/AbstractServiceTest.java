@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -207,7 +208,7 @@ abstract class AbstractServiceTest {
         deal.setName("Deal " + unique());
         deal.setWorkspaceId(workspace.getId());
         deal.setOwnerId(currentUser == null ? null : currentUser.getId());
-        deal.setValue(1000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

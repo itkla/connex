@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -256,8 +257,9 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         Deal big = newDeal(pipeline, stage, company);
         Deal small = newDeal(pipeline, stage, company);
-        small.setValue(100.0);
-        dealMapper.update(small);
+        small.setValue(new BigDecimal("100.00"));
+        dealMapper.updateValueAndSource(
+            workspace.getId(), small.getId(), small.getValue(), "manual");
         Tag tag = newTag();
 
         SegmentDefinition condition = new SegmentDefinition();
