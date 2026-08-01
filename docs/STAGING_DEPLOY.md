@@ -88,3 +88,17 @@ code boots — e.g. the 5aa90472 legacy-upload migration). For those:
 Note: workspace self-service creation now defaults to **off** (guided-pilot GTM). Staging QA
 flows that rely on registering a fresh user with an auto-created workspace need
 `CONNEX_WORKSPACES_ALLOW_CREATION=true` in `/etc/connex-staging/backend.env`.
+
+**Required (root):** staging runs the default Spring profile, so the mandatory deployment profile
+applies to it. `/etc/connex-staging/backend.env` must contain:
+
+```text
+CONNEX_DEPLOYMENT_PROFILE=silo
+```
+
+Staging is a Connex-operated instance on a dedicated database, which is `silo`. Without it the
+backend fails startup with `CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem
+outside dev/test/seeder`; the health gate then rolls the deploy back to the previous JAR and
+retries every cycle, so the running instance survives but every subsequent deploy fails until the
+variable is added. Tracked as an owner action in
+[RELEASE_1_0_EXTERNAL_BLOCKERS.md](RELEASE_1_0_EXTERNAL_BLOCKERS.md) item 6.

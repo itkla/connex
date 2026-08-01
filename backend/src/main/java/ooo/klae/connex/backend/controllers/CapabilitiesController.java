@@ -38,7 +38,8 @@ public class CapabilitiesController {
                         capabilityRegistry.isAvailable(Capability.CONNECTED_CAPTURE_MICROSOFT)),
                 capabilityRegistry.isAvailable(Capability.MANAGED_MAIL),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING),
-                capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT));
+                capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT),
+                capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY));
     }
 
     /**
@@ -51,6 +52,7 @@ public class CapabilitiesController {
      * @param mailManaged whether instance-managed mail is enabled
      * @param businessCardScanning whether local OCR and durable card retention are ready
      * @param businessCardImport whether reviewed source-image import and retention are ready
+     * @param campaignDelivery whether native email campaign delivery is available
      */
     public record CapabilitiesResponse(
             boolean sso,
@@ -59,7 +61,8 @@ public class CapabilitiesController {
             ConnectedCapture connectedCapture,
             boolean mailManaged,
             boolean businessCardScanning,
-            boolean businessCardImport) {
+            boolean businessCardImport,
+            boolean campaignDelivery) {
     }
 
     /**

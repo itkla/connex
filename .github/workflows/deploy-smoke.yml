@@ -119,7 +119,7 @@ jobs:
       - name: Build bootWar
         working-directory: backend
         run: bash gradlew bootWar --no-daemon -Pversion=ci
-      - name: Boot saas, silo, on-prem and smoke the public endpoints
+      - name: Boot saas, silo, on-prem and assert the capability matrix
         working-directory: backend
         env:
           SPRING_PROFILES_ACTIVE: dev
@@ -131,7 +131,14 @@ jobs:
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
           for PROFILE in saas silo on-prem; do
             echo "=== booting deployment profile: $PROFILE ==="
-            CONNEX_DEPLOYMENT_PROFILE="$PROFILE" java -jar "$WAR" > "/tmp/boot-$PROFILE.log" 2>&1 &
+            if [ "$PROFILE" = "on-prem" ]; then
+              EXPECTED_MANAGED_MAIL=false
+              CONNEX_DEPLOYMENT_PROFILE="$PROFILE" java -jar "$WAR" > "/tmp/boot-$PROFILE.log" 2>&1 &
+            else
+              EXPECTED_MANAGED_MAIL=true
+              CONNEX_DEPLOYMENT_PROFILE="$PROFILE" CONNEX_MAIL_MANAGED=true \
+                java -jar "$WAR" > "/tmp/boot-$PROFILE.log" 2>&1 &
+            fi
             PID=$!
             BOOTED=0
             for _ in $(seq 1 90); do
@@ -145,13 +152,54 @@ jobs:
               kill "$PID" 2>/dev/null || true
               exit 1
             fi
-            curl -sf http://localhost:8080/api/capabilities | grep -q '"businessCardScanning"' \
-              || { echo "::error::capabilities smoke failed for $PROFILE"; kill "$PID" 2>/dev/null || true; exit 1; }
-            echo "profile $PROFILE booted and smoked OK"
+            if ! CAPABILITIES=$(curl -sf http://localhost:8080/api/capabilities); then
+              echo "::error::capabilities smoke failed for $PROFILE"
+              kill "$PID" 2>/dev/null || true
+              exit 1
+            fi
+            for FIELD in businessCardScanning campaignDelivery mailManaged; do
+              if ! jq -e "has(\"$FIELD\")" > /dev/null <<< "$CAPABILITIES"; then
+                echo "::error::capabilities response for $PROFILE is missing $FIELD"
+                kill "$PID" 2>/dev/null || true
+                exit 1
+              fi
+            done
+            ACTUAL_MANAGED_MAIL=$(jq -r '.mailManaged' <<< "$CAPABILITIES")
+            if [ "$ACTUAL_MANAGED_MAIL" != "$EXPECTED_MANAGED_MAIL" ]; then
+              echo "::error::profile $PROFILE reported mailManaged=$ACTUAL_MANAGED_MAIL, expected $EXPECTED_MANAGED_MAIL"
+              echo "saas/silo boot with CONNEX_MAIL_MANAGED=true; on-prem forbids it, so it boots without it"
+              kill "$PID" 2>/dev/null || true
+              exit 1
+            fi
+            echo "profile $PROFILE booted OK with mailManaged=$ACTUAL_MANAGED_MAIL"
             kill "$PID" 2>/dev/null || true
             wait "$PID" 2>/dev/null || true
             sleep 3
           done
+
+          echo "=== on-prem must REFUSE instance-managed mail ==="
+          CONNEX_DEPLOYMENT_PROFILE=on-prem CONNEX_MAIL_MANAGED=true \
+            java -jar "$WAR" > /tmp/boot-on-prem-managed.log 2>&1 &
+          PID=$!
+          REFUSED=0
+          for _ in $(seq 1 90); do
+            if curl -sf http://localhost:8080/api/version > /dev/null 2>&1; then break; fi
+            if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; break; fi
+            sleep 2
+          done
+          if [ "$REFUSED" != 1 ]; then
+            echo "::error::on-prem booted with CONNEX_MAIL_MANAGED=true; it must fail startup"
+            tail -60 /tmp/boot-on-prem-managed.log
+            kill "$PID" 2>/dev/null || true
+            exit 1
+          fi
+          if ! grep -q "connex.deployment.profile=on-prem forbids: connex.mail.managed=true" \
+              /tmp/boot-on-prem-managed.log; then
+            echo "::error::on-prem refused to boot but not for the managed-mail reason"
+            tail -60 /tmp/boot-on-prem-managed.log
+            exit 1
+          fi
+          echo "on-prem correctly refused instance-managed mail at startup"
 
   required:
     name: Deploy — required

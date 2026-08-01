@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.capability;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -7,6 +8,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -141,5 +145,63 @@ class CapabilityRegistryTest {
     @Test
     void nullCapabilityIsRejected() {
         assertThrows(NullPointerException.class, () -> capabilityRegistry.isAvailable(null));
+    }
+
+    @Test
+    void productionDeploymentProfileMatrixIsPinned() {
+        Map<Capability, Set<String>> expected = new EnumMap<>(Capability.class);
+        expected.put(Capability.SSO, Set.of());
+        expected.put(Capability.SOCIAL_LOGIN_GOOGLE, Set.of());
+        expected.put(Capability.SOCIAL_LOGIN_MICROSOFT, Set.of());
+        expected.put(Capability.CONNECTED_ACCOUNTS_GOOGLE, Set.of());
+        expected.put(Capability.CONNECTED_ACCOUNTS_MICROSOFT, Set.of());
+        expected.put(Capability.CONNECTED_CAPTURE_GOOGLE, Set.of());
+        expected.put(Capability.CONNECTED_CAPTURE_MICROSOFT, Set.of());
+        expected.put(Capability.MANAGED_MAIL, Set.of(DeploymentProperties.PROFILE_ON_PREM));
+        expected.put(Capability.BUSINESS_CARD_SCANNING, Set.of());
+        expected.put(Capability.BUSINESS_CARD_IMPORT, Set.of());
+        expected.put(Capability.CAMPAIGN_DELIVERY, Set.of());
+
+        assertEquals(EnumSet.allOf(Capability.class), expected.keySet(),
+                "A capability was added without pinning its deployment-profile policy");
+        assertEquals(expected, CapabilityRegistry.deploymentProfilePolicy());
+    }
+
+    @Test
+    void productionProfilePolicyRefusesOnlyManagedMailOnPrem() {
+        List<String> profiles = List.of(DeploymentProperties.PROFILE_SAAS,
+                DeploymentProperties.PROFILE_SILO, DeploymentProperties.PROFILE_ON_PREM);
+
+        for (Capability capability : Capability.values()) {
+            for (String profile : profiles) {
+                boolean expectedAllowed = !(capability == Capability.MANAGED_MAIL
+                        && DeploymentProperties.PROFILE_ON_PREM.equals(profile));
+                assertEquals(expectedAllowed, CapabilityRegistry.isAllowedForProfile(capability, profile),
+                        capability + " under profile " + profile);
+            }
+            assertTrue(CapabilityRegistry.isAllowedForProfile(capability, null),
+                    capability + " with no configured profile");
+        }
+    }
+
+    @Test
+    void managedMailIsRefusedOnPremRegardlessOfOperatorSetting() {
+        when(deploymentProperties.isConfigured()).thenReturn(true);
+        when(deploymentProperties.getProfile()).thenReturn(DeploymentProperties.PROFILE_ON_PREM);
+
+        assertFalse(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL));
+
+        verifyNoInteractions(mailProperties);
+    }
+
+    @Test
+    void managedMailRemainsAvailableUnderSaasAndSilo() {
+        when(deploymentProperties.isConfigured()).thenReturn(true);
+        when(deploymentProperties.getProfile())
+                .thenReturn(DeploymentProperties.PROFILE_SAAS, DeploymentProperties.PROFILE_SILO);
+        when(mailProperties.isManaged()).thenReturn(true);
+
+        assertTrue(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL));
+        assertTrue(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL));
     }
 }
