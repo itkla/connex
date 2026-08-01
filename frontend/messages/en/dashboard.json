@@ -161,7 +161,8 @@
     "activitiesUpcoming": "{count, plural, one {# activity} other {# activities}}",
     "dealsClosingSeparator": " · {count, plural, one {# deal} other {# deals}} closing this week",
     "dealsCount": "{count, plural, one {# deal} other {# deals}}",
-    "closingThisWeek": " closing this week"
+    "closingThisWeek": " closing this week",
+    "summaryUnavailable": "We couldn't load your day's summary."
   },
   "DashboardPipelineChart": {
     "pipelineLabel": "Pipeline",

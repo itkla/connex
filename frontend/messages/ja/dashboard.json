@@ -161,7 +161,8 @@
     "activitiesUpcoming": "{count, plural, one {予定 # 件} other {予定 # 件}}",
     "dealsClosingSeparator": " · {count, plural, one {今週成約予定 # 件の案件} other {今週成約予定 # 件の案件}}",
     "dealsCount": "{count, plural, one {# 件の案件} other {# 件の案件}}",
-    "closingThisWeek": " が今週成約予定です"
+    "closingThisWeek": " が今週成約予定です",
+    "summaryUnavailable": "本日の予定を読み込めませんでした。"
   },
   "DashboardPipelineChart": {
     "pipelineLabel": "パイプライン",

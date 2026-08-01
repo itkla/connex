@@ -205,7 +205,7 @@
   },
   "SavedViews": {
     "all": "All",
-    "loadFailed": "Saved views couldn’t be loaded",
+    "loadFailed": "Saved views couldn't be loaded",
     "save": "Save",
     "saveView": "Save view",
     "updateView": "Update “{name}”",
