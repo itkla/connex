@@ -66,6 +66,7 @@ public class DealDocumentService {
     private final UserMapper userMapper;
     private final DealLineItemService lineItemService;
     private final WorkspaceService workspaceService;
+    private final DeletionPolicy deletionPolicy;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
@@ -195,6 +196,7 @@ public class DealDocumentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = requireDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
+        deletionPolicy.requireDeletable(document.getCreatedBy());
         if (!"draft".equals(document.getStatus())) {
             throw new BadRequestException("Only draft documents can be deleted");
         }
@@ -345,7 +347,7 @@ public class DealDocumentService {
             && !"approved".equals(d.getStatus())
             && policyService.firstMatch(policies, d, content) != null;
         return new DealDocumentDto(d.getId(), d.getDealId(), d.getTemplateId(), d.getType(), d.getLocale(),
-            d.getStatus(), d.getVersion(), d.getTitle(), d.getCurrency(), d.getGeneratedAt(), content,
+            d.getStatus(), d.getVersion(), d.getTitle(), d.getCurrency(), d.getGeneratedAt(), d.getCreatedBy(), content,
             requiresApproval, DocumentApprovalDto.from(latestApproval));
     }
 

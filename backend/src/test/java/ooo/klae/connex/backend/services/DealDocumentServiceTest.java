@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -18,9 +19,11 @@ import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 class DealDocumentServiceTest extends AbstractServiceTest {
@@ -29,6 +32,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
     @Autowired DocumentTemplateService templateService;
     @Autowired DealLineItemService lineItemService;
     @Autowired ProductService productService;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();
@@ -80,6 +84,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         assertEquals("draft", doc.status());
         assertEquals("quote", doc.type());
         assertEquals("JPY", doc.currency());
+        assertEquals(currentUser.getId(), doc.createdBy());
         assertNotNull(doc.content());
         assertEquals("Quote for " + doc.content().company().name(), doc.content().sections().title());
         assertTrue(doc.content().sections().terms().contains("JPY 220.00"),
@@ -159,6 +164,50 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         DealDocumentDto draft = documentService.generate(deal.getId(), tpl.getId());
         documentService.delete(deal.getId(), draft.id());
         assertEquals(1, documentService.getForDeal(deal.getId()).size());
+    }
+
+    @Test
+    void nonCreatorMemberCannotDeleteAnotherMembersDraft() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = documentService.generate(deal.getId(), template().getId());
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> documentService.delete(deal.getId(), doc.id()));
+
+        authenticateAs(currentUser, workspace.getId());
+        assertEquals(doc.id(), documentService.getOne(deal.getId(), doc.id()).id());
+    }
+
+    @Test
+    void adminCanDeleteAnotherMembersDraft() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = documentService.generate(deal.getId(), template().getId());
+        User admin = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), admin.getId(), "admin");
+        authenticateAs(admin, workspace.getId());
+
+        documentService.delete(deal.getId(), doc.id());
+
+        assertThrows(ResourceNotFoundException.class, () -> documentService.getOne(deal.getId(), doc.id()));
+    }
+
+    @Test
+    void nullCreatorIsAdminOnly() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = documentService.generate(deal.getId(), template().getId());
+        jdbcTemplate.update(
+                "UPDATE deal_document SET created_by = NULL WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), doc.id());
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> documentService.delete(deal.getId(), doc.id()));
+
+        workspaceMapper.updateMemberRole(workspace.getId(), member.getId(), "admin");
+        authenticateAs(member, workspace.getId());
+        documentService.delete(deal.getId(), doc.id());
+        assertThrows(ResourceNotFoundException.class, () -> documentService.getOne(deal.getId(), doc.id()));
     }
 
     @Test

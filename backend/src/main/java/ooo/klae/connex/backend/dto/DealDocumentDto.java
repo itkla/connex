@@ -14,6 +14,7 @@ package ooo.klae.connex.backend.dto;
  * @param title            resolved title snapshot
  * @param currency         document currency
  * @param generatedAt      when generated
+ * @param createdBy        generator user id
  * @param content          parsed immutable snapshot
  * @param requiresApproval whether an active approval policy currently blocks direct finalization
  * @param latestApproval   most recent approval request on this document (nullable)
@@ -29,6 +30,7 @@ public record DealDocumentDto(
     String title,
     String currency,
     String generatedAt,
+    Integer createdBy,
     DocumentContent content,
     boolean requiresApproval,
     DocumentApprovalDto latestApproval
