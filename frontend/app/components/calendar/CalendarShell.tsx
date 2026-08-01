@@ -35,6 +35,7 @@ import QuickCreateHost from './QuickCreateHost';
 import GoToDateDialog from './GoToDateDialog';
 import CalendarShortcuts from './CalendarShortcuts';
 import UpNext from './UpNext';
+import SourceNotice, { type CalendarSourceKey, type CalendarTruncation } from './SourceNotice';
 import { temperatureIndex } from './warmth';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
 
@@ -67,6 +68,10 @@ export interface CalendarShellProps {
     notes?: Note[];
     temperatures?: RelationshipTemperature[];
     currentUserId: number;
+    /** Sources whose fetch failed; the calendar discloses that it is incomplete. */
+    failedSources?: ReadonlyArray<CalendarSourceKey>;
+    /** Sources cut short by the per-source cap, disclosed above the grid. */
+    truncatedSources?: ReadonlyArray<CalendarTruncation>;
 }
 
 export default function CalendarShell({
@@ -77,6 +82,8 @@ export default function CalendarShell({
     notes,
     temperatures,
     currentUserId,
+    failedSources = [],
+    truncatedSources = [],
 }: CalendarShellProps) {
     const t = useTranslations('Calendar');
     const locale = useLocale();
@@ -436,6 +443,8 @@ export default function CalendarShell({
                         </div>
                     </header>
                 </Rise>
+
+                <SourceNotice failed={failedSources} truncated={truncatedSources} />
 
                 <UpNext events={visibleEvents} locale={locale} onOpenEvent={onOpenEvent} />
 

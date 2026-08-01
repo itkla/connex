@@ -688,6 +688,91 @@ async function getCompleteKnownPage<T>(
     return items;
 }
 
+/** Default per-source item cap for calendar reads. Five requests at the server's max page size. */
+export const CALENDAR_SOURCE_ITEM_CAP = 500;
+
+/**
+ * A bounded collection read: the items actually fetched, the server's reported total,
+ * and whether the cap cut the result short.
+ */
+export type CappedItems<T> = { items: T[]; total: number; truncated: boolean };
+
+/**
+ * Reads at most `cap` items from a paged endpoint.
+ *
+ * Unlike {@link getCompletePageItems}, which walks every page and so issues an
+ * unbounded number of serial requests on a large workspace, this stops at the cap and
+ * reports the truncation so the caller can disclose it. Callers must surface
+ * `truncated` — silently showing a partial collection as if it were the whole one is
+ * the failure mode this exists to prevent.
+ * @param fetchPage the paged endpoint to read
+ * @param cap maximum number of items to accumulate
+ */
+async function getCappedPageItems<T>(
+    fetchPage: (params: Types.PageParams, init: RequestInit) => Promise<Types.Page<T>>,
+    cap: number,
+    init: RequestInit = {},
+): Promise<CappedItems<T>> {
+    const items: T[] = [];
+    let total = 0;
+    for (let page = 1; items.length < cap; page += 1) {
+        const response = await fetchPage({ page, size: WORKSPACE_LIST_PAGE_SIZE }, init);
+        total = response.total;
+        if (response.items.length === 0) break;
+        items.push(...response.items);
+        if (items.length >= total) break;
+    }
+    const bounded = items.slice(0, cap);
+    return { items: bounded, total, truncated: total > bounded.length };
+}
+
+export function getTasksCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Task>>(
+        (init) => getCappedPageItems<Types.Task>(getTasksPage, cap, init),
+        cookie,
+    );
+}
+
+export function getActivitiesCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Activity>>(
+        (init) => getCappedPageItems<Types.Activity>(
+            (params, requestInit) => getActivitiesPage(params, requestInit),
+            cap,
+            init,
+        ),
+        cookie,
+    );
+}
+
+export function getNotesCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Note>>(
+        (init) => getCappedPageItems<Types.Note>(getNotesPage, cap, init),
+        cookie,
+    );
+}
+
+export function getContactsCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Contact>>(
+        (init) => getCappedPageItems<Types.Contact>(
+            (params, requestInit) => getContactsPage(params, requestInit),
+            cap,
+            init,
+        ),
+        cookie,
+    );
+}
+
+export function getDealsCappedResultFromCookie(cookie: string | null, cap = CALENDAR_SOURCE_ITEM_CAP) {
+    return resultWithCookie<CappedItems<Types.Deal>>(
+        (init) => getCappedPageItems<Types.Deal>(
+            (params, requestInit) => getDealsPage(params, requestInit),
+            cap,
+            init,
+        ),
+        cookie,
+    );
+}
+
 /** Complete, explicitly capped inputs for the relationship graph. */
 export async function getRelationshipMapData(init: RequestInit = {}) {
     const [companies, contacts, deals, activities, tasks, notes] = await Promise.all([

@@ -71,7 +71,22 @@
     "lastTouch": "{count, plural, =0 {今日連絡} =1 {昨日連絡} other {#日前に連絡}}",
     "neverTouched": "未接触",
     "alreadyCold": "疎遠 — 再接触を",
-    "goesColdIn": "{count, plural, =0 {今日疎遠に} =1 {明日疎遠に} other {#日後に疎遠に}}"
+    "goesColdIn": "{count, plural, =0 {今日疎遠に} =1 {明日疎遠に} other {#日後に疎遠に}}",
+    "sourceNotice": {
+      "failedTitle": "一部の予定を読み込めませんでした",
+      "failedBody": "このカレンダーは不完全です。{sources}を読み込めませんでした。ページを再読み込みしてお試しください。",
+      "warmthFailed": "コンタクトの温度感を読み込めなかったため、関係性の色分けが表示されない場合があります。",
+      "truncatedRecent": "{total}件の{source}のうち、最新の{shown}件を表示しています。それより古いものは表示されない場合があります。",
+      "truncatedNeutral": "{total}件の{source}のうち{shown}件を表示しています。一部は表示されない場合があります。",
+      "separator": "、",
+      "source": {
+        "activities": "アクティビティ",
+        "tasks": "タスク",
+        "persons": "コンタクト",
+        "deals": "案件",
+        "notes": "メモ"
+      }
+    }
   },
   "CalendarLayout": {
     "title": "概要 / カレンダー",
