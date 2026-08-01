@@ -23,6 +23,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
+import { PageShell } from '@/app/components/PageShell';
 import {
     cloneReportConfig,
     groupReportTemplates,
@@ -233,8 +234,8 @@ export default function ReportsBoard({
     );
 
     return (
-        <div className="min-h-full bg-background px-2 pb-12 pt-8">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <>
+            <PageShell tier="wide">
                 <Rise>
                     <header className="flex flex-wrap items-end justify-between gap-5">
                         <div>
@@ -350,7 +351,7 @@ export default function ReportsBoard({
                 ) : (
                     <Rise delay={0.06}>{startSection}</Rise>
                 )}
-            </div>
+            </PageShell>
 
             <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
                 <DialogContent>
@@ -368,6 +369,6 @@ export default function ReportsBoard({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </>
     );
 }
