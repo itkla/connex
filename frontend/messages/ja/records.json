@@ -205,6 +205,7 @@
   },
   "SavedViews": {
     "all": "すべて",
+    "loadFailed": "保存済みビューを読み込めませんでした",
     "save": "保存",
     "saveView": "ビューを保存",
     "updateView": "「{name}」を更新",

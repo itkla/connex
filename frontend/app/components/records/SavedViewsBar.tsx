@@ -7,6 +7,7 @@ import {
     BookmarkIcon,
     BookmarkSlashIcon,
     EllipsisHorizontalIcon,
+    ExclamationTriangleIcon,
     LinkIcon,
     LockClosedIcon,
     PencilIcon,
@@ -115,12 +116,18 @@ export default function SavedViewsBar({
     currentConfig,
     onApply,
     defaultView,
+    unavailable = false,
 }: {
     recordType: SavedViewRecordType;
     initialViews: SavedView[];
     currentConfig: SavedViewConfig;
     onApply: (config: SavedViewConfig) => void;
     defaultView?: SavedView | null;
+    /**
+     * Set when the saved-view list could not be loaded. The bar then says so instead of rendering its
+     * tabs, because an unreadable saved-view list must not present as an empty one.
+     */
+    unavailable?: boolean;
 }) {
     const t = useTranslations("SavedViews");
     const pathname = usePathname();
@@ -383,6 +390,15 @@ export default function SavedViewsBar({
             return null;
         }
     };
+
+    if (unavailable) {
+        return (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground">
+                <ExclamationTriangleIcon className="size-4 shrink-0" aria-hidden="true" />
+                {t("loadFailed")}
+            </div>
+        );
+    }
 
     return (
         <div className="flex items-center gap-1 overflow-x-auto">

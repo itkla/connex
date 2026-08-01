@@ -3806,6 +3806,14 @@ export function getSavedViewsFromCookie(recordType: Types.SavedViewRecordType, c
     return safeWithCookie<Types.SavedView>((init) => getSavedViews(recordType, init), cookie);
 }
 
+/**
+ * Failure-aware saved-view fetch (see {@link resultWithCookie}), so an unreadable view list is not
+ * presented as a workspace with no saved views.
+ */
+export function getSavedViewsResultFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null) {
+    return resultWithCookie<Types.SavedView[]>((init) => getSavedViews(recordType, init), cookie);
+}
+
 export async function getSavedView(id: number, init: RequestInit = {}) {
     return fromSavedViewWire(await getJson<SavedViewWire>(`/api/saved-views/${id}`, { cache: "no-store", ...init }));
 }
@@ -3825,10 +3833,6 @@ export function deleteSavedView(id: number, init: RequestInit = {}) {
 export async function getSavedViewPins(init: RequestInit = {}) {
     const views = await getJson<SavedViewWire[]>(`/api/saved-views/pins`, { cache: "no-store", ...init });
     return views.map(fromSavedViewWire);
-}
-
-export function getSavedViewPinsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.SavedView>((init) => getSavedViewPins(init), cookie);
 }
 
 export async function pinSavedView(id: number, position?: number): Promise<void> {
