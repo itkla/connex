@@ -36,6 +36,31 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
     window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
 }
 
+/**
+ * Reflects an arbitrary set of owned params into the URL via shallow `history.replaceState`, following
+ * the same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
+ * `window.location.search` as its base and only ever set/deletes the keys present in `owned`, so every
+ * other param — whether owned by another writer on the page or carried in from a shared link — survives
+ * untouched. An `undefined` or empty value deletes its key, which is how a closed deep-linked record
+ * clears itself without disturbing the surrounding query, sort, and filter state.
+ *
+ * @param pathname - the current path, used to rebuild the URL without a full navigation
+ * @param owned - the complete set of keys this writer owns, mapped to their current values
+ */
+export function writeOwnedParamsToUrl(
+    pathname: string,
+    owned: Readonly<Record<string, string | undefined>>,
+): void {
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries(owned)) {
+        if (value) params.set(key, value);
+        else params.delete(key);
+    }
+    const next = params.toString();
+    if (next === window.location.search.replace(/^\?/, '')) return;
+    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+}
+
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
 export function writeListQueryToUrl(pathname: string, query: string): void {
     const params = new URLSearchParams(window.location.search);
