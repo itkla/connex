@@ -22,6 +22,7 @@ import type { TaskStatus, User } from "@/app/lib/types";
 import { formatDate } from "@/app/lib/utils";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import Rise from "@/app/components/motion/Rise";
+import { PageShell } from "@/app/components/PageShell";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
 import { DUE_CHIP, formatDue } from "@/app/components/activity/tasks/taskDue";
@@ -90,8 +91,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     );
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
+        <PageShell tier="form">
                 <Rise className="flex flex-col gap-6">
                     <Link
                         href="/activity/tasks"
@@ -197,7 +197,6 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 </Rise>
 
                 <BacklinksPanel refType="task" refId={task.id} />
-            </div>
-        </div>
+        </PageShell>
     );
 }

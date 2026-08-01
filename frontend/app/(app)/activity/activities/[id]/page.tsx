@@ -19,6 +19,7 @@ import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
 import RecordReturnLink from "@/app/components/records/RecordReturnLink";
 import Rise from "@/app/components/motion/Rise";
+import { PageShell } from "@/app/components/PageShell";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
 import ProviderCaptureEvidence from "@/app/components/activity/ProviderCaptureEvidence";
@@ -83,8 +84,7 @@ export default async function ActivityDetailPage({
     const typeLabel = tPage(`type${kind}` as "typeCall");
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
+        <PageShell tier="form">
                 <Rise className="flex flex-col gap-6">
                     <RecordReturnLink
                         href={returnPath}
@@ -184,7 +184,6 @@ export default async function ActivityDetailPage({
                 ) : null}
 
                 <BacklinksPanel refType="activity" refId={activity.id} />
-            </div>
-        </div>
+        </PageShell>
     );
 }

@@ -29,6 +29,7 @@ import { type Company, type Contact, type Deal, type Tag } from "@/app/lib/types
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 
 import Rise from "@/app/components/motion/Rise";
+import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import CompanyActionsMenu from "@/app/components/records/companies/CompanyActionsMenu";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
@@ -113,8 +114,7 @@ export default async function CompanyPage({ params, searchParams }: CompanyPageP
     const interactionUsers = relatedUsers.filter((user) => interactionUserIds.has(user.id));
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <RecordStickyContext
                     anchorId="company-record-identity"
                     backHref={returnPath}
@@ -285,7 +285,6 @@ export default async function CompanyPage({ params, searchParams }: CompanyPageP
                         </section>
                     </Rise>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

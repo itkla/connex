@@ -26,6 +26,7 @@ import Timeline from "@/app/components/me/Timeline";
 import EmptyState from "@/app/components/me/EmptyState";
 import Attachments from "@/app/components/attachments/Attachments";
 import Rise from "@/app/components/motion/Rise";
+import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import UserPerformance from "@/app/components/users/UserPerformance";
 
@@ -59,8 +60,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     const hasActivity = tasks.length > 0 || activities.length > 0 || notes.length > 0;
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <Rise>
                     <div className="flex flex-col gap-8">
                         <Link
@@ -149,7 +149,6 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                         </div>
                     </Rise>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }
