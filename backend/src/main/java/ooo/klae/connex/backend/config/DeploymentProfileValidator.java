@@ -16,10 +16,22 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Enforces deployment-profile posture constraints during startup. An unset profile
- * remains bootable during the soft launch, with a warning outside dev/test. Forced
- * cookie security and database transport checks are intentionally outside this v1
- * matrix because existing fail-closed validators already own those requirements.
+ * Enforces deployment-profile posture constraints during startup. A deployed instance must
+ * declare its edition: an unset or blank {@code connex.deployment.profile} fails startup
+ * outside the dev, test, and seeder profiles, so posture enforcement can never be silently
+ * inactive in production.
+ *
+ * <p>The seeder profile is exempt because seeder mode requires the opposite:
+ * {@code SeederStartupConfigurationValidator} refuses a set {@code connex.deployment.profile},
+ * and its guard already forces {@code seeder} to be the sole active profile with a non-web,
+ * maintenance-mode context. Without this exemption seeder runs would be unbootable in both
+ * directions.
+ *
+ * <p>Invalid values remain the responsibility of bean validation on
+ * {@link DeploymentProperties}. Forced cookie security and database transport checks are
+ * intentionally outside this matrix because existing fail-closed validators already own those
+ * requirements. The effective capability matrix is logged separately by
+ * {@code CapabilityProfileMatrixLogger}.
  */
 @Component
 @RequiredArgsConstructor
@@ -48,19 +60,15 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         if (!properties.isConfigured()) {
-            if (environment.acceptsProfiles(Profiles.of("dev", "test"))) {
-                log.debug("deployment profile unset (dev/test) — posture enforcement inactive");
+            if (environment.acceptsProfiles(Profiles.of("dev", "test", "seeder"))) {
+                log.debug("deployment profile unset (dev/test/seeder) — posture enforcement inactive");
                 return;
             }
-            log.warn("CONNEX_DEPLOYMENT_PROFILE is unset outside dev/test; set it to saas, silo, or on-prem. "
-                + "Deployment posture enforcement is inactive during soft launch and will become mandatory");
-            return;
+            throw new IllegalStateException(
+                "CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem outside dev/test/seeder");
         }
 
         String profile = properties.getProfile();
-        if (profile == null) {
-            throw new IllegalStateException("connex.deployment.profile became null during startup validation");
-        }
         List<String> forbiddenKeys = FORBIDDEN_KEYS_BY_PROFILE.get(profile);
         if (forbiddenKeys == null) {
             throw new IllegalStateException("Unsupported connex.deployment.profile=" + profile);

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Set;
 
@@ -16,10 +17,42 @@ import org.springframework.mock.env.MockEnvironment;
 
 class DeploymentProfileValidatorTest {
 
+    private static final String MISSING_PROFILE_MESSAGE =
+        "CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem outside dev/test/seeder";
+
     @Test
-    void allowsUnsetProfileOutsideDevDuringSoftLaunch() {
+    void rejectsUnsetProfileOutsideDevTestAndSeeder() {
         MockEnvironment environment = new MockEnvironment()
             .withProperty("connex.bootstrap.enabled", "true");
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+            () -> validator("", environment).run(null));
+
+        assertEquals(MISSING_PROFILE_MESSAGE, exception.getMessage());
+    }
+
+    @Test
+    void rejectsBlankProfileOutsideDevTestAndSeeder() {
+        MockEnvironment environment = new MockEnvironment();
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+            () -> validator("   ", environment).run(null));
+
+        assertEquals(MISSING_PROFILE_MESSAGE, exception.getMessage());
+    }
+
+    @Test
+    void allowsUnsetProfileForSeeder() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("seeder");
+
+        assertDoesNotThrow(() -> validator("", environment).run(null));
+    }
+
+    @Test
+    void allowsUnsetProfileInTest() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("test");
 
         assertDoesNotThrow(() -> validator("", environment).run(null));
     }
@@ -97,6 +130,17 @@ class DeploymentProfileValidatorTest {
             assertFalse(violations.isEmpty());
             assertEquals("connex.deployment.profile must be one of: saas, silo, on-prem",
                 violations.iterator().next().getMessage());
+        }
+    }
+
+    @Test
+    void bindingStillAcceptsAnAbsentProfileSoSeederModeCanBoot() {
+        DeploymentProperties properties = new DeploymentProperties();
+
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Set<ConstraintViolation<DeploymentProperties>> violations = factory.getValidator().validate(properties);
+
+            assertTrue(violations.isEmpty());
         }
     }
 

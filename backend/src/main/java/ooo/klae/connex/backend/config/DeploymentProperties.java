@@ -21,6 +21,14 @@ public class DeploymentProperties {
     public static final String PROFILE_SILO = "silo";
     public static final String PROFILE_ON_PREM = "on-prem";
 
+    /**
+     * Accepts an absent value on purpose. Bean validation runs at bind time, before any
+     * profile-aware logic can apply an exemption, and an absent value is legal for the dev,
+     * test, and seeder profiles — seeder mode in fact requires it, because
+     * {@code SeederStartupConfigurationValidator} refuses a set profile. Making the value
+     * mandatory here would therefore make seeder runs unbootable. Presence is instead
+     * enforced conditionally at startup by {@link DeploymentProfileValidator}.
+     */
     @Pattern(regexp = "^(saas|silo|on-prem)?$",
         message = "connex.deployment.profile must be one of: saas, silo, on-prem")
     private String profile = "";
