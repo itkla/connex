@@ -4452,10 +4452,6 @@ export function getCampaignExports(id: number, init: RequestInit = {}) {
     return getJson<Types.CampaignAudienceExport[]>(`/api/campaigns/${id}/exports`, init);
 }
 
-export function getCampaignExportsFromCookie(id: number, cookie: string | null) {
-    return safeReadWithCookie<Types.CampaignAudienceExport>((init) => getCampaignExports(id, init), cookie);
-}
-
 export function createCampaignExport(id: number, payload: Types.CampaignAudienceExportPayload) {
     return postJson<Types.CampaignAudienceExport>(`/api/campaigns/${id}/exports`, payload);
 }
