@@ -2450,67 +2450,13 @@ export function getContactTagsFromCookie(id: number, cookie: string | null) {
 export function addContactTag(id: number, tagId: number, init: RequestInit = {}) {
     return postJson<void>(`/api/persons/${id}/tags/${tagId}`, {}, init);
 }
-/**
- * Applies a tag to a contact during SSR, reporting whether the write actually landed.
- *
- * A write reports {@link CookieResult} rather than going through {@link safeWithCookie},
- * so a rejected request — a permission denial, a tenant mismatch, an unreachable backend —
- * cannot be mistaken for a completed one. A missing cookie reports `ok: false` for the same
- * reason: with no session there is nothing to write under, so nothing was applied.
- *
- * `ok: true` means the client saw the backend confirm the write. A connection lost after the
- * backend committed still reports `ok: false`, which is the honest direction to be wrong in.
- * @param id the contact to tag
- * @param tagId the tag to apply
- * @param cookie the incoming request's cookie header, or null
- * @returns whether the write was confirmed
- */
-export function addContactTagFromCookie(
-    id: number,
-    tagId: number,
-    cookie: string | null,
-): Promise<CookieResult<void>> {
-    return resultWithCookie<void>((init) => addContactTag(id, tagId, init), cookie);
-}
 
 export function removeContactTag(id: number, tagId: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/persons/${id}/tags/${tagId}`, init);
 }
-/**
- * Removes a tag from a contact during SSR, reporting whether the write actually landed.
- * Failure-aware for the reasons given on {@link addContactTagFromCookie}.
- * @param id the contact to untag
- * @param tagId the tag to remove
- * @param cookie the incoming request's cookie header, or null
- * @returns whether the write was confirmed
- */
-export function removeContactTagFromCookie(
-    id: number,
-    tagId: number,
-    cookie: string | null,
-): Promise<CookieResult<void>> {
-    return resultWithCookie<void>((init) => removeContactTag(id, tagId, init), cookie);
-}
 
 export function replaceContactTags(id: number, tagIds: number[], init: RequestInit = {}) {
     return putJson<Types.Tag[]>(`/api/persons/${id}/tags`, tagIds, init);
-}
-/**
- * Replaces a contact's tag set during SSR, reporting whether the write actually landed.
- * Failure-aware for the reasons given on {@link addContactTagFromCookie}; here the
- * swallowed form was worse still, since an empty array also reads as "the server replaced
- * the tag set with no tags".
- * @param id the contact whose tags are replaced
- * @param tagIds the tags the contact should end up with
- * @param cookie the incoming request's cookie header, or null
- * @returns the resulting tag set, or the fact that it could not be written
- */
-export function replaceContactTagsFromCookie(
-    id: number,
-    tagIds: number[],
-    cookie: string | null,
-): Promise<CookieResult<Types.Tag[]>> {
-    return resultWithCookie<Types.Tag[]>((init) => replaceContactTags(id, tagIds, init), cookie);
 }
 
 export function getContactDeals(id: number, init: RequestInit = {}) {
