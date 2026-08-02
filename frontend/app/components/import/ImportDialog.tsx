@@ -21,11 +21,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { commitImport, isFieldError, previewImport, search } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import { usePermission } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import {
     columnSamples,
+    CREATE_CUSTOM_FIELD,
+    IGNORE_COLUMN,
     inferColumnType,
     parseCsv,
+    resolveColumnTarget,
     STANDARD_FIELDS,
     suggestField,
     type InferredType,
@@ -42,8 +46,6 @@ import type {
 
 const MAX_ROWS = 5000;
 const MAX_BYTES = 5 * 1024 * 1024;
-const IGNORE = 'ignore';
-const CREATE = '__create__';
 const CUSTOM_TYPES: InferredType[] = ['text', 'number', 'date', 'boolean', 'url'];
 const DUPLICATE_ACTIONS: ImportDuplicateAction[] = ['fill_empty', 'skip', 'overwrite'];
 
@@ -120,6 +122,7 @@ export type ImportDialogProps = {
 export default function ImportDialog({ entity, open, onOpenChange, onImported, requestInit }: ImportDialogProps) {
     const t = useTranslations('importExport');
     const reduceMotion = useReducedMotion();
+    const canCreateCustomField = usePermission('CUSTOM_FIELD_MANAGE');
     const { activeWorkspaceId } = useWorkspace();
     const workspaceKey =
         requestWorkspaceKey(requestInit) || activeWorkspaceId?.toString() || '';
@@ -200,7 +203,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                     else taken.add(suggested);
                 }
                 initial[header] = {
-                    target: suggested ?? IGNORE,
+                    target: suggested ?? IGNORE_COLUMN,
                     customType: inferColumnType(columnSamples(result.rows, header)),
                 };
             }
@@ -219,17 +222,24 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         const mapping: ImportColumnMapping[] = [];
         for (const header of parsed.headers) {
             const col = columns[header];
-            if (!col || col.target === IGNORE) continue;
-            if (col.target === CREATE) {
+            const target = resolveColumnTarget(col?.target, canCreateCustomField);
+            if (!col || target === IGNORE_COLUMN) continue;
+            if (target === CREATE_CUSTOM_FIELD) {
                 mapping.push({ column: header, createCustomField: true, customFieldType: col.customType, customFieldLabel: header });
             } else {
-                mapping.push({ column: header, field: col.target });
+                mapping.push({ column: header, field: target });
             }
         }
         return mapping;
     }
 
-    const mappedCount = useMemo(() => Object.values(columns).filter((c) => c.target !== IGNORE).length, [columns]);
+    const mappedCount = useMemo(
+        () =>
+            Object.values(columns).filter(
+                (c) => resolveColumnTarget(c.target, canCreateCustomField) !== IGNORE_COLUMN,
+            ).length,
+        [columns, canCreateCustomField],
+    );
     const hasName = useMemo(() => Object.values(columns).some((c) => c.target === 'name'), [columns]);
     const nameColumn = useMemo(
         () => Object.entries(columns).find(([, c]) => c.target === 'name')?.[0] ?? null,
@@ -424,7 +434,14 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                         />
                     )}
                     {step === 'map' && parsed && (
-                        <MapStep parsed={parsed} entity={entity} columns={columns} setColumns={setColumns} mappedCount={mappedCount} />
+                        <MapStep
+                            parsed={parsed}
+                            entity={entity}
+                            columns={columns}
+                            setColumns={setColumns}
+                            mappedCount={mappedCount}
+                            canCreateCustomField={canCreateCustomField}
+                        />
                     )}
                     {step === 'review' && preview && (
                         <ReviewStep preview={preview} stale={reviewStale} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={parsed} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit} />
@@ -557,12 +574,14 @@ function MapStep({
     columns,
     setColumns,
     mappedCount,
+    canCreateCustomField,
 }: {
     parsed: ParsedCsv;
     entity: ImportEntity;
     columns: Record<string, ColumnTarget>;
     setColumns: (updater: (prev: Record<string, ColumnTarget>) => Record<string, ColumnTarget>) => void;
     mappedCount: number;
+    canCreateCustomField: boolean;
 }) {
     const t = useTranslations('importExport');
     const fieldOptions = useMemo(
@@ -584,6 +603,7 @@ function MapStep({
             <div className="space-y-2">
                 {parsed.headers.map((header) => {
                     const col = columns[header];
+                    const target = resolveColumnTarget(col?.target, canCreateCustomField);
                     const samples = columnSamples(parsed.rows, header, 3).join(', ');
                     return (
                         <div key={header} className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg border border-border px-3 py-2">
@@ -593,19 +613,21 @@ function MapStep({
                             </div>
                             <span className="text-muted-foreground" aria-hidden>→</span>
                             <div className="flex items-center gap-2">
-                                <Select value={col?.target ?? IGNORE} onValueChange={(v) => setTarget(header, v)}>
+                                <Select value={target} onValueChange={(v) => setTarget(header, v)}>
                                     <SelectTrigger size="sm" className="w-full">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value={IGNORE}>{t('ignore')}</SelectItem>
+                                        <SelectItem value={IGNORE_COLUMN}>{t('ignore')}</SelectItem>
                                         {fieldOptions.map((f) => (
                                             <SelectItem key={f.key} value={f.key}>{f.label}</SelectItem>
                                         ))}
-                                        <SelectItem value={CREATE}>{t('createCustomField')}</SelectItem>
+                                        {canCreateCustomField && (
+                                            <SelectItem value={CREATE_CUSTOM_FIELD}>{t('createCustomField')}</SelectItem>
+                                        )}
                                     </SelectContent>
                                 </Select>
-                                {col?.target === CREATE && (
+                                {col && target === CREATE_CUSTOM_FIELD && (
                                     <Select value={col.customType} onValueChange={(v) => setType(header, v)}>
                                         <SelectTrigger size="sm" className="w-28">
                                             <SelectValue />
