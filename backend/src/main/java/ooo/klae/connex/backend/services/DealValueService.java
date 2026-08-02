@@ -63,30 +63,46 @@ public class DealValueService {
     }
 
     /**
-     * Resolves the realized value for a won or lost transition. Only a won deal carries realized
-     * value: with line items it derives from the line-item total, otherwise it keeps the supplied or
-     * existing amount. A lost or undetermined outcome always resolves to zero regardless of any
-     * client-supplied value, because {@code deal_metrics.closed_revenue} sums {@code actual_value}
-     * for every closed deal, so crediting a lost deal with booking value would inflate reported
-     * revenue.
+     * Resolves the realized value a deal takes at the moment it wins, independently of how it got
+     * there. A deal with line items derives the line-item total and rejects a differing submitted
+     * amount; a deal without them records exactly what was submitted, and zero when nothing was.
+     *
+     * <p>The derived total never inherits the deal's stored {@code actual_value}. Path-independence
+     * is the contract: winning, losing and winning again must land on the same figure as winning the
+     * first time, and carrying a stale amount left over from an earlier win would make the result
+     * depend on the deal's history rather than on its line items.
+     *
+     * <p>An amount matching what the deal already holds is an echo rather than an edit, and derives
+     * silently. A form edit reads the deal, changes only the stage and saves the whole record back,
+     * so the request carries the stored realized value whether or not the operator touched the
+     * field; treating that as a manual edit would refuse the ordinary act of dragging a line-item
+     * deal onto a won stage. Only an amount that matches neither the stored figure nor the derived
+     * total is a real attempt to overwrite line-item revenue by hand.
      */
-    @Transactional(propagation = Propagation.MANDATORY)
-    public BigDecimal resolveActualValueForClose(
-            int workspaceId, Deal lockedDeal, Boolean won, BigDecimal requestedActualValue) {
-        if (!Boolean.TRUE.equals(won)) {
-            return money(null);
-        }
-        boolean hasLineItems = dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0;
-        if (hasLineItems) {
-            BigDecimal derived = money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
-            if (requestedActualValue != null && money(requestedActualValue).compareTo(derived) != 0) {
+    private BigDecimal resolveRealizedValueForFreshWin(
+            int workspaceId, Deal lockedDeal, BigDecimal requestedActualValue) {
+        if (dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0) {
+            BigDecimal derived =
+                money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
+            if (isManualOverwrite(requestedActualValue, derived, lockedDeal.getActualValue())) {
                 throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
             }
             return derived;
         }
-        return requestedActualValue == null
-            ? money(lockedDeal.getActualValue())
-            : money(requestedActualValue);
+        return money(requestedActualValue);
+    }
+
+    /**
+     * Whether a submitted realized value is an operator overwriting the line-item total by hand,
+     * rather than a client echoing back a figure it was given.
+     */
+    private boolean isManualOverwrite(
+            BigDecimal requested, BigDecimal derived, BigDecimal stored) {
+        if (requested == null) {
+            return false;
+        }
+        BigDecimal submitted = money(requested);
+        return submitted.compareTo(derived) != 0 && submitted.compareTo(money(stored)) != 0;
     }
 
     /**
@@ -99,8 +115,9 @@ public class DealValueService {
      *       {@code actual_value} across every closed deal, so a won-to-lost transition that kept the
      *       won figure would inflate reported revenue by the full value of a deal the business
      *       failed to win.</li>
-     *   <li><b>Freshly won</b> — derives from the line-item total, or keeps the supplied or existing
-     *       amount when the deal has no line items.</li>
+     *   <li><b>Freshly won</b> — derives from the line-item total, or records the submitted amount
+     *       when the deal has no line items. The stored figure is never inherited, so winning a deal
+     *       lands on the same value however often it was won and lost before.</li>
      *   <li><b>Already won, or still open</b> — realized value stays frozen at the win and only an
      *       explicit operator edit moves it.</li>
      * </ul>
@@ -119,28 +136,13 @@ public class DealValueService {
         if (Boolean.FALSE.equals(lockedDeal.getWon())) {
             return persistRealizedValue(workspaceId, lockedDeal, money(null));
         }
-        BigDecimal submitted = submittedEdit(lockedDeal, requestedActualValue);
         if (Boolean.TRUE.equals(lockedDeal.getWon()) && !Boolean.TRUE.equals(previousOutcome)) {
-            return persistRealizedValue(workspaceId, lockedDeal, resolveActualValueForClose(
-                workspaceId, lockedDeal, Boolean.TRUE, submitted));
+            return persistRealizedValue(workspaceId, lockedDeal,
+                resolveRealizedValueForFreshWin(workspaceId, lockedDeal, requestedActualValue));
         }
-        BigDecimal edited = setRealizedValue(workspaceId, lockedDeal, submitted);
+        BigDecimal edited = setRealizedValue(workspaceId, lockedDeal, requestedActualValue);
         lockedDeal.setActualValue(edited);
         return edited;
-    }
-
-    /**
-     * Narrows a submitted realized value to a genuine edit. A full deal update echoes the stored
-     * figure back, so an amount equal to what is already on the deal expresses no intent and must
-     * not be validated against a freshly derived line-item total — otherwise winning a line-item
-     * deal through the form would conflict with the value the same request just round-tripped.
-     */
-    private static BigDecimal submittedEdit(Deal lockedDeal, BigDecimal requestedActualValue) {
-        if (requestedActualValue == null) {
-            return null;
-        }
-        BigDecimal requested = money(requestedActualValue);
-        return requested.compareTo(money(lockedDeal.getActualValue())) == 0 ? null : requested;
     }
 
     /**

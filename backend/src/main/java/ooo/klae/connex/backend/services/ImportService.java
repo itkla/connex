@@ -7,9 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -96,6 +93,7 @@ public class ImportService {
     private final DealMapper dealMapper;
     private final DealLineItemMapper dealLineItemMapper;
     private final DealValueService dealValueService;
+    private final DealOutcomeWriter dealOutcomeWriter;
     private final TagMapper tagMapper;
     private final TagService tagService;
     private final PipelineMapper pipelineMapper;
@@ -109,7 +107,6 @@ public class ImportService {
     private final MatchingService matchingService;
     private final DuplicatePreflightService duplicatePreflightService;
 
-    private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
     private static final String DEFAULT_CURRENCY = "USD";
     private static final int DEAL_VALUE_SCALE = 2;
@@ -1039,6 +1036,7 @@ public class ImportService {
 
         List<PlanRow> toCreate = new ArrayList<>();
         List<Deal> beans = new ArrayList<>();
+        List<DealOutcomeWriter.NewDeal> newDeals = new ArrayList<>();
         int updated = 0;
         int skipped = 0;
 
@@ -1073,13 +1071,14 @@ public class ImportService {
             bean.setPipelineId(row.resolvedPipelineId);
             bean.setStageId(row.resolvedStageId);
             bean.setCompanyId(companyId(row, companyByName));
-            reconcileClose(workspaceId, bean, stageOutcome);
+            newDeals.add(new DealOutcomeWriter.NewDeal(bean, bean.getValue(),
+                outcomeFor(workspaceId, bean.getStageId(), stageOutcome)));
             beans.add(bean);
             toCreate.add(row);
         }
 
         if (!beans.isEmpty()) {
-            dealMapper.insertBatch(beans);
+            dealOutcomeWriter.createBatch(newDeals);
             for (int i = 0; i < beans.size(); i++) {
                 Deal bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
@@ -1292,7 +1291,8 @@ public class ImportService {
             existing.setPipelineId(row.resolvedPipelineId);
             existing.setStageId(row.resolvedStageId);
         }
-        reconcileClose(workspaceId, existing, stageOutcome);
+        String outcome = outcomeFor(workspaceId, existing.getStageId(), stageOutcome);
+        dealOutcomeWriter.applyOutcome(existing, outcome);
         Integer afterStageId = existing.getStageId();
         boolean parentChanged =
             !Objects.equals(beforeName, existing.getName())
@@ -1307,9 +1307,8 @@ public class ImportService {
                 || !Objects.equals(beforeClosedReason, existing.getClosedReason())
                 || !Objects.equals(beforeOutcome, existing.getWon());
         if (parentChanged) {
-            dealMapper.update(existing);
+            dealOutcomeWriter.write(workspaceId, existing, beforeOutcome, null, outcome);
         }
-        dealValueService.reconcileRealizedValue(workspaceId, existing, beforeOutcome, null);
         if (afterStageId != null && !afterStageId.equals(beforeStageId)) {
             dealStageHistoryService.recordTransition(
                 workspaceId, existing.getId(), afterStageId, beforeOutcome, existing.getWon());
@@ -1354,18 +1353,10 @@ public class ImportService {
         }
     }
 
-    private void reconcileClose(int workspaceId, Deal deal, Map<Integer, String> stageOutcome) {
-        Integer stageId = deal.getStageId();
-        String outcome = stageId == null ? "normal"
-            : stageOutcome.computeIfAbsent(stageId, sid -> dealMapper.getStageOutcome(workspaceId, sid));
-        if ("won".equals(outcome)) deal.setWon(true);
-        else if ("lost".equals(outcome)) deal.setWon(false);
-        if (deal.getWon() == null) {
-            deal.setClosedAt(null);
-            deal.setClosedReason(null);
-        } else if (deal.getClosedAt() == null || deal.getClosedAt().isBlank()) {
-            deal.setClosedAt(LocalDateTime.now(ZoneOffset.UTC).format(MYSQL_DATETIME));
-        }
+    private String outcomeFor(int workspaceId, Integer stageId, Map<Integer, String> stageOutcome) {
+        return stageId == null ? "normal"
+            : stageOutcome.computeIfAbsent(
+                stageId, sid -> dealOutcomeWriter.stageOutcome(workspaceId, sid));
     }
 
     private Map<String, Integer> resolveDealPeople(int workspaceId, List<PlanRow> plan, String action) {

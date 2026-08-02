@@ -137,7 +137,7 @@ public class DealDto {
         d.setOwnerId(ownerId);
         d.setName(name);
         d.setValue(money(value));
-        d.setActualValue(money(actualValue));
+        d.setActualValue(actualValue == null ? null : money(actualValue));
         d.setCurrency(currency);
         d.setPipelineId(pipeline);
         d.setStageId(stage);

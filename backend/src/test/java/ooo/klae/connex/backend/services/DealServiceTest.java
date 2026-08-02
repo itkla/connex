@@ -1555,6 +1555,81 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
     }
 
+    @Test
+    void reWinningAfterALossDerivesTheSameRealizedValueAsTheFirstWin() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Stage won = newSuccessStage(pipeline, 2);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+        BigDecimal firstWin = storedActualValue(deal.getId());
+
+        dealService.move(deal.getId(), lost.getId(), 0);
+        assertEquals(0, BigDecimal.ZERO.compareTo(storedActualValue(deal.getId())));
+        dealService.move(deal.getId(), won.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(firstWin));
+        assertEquals(0, firstWin.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void reWinningAfterAReopenDerivesTheSameRealizedValueAsTheFirstWin() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage won = newSuccessStage(pipeline, 1);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+        BigDecimal firstWin = storedActualValue(deal.getId());
+
+        dealService.reopen(deal.getId());
+        dealService.move(deal.getId(), won.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, firstWin.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void reWinningAManualDealAfterALossDoesNotResurrectTheOldFigure() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Stage won = newSuccessStage(pipeline, 2);
+        Deal deal = newDeal(pipeline, open, newCompany());
+        dealService.close(deal.getId(), true, "Signed", new BigDecimal("5000000.00"));
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(storedActualValue(deal.getId())));
+
+        dealService.move(deal.getId(), lost.getId(), 0);
+        dealService.move(deal.getId(), won.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void reWinningAgreesWhicheverWayTheDealWasUnwon() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Stage won = newSuccessStage(pipeline, 2);
+        Company company = newCompany();
+
+        Deal viaLost = newDeal(pipeline, open, company);
+        dealService.close(viaLost.getId(), true, "Signed", new BigDecimal("5000000.00"));
+        dealService.move(viaLost.getId(), lost.getId(), 0);
+        dealService.move(viaLost.getId(), won.getId(), 0);
+
+        Deal viaReopen = newDeal(pipeline, open, company);
+        dealService.close(viaReopen.getId(), true, "Signed", new BigDecimal("5000000.00"));
+        dealService.reopen(viaReopen.getId());
+        dealService.move(viaReopen.getId(), won.getId(), 0);
+
+        assertEquals(0, storedActualValue(viaLost.getId())
+            .compareTo(storedActualValue(viaReopen.getId())));
+    }
+
     private Deal wonLineItemDeal(Pipeline pipeline, Stage stage, Company company) {
         Deal deal = newDeal(pipeline, stage, company);
         addLineItem(deal, "5000000.00");

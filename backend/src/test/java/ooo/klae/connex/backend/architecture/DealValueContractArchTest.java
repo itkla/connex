@@ -50,6 +50,8 @@ class DealValueContractArchTest {
     private static final Pattern MONEY_ASSIGNMENT = Pattern.compile(
         "\\b(?:value|actual_value|value_source)\\s*=", Pattern.CASE_INSENSITIVE);
     private static final Set<String> STATEMENT_TAGS = Set.of("select", "insert", "update", "delete");
+    private static final Set<String> DEAL_ROW_WRITERS =
+        Set.of("DealMapper.java", "DealOutcomeWriter.java", "SeederBatchWriter.java");
 
     @Test
     void dealMoneyCarriersNeverUseFloatingPointTypes() throws Exception {
@@ -90,22 +92,53 @@ class DealValueContractArchTest {
             "Canonical deal-value writes escaped DealValueService: " + violations);
     }
 
+    /**
+     * Deal rows may only be written through {@code DealOutcomeWriter}, which reconciles realized
+     * value in the same step. A file-level "also calls reconcile" rule would not do: it can never
+     * fire inside {@code DealService} or {@code ImportService}, the only two files that write deal
+     * outcomes, because each already reconciles somewhere else in the file. Containment is checked
+     * instead, so adding an unreconciled route anywhere fails the build.
+     */
     @Test
-    void everyDealOutcomeWriterReconcilesRealizedValue() throws Exception {
+    void onlyDealOutcomeWriterWritesDealRows() throws Exception {
         Path sourceRoot = repoRoot().resolve("backend/src/main/java");
         List<String> violations = new ArrayList<>();
         try (Stream<Path> files = Files.walk(sourceRoot)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String name = file.getFileName().toString();
+                if (DEAL_ROW_WRITERS.contains(name)) {
+                    continue;
+                }
                 String source = Files.readString(file);
                 if (source.contains("dealMapper.update(")
-                        && !source.contains("reconcileRealizedValue(")) {
+                        || source.contains("dealMapper.insert(")
+                        || source.contains("dealMapper.insertBatch(")) {
                     violations.add(sourceRoot.relativize(file).toString());
                 }
             }
         }
         assertTrue(violations.isEmpty(),
-            "A route writes the deal outcome without reconciling realized value, so a won-to-lost"
-                + " transition would keep the won figure and inflate closed revenue: " + violations);
+            "Deal rows must be written through DealOutcomeWriter so realized value is reconciled in"
+                + " the same step; a won-to-lost transition that skipped it would keep the won"
+                + " figure and inflate closed revenue: " + violations);
+    }
+
+    /**
+     * The generated demo deal is the one deal row not written through {@code DealOutcomeWriter}, so
+     * its compliance is asserted directly rather than assumed: a seeded deal that is not won must
+     * carry zero realized value.
+     */
+    @Test
+    void seededDealsNeverGiveAnUnwonDealRealizedValue() throws Exception {
+        Path generator = repoRoot().resolve(
+            "backend/src/main/java/ooo/klae/connex/backend/seeder/SeedDataGenerator.java");
+        String source = Files.readString(generator);
+
+        assertTrue(source.contains("deal.setWon(outcome < 2);"),
+            "SeedDataGenerator no longer decides won from 'outcome < 2'; re-verify the pairing");
+        assertTrue(source.contains("deal.setActualValue(outcome < 2"),
+            "SeedDataGenerator must gate realized value on the same predicate as won, so a seeded"
+                + " lost deal records zero");
     }
 
     @Test

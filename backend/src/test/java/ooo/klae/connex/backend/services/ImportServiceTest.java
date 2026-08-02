@@ -2144,6 +2144,50 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(0, new BigDecimal("5000000.00").compareTo(updated.getActualValue()));
     }
 
+    @Test
+    void dealImportCreatingOnAWonStageRecordsTheImportedValueAsRealized() {
+        Pipeline pipeline = newPipeline();
+        Stage won = terminalStage(pipeline, 0, true);
+
+        ImportResult result = reviewAndCommitDeals(req(
+            List.of(map("Deal", "name"), map("Value", "value"),
+                map("Pipe", "pipeline"), map("Stage", "stage")),
+            List.of(Map.of(
+                "Deal", "Imported Won " + unique(),
+                "Value", "5000000.00",
+                "Pipe", pipeline.getName(),
+                "Stage", won.getName())),
+            "fill_empty"));
+
+        assertEquals(1, result.getCreated());
+        List<Deal> deals = dealMapper.getAllDeals(workspace.getId());
+        assertEquals(1, deals.size());
+        assertEquals(Boolean.TRUE, deals.get(0).getWon());
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(deals.get(0).getActualValue()));
+    }
+
+    @Test
+    void dealImportCreatingOnALostStageRecordsZeroRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage lost = terminalStage(pipeline, 0, false);
+
+        ImportResult result = reviewAndCommitDeals(req(
+            List.of(map("Deal", "name"), map("Value", "value"),
+                map("Pipe", "pipeline"), map("Stage", "stage")),
+            List.of(Map.of(
+                "Deal", "Imported Lost " + unique(),
+                "Value", "5000000.00",
+                "Pipe", pipeline.getName(),
+                "Stage", lost.getName())),
+            "fill_empty"));
+
+        assertEquals(1, result.getCreated());
+        List<Deal> deals = dealMapper.getAllDeals(workspace.getId());
+        assertEquals(1, deals.size());
+        assertEquals(Boolean.FALSE, deals.get(0).getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(deals.get(0).getActualValue()));
+    }
+
     private Stage terminalStage(Pipeline pipeline, int position, boolean success) {
         Stage stage = new Stage();
         stage.setName((success ? "Won " : "Lost ") + unique());
