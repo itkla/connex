@@ -220,15 +220,17 @@ export default function CampaignDetail({
                             </h1>
                             <CampaignStatusBadge status={campaign.status} />
                         </div>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmDelete(true)}
-                            className="shrink-0 text-muted-foreground hover:text-destructive"
-                        >
-                            <TrashIcon className="size-4" />
-                            {t("delete")}
-                        </Button>
+                        {canManage && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setConfirmDelete(true)}
+                                className="shrink-0 text-muted-foreground hover:text-destructive"
+                            >
+                                <TrashIcon className="size-4" />
+                                {t("delete")}
+                            </Button>
+                        )}
                     </div>
                 </Rise>
 
@@ -322,29 +324,33 @@ export default function CampaignDetail({
                             >
                                 <div className="flex flex-col gap-4">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <SegmentBuilder
-                                            definition={definition}
-                                            fields={segmentFields}
-                                            onChange={changeDefinition}
-                                            recordType={recordType}
-                                            options={null}
-                                            advanced
-                                        />
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={saveAudience}
-                                            disabled={isSaving || audienceSaved}
-                                        >
-                                            {isSaving ? (
-                                                <>
-                                                    <Loader2Icon className="size-4 animate-spin" />
-                                                    {at("saving")}
-                                                </>
-                                            ) : (
-                                                at("saveAudience")
-                                            )}
-                                        </Button>
+                                        {canManage && (
+                                            <>
+                                                <SegmentBuilder
+                                                    definition={definition}
+                                                    fields={segmentFields}
+                                                    onChange={changeDefinition}
+                                                    recordType={recordType}
+                                                    options={null}
+                                                    advanced
+                                                />
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={saveAudience}
+                                                    disabled={isSaving || audienceSaved}
+                                                >
+                                                    {isSaving ? (
+                                                        <>
+                                                            <Loader2Icon className="size-4 animate-spin" />
+                                                            {at("saving")}
+                                                        </>
+                                                    ) : (
+                                                        at("saveAudience")
+                                                    )}
+                                                </Button>
+                                            </>
+                                        )}
                                         <Button
                                             variant="brand"
                                             size="sm"
@@ -376,23 +382,25 @@ export default function CampaignDetail({
                                                 estimate={estimate}
                                                 recordType={recordType}
                                             />
-                                            <div>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={freezeSnapshot}
-                                                    disabled={isFreezing}
-                                                >
-                                                    {isFreezing ? (
-                                                        <>
-                                                            <Loader2Icon className="size-4 animate-spin" />
-                                                            {at("freezing")}
-                                                        </>
-                                                    ) : (
-                                                        at("freeze")
-                                                    )}
-                                                </Button>
-                                            </div>
+                                            {canManage && (
+                                                <div>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={freezeSnapshot}
+                                                        disabled={isFreezing}
+                                                    >
+                                                        {isFreezing ? (
+                                                            <>
+                                                                <Loader2Icon className="size-4 animate-spin" />
+                                                                {at("freezing")}
+                                                            </>
+                                                        ) : (
+                                                            at("freeze")
+                                                        )}
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </div>
                                     ) : (
                                         <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
@@ -400,7 +408,9 @@ export default function CampaignDetail({
                                                 {at("noAudience")}
                                             </p>
                                             <p className="mt-1 text-xs text-muted-foreground">
-                                                {at("noAudienceHint")}
+                                                {canManage
+                                                    ? at("noAudienceHint")
+                                                    : at("noAudienceHintReadOnly")}
                                             </p>
                                         </div>
                                     )}

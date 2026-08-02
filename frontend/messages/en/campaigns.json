@@ -90,6 +90,7 @@
         "estimating": "Estimating…",
         "noAudience": "No audience defined yet",
         "noAudienceHint": "Add smart-segment conditions above, save, then estimate who qualifies.",
+        "noAudienceHintReadOnly": "Audience conditions are set by members with campaign management access.",
         "estimateTitle": "Estimate before launch",
         "estimateSubtitle": "A point-in-time count of who would qualify right now.",
         "included": "Will receive",

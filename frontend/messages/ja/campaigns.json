@@ -90,6 +90,7 @@
         "estimating": "試算中…",
         "noAudience": "対象者が未定義です",
         "noAudienceHint": "上でスマートセグメントの条件を追加・保存し、対象者を試算してください。",
+        "noAudienceHintReadOnly": "対象者の条件は、キャンペーンの管理権限を持つメンバーが設定します。",
         "estimateTitle": "配信前の試算",
         "estimateSubtitle": "現時点で対象となる人数のスナップショットです。",
         "included": "配信対象",
