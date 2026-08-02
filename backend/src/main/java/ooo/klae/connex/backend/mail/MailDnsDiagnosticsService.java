@@ -17,6 +17,12 @@ import ooo.klae.connex.backend.dto.MailDiagnosticTestDto.DnsRecord;
  * Workspace administrators can influence the queried sender domain in override mode, so
  * names are strictly validated, failures are isolated per record, raw TXT is discarded,
  * and DKIM remains not configured until the product has an explicit selector field.
+ *
+ * <p>A resolvable domain with no matching record and an unresolvable domain deliberately
+ * share the single {@code unknown} status, and no record count is returned. Distinguishing
+ * them would turn this endpoint into a domain-existence oracle against whichever resolver
+ * the instance uses, including a split-horizon internal one. The advisory value of the
+ * check does not require that resolution.
  */
 @Service
 @RequiredArgsConstructor
@@ -105,7 +111,7 @@ public class MailDnsDiagnosticsService {
                 present = true;
             }
         }
-        return new DnsRecord(queryName, present ? "present" : "missing", records.size());
+        return new DnsRecord(queryName, present ? "present" : "unknown");
     }
 
     private static boolean hasVersionToken(String record, String requiredPrefix) {
@@ -123,10 +129,10 @@ public class MailDnsDiagnosticsService {
     }
 
     private static DnsRecord unknown(String queryName) {
-        return new DnsRecord(queryName, "unknown", 0);
+        return new DnsRecord(queryName, "unknown");
     }
 
     private static DnsRecord notConfigured() {
-        return new DnsRecord("", "not_configured", 0);
+        return new DnsRecord("", "not_configured");
     }
 }

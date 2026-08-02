@@ -13,6 +13,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -35,6 +38,7 @@ class JobRunRecorderIntegrationTest {
 
     @Autowired private JobRunRecorder recorder;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     @BeforeEach
     @AfterEach
@@ -45,6 +49,22 @@ class JobRunRecorderIntegrationTest {
                 JOB_NAME,
                 WORKSPACE_ONE,
                 WORKSPACE_TWO);
+    }
+
+    @Test
+    void recordingSurvivesRollbackOfTheSurroundingJobTransaction() {
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+        outer.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        outer.executeWithoutResult(status -> {
+            record(WORKSPACE_ONE, 0);
+            status.setRollbackOnly();
+        });
+
+        assertFalse(ids(WORKSPACE_ONE).isEmpty(),
+                "JobRunRecorder must record in its own REQUIRES_NEW transaction. If this fails, the "
+                        + "recorder is joining the caller's transaction, so a rolled-back job would "
+                        + "also erase its own diagnostics row - and a recording failure would mark the "
+                        + "job's transaction rollback-only and undo the job's real work.");
     }
 
     @Test

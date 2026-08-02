@@ -32,6 +32,6 @@ public record MailDiagnosticTestDto(
     }
 
     /** Content-free result of one bounded TXT lookup. */
-    public record DnsRecord(String queryName, String status, int recordCount) {
+    public record DnsRecord(String queryName, String status) {
     }
 }

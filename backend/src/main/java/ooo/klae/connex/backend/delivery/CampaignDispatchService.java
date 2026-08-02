@@ -54,18 +54,21 @@ public class CampaignDispatchService {
     private final CapabilityRegistry capabilityRegistry;
 
     /** Processes every queued send in the workspace. Never throws. */
-    public void processWorkspace(int workspaceId) {
+    public int processWorkspace(int workspaceId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
-            return;
+            return 0;
         }
+        int failed = 0;
         for (int sendId : campaignSendMapper.queuedSendIds(workspaceId)) {
             try {
                 processSend(workspaceId, sendId);
             } catch (Exception exception) {
+                failed++;
                 log.warn("Campaign send {} dispatch failed in workspace {}: {}",
                         sendId, workspaceId, exception.getMessage());
             }
         }
+        return failed;
     }
 
     /** Dispatches the pending deliveries of one send, claim-first. Never throws. */

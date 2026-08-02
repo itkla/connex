@@ -61,6 +61,16 @@ public class MailDiagnosticsService {
                     dns);
         }
 
+        if (!actor.isEmailVerified()) {
+            Dns dns = mailDnsDiagnosticsService.diagnose(null);
+            return new MailDiagnosticTestDto(
+                    correlationId,
+                    new Sender(null, null),
+                    new Transport(
+                            "unconfigured", null, null, "unconfigured", "actor_email_unverified"),
+                    dns);
+        }
+
         ResolvedMailConfig config;
         try {
             config = mailConfigResolver.resolveForWorkspace(workspaceId);
@@ -90,9 +100,11 @@ public class MailDiagnosticsService {
         Sender sender = new Sender(
                 safeAddress(config.fromAddress(), config.username()),
                 safeDisplayName(config.fromName()));
+        String visibleHost = tenantVisibleHost(config);
+        Integer visiblePort = tenantVisiblePort(config);
         Transport transport;
         try {
-            smtpDestinationGuard.requirePublicDestination(config.host(), config.port());
+            smtpDestinationGuard.resolveForSend(config);
             Locale locale = LocaleSupport.resolve(actor.getLocale());
             String body = templateRenderer.render(
                     "test", locale.getLanguage(), Map.of("recipient", actor.getEmail()));
@@ -110,24 +122,33 @@ public class MailDiagnosticsService {
                     "Sent a diagnostic test email",
                     null);
             transport = new Transport(
-                    mode, safeHost(config.host()), config.port(), "succeeded", null);
+                    mode, visibleHost, visiblePort, "succeeded", null);
         } catch (BadRequestException exception) {
             transport = new Transport(
                     mode,
-                    safeHost(config.host()),
-                    config.port(),
+                    visibleHost,
+                    visiblePort,
                     "failed",
                     "smtp_destination_rejected");
         } catch (RuntimeException exception) {
             transport = new Transport(
                     mode,
-                    safeHost(config.host()),
-                    config.port(),
+                    visibleHost,
+                    visiblePort,
                     "failed",
                     "smtp_transport_failed");
         }
-        Dns dns = mailDnsDiagnosticsService.diagnose(config.fromAddress());
+        Dns dns = mailDnsDiagnosticsService.diagnose(
+                config.workspaceSupplied() ? config.fromAddress() : null);
         return new MailDiagnosticTestDto(correlationId, sender, transport, dns);
+    }
+
+    private static String tenantVisibleHost(ResolvedMailConfig config) {
+        return config.workspaceSupplied() ? safeHost(config.host()) : null;
+    }
+
+    private static Integer tenantVisiblePort(ResolvedMailConfig config) {
+        return config.workspaceSupplied() ? config.port() : null;
     }
 
     private static String safeAddress(String address, String username) {

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -70,6 +71,22 @@ class ObjectDeletionRetryQueueTest {
     @AfterEach
     void clearContext() {
         tenantContext.clear();
+    }
+
+    @Test
+    void failedUserDeletionSweepRecordsAFailedRunSoErasureGapsAreVisible() {
+        ObjectDeletionTask task = new ObjectDeletionTask(1L, 7, "users/9/x.png", 0, 1);
+        when(userQueueMapper.findDue(any(), anyInt())).thenReturn(java.util.List.of(task));
+        doThrow(new IllegalStateException("storage unavailable"))
+            .when(transactionExecutor).retryUser(any(), any());
+
+        queue.retryPending();
+
+        verify(jobRunRecorder).record(
+            eq(JobRunRecorder.OBJECT_DELETION_RETRY),
+            eq(null),
+            eq(JobRunRecorder.JobRunStatus.FAILED),
+            any());
     }
 
     @Test

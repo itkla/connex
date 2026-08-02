@@ -24,6 +24,7 @@
   <delete id="deleteBeyondRetention">
     DELETE FROM job_run
     WHERE job_name = #{jobName}
+      AND status = #{status}
       <choose>
         <when test="workspaceId == null">AND workspace_id IS NULL</when>
         <otherwise>AND workspace_id = #{workspaceId}</otherwise>
@@ -33,6 +34,7 @@
           SELECT id
           FROM job_run
           WHERE job_name = #{jobName}
+            AND status = #{status}
             <choose>
               <when test="workspaceId == null">AND workspace_id IS NULL</when>
               <otherwise>AND workspace_id = #{workspaceId}</otherwise>

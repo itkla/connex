@@ -132,6 +132,29 @@ public class CapabilityRegistry {
                 && operatorSetting(requiredCapability);
     }
 
+    /**
+     * Returns availability using only last-known readiness, starting no storage or sidecar
+     * probe. Read-only diagnostics use this so rendering a health report never itself
+     * contacts the OCR sidecar or object storage.
+     *
+     * @param capability capability to evaluate
+     * @return {@code true} when the capability is available as of the latest observation
+     */
+    public boolean isAvailableWithoutProbing(Capability capability) {
+        Capability requiredCapability = Objects.requireNonNull(capability, "capability");
+        return switch (requiredCapability) {
+            case BUSINESS_CARD_SCANNING -> profileConstraint(requiredCapability)
+                    && entitlement(requiredCapability)
+                    && rollout(requiredCapability)
+                    && businessCardService.isAvailableCached();
+            case BUSINESS_CARD_IMPORT -> profileConstraint(requiredCapability)
+                    && entitlement(requiredCapability)
+                    && rollout(requiredCapability)
+                    && businessCardService.isImportAvailableCached();
+            default -> isAvailable(requiredCapability);
+        };
+    }
+
     private boolean profileConstraint(Capability capability) {
         if (!deploymentProperties.isConfigured()) {
             return true;

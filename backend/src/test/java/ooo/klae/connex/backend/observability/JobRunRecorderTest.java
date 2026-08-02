@@ -75,7 +75,7 @@ class JobRunRecorderTest {
                 JobRunDetail.started(CLOCK));
 
         verify(mapper).deleteBeyondRetention(
-                JobRunRecorder.NOTIFICATION_RECONCILIATION, 8, 50);
+                JobRunRecorder.NOTIFICATION_RECONCILIATION, 8, "succeeded", 50);
     }
 
     @Test

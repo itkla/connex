@@ -12,7 +12,6 @@ import { StatusPill, type DiagnosticTone } from "./StatusPill";
 
 const DNS_TONE: Record<DnsAdvisoryStatus, DiagnosticTone> = {
     present: "ok",
-    missing: "warn",
     unknown: "neutral",
     not_configured: "neutral",
 };
@@ -106,7 +105,11 @@ export function MailDeliverabilitySection({ workspaceId }: { workspaceId: number
                             <Row label={t("mailHost")} value={transport.host ?? "—"} />
                             <Row
                                 label={t("mailPort")}
-                                value={transport.port === null ? "—" : String(transport.port)}
+                                value={
+                                    transport.port === null || transport.port === undefined
+                                        ? "—"
+                                        : String(transport.port)
+                                }
                             />
                             {transport.errorCode ? (
                                 <Row label={t("mailErrorCode")} value={transport.errorCode} />

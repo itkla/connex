@@ -27,7 +27,6 @@ class MailDnsDiagnosticsServiceTest {
 
         assertEquals("example.com", dns.domain());
         assertEquals("present", dns.spf().status());
-        assertEquals(2, dns.spf().recordCount());
         assertEquals("present", dns.dmarc().status());
         assertEquals("not_configured", dns.dkim().status());
         assertFalse(dns.toString().contains("credential"));
@@ -43,7 +42,7 @@ class MailDnsDiagnosticsServiceTest {
         Dns dns = new MailDnsDiagnosticsService(resolver).diagnose("sender@example.com");
 
         assertEquals("unknown", dns.spf().status());
-        assertEquals("missing", dns.dmarc().status());
+        assertEquals("unknown", dns.dmarc().status());
         assertEquals("not_configured", dns.dkim().status());
     }
 
@@ -81,7 +80,7 @@ class MailDnsDiagnosticsServiceTest {
 
         Dns dns = new MailDnsDiagnosticsService(resolver).diagnose("sender@example.com");
 
-        assertEquals("missing", dns.spf().status());
-        assertEquals("missing", dns.dmarc().status());
+        assertEquals("unknown", dns.spf().status());
+        assertEquals("unknown", dns.dmarc().status());
     }
 }

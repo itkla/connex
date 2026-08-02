@@ -100,7 +100,6 @@ public record TenantDiagnosticsDto(
 
     /** One metadata-only scheduler outcome. */
     public record JobRun(
-            long id,
             Integer workspaceId,
             String status,
             LocalDateTime startedAt,

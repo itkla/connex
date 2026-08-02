@@ -15,6 +15,7 @@ public interface JobRunMapper {
     int deleteBeyondRetention(
         @Param("jobName") String jobName,
         @Param("workspaceId") Integer workspaceId,
+        @Param("status") String status,
         @Param("keepCount") int keepCount);
 
     List<JobRun> findLatestVisible(

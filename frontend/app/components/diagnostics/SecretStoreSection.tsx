@@ -15,14 +15,10 @@ export function SecretStoreSection({
     data,
     loading,
     error,
-    referenceId,
-    onRetry,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
     error: string | null;
-    referenceId?: string | null;
-    onRetry?: () => void;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const store = data?.secretStore ?? null;
@@ -33,8 +29,6 @@ export function SecretStoreSection({
             description={t("secretStoreDescription")}
             loading={loading}
             error={error}
-            referenceId={referenceId}
-            onRetry={onRetry}
             isEmpty={!loading && !error && !store}
             emptyLabel={t("secretStoreEmpty")}
         >

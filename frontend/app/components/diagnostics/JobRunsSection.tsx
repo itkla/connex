@@ -27,14 +27,10 @@ export function JobRunsSection({
     data,
     loading,
     error,
-    referenceId,
-    onRetry,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
     error: string | null;
-    referenceId?: string | null;
-    onRetry?: () => void;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const jobs = data?.jobs ?? [];
@@ -45,8 +41,6 @@ export function JobRunsSection({
             description={t("jobsDescription")}
             loading={loading}
             error={error}
-            referenceId={referenceId}
-            onRetry={onRetry}
             isEmpty={!loading && !error && jobs.length === 0}
             emptyLabel={t("jobsEmpty")}
         >

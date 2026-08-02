@@ -669,7 +669,6 @@
     },
     "dnsStatus": {
       "present": "検出",
-      "missing": "未検出",
       "unknown": "不明",
       "not_configured": "未設定"
     },
@@ -678,6 +677,7 @@
       "ai_provider_incomplete": "AIプロバイダーの設定が不完全です",
       "delivery_provider_missing": "配信チャネルが未準備です",
       "capture_paused": "取り込みストリームが一時停止中です"
-    }
+    },
+    "staleAfterRefresh": "最後に取得できた内容を表示しています。更新に失敗しました。"
   }
 }

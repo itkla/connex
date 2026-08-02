@@ -3437,7 +3437,7 @@ export type JobRunStatus = "succeeded" | "failed" | "skipped";
 
 export type DiagnosticsFindingSeverity = "info" | "warning";
 
-export type DnsAdvisoryStatus = "present" | "missing" | "unknown" | "not_configured";
+export type DnsAdvisoryStatus = "present" | "unknown" | "not_configured";
 
 export type MailTransportOutcome = "succeeded" | "failed" | "unconfigured";
 
@@ -3508,7 +3508,6 @@ export type DiagnosticsProviders = {
 };
 
 export type DiagnosticsJobRun = {
-    id: number;
     workspaceId: number | null;
     status: JobRunStatus;
     startedAt: string;
@@ -3545,7 +3544,6 @@ export type TenantDiagnostics = {
 export type MailDnsAdvisoryRecord = {
     queryName: string;
     status: DnsAdvisoryStatus;
-    recordCount: number;
 };
 
 export type MailDnsAdvisory = {
@@ -3563,8 +3561,8 @@ export type MailDiagnosticSender = {
 
 export type MailDiagnosticTransport = {
     mode: DiagnosticsMailMode;
-    host: string | null;
-    port: number | null;
+    host?: string | null;
+    port?: number | null;
     outcome: MailTransportOutcome;
     errorCode: string | null;
 };

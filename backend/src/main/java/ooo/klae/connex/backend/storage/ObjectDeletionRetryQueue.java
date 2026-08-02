@@ -253,29 +253,34 @@ public class ObjectDeletionRetryQueue {
 
     private void retryUserCatalog() {
         JobRunDetail detail = JobRunDetail.started(clock);
-        try {
-            tenantWorkScope.unrouted(() -> {
+        tenantWorkScope.unrouted(() -> {
+            try {
                 List<ObjectDeletionTask> tasks = userQueueMapper.findDue(
                     now(), properties.getDeleteRetryBatchSize());
+                boolean anyTaskFailed = false;
                 for (ObjectDeletionTask task : tasks) {
                     try {
                         LocalDateTime current = now();
                         transactionExecutor.retryUser(task, current);
                     } catch (RuntimeException exception) {
+                        anyTaskFailed = true;
                         log.warn("User object deletion task could not be finalized");
                     }
                 }
-                if (!tasks.isEmpty()) {
+                if (anyTaskFailed) {
+                    record(null, JobRunStatus.FAILED,
+                        new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
+                } else if (!tasks.isEmpty()) {
                     record(null, JobRunStatus.SUCCEEDED,
                         new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
                 }
-                return null;
-            });
-        } catch (RuntimeException exception) {
-            record(null, JobRunStatus.FAILED,
-                new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
-            log.warn("Private user object deletion sweep failed");
-        }
+            } catch (RuntimeException exception) {
+                record(null, JobRunStatus.FAILED,
+                    new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
+                log.warn("Private user object deletion sweep failed");
+            }
+            return null;
+        });
     }
 
     private void retryTenantCatalogRaw(String catalog) {

@@ -20,14 +20,10 @@ export function ProfileCapabilitiesSection({
     data,
     loading,
     error,
-    referenceId,
-    onRetry,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
     error: string | null;
-    referenceId?: string | null;
-    onRetry?: () => void;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const deployment = data?.deployment ?? null;
@@ -39,8 +35,6 @@ export function ProfileCapabilitiesSection({
             description={t("profileDescription")}
             loading={loading}
             error={error}
-            referenceId={referenceId}
-            onRetry={onRetry}
             isEmpty={!loading && !error && capabilities.length === 0}
             emptyLabel={t("profileEmpty")}
         >

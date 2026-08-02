@@ -105,10 +105,12 @@ public class ReportDeliveryScheduler {
                     } catch (Exception exception) {
                         log.warn("Report schedule {} failed in workspace {}: {}",
                                 ref.scheduleId(), ref.workspaceId(), exception.getMessage());
-                        tenantWorkScope.inWorkspace(
-                                ref.workspaceId(),
-                                () -> auditFailure(
-                                        ref, "scheduled report delivery failed", runDetail));
+                        try {
+                            auditFailure(ref, "scheduled report delivery failed", runDetail);
+                        } catch (RuntimeException auditFailure) {
+                            log.warn("Report delivery failure audit could not be written for "
+                                    + "workspace {}", ref.workspaceId());
+                        }
                     }
                 }
             } catch (Exception exception) {

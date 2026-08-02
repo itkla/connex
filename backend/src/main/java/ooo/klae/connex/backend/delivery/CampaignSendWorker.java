@@ -63,8 +63,16 @@ public class CampaignSendWorker {
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {
                     try {
-                        campaignDispatchService.processWorkspace(workspaceId);
-                        record(workspaceId, JobRunStatus.SUCCEEDED, detail);
+                        int failed = campaignDispatchService.processWorkspace(workspaceId);
+                        if (failed > 0) {
+                            record(workspaceId, JobRunStatus.FAILED,
+                                new JobRunDetail(
+                                    detail.startedAt(),
+                                    Map.of("phase", "workspace_dispatch",
+                                        "failedCount", failed)));
+                        } else {
+                            record(workspaceId, JobRunStatus.SUCCEEDED, detail);
+                        }
                     } catch (RuntimeException exception) {
                         record(workspaceId, JobRunStatus.FAILED,
                             new JobRunDetail(

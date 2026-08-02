@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import ooo.klae.connex.backend.beans.ProviderCaptureSyncState;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedCaptureProperties;
 import ooo.klae.connex.backend.dto.ProviderCaptureSyncRef;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
@@ -36,6 +38,9 @@ import java.util.Map;
     name = "scheduling-enabled",
     havingValue = "true")
 public class ProviderCaptureScheduler {
+    private static final Set<String> DEGRADED_STREAM_STATUSES =
+        Set.of("retrying", "intervention_required", "paused");
+
     private static final DateTimeFormatter MYSQL_TIMESTAMP =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
     private final AtomicLong workspaceCursor = new AtomicLong();
@@ -75,15 +80,23 @@ public class ProviderCaptureScheduler {
                     try {
                         List<ProviderCaptureSyncRef> refs = captureMapper.findDueSyncRefs(
                             workspaceId, mysql(Instant.now()), 1);
+                        boolean[] degraded = {false};
                         for (ProviderCaptureSyncRef ref : refs) {
                             worker.runPage(workspaceId, ref.syncStateId());
                             processedInWorkspace[0]++;
+                            if (leftDegraded(workspaceId, ref.syncStateId())) {
+                                degraded[0] = true;
+                            }
                         }
                         if (!refs.isEmpty()) {
-                            record(workspaceId, JobRunStatus.SUCCEEDED,
+                            record(workspaceId,
+                                degraded[0] ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED,
                                 new JobRunDetail(
                                     detail.startedAt(),
-                                    Map.of("dueCount", refs.size())));
+                                    degraded[0]
+                                        ? Map.of("phase", "stream_degraded",
+                                            "dueCount", refs.size())
+                                        : Map.of("dueCount", refs.size())));
                         }
                     } catch (RuntimeException exception) {
                         record(workspaceId, JobRunStatus.FAILED,
@@ -106,6 +119,11 @@ public class ProviderCaptureScheduler {
 
     private static String mysql(Instant value) {
         return LocalDateTime.ofInstant(value, ZoneOffset.UTC).format(MYSQL_TIMESTAMP);
+    }
+
+    private boolean leftDegraded(int workspaceId, long syncStateId) {
+        ProviderCaptureSyncState state = captureMapper.getSyncState(workspaceId, syncStateId);
+        return state != null && DEGRADED_STREAM_STATUSES.contains(state.getStatus());
     }
 
     private void record(int workspaceId, JobRunStatus status, JobRunDetail detail) {

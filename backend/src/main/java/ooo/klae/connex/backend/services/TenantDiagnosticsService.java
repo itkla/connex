@@ -10,10 +10,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.ai.AiProviderReadiness;
 import ooo.klae.connex.backend.beans.JobRun;
 import ooo.klae.connex.backend.capability.Capability;
@@ -52,6 +54,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TenantDiagnosticsService {
     private static final TypeReference<Map<String, Object>> DETAIL_TYPE = new TypeReference<>() {
     };
@@ -100,13 +103,15 @@ public class TenantDiagnosticsService {
         WorkspaceScope organizationScope = workspaceScopeControlAccess.getForWorkspace(workspaceId);
         WorkspaceScope workspaceScope = new WorkspaceScope(
                 organizationScope.orgId(), List.of(workspaceId), "[" + workspaceId + "]");
-        TenantSections sections = tenantAccess.inWorkspace(
-                workspaceId,
-                organizationScope.orgId(),
-                actorId,
-                () -> tenantSections(workspaceScope));
-        SecretStoreDiagnosticsDto secretStore =
-                secretStoreLifecycleService.diagnosticsForWorkspace(workspaceId);
+        TenantSections sections = guarded(
+                () -> tenantAccess.inWorkspace(
+                        workspaceId,
+                        organizationScope.orgId(),
+                        actorId,
+                        () -> tenantSections(workspaceScope)),
+                TenantSections.empty());
+        SecretStoreDiagnosticsDto secretStore = guarded(
+                () -> secretStoreLifecycleService.diagnosticsForWorkspace(workspaceId), null);
         return assemble(
                 new Scope("workspace", workspaceId),
                 organizationScope.orgId(),
@@ -125,9 +130,22 @@ public class TenantDiagnosticsService {
         WorkspaceScope scope = workspaceScopeControlAccess.getForOrg(orgId);
         TenantSections sections = scope.workspaceIds().isEmpty()
                 ? TenantSections.empty()
-                : tenantAccess.inOrganization(scope, actorId, () -> tenantSections(scope));
-        SecretStoreDiagnosticsDto secretStore = secretStoreLifecycleService.diagnosticsForOrg(orgId);
+                : guarded(
+                        () -> tenantAccess.inOrganization(scope, actorId, () -> tenantSections(scope)),
+                        TenantSections.empty());
+        SecretStoreDiagnosticsDto secretStore = guarded(
+                () -> secretStoreLifecycleService.diagnosticsForOrg(orgId), null);
         return assemble(new Scope("organization", orgId), orgId, sections, secretStore);
+    }
+
+    private <T> T guarded(Supplier<T> source, T unavailable) {
+        try {
+            return source.get();
+        } catch (RuntimeException exception) {
+            log.warn("Diagnostics section unavailable exceptionClass={}",
+                    exception.getClass().getSimpleName());
+            return unavailable;
+        }
     }
 
     private TenantDiagnosticsDto assemble(
@@ -135,14 +153,20 @@ public class TenantDiagnosticsService {
             int orgId,
             TenantSections sections,
             SecretStoreDiagnosticsDto secretStore) {
-        Deployment deployment = deployment();
-        Ai ai = new Ai(
-                aiProviderReadiness.isReadyForOrg(orgId),
-                aiProviderReadiness.isImageInputReadyForOrg(orgId));
-        Ocr ocr = new Ocr(
-                businessCardService.isAvailableCached(),
-                businessCardService.isImportAvailableCached());
-        List<Finding> findings = findings(ai, sections.workspaces());
+        Deployment deployment = guarded(
+                this::deployment, new Deployment(null, false, List.of()));
+        Ai ai = guarded(
+                () -> new Ai(
+                        aiProviderReadiness.isReadyForOrg(orgId),
+                        aiProviderReadiness.isImageInputReadyForOrg(orgId)),
+                new Ai(false, false));
+        Ocr ocr = guarded(
+                () -> new Ocr(
+                        businessCardService.isAvailableCached(),
+                        businessCardService.isImportAvailableCached()),
+                new Ocr(false, false));
+        List<Finding> findings = guarded(
+                () -> findings(ai, sections.workspaces()), List.of());
         return new TenantDiagnosticsDto(
                 scope,
                 deployment,
@@ -161,7 +185,7 @@ public class TenantDiagnosticsService {
             capabilities.add(new CapabilityState(
                     capability.name().toLowerCase(Locale.ROOT),
                     CapabilityRegistry.isAllowedForProfile(capability, profile),
-                    capabilityRegistry.isAvailable(capability)));
+                    capabilityRegistry.isAvailableWithoutProbing(capability)));
         }
         return new Deployment(profile, deploymentProperties.isConfigured(), capabilities);
     }
@@ -303,7 +327,6 @@ public class TenantDiagnosticsService {
             return null;
         }
         return new TenantDiagnosticsDto.JobRun(
-                run.getId(),
                 run.getWorkspaceId(),
                 run.getStatus(),
                 run.getStartedAt(),

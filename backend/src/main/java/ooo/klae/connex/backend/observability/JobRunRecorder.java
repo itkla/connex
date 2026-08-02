@@ -111,7 +111,7 @@ public class JobRunRecorder {
             jobRun.setDetail(sanitizeDetail(workspaceId, detail));
             transaction.executeWithoutResult(transactionStatus -> {
                 mapper.insert(jobRun);
-                mapper.deleteBeyondRetention(jobName, workspaceId, KEEP_COUNT);
+                mapper.deleteBeyondRetention(jobName, workspaceId, status.token(), KEEP_COUNT);
             });
         } catch (RuntimeException exception) {
             log.warn(

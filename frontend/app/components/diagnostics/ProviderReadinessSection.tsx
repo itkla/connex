@@ -29,14 +29,10 @@ export function ProviderReadinessSection({
     data,
     loading,
     error,
-    referenceId,
-    onRetry,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
     error: string | null;
-    referenceId?: string | null;
-    onRetry?: () => void;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const locale = useLocale();
@@ -49,8 +45,6 @@ export function ProviderReadinessSection({
             description={t("providersDescription")}
             loading={loading}
             error={error}
-            referenceId={referenceId}
-            onRetry={onRetry}
             isEmpty={!loading && !error && !providers}
             emptyLabel={t("providersEmpty")}
         >

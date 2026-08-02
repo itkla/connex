@@ -669,7 +669,6 @@
     },
     "dnsStatus": {
       "present": "Found",
-      "missing": "Missing",
       "unknown": "Unknown",
       "not_configured": "Not configured"
     },
@@ -678,6 +677,7 @@
       "ai_provider_incomplete": "AI provider is incomplete",
       "delivery_provider_missing": "A delivery channel is not ready",
       "capture_paused": "A capture stream is paused"
-    }
+    },
+    "staleAfterRefresh": "Showing the last successful report. Refresh failed."
   }
 }

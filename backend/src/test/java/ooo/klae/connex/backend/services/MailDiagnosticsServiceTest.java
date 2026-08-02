@@ -111,19 +111,21 @@ class MailDiagnosticsServiceTest {
     void instanceFallbackSucceedsAndDnsUnknownDoesNotAlterOutcome() {
         when(mailConfigResolver.resolveForWorkspace(WORKSPACE_ID))
                 .thenReturn(config(false));
-        when(dnsDiagnosticsService.diagnose("sender@example.com"))
+        when(dnsDiagnosticsService.diagnose(null))
                 .thenReturn(new Dns(
                         true,
-                        "example.com",
-                        new DnsRecord("example.com", "unknown", 0),
-                        new DnsRecord("", "not_configured", 0),
-                        new DnsRecord("_dmarc.example.com", "unknown", 0)));
+                        null,
+                        new DnsRecord("", "unknown"),
+                        new DnsRecord("", "not_configured"),
+                        new DnsRecord("", "unknown")));
 
         MailDiagnosticTestDto result = service.testSend(WORKSPACE_ID, ACTOR_ID);
 
         assertEquals("instance_default", result.transport().mode());
         assertEquals("succeeded", result.transport().outcome());
         assertEquals("unknown", result.dns().spf().status());
+        assertNull(result.transport().host());
+        assertNull(result.transport().port());
         assertRecipientAndAudit();
     }
 
@@ -145,7 +147,7 @@ class MailDiagnosticsServiceTest {
                 .thenReturn(config(true));
         doThrow(new BadRequestException("sentinel destination detail"))
                 .when(smtpDestinationGuard)
-                .requirePublicDestination("smtp.example.com", 587);
+                .resolveForSend(any());
 
         MailDiagnosticTestDto result = service.testSend(WORKSPACE_ID, ACTOR_ID);
 
@@ -239,6 +241,7 @@ class MailDiagnosticsServiceTest {
         User user = new User();
         user.setId(ACTOR_ID);
         user.setEmail(ACTOR_EMAIL);
+        user.setEmailVerified(true);
         user.setLocale("en");
         return user;
     }
@@ -264,8 +267,8 @@ class MailDiagnosticsServiceTest {
         return new Dns(
                 true,
                 "example.com",
-                new DnsRecord("example.com", "present", 1),
-                new DnsRecord("", "not_configured", 0),
-                new DnsRecord("_dmarc.example.com", "present", 1));
+                new DnsRecord("example.com", "present"),
+                new DnsRecord("", "not_configured"),
+                new DnsRecord("_dmarc.example.com", "present"));
     }
 }
