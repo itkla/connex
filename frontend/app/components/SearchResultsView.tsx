@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import Rise from "@/app/components/motion/Rise";
+import { PageHeader } from "@/app/components/PageHeader";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { PageShell } from "@/app/components/PageShell";
 import { buildSearchGroups } from "@/app/lib/search/resultGroups";
 import type { SearchResults } from "@/app/lib/types";
 
@@ -21,14 +23,9 @@ export default function SearchResultsView({
     const hasResults = groups.length > 0;
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <Rise delay={0}>
-                    <header className="px-4 sm:px-6">
-                        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                            {t("resultsHeading", { query })}
-                        </h1>
-                    </header>
+                    <PageHeader className="px-4 sm:px-6" variant="compact" title={t("resultsHeading", { query })} />
                 </Rise>
 
                 {!hasResults ? (
@@ -107,7 +104,6 @@ export default function SearchResultsView({
                         </Rise>
                     ))
                 )}
-            </div>
-        </div>
+        </PageShell>
     );
 }

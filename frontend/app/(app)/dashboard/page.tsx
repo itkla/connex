@@ -72,6 +72,7 @@ import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
 import RecentMoves from '@/app/components/dashboard/RecentMoves';
 import Rise from '@/app/components/motion/Rise';
+import { PageShell } from '@/app/components/PageShell';
 import SectionUnavailable from '@/app/components/SectionUnavailable';
 import TaskSummary from '@/app/components/dashboard/TaskSummary';
 import Timeline from '@/app/components/me/Timeline';
@@ -567,8 +568,7 @@ export default async function Dashboard() {
     const initialWidgets = normalizeLayout(layoutResponse.response?.layout);
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <PageShell tier="wide">
                 <Rise>
                     <Greeting
                         user={user}
@@ -645,7 +645,6 @@ export default async function Dashboard() {
                         layoutErrored={layoutResponse.errored}
                     />
                 </Rise>
-            </div>
-        </div>
+        </PageShell>
     );
 }

@@ -35,7 +35,9 @@ import { useNotificationWorkspaceActions } from "@/app/components/notifications/
 import { cn } from "@/lib/utils";
 import { FilterBar, MultiSelectFilter, RadioFilter, SegmentedToggle } from "@/app/components/filters";
 import Rise from "@/app/components/motion/Rise";
+import { PageHeader } from "@/app/components/PageHeader";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { PageShell } from "@/app/components/PageShell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -610,19 +612,20 @@ export default function NotificationsInbox() {
         ?? t("filterWorkspace");
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <Rise>
-                    <header className="flex flex-wrap items-end justify-between gap-4 px-4 sm:px-6">
-                        <div>
-                            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("title")}</h1>
-                            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("inboxDescription")}</p>
-                        </div>
-                        <Button variant="outline" disabled={unread === 0} onClick={() => void readAll()}>
-                            <CheckCheck />
-                            {t("markAllRead")}
-                        </Button>
-                    </header>
+                    <PageHeader
+                        className="px-4 sm:px-6"
+                        variant="compact"
+                        title={t("title")}
+                        description={t("inboxDescription")}
+                        actions={
+                            <Button variant="outline" disabled={unread === 0} onClick={() => void readAll()}>
+                                <CheckCheck />
+                                {t("markAllRead")}
+                            </Button>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06} className="px-4 sm:px-6">
@@ -950,7 +953,6 @@ export default function NotificationsInbox() {
                         </Pagination>
                     </Rise>
                 ) : null}
-            </div>
-        </div>
+        </PageShell>
     );
 }

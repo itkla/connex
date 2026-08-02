@@ -1,4 +1,5 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/app/components/PageShell';
 
 function SectionLabel() {
     return (
@@ -10,8 +11,7 @@ function SectionLabel() {
 
 export default function ContactPageLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <div>
                     <div className="flex flex-row justify-between">
                         <Skeleton className="h-5 w-28" />
@@ -142,7 +142,6 @@ export default function ContactPageLoading() {
                         </div>
                     </section>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

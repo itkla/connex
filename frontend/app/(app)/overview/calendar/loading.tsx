@@ -1,9 +1,9 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/app/components/PageShell';
 
 export default function CalendarLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <header className="flex flex-wrap items-end justify-between gap-4">
                     <div>
                         <Skeleton className="h-10 w-40" />
@@ -40,7 +40,6 @@ export default function CalendarLoading() {
                         ))}
                     </div>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

@@ -20,6 +20,7 @@ import { formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/util
 import { computeKpis } from "@/app/components/overview/analytics/metrics";
 
 import Rise from "@/app/components/motion/Rise";
+import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Timeline from "@/app/components/me/Timeline";
 import MeHero from "@/app/components/me/MeHero";
@@ -81,8 +82,7 @@ export default async function MePage() {
     const hasWork = tasks.length + activities.length + notes.length > 0;
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <PageShell tier="wide">
                 <Rise>
                     <MeHero
                         user={user}
@@ -137,7 +137,6 @@ export default async function MePage() {
                         {t("accountSettings")}
                     </Link>
                 </footer>
-            </div>
-        </div>
+        </PageShell>
     );
 }

@@ -50,6 +50,8 @@ import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
+import { PageHeader } from '@/app/components/PageHeader';
+import { PageShell } from '@/app/components/PageShell';
 import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
 import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
@@ -761,56 +763,56 @@ export default function TasksBrowser({
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <>
+            <PageShell tier="wide">
                 <Rise>
-                    <header className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                            <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                            <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div
-                                role="group"
-                                aria-label={t('displayMode')}
-                                className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
-                            >
-                                <button
-                                    type="button"
-                                    onClick={() => setView('list')}
-                                    aria-label={t('viewList')}
-                                    aria-pressed={view === 'list'}
-                                    className={cn(
-                                        'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                        view === 'list' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                                    )}
+                    <PageHeader
+                        title={t('title')}
+                        description={t('subtitle')}
+                        actions={
+                            <>
+                                <div
+                                    role="group"
+                                    aria-label={t('displayMode')}
+                                    className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
                                 >
-                                    <QueueListIcon className="size-4" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setView('board')}
-                                    aria-label={t('viewBoard')}
-                                    aria-pressed={view === 'board'}
-                                    className={cn(
-                                        'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                        view === 'board' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setView('list')}
+                                        aria-label={t('viewList')}
+                                        aria-pressed={view === 'list'}
+                                        className={cn(
+                                            'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
+                                            view === 'list' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
+                                        )}
+                                    >
+                                        <QueueListIcon className="size-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setView('board')}
+                                        aria-label={t('viewBoard')}
+                                        aria-pressed={view === 'board'}
+                                        className={cn(
+                                            'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
+                                            view === 'board' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
+                                        )}
+                                    >
+                                        <ViewColumnsIcon className="size-4" />
+                                    </button>
+                                </div>
+                                <Button
+                                    variant="brand"
+                                    className="shadow-sm transition-transform active:scale-[0.98]"
+                                    aria-label={t('newAria')}
+                                    onClick={() => setCreating(true)}
                                 >
-                                    <ViewColumnsIcon className="size-4" />
-                                </button>
-                            </div>
-                            <Button
-                                variant="brand"
-                                className="shadow-sm transition-transform active:scale-[0.98]"
-                                aria-label={t('newAria')}
-                                onClick={() => setCreating(true)}
-                            >
-                                <PlusIcon strokeWidth={2.5} />
-                                {t('new')}
-                            </Button>
-                        </div>
-                    </header>
+                                    <PlusIcon strokeWidth={2.5} />
+                                    {t('new')}
+                                </Button>
+                            </>
+                        }
+                    />
                 </Rise>
 
                 {hasAnyTasks && (
@@ -1011,7 +1013,7 @@ export default function TasksBrowser({
                         </div>
                     )}
                 </Rise>
-            </div>
+            </PageShell>
 
             {editingTask && (
                 <EditTaskSheet
@@ -1046,7 +1048,7 @@ export default function TasksBrowser({
                 users={users}
                 currentUserId={currentUserId}
             />
-        </div>
+        </>
     );
 }
 

@@ -26,6 +26,8 @@ import type {
 } from '@/app/lib/types';
 
 import Rise from '@/app/components/motion/Rise';
+import { PageHeader } from '@/app/components/PageHeader';
+import { PageShell } from '@/app/components/PageShell';
 import IntroLineageList from './IntroLineageList';
 import IntroStats from './IntroStats';
 import { tierFor } from './IntroStrength';
@@ -323,26 +325,24 @@ export default function IntroductionsBoard({
               };
 
     return (
-        <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
+        <PageShell tier="wide">
             <Rise>
-                <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                        <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-                            {t('pageTitle')}
-                        </h1>
-                        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{t('pageSubtitle')}</p>
-                    </div>
-                    <LogIntroDialog
-                        contacts={contacts}
-                        onRecord={logManual}
-                        trigger={
-                            <Button variant="outline">
-                                <PlusIcon className="size-4" />
-                                {t('logIntro')}
-                            </Button>
-                        }
-                    />
-                </header>
+                <PageHeader
+                    title={t('pageTitle')}
+                    description={t('pageSubtitle')}
+                    actions={
+                        <LogIntroDialog
+                            contacts={contacts}
+                            onRecord={logManual}
+                            trigger={
+                                <Button variant="outline">
+                                    <PlusIcon className="size-4" />
+                                    {t('logIntro')}
+                                </Button>
+                            }
+                        />
+                    }
+                />
             </Rise>
 
             <Rise delay={0.06}>
@@ -505,6 +505,6 @@ export default function IntroductionsBoard({
                     )}
                 </section>
             </Rise>
-        </div>
+        </PageShell>
     );
 }

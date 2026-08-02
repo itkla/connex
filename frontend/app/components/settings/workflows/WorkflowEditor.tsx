@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import AccessDenied from "@/app/components/AccessDenied";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
@@ -440,9 +441,7 @@ function EditorBody({ ruleId }: { ruleId?: number }) {
 
     if (accessDenied) {
         return (
-            <div className="rounded-2xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
-                {tr("noAccess")}
-            </div>
+            <AccessDenied variant="inline" body={tr("noAccess")} />
         );
     }
     if (missing) {

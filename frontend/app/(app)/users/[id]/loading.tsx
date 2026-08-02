@@ -1,9 +1,9 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/app/components/PageShell';
 
 export default function UserLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <div className="flex flex-col gap-8">
                     <Skeleton className="h-5 w-24" />
 
@@ -80,7 +80,6 @@ export default function UserLoading() {
                         </div>
                     </section>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

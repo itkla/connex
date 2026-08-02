@@ -18,6 +18,8 @@ import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ApprovalPolicyDialog from '@/app/components/records/approval-policies/ApprovalPolicyDialog';
+import { PageHeader } from '@/app/components/PageHeader';
+import { PageShell } from '@/app/components/PageShell';
 import { deleteApprovalPolicy } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatCurrency } from '@/app/lib/utils';
@@ -96,22 +98,24 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <>
+            <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                        <div className="flex items-center gap-2">
-                            <Button variant="outline" onClick={() => router.push('/library/documents')}>
-                                <DocumentDuplicateIcon className="size-4" />
-                                {t('templatesLink')}
-                            </Button>
-                            <Button variant="brand" onClick={openNew}>
-                                <PlusIcon className="size-4" />
-                                {t('newButton')}
-                            </Button>
-                        </div>
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            <>
+                                <Button variant="outline" onClick={() => router.push('/library/documents')}>
+                                    <DocumentDuplicateIcon className="size-4" />
+                                    {t('templatesLink')}
+                                </Button>
+                                <Button variant="brand" onClick={openNew}>
+                                    <PlusIcon className="size-4" />
+                                    {t('newButton')}
+                                </Button>
+                            </>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>
@@ -200,7 +204,7 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
                         </div>
                     )}
                 </Rise>
-            </div>
+            </PageShell>
 
             <ApprovalPolicyDialog
                 open={editorOpen}
@@ -219,6 +223,6 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
                 isDeleting={isRemoving}
                 confirmDelete={confirmRemove}
             />
-        </div>
+        </>
     );
 }

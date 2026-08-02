@@ -40,6 +40,8 @@ import { compareByColor, copyToClipboard, readableTextColor } from '@/app/lib/ut
 import type { Tag } from '@/app/lib/types';
 import Rise from '@/app/components/motion/Rise';
 import TagDialog from '@/app/components/library/tags/TagDialog';
+import { PageHeader } from '@/app/components/PageHeader';
+import { PageShell } from '@/app/components/PageShell';
 
 type Props = { tags: Tag[] };
 type SortKey = 'color' | 'name';
@@ -133,25 +135,24 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
     const noResults = hasTags && visible.length === 0;
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
             <Rise>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
-                    </div>
-                    {hasTags && (
-                        <Button
-                            variant="brand"
-                            aria-label={t('newAria')}
-                            onClick={openCreate}
-                        >
-                            <PlusIcon strokeWidth={2.5} />
-                            {t('newTag')}
-                        </Button>
-                    )}
-                </div>
+                <PageHeader
+                    title={t('title')}
+                    description={t('subtitle')}
+                    actions={
+                        hasTags ? (
+                            <Button
+                                variant="brand"
+                                aria-label={t('newAria')}
+                                onClick={openCreate}
+                            >
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('newTag')}
+                            </Button>
+                        ) : undefined
+                    }
+                />
             </Rise>
 
             {hasTags && (
@@ -266,8 +267,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-            </div>
-        </div>
+        </PageShell>
     );
 }
 

@@ -1,9 +1,9 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageShell } from "@/app/components/PageShell";
 
 export default function CompanyDetailLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <div>
                     <div className="inline-flex w-fit items-center gap-2">
                         <Skeleton className="size-4 rounded-md" />
@@ -150,7 +150,6 @@ export default function CompanyDetailLoading() {
                         </div>
                     </section>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

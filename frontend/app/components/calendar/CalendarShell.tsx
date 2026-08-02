@@ -38,6 +38,7 @@ import UpNext from './UpNext';
 import SourceNotice, { type CalendarSourceKey, type CalendarTruncation } from './SourceNotice';
 import { temperatureIndex } from './warmth';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
+import { PageShell } from '@/app/components/PageShell';
 
 const SWIPE_OFFSET = 40;
 
@@ -395,13 +396,13 @@ export default function CalendarShell({
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-6">
+        <>
+            <PageShell tier="wide">
                 <Rise>
                     <header className="flex flex-col gap-3">
                         <div className="flex items-end justify-between gap-3">
                             <div>
-                                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{t('title')}</h1>
+                                <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
                                 {periodLabel && (
                                     <button
                                         type="button"
@@ -480,7 +481,7 @@ export default function CalendarShell({
                         </motion.div>
                     </div>
                 </Rise>
-            </div>
+            </PageShell>
 
             <EventDetailSheet
                 event={openEvent}
@@ -525,7 +526,7 @@ export default function CalendarShell({
                 onPick={cal.goToDate}
             />
             <CalendarShortcuts open={helpOpen} onOpenChange={setHelpOpen} />
-        </div>
+        </>
     );
 }
 

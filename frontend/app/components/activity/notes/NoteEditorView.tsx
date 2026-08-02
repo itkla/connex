@@ -20,6 +20,7 @@ import { toastError } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecordReturnLink from "@/app/components/records/RecordReturnLink";
+import { PageShell } from "@/app/components/PageShell";
 import BacklinksPanel from "./BacklinksPanel";
 
 const RichNoteEditor = dynamic(() => import("./RichNoteEditor"), { ssr: false });
@@ -147,8 +148,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const displayTitle = deriveNoteTitle({ title, content }, t("untitled"));
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <PageShell tier="reading">
                 <CrumbLabel value={displayTitle} />
                 <div className="flex items-center justify-between gap-4">
                     <RecordReturnLink
@@ -241,8 +241,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                         <BacklinksPanel refType="note" refId={noteId} excludeNoteId={noteId} />
                     ) : null}
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }
 

@@ -292,7 +292,7 @@ export default function ReportBuilderBoard({
                         <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
                             {t(initialReport ? 'builder.editEyebrow' : 'builder.newEyebrow')}
                         </p>
-                        <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
+                        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
                             {t(initialReport ? 'builder.editTitle' : 'builder.newTitle')}
                         </h1>
                         <p className="mt-2 text-sm text-muted-foreground">{t('builder.subtitle')}</p>

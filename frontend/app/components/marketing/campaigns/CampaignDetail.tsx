@@ -34,6 +34,7 @@ import AudienceEstimatePanel from "@/app/components/marketing/campaigns/Audience
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
+import { PageShell } from "@/app/components/PageShell";
 import {
     type Campaign,
     type CampaignAudience,
@@ -200,8 +201,8 @@ export default function CampaignDetail({
     const latestSnapshot = snapshots[0] ?? null;
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <>
+            <PageShell tier="reading">
                 <Rise className="flex flex-col gap-4">
                     <Link
                         href="/marketing/campaigns"
@@ -473,7 +474,7 @@ export default function CampaignDetail({
                     </TabsContent>
                 </Tabs>
                 </Rise>
-            </div>
+            </PageShell>
 
             <ResponsiveDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
                 <ResponsiveDialogContent className="p-0 sm:max-w-md">
@@ -509,6 +510,6 @@ export default function CampaignDetail({
                     </div>
                 </ResponsiveDialogContent>
             </ResponsiveDialog>
-        </div>
+        </>
     );
 }

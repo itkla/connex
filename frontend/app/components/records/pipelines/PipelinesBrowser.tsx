@@ -24,6 +24,8 @@ import { type ColumnDef } from '@/app/components/records/types';
 import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
 import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDialog';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
+import { PageHeader } from '@/app/components/PageHeader';
+import { PageShell } from '@/app/components/PageShell';
 import {
     createPipeline,
     createStage,
@@ -516,16 +518,17 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     );
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                        <Button variant="brand" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
-                            <PlusIcon strokeWidth={2.5} />
-                            {t('new')}
-                        </Button>
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            <Button variant="brand" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('new')}
+                            </Button>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>
@@ -636,7 +639,6 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         onOpenChange={setShareOpen}
                     />
                 )}
-            </div>
-        </div>
+        </PageShell>
     );
 }

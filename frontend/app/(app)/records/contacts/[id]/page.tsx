@@ -12,6 +12,7 @@ import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import Rise from "@/app/components/motion/Rise";
+import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import ContactActionsMenu from "@/app/components/records/contacts/ContactActionsMenu";
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
@@ -101,8 +102,7 @@ export default async function ContactPage({ params, searchParams }: ContactPageP
         : null;
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <RecordStickyContext
                     anchorId="contact-record-identity"
                     backHref={returnPath}
@@ -392,7 +392,6 @@ export default async function ContactPage({ params, searchParams }: ContactPageP
                         </section>
                     </Rise>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }

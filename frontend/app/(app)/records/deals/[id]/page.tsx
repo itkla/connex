@@ -54,6 +54,7 @@ import {
 } from '@/app/lib/utils';
 
 import Rise from '@/app/components/motion/Rise';
+import { PageShell } from '@/app/components/PageShell';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import InfoRow from '@/app/components/me/InfoRow';
@@ -212,8 +213,7 @@ export default async function DealPage({ params, searchParams }: DealPageProps) 
     for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+        <PageShell tier="reading">
                 <RecordStickyContext
                     anchorId="deal-record-identity"
                     backHref={returnPath}
@@ -537,8 +537,7 @@ export default async function DealPage({ params, searchParams }: DealPageProps) 
                         </section>
                     </Rise>
                 </div>
-            </div>
-        </div>
+        </PageShell>
     );
 }
 

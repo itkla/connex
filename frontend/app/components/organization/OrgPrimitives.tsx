@@ -1,7 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { LockClosedIcon } from "@heroicons/react/24/outline";
+
+import AccessDenied from "@/app/components/AccessDenied";
 
 /** Shared row-action trigger: a subtle ellipsis button that reveals on row hover. */
 export const rowActionTrigger =
@@ -24,15 +25,5 @@ export function EmptyRow({ children }: { children: React.ReactNode }) {
 /** Shown when the backend refuses (403): the user is not an org administrator. */
 export function NoAccessCard() {
     const t = useTranslations("Organization");
-    return (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-12 text-center">
-            <span aria-hidden className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">
-                <LockClosedIcon className="size-5" />
-            </span>
-            <div className="space-y-1">
-                <p className="text-sm font-semibold text-foreground">{t("noAccessTitle")}</p>
-                <p className="max-w-sm text-sm text-muted-foreground">{t("noAccessBody")}</p>
-            </div>
-        </div>
-    );
+    return <AccessDenied variant="inline" title={t("noAccessTitle")} body={t("noAccessBody")} />;
 }

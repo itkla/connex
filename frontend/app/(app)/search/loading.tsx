@@ -1,9 +1,9 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageShell } from "@/app/components/PageShell";
 
 export default function SearchLoading() {
     return (
-        <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-10">
+        <PageShell tier="wide">
                 <header className="px-4 sm:px-6">
                     <Skeleton className="h-8 w-72" />
                 </header>
@@ -29,7 +29,6 @@ export default function SearchLoading() {
                         </div>
                     </section>
                 ))}
-            </div>
-        </div>
+        </PageShell>
     );
 }
