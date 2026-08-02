@@ -132,6 +132,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "InviteMapper",
         MAPPERS + "LegacyControlUploadMigrationMapper",
         MAPPERS + "MailConfigMapper",
+        MAPPERS + "MigrationHistoryMapper",
         MAPPERS + "OrganizationMapper",
         MAPPERS + "OrgMemberMapper",
         MAPPERS + "OrgPlacementMapper",

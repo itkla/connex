@@ -18,11 +18,13 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -409,7 +411,7 @@ public class AuditService {
         Object existing = attrs.getAttribute(REQUEST_ID_ATTR, RequestAttributes.SCOPE_REQUEST);
         if (existing instanceof String s)
             return s;
-        String id = UUID.randomUUID().toString();
+        String id = CorrelationIds.current();
         attrs.setAttribute(REQUEST_ID_ATTR, id, RequestAttributes.SCOPE_REQUEST);
         return id;
     }
@@ -607,6 +609,71 @@ public class AuditService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Returns the organization-plane audit slice a support bundle may carry, as CSV.
+     *
+     * @param orgId     the organization to read
+     * @param since     the inclusive window start
+     * @param until     the inclusive window end
+     * @param requestId the correlation id to match, or null for the whole window
+     * @param limit     the maximum number of rows
+     * @return the support CSV projection
+     */
+    public String supportSliceForOrg(int orgId, Instant since, Instant until, String requestId, int limit) {
+        return toSupportCsv(auditLogMapper.findOrgSupportSlice(orgId, since, until, requestId, limit));
+    }
+
+    /**
+     * Returns the workspace record-event slice for one entity, as CSV.
+     *
+     * <p>The caller is responsible for proving the workspace belongs to the requested organization
+     * and that the actor holds {@code AUDIT_READ} in it; this method does not widen that gate.
+     *
+     * @param workspaceId the workspace the entity belongs to
+     * @param entityType  the record type
+     * @param entityId    the record id
+     * @param since       the inclusive window start
+     * @param until       the inclusive window end
+     * @param requestId   the correlation id to match, or null for the whole window
+     * @param limit       the maximum number of rows
+     * @return the support CSV projection
+     */
+    public String supportSliceForEntity(int workspaceId, String entityType, int entityId,
+            Instant since, Instant until, String requestId, int limit) {
+        return toSupportCsv(auditLogMapper.findEntitySupportSlice(
+                workspaceId, entityType, entityId, since, until, requestId, limit));
+    }
+
+    /**
+     * Projects audit rows to the closed set of fields a support bundle may disclose.
+     *
+     * <p>Actors are identified by id only. Display names are excluded deliberately: a bundle
+     * leaves the tenant, and the organization administrator can resolve an id to a person inside
+     * their own admin UI. Target labels, summaries, change and context bodies, IP addresses, user
+     * agents, session identifiers and the integrity chain are all omitted.
+     */
+    private String toSupportCsv(List<AuditLog> entries) {
+        StringBuilder sb = new StringBuilder();
+        writeCsvRow(sb, List.of("auditId", "scope", "workspaceId", "orgId", "action", "entityType",
+                "entityId", "actorId", "outcome", "requestId", "createdAt", "contentFieldsOmitted"));
+        for (AuditLog entry : entries) {
+            writeCsvRow(sb, List.of(
+                    csvCell(entry.getId()),
+                    csvCell(entry.getWorkspaceId() == null ? "organization" : "workspace"),
+                    csvCell(entry.getWorkspaceId()),
+                    csvCell(entry.getOrgId()),
+                    csvCell(entry.getAction()),
+                    csvCell(entry.getEntityType()),
+                    csvCell(entry.getEntityId()),
+                    csvCell(entry.getActorId()),
+                    csvCell(entry.getOutcome()),
+                    csvCell(entry.getRequestId()),
+                    csvCell(entry.getCreatedAt()),
+                    csvCell(true)));
+        }
+        return sb.toString();
     }
 
     private String toCsv(List<AuditLog> entries) {
