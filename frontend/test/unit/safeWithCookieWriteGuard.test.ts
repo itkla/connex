@@ -4,82 +4,114 @@ import { describe, expect, it } from 'vitest';
 
 const API_SOURCE = readFileSync(path.resolve(process.cwd(), 'app/lib/api.ts'), 'utf8');
 
+const SWALLOWING_READ_WRAPPER = 'safeReadWithCookie';
 const MUTATING_HELPERS = ['postJson', 'putJson', 'patchJson', 'deleteJson', 'postFormData'] as const;
+const DELETED_SSR_WRITE_WRAPPERS = [
+    'addContactTagFromCookie',
+    'removeContactTagFromCookie',
+    'replaceContactTagsFromCookie',
+] as const;
 
-/**
- * How many read fetchers are currently routed through the error-swallowing `safeWithCookie`.
- * Pinned exactly rather than as a floor, so a call site the scan stops resolving fails loudly
- * instead of quietly shrinking the guard. Migrating a read off the wrapper should decrement it.
- */
-const SAFE_WITH_COOKIE_READ_SITES = 39;
+const SWALLOWING_READ_CALL_SITES = 39;
 
-/** Drops comments so a doc-comment mention of the wrapper is not scanned as a call site. */
+const ANY_SINGLE_PARAM_ARROW_TO_FETCHER = /\(\s*\w+\s*\)\s*=>\s*(\w+)\(/;
+
 function withoutComments(source: string): string {
     return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 }
 
 const API_CODE = withoutComments(API_SOURCE);
 
-/**
- * Names every fetcher routed through the error-swallowing wrapper, by scanning for the arrow
- * that follows each reference to it, and counts the references it could not resolve.
- *
- * The marker omits the `<` so a call that lets the type argument be inferred is still seen, and
- * the lambda parameter is matched generically so renaming it does not hide a call. Both the
- * single-line and the wrapped call layouts in `api.ts` are matched.
- */
-function fetchersRoutedThroughSafeWithCookie(): { names: string[]; unresolved: number } {
-    const marker = 'safeWithCookie';
+function fetchersRoutedThrough(
+    source: string,
+    wrapper: string,
+): { names: string[]; unresolved: number } {
     const names: string[] = [];
     let unresolved = 0;
-    let index = API_CODE.indexOf(marker);
+    let index = source.indexOf(wrapper);
     while (index !== -1) {
-        const arrow = /\(\s*\w+\s*\)\s*=>\s*(\w+)\(/.exec(API_CODE.slice(index, index + 240));
+        const arrow = ANY_SINGLE_PARAM_ARROW_TO_FETCHER.exec(source.slice(index, index + 240));
         if (arrow) {
             names.push(arrow[1]);
         } else {
             unresolved += 1;
         }
-        index = API_CODE.indexOf(marker, index + marker.length);
+        index = source.indexOf(wrapper, index + wrapper.length);
     }
     return { names, unresolved };
 }
 
-function bodyOf(fetcherName: string): string {
+function bodyOf(source: string, fetcherName: string): string {
     const declaration = new RegExp(`function ${fetcherName}\\s*\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`);
-    const match = declaration.exec(API_CODE);
+    const match = declaration.exec(source);
     if (!match) {
         throw new Error(`could not locate the definition of ${fetcherName} in app/lib/api.ts`);
     }
     return match[1];
 }
 
+function mutatingHelpersUsedBy(source: string, fetcherName: string): string[] {
+    return MUTATING_HELPERS.filter((helper) => bodyOf(source, fetcherName).includes(helper));
+}
+
+function withSmuggledCallSite(call: string): string {
+    return API_CODE.replace(
+        'export function getContactDeals(',
+        `export function smuggledWrite(id: number, cookie: string | null) {\n    return ${call};\n}\nexport function getContactDeals(`,
+    );
+}
+
 describe('the error-swallowing cookie wrapper stays off write paths', () => {
+    it('carries the read-only constraint in its name, at every call site', () => {
+        expect(API_CODE).toContain(`async function ${SWALLOWING_READ_WRAPPER}<T>(`);
+        expect(API_CODE).not.toMatch(/function safeWithCookie\b/);
+    });
+
     it('resolves every call site, so the guard below cannot silently shrink', () => {
-        const { names, unresolved } = fetchersRoutedThroughSafeWithCookie();
-        const references = API_CODE.split('safeWithCookie').length - 1;
+        const { names, unresolved } = fetchersRoutedThrough(API_CODE, SWALLOWING_READ_WRAPPER);
+        const references = API_CODE.split(SWALLOWING_READ_WRAPPER).length - 1;
 
         expect(unresolved, 'only the wrapper declaration should resolve to no fetcher').toBe(1);
         expect(names.length).toBe(references - 1);
-        expect(names.length).toBe(SAFE_WITH_COOKIE_READ_SITES);
+        expect(names.length, 'migrating a read off the wrapper must decrement this').toBe(
+            SWALLOWING_READ_CALL_SITES,
+        );
     });
 
-    it('routes no mutation through safeWithCookie', () => {
-        const { names } = fetchersRoutedThroughSafeWithCookie();
+    it('routes no mutation through the swallowing read wrapper', () => {
+        const { names } = fetchersRoutedThrough(API_CODE, SWALLOWING_READ_WRAPPER);
 
         for (const fetcher of names) {
-            const used = MUTATING_HELPERS.filter((helper) => bodyOf(fetcher).includes(helper));
-            expect(used, `${fetcher} is a write and must not swallow its failure`).toEqual([]);
+            expect(
+                mutatingHelpersUsedBy(API_CODE, fetcher),
+                `${fetcher} is a write and must not swallow its failure`,
+            ).toEqual([]);
         }
     });
 
-    it('documents the wrapper as read-only so the next write does not land on it', () => {
-        expect(API_SOURCE).toMatch(/\*\*Reads only\.\*\*/);
+    it('sees a write smuggled in without a type argument', () => {
+        const injected = withSmuggledCallSite(
+            `${SWALLOWING_READ_WRAPPER}((init) => replaceContactTags(id, [1], init), cookie)`,
+        );
+        const { names } = fetchersRoutedThrough(injected, SWALLOWING_READ_WRAPPER);
+
+        expect(names).toContain('replaceContactTags');
+        expect(mutatingHelpersUsedBy(injected, 'replaceContactTags')).not.toEqual([]);
+    });
+
+    it('sees a write smuggled in behind a renamed lambda parameter', () => {
+        const injected = withSmuggledCallSite(
+            `${SWALLOWING_READ_WRAPPER}<Types.Tag>((options) => replaceContactTags(id, [1], options), cookie)`,
+        );
+        const { names } = fetchersRoutedThrough(injected, SWALLOWING_READ_WRAPPER);
+
+        expect(names).toContain('replaceContactTags');
+        expect(mutatingHelpersUsedBy(injected, 'replaceContactTags')).not.toEqual([]);
     });
 
     it('keeps no SSR write wrapper that cannot carry a CSRF header', () => {
-        expect(API_CODE).not.toContain('addContactTagFromCookie');
-        expect(API_CODE).not.toContain('removeContactTagFromCookie');
-        expect(API_CODE).not.toContain('replaceContactTagsFromCookie');
+        for (const wrapper of DELETED_SSR_WRITE_WRAPPERS) {
+            expect(API_CODE).not.toContain(wrapper);
+        }
     });
 });
