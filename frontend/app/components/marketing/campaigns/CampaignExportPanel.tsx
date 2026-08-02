@@ -32,7 +32,9 @@ const CONNECTORS = ["http_list"];
  * lists the resulting exports, gating the create action on the caller's resolved manage permission.
  *
  * Exporting rides the same instance delivery capability as sending, so an instance without it says
- * so before the reader fills the form rather than answering with a 403 afterwards.
+ * so before the reader fills the form rather than answering with a 403 afterwards. That statement
+ * sits outside the permission gate on purpose: it is most useful to a reader who cannot act and
+ * would otherwise have no way to tell a disabled instance from a missing permission.
  */
 export default function CampaignExportPanel({
     campaignId,
@@ -54,7 +56,9 @@ export default function CampaignExportPanel({
     const [exportSnapshot, setExportSnapshot] = useState<string>("");
     const [exportConnector, setExportConnector] = useState<string>("");
     const [isCreatingExport, setIsCreatingExport] = useState(false);
-    const exportUnavailable = !deliveryEnabled;
+    const [exportRefused, setExportRefused] = useState(false);
+
+    const exportUnavailable = !deliveryEnabled || exportRefused;
     const canPushExport = canCreateExport(access);
 
     const chosenSnapshot = useMemo(
@@ -79,7 +83,8 @@ export default function CampaignExportPanel({
             setExportConnector("");
             toastSuccess(t("created"));
         } catch (err) {
-            if (err instanceof ApiError && err.status === 403 && !deliveryEnabled) {
+            if (err instanceof ApiError && err.status === 403) {
+                setExportRefused(true);
                 toastError(t("exportUnavailable"));
             } else {
                 toastError(err instanceof Error ? err.message : String(err));
@@ -92,6 +97,15 @@ export default function CampaignExportPanel({
     return (
         <Panel title={t("title")} subtitle={t("subtitle")}>
             <div className="flex flex-col gap-6">
+                {exportUnavailable && (
+                    <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
+                        <InformationCircleIcon
+                            aria-hidden
+                            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        />
+                        <p className="text-sm text-muted-foreground">{t("exportUnavailable")}</p>
+                    </div>
+                )}
                 {canPushExport && (
                     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -172,17 +186,6 @@ export default function CampaignExportPanel({
                             </Button>
                         </div>
 
-                        {exportUnavailable && (
-                            <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
-                                <InformationCircleIcon
-                                    aria-hidden
-                                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                                />
-                                <p className="text-sm text-muted-foreground">
-                                    {t("exportUnavailable")}
-                                </p>
-                            </div>
-                        )}
                     </div>
                 )}
 

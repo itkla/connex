@@ -40,7 +40,7 @@ describe('the campaign delivery surface reflects whether delivery is available',
     it('gates audience export on the same capability that gates sending', () => {
         const panel = source(EXPORT_PANEL);
 
-        expect(panel).toContain('const exportUnavailable = !deliveryEnabled;');
+        expect(panel).toContain('const exportUnavailable = !deliveryEnabled || exportRefused;');
         expect(panel).toContain('exportUnavailable');
     });
 });

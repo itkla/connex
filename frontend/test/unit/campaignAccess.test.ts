@@ -161,16 +161,45 @@ describe('the campaign surface consumes the resolved contract', () => {
     });
 });
 
-describe('an export refusal is not blamed on the instance flag', () => {
-    it('only claims delivery is disabled when the capability says so', () => {
+/**
+ * The operations article states that "the delivery and export panels say up front when sending is
+ * not enabled on this instance". That is a customer-facing claim, so both banners must sit outside
+ * the permission gates — the reader who most needs to tell a disabled instance from a missing
+ * permission is exactly the one who cannot act.
+ */
+describe('both delivery panels state availability to everyone who can see them', () => {
+    it('renders the export banner outside the permission gate', () => {
         const panel = source(EXPORT_PANEL);
 
-        expect(panel).toContain('err.status === 403 && !deliveryEnabled');
-        expect(panel).toContain('const exportUnavailable = !deliveryEnabled;');
+        expect(panel.indexOf('{exportUnavailable && (')).toBeGreaterThan(-1);
+        expect(panel.indexOf('{exportUnavailable && (')).toBeLessThan(
+            panel.indexOf('{canPushExport && ('),
+        );
     });
 
-    it('keeps no latched refusal that would outlive the request', () => {
-        expect(source(EXPORT_PANEL)).not.toContain('exportRefused');
+    it('renders the delivery banner outside the permission gate', () => {
+        const panel = source(DELIVERY_PANEL);
+
+        expect(panel.indexOf('st("deliveryUnavailable") : st("queueHint")')).toBeGreaterThan(-1);
+        expect(panel.indexOf('st("deliveryUnavailable") : st("queueHint")')).toBeLessThan(
+            panel.indexOf('{canMaterializeSend && ('),
+        );
+    });
+
+    it('latches a stale capability snapshot exactly as the delivery panel does', () => {
+        expect(source(EXPORT_PANEL)).toContain(
+            'const exportUnavailable = !deliveryEnabled || exportRefused;',
+        );
+        expect(source(DELIVERY_PANEL)).toContain(
+            'const deliveryUnavailable = !deliveryEnabled || deliveryRefused;',
+        );
+    });
+
+    it('keeps the refusal path reachable rather than gating it on what it reports', () => {
+        const panel = source(EXPORT_PANEL);
+
+        expect(panel).not.toContain('err.status === 403 && !deliveryEnabled');
+        expect(panel).toContain('setExportRefused(true);');
     });
 });
 
