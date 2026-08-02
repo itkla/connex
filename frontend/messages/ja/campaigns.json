@@ -183,7 +183,7 @@
         "versionOption": "v{version}・{locale}",
         "purpose": "許諾目的",
         "purposePlaceholder": "marketing",
-        "scheduledAt": "予約",
+        "queueHint": "キューに追加した配信は、次の配信処理で送信されます。送信日時を予約することはできません。",
         "eligible": "現時点の対象",
         "eligibleIncluded": "{count}件が対象",
         "eligibleExcluded": "{count}件を除外",

@@ -183,7 +183,7 @@
         "versionOption": "v{version} · {locale}",
         "purpose": "Consent purpose",
         "purposePlaceholder": "marketing",
-        "scheduledAt": "Schedule",
+        "queueHint": "A queued send goes out on the next delivery pass. Sends cannot be scheduled for a later time.",
         "eligible": "Eligible now",
         "eligibleIncluded": "{count} included",
         "eligibleExcluded": "{count} excluded",

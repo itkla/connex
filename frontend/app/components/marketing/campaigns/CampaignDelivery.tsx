@@ -99,7 +99,6 @@ export default function CampaignDelivery({
     const [sendMessageId, setSendMessageId] = useState<string>("");
     const [sendVersion, setSendVersion] = useState<string>("");
     const [sendPurpose, setSendPurpose] = useState<string>("");
-    const [sendScheduledAt, setSendScheduledAt] = useState<string>("");
     const [isCreatingSend, setIsCreatingSend] = useState(false);
     const [actionSendId, setActionSendId] = useState<number | null>(null);
     const [deliveryRefused, setDeliveryRefused] = useState(false);
@@ -209,14 +208,12 @@ export default function CampaignDelivery({
                 messageId,
                 messageVersion,
                 purpose: sendPurpose.trim() || null,
-                scheduledAt: sendScheduledAt || null,
             });
             setSends((prev) => [created, ...prev]);
             setSendSnapshot("");
             setSendMessageId("");
             setSendVersion("");
             setSendPurpose("");
-            setSendScheduledAt("");
             toastSuccess(st("created"));
         } catch (err) {
             toastError(err instanceof Error ? err.message : String(err));
@@ -508,17 +505,15 @@ export default function CampaignDelivery({
 
             <Panel title={st("title")} subtitle={st("subtitle")}>
                 <div className="flex flex-col gap-6">
-                    {deliveryUnavailable && (
-                        <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
-                            <InformationCircleIcon
-                                aria-hidden
-                                className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                            />
-                            <p className="text-sm text-muted-foreground">
-                                {st("deliveryUnavailable")}
-                            </p>
-                        </div>
-                    )}
+                    <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
+                        <InformationCircleIcon
+                            aria-hidden
+                            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        />
+                        <p className="text-sm text-muted-foreground">
+                            {deliveryUnavailable ? st("deliveryUnavailable") : st("queueHint")}
+                        </p>
+                    </div>
                     {canManage && (
                         <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -592,15 +587,6 @@ export default function CampaignDelivery({
                                         onChange={(e) => setSendPurpose(e.target.value)}
                                         placeholder={st("purposePlaceholder")}
                                         maxLength={32}
-                                    />
-                                </div>
-                                <div className="grid gap-1.5">
-                                    <Label htmlFor="send-scheduled">{st("scheduledAt")}</Label>
-                                    <Input
-                                        id="send-scheduled"
-                                        type="datetime-local"
-                                        value={sendScheduledAt}
-                                        onChange={(e) => setSendScheduledAt(e.target.value)}
                                     />
                                 </div>
                             </div>

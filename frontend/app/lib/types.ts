@@ -1775,12 +1775,15 @@ export type CampaignSend = {
     updatedAt: string;
 };
 
+/**
+ * A new send. Deliberately carries no scheduled time: the dispatch worker claims on status alone,
+ * so a `scheduledAt` the API still accepts would be stored and never honoured.
+ */
 export type CampaignSendPayload = {
     snapshotVersion: number;
     messageId: number;
     messageVersion: number;
     purpose?: string | null;
-    scheduledAt?: string | null;
 };
 
 /** Per-channel delivery tally within a campaign's engagement rollup. */
