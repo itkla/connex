@@ -3,7 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import type { DiagnosticsJob, DiagnosticsJobRun, JobRunStatus, TenantDiagnostics } from "@/app/lib/types";
-import { formatDateTime } from "@/app/lib/utils";
+import { formatUtcDateTime } from "@/app/lib/utils";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { StatusPill, type DiagnosticTone } from "./StatusPill";
 
@@ -85,13 +85,13 @@ function JobRow({ job }: { job: DiagnosticsJob }) {
                 <dl className="mt-1.5 grid gap-x-6 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-3">
                     <div className="flex gap-1.5">
                         <dt>{t("jobLastRun")}</dt>
-                        <dd className="text-foreground">{formatDateTime(last.startedAt, locale)}</dd>
+                        <dd className="text-foreground">{formatUtcDateTime(last.startedAt, locale)}</dd>
                     </div>
                     <div className="flex gap-1.5">
                         <dt>{t("jobLastSuccess")}</dt>
                         <dd>
                             {job.lastSuccess
-                                ? formatDateTime(job.lastSuccess.startedAt, locale)
+                                ? formatUtcDateTime(job.lastSuccess.startedAt, locale)
                                 : t("never")}
                         </dd>
                     </div>
@@ -99,7 +99,7 @@ function JobRow({ job }: { job: DiagnosticsJob }) {
                         <dt>{t("jobLastFailure")}</dt>
                         <dd>
                             {job.lastFailure
-                                ? formatDateTime(job.lastFailure.startedAt, locale)
+                                ? formatUtcDateTime(job.lastFailure.startedAt, locale)
                                 : t("never")}
                         </dd>
                     </div>

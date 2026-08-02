@@ -35,11 +35,11 @@ export function MailDeliverabilitySection({ workspaceId }: { workspaceId: number
         setPending(true);
         setError(null);
         setReferenceId(null);
+        setResult(null);
         try {
             setResult(await sendWorkspaceMailDiagnosticTest(workspaceId));
         } catch (caught) {
             if (handlePasskeyStepUpError(caught)) return;
-            setResult(null);
             if (caught instanceof ApiError) {
                 setError(caught.message);
                 setReferenceId(caught.correlationId ?? null);

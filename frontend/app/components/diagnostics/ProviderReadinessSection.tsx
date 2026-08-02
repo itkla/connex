@@ -3,7 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import type { DiagnosticsWorkspaceProviders, TenantDiagnostics } from "@/app/lib/types";
-import { formatDateTime } from "@/app/lib/utils";
+import { formatUtcDateTime } from "@/app/lib/utils";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { StatusPill, type DiagnosticTone } from "./StatusPill";
 
@@ -153,7 +153,7 @@ function WorkspaceProviders({
                                 })}
                                 {stream.lastSuccessAt
                                     ? ` · ${t("lastSuccess", {
-                                          when: formatDateTime(stream.lastSuccessAt, locale),
+                                          when: formatUtcDateTime(stream.lastSuccessAt, locale),
                                       })}`
                                     : ""}
                             </p>

@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -9,6 +12,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -35,6 +39,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 class MailDiagnosticsServiceTest {
     private static final int WORKSPACE_ID = 17;
     private static final int ACTOR_ID = 29;
+    private static final int ORG_ID = 91;
     private static final String ACTOR_EMAIL = "actor@example.com";
 
     private SessionSecurityService sessionSecurityService;
@@ -44,6 +49,7 @@ class MailDiagnosticsServiceTest {
     private MailService mailService;
     private MailDnsDiagnosticsService dnsDiagnosticsService;
     private AuditService auditService;
+    private WorkspaceService workspaceService;
     private MailDiagnosticsService service;
 
     private boolean managedMail;
@@ -67,6 +73,8 @@ class MailDiagnosticsServiceTest {
         mailService = mock(MailService.class);
         dnsDiagnosticsService = mock(MailDnsDiagnosticsService.class);
         auditService = mock(AuditService.class);
+        workspaceService = mock(WorkspaceService.class);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         service = new MailDiagnosticsService(
                 sessionSecurityService,
                 userMapper,
@@ -75,9 +83,26 @@ class MailDiagnosticsServiceTest {
                 new EmailTemplateRenderer(),
                 mailService,
                 dnsDiagnosticsService,
-                auditService);
+                auditService,
+                workspaceService,
+                new MailDiagnosticsRateLimiter(3, 300),
+                Clock.fixed(Instant.parse("2026-08-01T00:00:00Z"), ZoneOffset.UTC));
         when(userMapper.getUserById(ACTOR_ID)).thenReturn(actor());
         when(dnsDiagnosticsService.diagnose(any())).thenReturn(dns());
+    }
+
+    @Test
+    void repeatedTestSendsAreThrottledBeforeReachingTheTransport() {
+        when(mailConfigResolver.resolveForWorkspace(WORKSPACE_ID)).thenReturn(config(true));
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertEquals("succeeded", service.testSend(WORKSPACE_ID, ACTOR_ID).transport().outcome());
+        }
+        MailDiagnosticTestDto throttled = service.testSend(WORKSPACE_ID, ACTOR_ID);
+
+        assertEquals("failed", throttled.transport().outcome());
+        assertEquals("rate_limited", throttled.transport().errorCode());
+        verify(mailService, times(3)).sendNow(any(), any());
     }
 
     @Test
@@ -228,13 +253,17 @@ class MailDiagnosticsServiceTest {
         ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
         verify(mailService).sendNow(any(), message.capture());
         assertEquals(ACTOR_EMAIL, message.getValue().to());
-        verify(auditService).record(
+        verify(auditService).recordScoped(
                 "workspace.mail_config.test",
                 "workspace",
                 WORKSPACE_ID,
+                WORKSPACE_ID,
+                ORG_ID,
                 ACTOR_EMAIL,
                 "Sent a diagnostic test email",
                 null);
+        verify(auditService, never()).record(
+                any(), any(), any(), any(), any(), any());
     }
 
     private static User actor() {

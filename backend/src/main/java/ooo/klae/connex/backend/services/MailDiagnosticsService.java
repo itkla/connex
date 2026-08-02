@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Clock;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -41,6 +42,9 @@ public class MailDiagnosticsService {
     private final MailService mailService;
     private final MailDnsDiagnosticsService mailDnsDiagnosticsService;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
+    private final MailDiagnosticsRateLimiter rateLimiter;
+    private final Clock clock;
 
     /**
      * Sends through the effective managed, override, or fallback transport without mutating config.
@@ -53,6 +57,14 @@ public class MailDiagnosticsService {
         sessionSecurityService.requireRecentAuthentication(actorId);
         User actor = userMapper.getUserById(actorId);
         String correlationId = UUID.randomUUID().toString();
+        if (!rateLimiter.tryAcquire(workspaceId, actorId, clock.millis())) {
+            Dns dns = mailDnsDiagnosticsService.diagnose(null);
+            return new MailDiagnosticTestDto(
+                    correlationId,
+                    new Sender(null, null),
+                    new Transport("unconfigured", null, null, "failed", "rate_limited"),
+                    dns);
+        }
         if (actor == null || actor.getEmail() == null || actor.getEmail().isBlank()) {
             Dns dns = mailDnsDiagnosticsService.diagnose(null);
             return new MailDiagnosticTestDto(
@@ -136,12 +148,26 @@ public class MailDiagnosticsService {
         return new MailDiagnosticTestDto(correlationId, sender, transport, dns);
     }
 
+    /**
+     * Records the send audit against the workspace the test actually used.
+     *
+     * <p>The endpoint is addressed by path, so an administrator who belongs to two workspaces can
+     * test workspace B while the ambient tenant context still resolves to workspace A. Deriving the
+     * audit scope from that context would file the send against the wrong workspace, so the scope
+     * is passed explicitly.
+     *
+     * @param workspaceId workspace whose transport was used
+     * @param actor requesting administrator
+     * @return a stable error code when the audit could not be written, otherwise null
+     */
     private String recordTestAudit(int workspaceId, User actor) {
         try {
-            auditService.record(
+            auditService.recordScoped(
                     "workspace.mail_config.test",
                     "workspace",
                     workspaceId,
+                    workspaceId,
+                    workspaceService.getOrgId(workspaceId),
                     actor.getEmail(),
                     "Sent a diagnostic test email",
                     null);

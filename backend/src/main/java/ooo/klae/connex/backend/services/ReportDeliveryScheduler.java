@@ -106,8 +106,8 @@ public class ReportDeliveryScheduler {
                         log.warn("Report schedule {} failed in workspace {}: {}",
                                 ref.scheduleId(), ref.workspaceId(), exception.getMessage());
                         try {
-                            auditFailure(ref, "scheduled report delivery failed", runDetail);
-                        } catch (RuntimeException auditFailure) {
+                            recoverFailure(catalog, ref, runDetail);
+                        } catch (RuntimeException recoveryFailure) {
                             log.warn("Report delivery failure audit could not be written for "
                                     + "workspace {}", ref.workspaceId());
                         }
@@ -328,20 +328,51 @@ public class ReportDeliveryScheduler {
                 "recipientCount", recipientCount));
     }
 
+    /**
+     * Records the failure of a schedule whose workspace scope could not be entered.
+     *
+     * <p>The workspace placement resolution is what just failed — it is fail-closed, so a
+     * lifecycle-fenced workspace or an unavailable placement throws. Re-entering
+     * {@link TenantWorkScope#inWorkspace} to write the failure record would throw a second time
+     * and escape to the catalog loop, skipping every later due schedule in that catalog. The
+     * catalog being swept is already known, so the diagnostics row is written under a plain
+     * catalog pin and the compliance audit is written unrouted; neither re-resolves the workspace.
+     *
+     * @param catalog catalog currently being swept
+     * @param ref schedule that failed
+     * @param runDetail run start time
+     */
+    private void recoverFailure(String catalog, ReportScheduleRef ref, JobRunDetail runDetail) {
+        try {
+            tenantWorkScope.withCatalog(catalog, () -> {
+                record(ref, JobRunStatus.FAILED, runDetail, Map.of(
+                        "phase", "delivery_failed",
+                        "scheduleId", ref.scheduleId()));
+                return null;
+            });
+        } finally {
+            auditUnrouted(ref, "scheduled report delivery failed");
+        }
+    }
+
     private void auditFailure(ReportScheduleRef ref, String reason, JobRunDetail runDetail) {
         try {
             record(ref, JobRunStatus.FAILED, runDetail, Map.of(
                     "phase", "delivery_failed",
                     "scheduleId", ref.scheduleId()));
         } finally {
-            tenantWorkScope.unrouted(() -> {
-                auditService.recordFailureScoped(
-                        "report.schedule.delivery", "report_schedule", ref.scheduleId(),
-                        ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), null,
-                        "Scheduled report delivery failed", reason);
-                return null;
-            });
+            auditUnrouted(ref, reason);
         }
+    }
+
+    private void auditUnrouted(ReportScheduleRef ref, String reason) {
+        tenantWorkScope.unrouted(() -> {
+            auditService.recordFailureScoped(
+                    "report.schedule.delivery", "report_schedule", ref.scheduleId(),
+                    ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), null,
+                    "Scheduled report delivery failed", reason);
+            return null;
+        });
     }
 
     private void recordSkipped(ReportScheduleRef ref, String phase, JobRunDetail runDetail) {
