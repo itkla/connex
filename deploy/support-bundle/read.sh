@@ -101,7 +101,7 @@ support_bundle_render_manifest() {
     support_bundle_heading "Manifest"
     jq '{schemaVersion, productVersion, generatedAt, orgId, filters, omissions}' "$manifest" || return "$EXIT_READ"
     support_bundle_heading "Inventory (verified)"
-    jq -r '.files[] | "\(.path)\t\(.byteLength) bytes\t\(.sha256[0:16])…"' "$manifest" \
+    jq -r '.files[] | "\(.path)\t\(.byteLength) bytes\t\(.sha256[0:16])..."' "$manifest" \
         | column -t -s $'\t' || return "$EXIT_READ"
     # An omission is a deliberate statement that a source was unavailable or
     # unsafe to include, not an error; surfacing it stops a reader concluding

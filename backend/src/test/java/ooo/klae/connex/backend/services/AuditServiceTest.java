@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,6 +15,10 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.MDC;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
@@ -196,5 +202,51 @@ class AuditServiceTest {
         when(auditLogMapper.findByEntity(7, "company", 12, 25, 50)).thenReturn(List.of());
         service.exportForEntity("company", 12, 25, 50);
         verify(auditLogMapper).findByEntity(7, "company", 12, 25, 50);
+    }
+
+    /**
+     * The support bundle is indexed by correlation id, so the id recorded on an audit row must be
+     * the same value the request returned to the client as {@code X-Correlation-Id}, and every
+     * event written during one request must share it.
+     */
+    @Test
+    void auditEventsInOneRequestShareTheRequestCorrelationId() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        MDC.put(CorrelationIds.MDC_KEY, "abcd1234efgh");
+        try {
+            service.record("person.archive", "person", 412, "person:412", "Archived", null);
+            service.record("person.update", "person", 412, "person:412", "Updated", null);
+
+            ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+            verify(auditIntegrityService, org.mockito.Mockito.times(2)).append(captor.capture());
+            List<AuditLog> written = captor.getAllValues();
+            assertEquals("abcd1234efgh", written.get(0).getRequestId());
+            assertEquals(written.get(0).getRequestId(), written.get(1).getRequestId());
+        } finally {
+            MDC.remove(CorrelationIds.MDC_KEY);
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    /**
+     * Schedulers and other non-request threads have no correlation id in scope; they must still
+     * receive a usable identifier rather than failing.
+     */
+    @Test
+    void mintsAnIdentifierWhenNoCorrelationIdIsInScope() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        MDC.remove(CorrelationIds.MDC_KEY);
+        try {
+            service.record("job.run", "job", 1, "job:1", "Ran", null);
+
+            ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+            verify(auditIntegrityService).append(captor.capture());
+            assertNotNull(captor.getValue().getRequestId());
+            assertFalse(captor.getValue().getRequestId().isBlank());
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
     }
 }
