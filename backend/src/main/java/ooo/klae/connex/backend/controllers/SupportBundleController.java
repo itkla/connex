@@ -14,18 +14,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.context.request.async.AsyncWebRequest;
-import org.springframework.web.context.request.async.WebAsyncUtils;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.SupportBundleService;
-import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleDownload;
+import ooo.klae.connex.backend.services.SupportBundleService.SupportBundle;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleRequest;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -50,24 +46,22 @@ public class SupportBundleController {
     private final TenantContext tenantContext;
 
     /**
-     * Streams the redacted support bundle for one organization.
+     * Returns the redacted support bundle for one organization.
      *
      * @param orgId         the organization to collect for
      * @param correlationId the correlation id filter, or null
      * @param entityType    the record type filter, or null
      * @param entityId      the record id filter, or null
      * @param since         the ISO-8601 window start, or null for the default seven days
-     * @param request       the servlet request driving the async lifecycle
-     * @return the streaming ZIP response
+     * @return the ZIP response
      */
     @GetMapping("/support-bundle")
-    public ResponseEntity<StreamingResponseBody> supportBundle(
+    public ResponseEntity<byte[]> supportBundle(
             @PathVariable int orgId,
             @RequestParam(required = false) String correlationId,
             @RequestParam(required = false) String entityType,
             @RequestParam(required = false) Integer entityId,
-            @RequestParam(required = false) String since,
-            HttpServletRequest request) {
+            @RequestParam(required = false) String since) {
         int actorId = authService.getCurrentUser().getId();
         Integer workspaceId = resolveEntityFilterWorkspace(orgId, entityType, entityId);
         SupportBundleRequest bundleRequest = new SupportBundleRequest(
@@ -78,27 +72,20 @@ public class SupportBundleController {
             workspaceId,
             parseSince(since));
 
-        SupportBundleDownload download = supportBundleService.prepare(bundleRequest, actorId);
-        try {
-            configureAsyncLifecycle(request, download);
-            StreamingResponseBody body = download::writeTo;
-            ContentDisposition disposition = ContentDisposition.attachment()
-                .filename(download.filename(), StandardCharsets.UTF_8)
-                .build();
-            return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("application/zip"))
-                .cacheControl(CacheControl.noStore())
-                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .header("X-Content-Type-Options", "nosniff")
-                .header("Cross-Origin-Resource-Policy", "same-origin")
-                .header(
-                    "Content-Security-Policy",
-                    "default-src 'none'; sandbox; frame-ancestors 'none'; base-uri 'none'")
-                .body(body);
-        } catch (RuntimeException | Error exception) {
-            download.cancel();
-            throw exception;
-        }
+        SupportBundle bundle = supportBundleService.generate(bundleRequest, actorId);
+        ContentDisposition disposition = ContentDisposition.attachment()
+            .filename(bundle.filename(), StandardCharsets.UTF_8)
+            .build();
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("application/zip"))
+            .cacheControl(CacheControl.noStore())
+            .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+            .header("X-Content-Type-Options", "nosniff")
+            .header("Cross-Origin-Resource-Policy", "same-origin")
+            .header(
+                "Content-Security-Policy",
+                "default-src 'none'; sandbox; frame-ancestors 'none'; base-uri 'none'")
+            .body(bundle.content());
     }
 
     private Integer resolveEntityFilterWorkspace(int orgId, String entityType, Integer entityId) {
@@ -116,7 +103,7 @@ public class SupportBundleController {
             throw new BadRequestException(
                 "An active workspace is required to filter by entity");
         }
-        if (workspaceService.getCurrentWorkspace().getOrgId() != orgId) {
+        if (workspaceService.getOrgId(workspaceId) != orgId) {
             throw new ResourceNotFoundException("Workspace not found in this organization");
         }
         workspaceService.requirePermission(Permission.AUDIT_READ);
@@ -144,13 +131,4 @@ public class SupportBundleController {
         }
     }
 
-    private void configureAsyncLifecycle(
-            HttpServletRequest request,
-            SupportBundleDownload download) {
-        AsyncWebRequest asyncRequest = WebAsyncUtils.getAsyncManager(request).getAsyncWebRequest();
-        asyncRequest.setTimeout(download.remainingTimeoutMillis());
-        asyncRequest.addTimeoutHandler(download::cancel);
-        asyncRequest.addErrorHandler(error -> download.cancel());
-        asyncRequest.addCompletionHandler(download::cancel);
-    }
 }

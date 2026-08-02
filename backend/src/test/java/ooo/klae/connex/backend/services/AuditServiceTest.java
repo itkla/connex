@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -205,15 +207,35 @@ class AuditServiceTest {
     }
 
     /**
-     * The support bundle is indexed by correlation id, so the id recorded on an audit row must be
-     * the same value the request returned to the client as {@code X-Correlation-Id}, and every
-     * event written during one request must share it.
+     * The audit identifier must not be attacker-influenced: {@code X-Correlation-Id} is
+     * client-settable, so a caller could otherwise make unrelated requests share one identifier or
+     * inject rows into an investigator's filtered slice.
      */
     @Test
-    void auditEventsInOneRequestShareTheRequestCorrelationId() {
+    void auditRequestIdIgnoresTheClientSuppliedCorrelationId() {
         MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationIds.HEADER_NAME, "abcd1234efgh");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         MDC.put(CorrelationIds.MDC_KEY, "abcd1234efgh");
+        try {
+            service.record("person.archive", "person", 412, "person:412", "Archived", null);
+
+            ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+            verify(auditIntegrityService).append(captor.capture());
+            String recorded = captor.getValue().getRequestId();
+            assertNotNull(recorded);
+            assertNotEquals("abcd1234efgh", recorded);
+        } finally {
+            MDC.remove(CorrelationIds.MDC_KEY);
+            RequestContextHolder.resetRequestAttributes();
+        }
+    }
+
+    /** Every audit event written during one request shares that request's server-minted id. */
+    @Test
+    void auditEventsInOneRequestShareOneServerMintedId() {
+        RequestContextHolder.setRequestAttributes(
+            new ServletRequestAttributes(new MockHttpServletRequest()));
         try {
             service.record("person.archive", "person", 412, "person:412", "Archived", null);
             service.record("person.update", "person", 412, "person:412", "Updated", null);
@@ -221,32 +243,25 @@ class AuditServiceTest {
             ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
             verify(auditIntegrityService, org.mockito.Mockito.times(2)).append(captor.capture());
             List<AuditLog> written = captor.getAllValues();
-            assertEquals("abcd1234efgh", written.get(0).getRequestId());
+            assertNotNull(written.get(0).getRequestId());
             assertEquals(written.get(0).getRequestId(), written.get(1).getRequestId());
         } finally {
-            MDC.remove(CorrelationIds.MDC_KEY);
             RequestContextHolder.resetRequestAttributes();
         }
     }
 
     /**
-     * Schedulers and other non-request threads have no correlation id in scope; they must still
-     * receive a usable identifier rather than failing.
+     * A scheduler thread has no request attributes at all, so the request id is simply absent.
+     * This is unchanged, pre-existing behaviour and is asserted so it stays deliberate.
      */
     @Test
-    void mintsAnIdentifierWhenNoCorrelationIdIsInScope() {
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
-        MDC.remove(CorrelationIds.MDC_KEY);
-        try {
-            service.record("job.run", "job", 1, "job:1", "Ran", null);
+    void schedulerThreadsRecordNoRequestId() {
+        RequestContextHolder.resetRequestAttributes();
 
-            ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
-            verify(auditIntegrityService).append(captor.capture());
-            assertNotNull(captor.getValue().getRequestId());
-            assertFalse(captor.getValue().getRequestId().isBlank());
-        } finally {
-            RequestContextHolder.resetRequestAttributes();
-        }
+        service.record("job.run", "job", 1, "job:1", "Ran", null);
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        assertNull(captor.getValue().getRequestId());
     }
 }

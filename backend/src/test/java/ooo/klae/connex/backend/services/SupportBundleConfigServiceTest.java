@@ -43,7 +43,7 @@ class SupportBundleConfigServiceTest {
         environment.setProperty("spring.datasource.url", "jdbc:mysql://db.internal:3306/connexdb");
 
         Map<String, String> configuration = new SupportBundleConfigService(environment)
-            .safeConfiguration();
+            .safeConfiguration().values();
 
         assertEquals("on-prem", configuration.get("connex.deployment.profile"));
         assertEquals("false", configuration.get("connex.ai.enabled"));
@@ -54,9 +54,27 @@ class SupportBundleConfigServiceTest {
     }
 
     @Test
+    void dropsAnAllowlistedKeyWhoseValueLooksLikeAConnectionStringOrToken() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setProperty("connex.deployment.profile", "jdbc:mysql://db.internal:3306/x");
+        environment.setProperty("connex.signup.mode", "https://tenant.example.com/callback");
+        environment.setProperty("connex.mail.port", "587");
+
+        SupportBundleConfigService.SafeConfiguration configuration =
+            new SupportBundleConfigService(environment).safeConfiguration();
+
+        assertFalse(configuration.values().containsKey("connex.deployment.profile"));
+        assertFalse(configuration.values().containsKey("connex.signup.mode"));
+        assertEquals("587", configuration.values().get("connex.mail.port"));
+        assertEquals("unsafe_value_shape",
+            configuration.omissions().get("config:connex.deployment.profile"));
+        assertFalse(configuration.toString().contains("db.internal"));
+    }
+
+    @Test
     void omitsUnsetKeysRatherThanEmittingNull() {
         Map<String, String> configuration = new SupportBundleConfigService(new MockEnvironment())
-            .safeConfiguration();
+            .safeConfiguration().values();
 
         assertTrue(configuration.isEmpty());
     }

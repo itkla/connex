@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
@@ -95,6 +97,9 @@ public class SupportBundleConfigService {
         "database",
         "datasource");
 
+    private static final Pattern UNSAFE_VALUE = Pattern.compile(
+        "(?i)(jdbc:|://|-----BEGIN |[A-Za-z0-9+/_-]{40,}={0,2}$)");
+
     private final Environment environment;
 
     /**
@@ -103,16 +108,57 @@ public class SupportBundleConfigService {
      * <p>An unset key is omitted rather than emitted as null, so a reader can tell "not
      * configured" from "configured empty".
      *
-     * @return the allowlisted configuration values, keyed by property name
+     * <p>Both guards are enforced here at runtime, not merely asserted by a test. A key whose name
+     * looks credential- or location-bearing is dropped even though it was allowlisted, and so is a
+     * value that looks like a connection string, URL, PEM block, or long opaque token — an
+     * allowlisted key can still be given a dangerous value by an operator. Every drop is reported
+     * so the omission is visible in the manifest rather than silent.
+     *
+     * @return the allowlisted configuration values and the reasons for any drops
      */
-    public Map<String, String> safeConfiguration() {
+    public SafeConfiguration safeConfiguration() {
         Map<String, String> configuration = new LinkedHashMap<>();
+        Map<String, Object> omissions = new LinkedHashMap<>();
         for (String key : SAFE_CONFIG_KEYS) {
+            if (isForbiddenKey(key)) {
+                omissions.put("config:" + key, "forbidden_key_segment");
+                continue;
+            }
             String value = environment.getProperty(key);
-            if (value != null) {
-                configuration.put(key, value);
+            if (value == null) {
+                continue;
+            }
+            if (UNSAFE_VALUE.matcher(value).find()) {
+                omissions.put("config:" + key, "unsafe_value_shape");
+                continue;
+            }
+            configuration.put(key, value);
+        }
+        return new SafeConfiguration(configuration, omissions);
+    }
+
+    /**
+     * Returns whether a key name disqualifies it from disclosure.
+     *
+     * @param key the configuration key
+     * @return true when the key contains a forbidden segment
+     */
+    public static boolean isForbiddenKey(String key) {
+        String lowered = key.toLowerCase(Locale.ROOT);
+        for (String forbidden : FORBIDDEN_KEY_SEGMENTS) {
+            if (lowered.contains(forbidden)) {
+                return true;
             }
         }
-        return configuration;
+        return false;
+    }
+
+    /**
+     * The allowlisted configuration and the keys that were dropped.
+     *
+     * @param values    the disclosed configuration values
+     * @param omissions the dropped keys, mapped to the reason they were dropped
+     */
+    public record SafeConfiguration(Map<String, String> values, Map<String, Object> omissions) {
     }
 }

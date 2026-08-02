@@ -17,7 +17,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
@@ -36,9 +35,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 
+import ooo.klae.connex.backend.dto.AuditSupportRowDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleDownload;
+import ooo.klae.connex.backend.services.SupportBundleService.SupportBundle;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleRequest;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -62,6 +63,9 @@ class SupportBundleServiceTest {
     private AuditService auditService;
     private ObjectMapper objectMapper;
     private SupportBundleService service;
+    private ooo.klae.connex.backend.mappers.AuditLogMapper auditLogMapper;
+    private AuditIntegrityService auditIntegrityService;
+    private ooo.klae.connex.backend.tenant.TenantContext tenantContext;
 
     @BeforeEach
     void setUp() {
@@ -72,14 +76,19 @@ class SupportBundleServiceTest {
         migrationHistoryService = Mockito.mock(MigrationHistoryService.class);
         productVersionService = Mockito.mock(ProductVersionService.class);
         auditService = Mockito.mock(AuditService.class);
+        auditLogMapper = Mockito.mock(ooo.klae.connex.backend.mappers.AuditLogMapper.class);
+        auditIntegrityService = Mockito.mock(AuditIntegrityService.class);
+        tenantContext = Mockito.mock(ooo.klae.connex.backend.tenant.TenantContext.class);
         objectMapper = new ObjectMapper();
 
         when(readinessService.readiness(anyInt())).thenReturn(Map.of("profile", "on-prem"));
-        when(configService.safeConfiguration()).thenReturn(Map.of("connex.ai.enabled", "false"));
+        when(configService.safeConfiguration()).thenReturn(
+            new SupportBundleConfigService.SafeConfiguration(
+                Map.of("connex.ai.enabled", "false"), Map.of()));
         when(migrationHistoryService.history()).thenReturn(List.of());
         when(productVersionService.version()).thenReturn("test");
         when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
-            .thenReturn("auditId,scope\r\n1,organization\r\n");
+            .thenReturn(new AuditService.AuditSlice("auditId,scope\r\n1,organization\r\n", 1, false));
 
         service = new SupportBundleService(
             orgMemberService,
@@ -99,7 +108,7 @@ class SupportBundleServiceTest {
 
     @Test
     void checksOrgAdminBeforeRecentAuthentication() {
-        service.prepare(request(null), ACTOR_ID).cancel();
+        service.generate(request(null), ACTOR_ID);
 
         InOrder order = inOrder(orgMemberService, sessionSecurityService);
         order.verify(orgMemberService).requireOrgAdmin(ORG_ID, ACTOR_ID);
@@ -111,7 +120,7 @@ class SupportBundleServiceTest {
         doThrow(new ForbiddenException("nope"))
             .when(orgMemberService).requireOrgAdmin(anyInt(), anyInt());
 
-        assertThrows(ForbiddenException.class, () -> service.prepare(request(null), ACTOR_ID));
+        assertThrows(ForbiddenException.class, () -> service.generate(request(null), ACTOR_ID));
         verify(sessionSecurityService, never()).requireRecentAuthentication(anyInt());
         verify(auditService, never()).recordStrictIndependentScoped(
             anyString(), anyString(), any(), any(), any(), anyString(), anyString(), any());
@@ -122,12 +131,12 @@ class SupportBundleServiceTest {
         doThrow(new ForbiddenException("stale"))
             .when(sessionSecurityService).requireRecentAuthentication(anyInt());
 
-        assertThrows(ForbiddenException.class, () -> service.prepare(request(null), ACTOR_ID));
+        assertThrows(ForbiddenException.class, () -> service.generate(request(null), ACTOR_ID));
     }
 
     @Test
     void defaultsToASevenDayWindow() throws Exception {
-        JsonNode manifest = manifestOf(service.prepare(request(null), ACTOR_ID));
+        JsonNode manifest = manifestOf(service.generate(request(null), ACTOR_ID));
 
         assertEquals(NOW.minus(Duration.ofDays(7)).toString(),
             manifest.get("filters").get("since").asString());
@@ -136,15 +145,15 @@ class SupportBundleServiceTest {
 
     @Test
     void acceptsExactlyThirtyDays() {
-        assertNotNull(service.prepare(request(NOW.minus(Duration.ofDays(30))), ACTOR_ID));
+        assertNotNull(service.generate(request(NOW.minus(Duration.ofDays(30))), ACTOR_ID));
     }
 
     @Test
     void rejectsWindowsOlderThanThirtyDaysAndFutureWindows() {
         assertThrows(BadRequestException.class,
-            () -> service.prepare(request(NOW.minus(Duration.ofDays(31))), ACTOR_ID));
+            () -> service.generate(request(NOW.minus(Duration.ofDays(31))), ACTOR_ID));
         assertThrows(BadRequestException.class,
-            () -> service.prepare(request(NOW.plusSeconds(60)), ACTOR_ID));
+            () -> service.generate(request(NOW.plusSeconds(60)), ACTOR_ID));
     }
 
     @Test
@@ -159,7 +168,7 @@ class SupportBundleServiceTest {
 
     @Test
     void writesTheManifestLastAndDoesNotSelfHashIt() throws Exception {
-        Map<String, byte[]> entries = entriesOf(service.prepare(request(null), ACTOR_ID));
+        Map<String, byte[]> entries = entriesOf(service.generate(request(null), ACTOR_ID));
 
         List<String> order = new ArrayList<>(entries.keySet());
         assertEquals("manifest.json", order.get(order.size() - 1));
@@ -173,7 +182,7 @@ class SupportBundleServiceTest {
 
     @Test
     void everyInventoryDigestAndLengthMatchesTheEntryBytes() throws Exception {
-        Map<String, byte[]> entries = entriesOf(service.prepare(request(null), ACTOR_ID));
+        Map<String, byte[]> entries = entriesOf(service.generate(request(null), ACTOR_ID));
         JsonNode manifest = objectMapper.readTree(entries.get("manifest.json"));
 
         int checked = 0;
@@ -191,55 +200,17 @@ class SupportBundleServiceTest {
 
     @Test
     void declaresTheSourcesItDeliberatelyOmits() throws Exception {
-        JsonNode omissions = manifestOf(service.prepare(request(null), ACTOR_ID)).get("omissions");
+        JsonNode omissions = manifestOf(service.generate(request(null), ACTOR_ID)).get("omissions");
 
         assertEquals("no_persisted_source", omissions.get("client-errors.json").asString());
         assertEquals("job_run_not_available", omissions.get("job-runs.json").asString());
     }
 
-    @Test
-    void neverEmitsSecretMaterialFromAnySource() throws Exception {
-        Map<String, Object> readiness = new LinkedHashMap<>();
-        readiness.put("profile", "on-prem");
-        readiness.put("mailHost", SENTINEL);
-        when(readinessService.readiness(anyInt())).thenReturn(Map.of("profile", "on-prem"));
-        when(configService.safeConfiguration()).thenReturn(Map.of("connex.ai.enabled", "false"));
-        when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
-            .thenReturn("auditId,scope,actorId\r\n1,organization,55\r\n");
 
-        Map<String, byte[]> entries = entriesOf(service.prepare(request(null), ACTOR_ID));
-
-        for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
-            String content = new String(entry.getValue(), java.nio.charset.StandardCharsets.UTF_8);
-            assertFalse(content.contains(SENTINEL),
-                "Entry " + entry.getKey() + " leaked the sentinel secret");
-            assertFalse(content.contains("password"),
-                "Entry " + entry.getKey() + " leaked a credential-shaped key");
-            assertFalse(content.contains("jdbc:"),
-                "Entry " + entry.getKey() + " leaked a datasource URL");
-        }
-        assertTrue(readiness.containsKey("mailHost"));
-    }
-
-    @Test
-    void auditSliceCarriesNoDisplayName() throws Exception {
-        when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
-            .thenReturn("auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,"
-                + "outcome,requestId,createdAt,contentFieldsOmitted\r\n");
-
-        Map<String, byte[]> entries = entriesOf(service.prepare(request(null), ACTOR_ID));
-        String header = new String(entries.get("audit-slice.csv"),
-            java.nio.charset.StandardCharsets.UTF_8);
-
-        assertTrue(header.contains("actorId"));
-        assertFalse(header.contains("actorLabel"));
-        assertFalse(header.contains("currentActorLabel"));
-        assertFalse(header.contains("targetLabel"));
-    }
 
     @Test
     void auditsTheDownloadWithFilterMetadataOnly() {
-        service.prepare(request(null), ACTOR_ID).cancel();
+        service.generate(request(null), ACTOR_ID);
 
         verify(auditService).recordStrictIndependentScoped(
             eq("org.support_bundle.download"),
@@ -252,33 +223,79 @@ class SupportBundleServiceTest {
             any());
     }
 
-    @Test
-    void refusesToStreamTwiceFromOneDownload() throws Exception {
-        SupportBundleDownload download = service.prepare(request(null), ACTOR_ID);
-        download.writeTo(new ByteArrayOutputStream());
 
-        assertThrows(IllegalStateException.class,
-            () -> download.writeTo(new ByteArrayOutputStream()));
+
+/**
+     * Drives the real CSV formatter over real projected rows. The previous version of this test
+     * asserted against a hand-typed mock string, so adding a display-name column to the formatter
+     * would not have failed it.
+     */
+    @Test
+    void auditSliceFormatterEmitsActorIdAndNoPersonalName() {
+        AuditService realAuditService = new AuditService(
+            auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
+            new ClientIpResolver(""));
+        when(auditLogMapper.findOrgSupportSlice(anyInt(), any(), any(), any(), anyInt()))
+            .thenReturn(List.of(new AuditSupportRowDto(
+                9001L, 7, 3, "person.archive", "person", 412, 55, "success",
+                "req-1", Instant.parse("2026-07-31T04:05:06Z"))));
+
+        AuditService.AuditSlice slice = realAuditService.supportSliceForOrg(
+            3, NOW.minus(Duration.ofDays(7)), NOW, null, 10);
+
+        assertTrue(slice.csv().contains("actorId"));
+        assertTrue(slice.csv().contains("55"));
+        assertFalse(slice.csv().contains("actorLabel"));
+        assertFalse(slice.csv().contains("currentActorLabel"));
+        assertFalse(slice.csv().contains("targetLabel"));
+        assertFalse(slice.truncated());
+        assertEquals(1, slice.rowCount());
     }
 
+    /**
+     * A saturated window must be distinguishable from a complete one, so the query asks for one
+     * row beyond the disclosure limit and the extra row is never emitted.
+     */
     @Test
-    void releasesAdmissionSoConcurrentDownloadsDoNotLeak() throws Exception {
-        for (int attempt = 0; attempt < 12; attempt++) {
-            service.prepare(request(null), ACTOR_ID).writeTo(new ByteArrayOutputStream());
+    void auditSliceReportsTruncationWithoutDisclosingTheExtraRow() {
+        AuditService realAuditService = new AuditService(
+            auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
+            new ClientIpResolver(""));
+        List<AuditSupportRowDto> rows = new ArrayList<>();
+        for (int index = 0; index < 4; index++) {
+            rows.add(new AuditSupportRowDto((long) index, 7, 3, "person.update", "person", index,
+                55, "success", "req-" + index, Instant.parse("2026-07-31T04:05:06Z")));
         }
-        assertNotNull(service.prepare(request(null), ACTOR_ID));
+        when(auditLogMapper.findOrgSupportSlice(anyInt(), any(), any(), any(), eq(4)))
+            .thenReturn(rows);
+
+        AuditService.AuditSlice slice = realAuditService.supportSliceForOrg(
+            3, NOW.minus(Duration.ofDays(7)), NOW, null, 3);
+
+        assertTrue(slice.truncated());
+        assertEquals(3, slice.rowCount());
+        assertFalse(slice.csv().contains("req-3"));
     }
 
-    private JsonNode manifestOf(SupportBundleDownload download) throws Exception {
-        return objectMapper.readTree(entriesOf(download).get("manifest.json"));
+    @Test
+    void manifestRecordsTheAuditSliceRowCountAndTruncation() throws Exception {
+        when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
+            .thenReturn(new AuditService.AuditSlice("auditId\r\n", 10_000, true));
+
+        JsonNode manifest = manifestOf(service.generate(request(null), ACTOR_ID));
+
+        assertEquals(10_000, manifest.get("auditSliceRowCount").asInt());
+        assertTrue(manifest.get("auditSliceTruncated").asBoolean());
     }
 
-    private Map<String, byte[]> entriesOf(SupportBundleDownload download) throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        download.writeTo(output);
+    private JsonNode manifestOf(SupportBundle bundle) throws Exception {
+        return objectMapper.readTree(entriesOf(bundle).get("manifest.json"));
+    }
+
+    private Map<String, byte[]> entriesOf(SupportBundle bundle) throws Exception {
         Map<String, byte[]> entries = new LinkedHashMap<>();
         try (ZipInputStream zip = new ZipInputStream(
-                new ByteArrayInputStream(output.toByteArray()))) {
+                new ByteArrayInputStream(bundle.content()))) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 entries.put(entry.getName(), zip.readAllBytes());

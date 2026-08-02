@@ -17,8 +17,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AuditSupportRowDto;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
-import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
@@ -407,11 +407,20 @@ public class AuditService {
      * @param attrs
      * @return
      */
+    /**
+     * Returns the per-request identifier recorded on audit rows.
+     *
+     * <p>This is deliberately server-minted rather than the inbound {@code X-Correlation-Id}. That
+     * header is client-settable and is kept as-is for log and response correlation, so adopting it
+     * here would let any authenticated caller make unrelated requests share one identifier, or
+     * inject rows into an investigator's filtered slice. The audit identifier must not be
+     * attacker-influenced.
+     */
     private String requestId(ServletRequestAttributes attrs) {
         Object existing = attrs.getAttribute(REQUEST_ID_ATTR, RequestAttributes.SCOPE_REQUEST);
         if (existing instanceof String s)
             return s;
-        String id = CorrelationIds.current();
+        String id = UUID.randomUUID().toString();
         attrs.setAttribute(REQUEST_ID_ATTR, id, RequestAttributes.SCOPE_REQUEST);
         return id;
     }
@@ -612,21 +621,22 @@ public class AuditService {
     }
 
     /**
-     * Returns the organization-plane audit slice a support bundle may carry, as CSV.
+     * Returns the organization-plane audit slice a support bundle may carry.
      *
      * @param orgId     the organization to read
      * @param since     the inclusive window start
      * @param until     the inclusive window end
-     * @param requestId the correlation id to match, or null for the whole window
-     * @param limit     the maximum number of rows
-     * @return the support CSV projection
+     * @param requestId the request identifier to match, or null for the whole window
+     * @param limit     the maximum number of rows to disclose
+     * @return the support slice
      */
-    public String supportSliceForOrg(int orgId, Instant since, Instant until, String requestId, int limit) {
-        return toSupportCsv(auditLogMapper.findOrgSupportSlice(orgId, since, until, requestId, limit));
+    public AuditSlice supportSliceForOrg(int orgId, Instant since, Instant until, String requestId, int limit) {
+        return toSupportSlice(
+            auditLogMapper.findOrgSupportSlice(orgId, since, until, requestId, limit + 1), limit);
     }
 
     /**
-     * Returns the workspace record-event slice for one entity, as CSV.
+     * Returns the workspace record-event slice for one entity.
      *
      * <p>The caller is responsible for proving the workspace belongs to the requested organization
      * and that the actor holds {@code AUDIT_READ} in it; this method does not widen that gate.
@@ -636,44 +646,54 @@ public class AuditService {
      * @param entityId    the record id
      * @param since       the inclusive window start
      * @param until       the inclusive window end
-     * @param requestId   the correlation id to match, or null for the whole window
-     * @param limit       the maximum number of rows
-     * @return the support CSV projection
+     * @param requestId   the request identifier to match, or null for the whole window
+     * @param limit       the maximum number of rows to disclose
+     * @return the support slice
      */
-    public String supportSliceForEntity(int workspaceId, String entityType, int entityId,
+    public AuditSlice supportSliceForEntity(int workspaceId, String entityType, int entityId,
             Instant since, Instant until, String requestId, int limit) {
-        return toSupportCsv(auditLogMapper.findEntitySupportSlice(
-                workspaceId, entityType, entityId, since, until, requestId, limit));
+        return toSupportSlice(auditLogMapper.findEntitySupportSlice(
+                workspaceId, entityType, entityId, since, until, requestId, limit + 1), limit);
     }
 
     /**
-     * Projects audit rows to the closed set of fields a support bundle may disclose.
+     * Formats the projected rows as CSV and reports whether the window was truncated.
      *
-     * <p>Actors are identified by id only. Display names are excluded deliberately: a bundle
-     * leaves the tenant, and the organization administrator can resolve an id to a person inside
-     * their own admin UI. Target labels, summaries, change and context bodies, IP addresses, user
-     * agents, session identifiers and the integrity chain are all omitted.
+     * <p>The query asks for one row more than it may disclose, so a saturated slice is detectable
+     * rather than silently indistinguishable from a complete one. The extra row is never emitted.
      */
-    private String toSupportCsv(List<AuditLog> entries) {
+    private AuditSlice toSupportSlice(List<AuditSupportRowDto> rows, int limit) {
+        boolean truncated = rows.size() > limit;
+        List<AuditSupportRowDto> disclosed = truncated ? rows.subList(0, limit) : rows;
         StringBuilder sb = new StringBuilder();
         writeCsvRow(sb, List.of("auditId", "scope", "workspaceId", "orgId", "action", "entityType",
                 "entityId", "actorId", "outcome", "requestId", "createdAt", "contentFieldsOmitted"));
-        for (AuditLog entry : entries) {
+        for (AuditSupportRowDto row : disclosed) {
             writeCsvRow(sb, List.of(
-                    csvCell(entry.getId()),
-                    csvCell(entry.getWorkspaceId() == null ? "organization" : "workspace"),
-                    csvCell(entry.getWorkspaceId()),
-                    csvCell(entry.getOrgId()),
-                    csvCell(entry.getAction()),
-                    csvCell(entry.getEntityType()),
-                    csvCell(entry.getEntityId()),
-                    csvCell(entry.getActorId()),
-                    csvCell(entry.getOutcome()),
-                    csvCell(entry.getRequestId()),
-                    csvCell(entry.getCreatedAt()),
+                    csvCell(row.auditId()),
+                    csvCell(row.workspaceId() == null ? "organization" : "workspace"),
+                    csvCell(row.workspaceId()),
+                    csvCell(row.orgId()),
+                    csvCell(row.action()),
+                    csvCell(row.entityType()),
+                    csvCell(row.entityId()),
+                    csvCell(row.actorId()),
+                    csvCell(row.outcome()),
+                    csvCell(row.requestId()),
+                    csvCell(row.createdAt()),
                     csvCell(true)));
         }
-        return sb.toString();
+        return new AuditSlice(sb.toString(), disclosed.size(), truncated);
+    }
+
+    /**
+     * A support bundle audit slice.
+     *
+     * @param csv       the rendered CSV
+     * @param rowCount  the number of rows disclosed
+     * @param truncated whether more rows matched than were disclosed
+     */
+    public record AuditSlice(String csv, int rowCount, boolean truncated) {
     }
 
     private String toCsv(List<AuditLog> entries) {

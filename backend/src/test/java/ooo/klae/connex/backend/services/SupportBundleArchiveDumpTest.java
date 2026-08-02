@@ -45,15 +45,17 @@ class SupportBundleArchiveDumpTest {
         when(readinessService.readiness(anyInt())).thenReturn(Map.of(
             "source", "support_bundle_fallback",
             "profile", "on-prem"));
-        when(configService.safeConfiguration())
-            .thenReturn(Map.of("connex.deployment.profile", "on-prem"));
+        when(configService.safeConfiguration()).thenReturn(
+            new SupportBundleConfigService.SafeConfiguration(
+                Map.of("connex.deployment.profile", "on-prem"), Map.of()));
         when(migrationHistoryService.history()).thenReturn(List.of());
         when(productVersionService.version()).thenReturn("test");
         when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
-            .thenReturn("auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,"
-                + "outcome,requestId,createdAt,contentFieldsOmitted\r\n"
-                + "9001,workspace,7,3,person.archive,person,412,55,success,abcd1234efgh,"
-                + "2026-07-31T04:05:06Z,true\r\n");
+            .thenReturn(new AuditService.AuditSlice(
+                "auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,"
+                    + "outcome,requestId,createdAt,contentFieldsOmitted\r\n"
+                    + "9001,workspace,7,3,person.archive,person,412,55,success,abcd1234efgh,"
+                    + "2026-07-31T04:05:06Z,true\r\n", 1, false));
 
         SupportBundleService service = new SupportBundleService(
             orgMemberService,
@@ -71,8 +73,9 @@ class SupportBundleArchiveDumpTest {
         Path archive = directory.resolve("sample-bundle.zip");
         Files.deleteIfExists(archive);
         try (OutputStream output = Files.newOutputStream(archive)) {
-            service.prepare(new SupportBundleRequest(3, null, null, null, null, null), 55)
-                .writeTo(output);
+            output.write(service
+                .generate(new SupportBundleRequest(3, null, null, null, null, null), 55)
+                .content());
         }
 
         assertTrue(Files.size(archive) > 0);
