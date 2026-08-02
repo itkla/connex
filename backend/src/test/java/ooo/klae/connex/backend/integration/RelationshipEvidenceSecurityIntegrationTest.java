@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import java.math.BigDecimal;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
@@ -547,7 +548,7 @@ class RelationshipEvidenceSecurityIntegrationTest {
         Deal deal = new Deal();
         deal.setName("Evidence Deal " + suffix());
         deal.setWorkspaceId(workspace.getId());
-        deal.setValue(1_000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

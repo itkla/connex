@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
+import java.math.BigDecimal;
+
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -646,7 +648,7 @@ public class DealController {
     public DealDto closeDeal(@PathVariable int id, @Valid @RequestBody(required = false) CloseDealRequest req) {
         Boolean won = req != null ? req.getWon() : null;
         String reason = req != null ? req.getReason() : null;
-        Double actualValue = req != null ? req.getActualValue() : null;
+        BigDecimal actualValue = req != null ? req.getActualValue() : null;
         return DealDto.from(dealService.close(id, won, reason, actualValue));
     }
 

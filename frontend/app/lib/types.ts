@@ -1089,6 +1089,11 @@ export type Deal = {
     value: number;
     actualValue: number;
     currency: string;
+    /**
+     * Where {@link value} comes from. `line_items` means the server derives it from the deal's
+     * line-item totals and rejects manual edits; `manual` means it is operator-entered.
+     */
+    valueSource?: 'manual' | 'line_items';
     pipeline: number | null;
     stage: number | null;
     /** Manual sort order within the stage column (0-based, contiguous). */

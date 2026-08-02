@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.riskrationale;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -123,7 +124,7 @@ class DealRiskRationaleServiceTest {
     @Test
     void generate_noneRisk_returnsNotAtRiskWithoutInvocation() {
         DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, 125000, "USD", "none", 0,
+                DEAL_ID, new BigDecimal("125000.00"), "USD", "none", 0,
                 List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 31))),
                 "2026-07-09 18:30:00");
         when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
@@ -139,7 +140,8 @@ class DealRiskRationaleServiceTest {
     @Test
     void generate_emptyFactors_returnsNotAtRiskWithoutInvocation() {
         DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, 125000, "USD", "medium", 25, List.of(), "2026-07-09 18:30:00");
+                DEAL_ID, new BigDecimal("125000.00"), "USD", "medium", 25,
+                List.of(), "2026-07-09 18:30:00");
         when(aiFeatureGate.generationProfileIfUsable(AiFeature.DEAL_RISK_RATIONALE, DealRiskRationaleService.MAX_TOKENS, DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
 
@@ -396,7 +398,8 @@ class DealRiskRationaleServiceTest {
     private static DealRiskDto atRisk() {
         DealRiskFactor factor = new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 31));
         return new DealRiskDto(
-                DEAL_ID, 125000, "USD", "medium", 25, List.of(factor), "2026-07-09 18:30:00");
+                DEAL_ID, new BigDecimal("125000.00"), "USD", "medium", 25,
+                List.of(factor), "2026-07-09 18:30:00");
     }
 
     private static RationaleAssembly assembly() {

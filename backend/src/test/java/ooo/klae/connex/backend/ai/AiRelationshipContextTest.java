@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -275,12 +276,12 @@ class AiRelationshipContextTest {
     }
 
     private static Deal deal(
-            int id, Boolean won, double value, double actualValue, String currency, String reason, String closedAt) {
+            int id, Boolean won, long value, long actualValue, String currency, String reason, String closedAt) {
         Deal deal = new Deal();
         deal.setId(id);
         deal.setWon(won);
-        deal.setValue(value);
-        deal.setActualValue(actualValue);
+        deal.setValue(BigDecimal.valueOf(value));
+        deal.setActualValue(BigDecimal.valueOf(actualValue));
         deal.setCurrency(currency);
         deal.setClosedReason(reason);
         deal.setClosedAt(closedAt);

@@ -1,11 +1,13 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,7 +29,9 @@ import org.springframework.security.test.context.support.WithAnonymousUser;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
@@ -98,7 +102,7 @@ class DealControllerTest {
         deal.setName("FY27 Renewal");
         when(dealService.updateName(42, "FY27 Renewal")).thenReturn(deal);
 
-        mockMvc.perform(put("/api/deals/42/name")
+        MvcResult result = mockMvc.perform(put("/api/deals/42/name")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -109,10 +113,12 @@ class DealControllerTest {
             .andExpect(jsonPath("$.workspaceId").value(7))
             .andExpect(jsonPath("$.ownerId").value(9))
             .andExpect(jsonPath("$.name").value("FY27 Renewal"))
-            .andExpect(jsonPath("$.value").value(1000.0))
             .andExpect(jsonPath("$.pipeline").value(3))
             .andExpect(jsonPath("$.stage").value(11))
-            .andExpect(jsonPath("$.references").isArray());
+            .andExpect(jsonPath("$.references").isArray())
+            .andReturn();
+        assertDecimal("1000.00", objectMapper.readTree(
+            result.getResponse().getContentAsString()).get("value"));
 
         verify(dealService).updateName(42, "FY27 Renewal");
     }
@@ -120,10 +126,10 @@ class DealControllerTest {
     @Test
     void updateValueDelegatesWithAnExactBigDecimal() throws Exception {
         Deal deal = deal();
-        deal.setValue(125000.0);
+        deal.setValue(new BigDecimal("125000.00"));
         when(dealService.updateValue(42, new BigDecimal("125000.00"))).thenReturn(deal);
 
-        mockMvc.perform(put("/api/deals/42/value")
+        MvcResult result = mockMvc.perform(put("/api/deals/42/value")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -131,9 +137,63 @@ class DealControllerTest {
                     """))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(42))
-            .andExpect(jsonPath("$.value").value(125000.0));
+            .andReturn();
+        assertDecimal("125000.00", objectMapper.readTree(
+            result.getResponse().getContentAsString()).get("value"));
 
         verify(dealService).updateValue(42, new BigDecimal("125000.00"));
+    }
+
+    @Test
+    void closeDelegatesNullableActualValueAsAnExactBigDecimal() throws Exception {
+        Deal deal = deal();
+        deal.setWon(true);
+        deal.setActualValue(new BigDecimal("12.34"));
+        when(dealService.close(42, true, "signed", new BigDecimal("12.34")))
+            .thenReturn(deal);
+
+        MvcResult result = mockMvc.perform(post("/api/deals/42/close")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"won":true,"reason":"signed","actualValue":12.34}
+                    """))
+            .andExpect(status().isOk())
+            .andReturn();
+        assertDecimal("12.34", objectMapper.readTree(
+            result.getResponse().getContentAsString()).get("actualValue"));
+
+        verify(dealService).close(42, true, "signed", new BigDecimal("12.34"));
+    }
+
+    @Test
+    void closeRejectsANegativeActualValueWithoutCallingTheService() throws Exception {
+        mockMvc.perform(post("/api/deals/42/close")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"won":false,"reason":"cancelled","actualValue":-12.34}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.actualValue").exists());
+
+        verifyNoInteractions(dealService);
+    }
+
+    @Test
+    void closePreservesAnOmittedActualValue() throws Exception {
+        Deal deal = deal();
+        when(dealService.close(42, true, null, null)).thenReturn(deal);
+
+        mockMvc.perform(post("/api/deals/42/close")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"won":true}
+                    """))
+            .andExpect(status().isOk());
+
+        verify(dealService).close(42, true, null, null);
     }
 
     @Test
@@ -259,8 +319,8 @@ class DealControllerTest {
         deal.setWorkspaceId(7);
         deal.setOwnerId(9);
         deal.setName("Renewal");
-        deal.setValue(1000.0);
-        deal.setActualValue(0.0);
+        deal.setValue(new BigDecimal("1000.00"));
+        deal.setActualValue(new BigDecimal("0.00"));
         deal.setCurrency("USD");
         deal.setPipelineId(3);
         deal.setStageId(11);
@@ -270,6 +330,10 @@ class DealControllerTest {
         deal.setCreatedAt("2026-07-01 12:00:00");
         deal.setUpdatedAt("2026-07-19 18:00:00");
         return deal;
+    }
+
+    private static void assertDecimal(String expected, JsonNode actual) {
+        assertEquals(0, new BigDecimal(expected).compareTo(actual.decimalValue()));
     }
 
     @TestConfiguration

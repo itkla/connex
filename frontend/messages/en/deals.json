@@ -184,7 +184,7 @@
         "revenueTrend": "Revenue trend",
         "stageRatio": "Stage distribution",
         "openPipeline": "Open pipeline",
-        "openPipelineTooltip": "Total forecast value of deals that are still open (not yet past their close date).",
+        "openPipelineTooltip": "Total forecast value of all deals that are still open. Not bounded by close date.",
         "openDeals": "Open deals",
         "openDealsTooltip": "Number of deals that are still open.",
         "closedForecast": "Closed forecast",
@@ -265,7 +265,9 @@
         "toastStageChangedPartial": "Moved {succeeded} of {total} deals",
         "toastStageFailed": "Couldn't move {failed} deals",
         "sectionPerformance": "Performance",
-        "sectionSummary": "Pipeline summary"
+        "sectionSummary": "Pipeline summary",
+        "metricsBasis": "Current matching deals · open pipeline is not bounded by close date · deals on archived accounts are grouped as unassigned",
+        "valueDerivedFromLineItems": "This value is derived from the deal's line items. Edit or remove the line items to change it."
     },
     "DealsRevenueChart": {
         "actualRevenue": "Actual revenue",
@@ -374,7 +376,8 @@
         "closedReason": "Closed reason",
         "actualValue": "Actual value",
         "cancel": "Cancel",
-        "save": "Save"
+        "save": "Save",
+        "valueDerivedFromLineItems": "This value is derived from the deal's line items. Edit or remove the line items to change it."
     },
     "DealsStageRatio": {
         "open": "Open",

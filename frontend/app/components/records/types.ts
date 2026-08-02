@@ -50,6 +50,12 @@ export interface ColumnDef<T> {
         save: (item: T, next: string) => Promise<void>;
         inputType?: 'text' | 'url' | 'tel';
         validate?: (next: string) => string | null;
+        /**
+         * Suppresses in-place editing for a single row, returning the localized reason to surface
+         * instead. Returning `null` leaves the cell editable. Used where the server owns the value
+         * and would reject an edit, so the affordance is withheld rather than failing on commit.
+         */
+        disabled?: (item: T) => string | null;
     };
     filter?: FilterDef<T>;
     widthClass?: string;

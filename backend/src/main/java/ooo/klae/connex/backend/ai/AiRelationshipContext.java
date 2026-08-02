@@ -210,10 +210,13 @@ public class AiRelationshipContext {
 
     private String accountHistoryLine(Deal deal, MaskingContext context, String sourceId) {
         StringBuilder line = new StringBuilder("- Outcome: ").append(outcome(deal.getWon()));
-        double value = deal.getWon() != null && deal.getWon() && deal.getActualValue() > 0
-                ? deal.getActualValue()
+        BigDecimal actualValue = deal.getActualValue();
+        BigDecimal value = Boolean.TRUE.equals(deal.getWon())
+                && actualValue != null
+                && actualValue.signum() > 0
+                ? actualValue
                 : deal.getValue();
-        if (Double.isFinite(value) && value > 0) {
+        if (value != null && value.signum() > 0) {
             line.append("; Value: ").append(amount(value, deal.getCurrency(), context));
         }
         if (deal.getWon() != null) {
@@ -354,8 +357,8 @@ public class AiRelationshipContext {
         }
     }
 
-    private static String amount(double value, String currency, MaskingContext context) {
-        String amount = BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();
+    private static String amount(BigDecimal value, String currency, MaskingContext context) {
+        String amount = value.stripTrailingZeros().toPlainString();
         String safeCurrency = maskAllowedStatic(currency, context);
         return isUsableMasked(safeCurrency) ? amount + " " + safeCurrency : amount;
     }

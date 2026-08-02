@@ -20,6 +20,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import ReportWidgetRenderer, { formatReportValue } from '@/app/components/reports/ReportWidgetRenderer';
+import { reportFigureBasisKey } from '@/app/components/reports/reportFigureBasis';
 import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
 import { useReportLabels } from '@/app/components/reports/reportLabels';
 import ScheduleManager from '@/app/components/reports/ScheduleManager';
@@ -694,7 +695,9 @@ function ReportPaper({
             <section className="mt-12" aria-labelledby="figures-title">
                 <SectionHeading id="figures-title" title={t('document.figures')} />
                 <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
-                    {document.widgets.map((widget) => (
+                    {document.widgets.map((widget) => {
+                        const basisKey = reportFigureBasisKey(widget.measure);
+                        return (
                         <section
                             key={widget.widgetId}
                             className={(layoutById.get(widget.widgetId)?.width ?? 6) >= 12
@@ -712,6 +715,9 @@ function ReportPaper({
                                             group: t(`group.${widget.groupBy ?? 'none'}`),
                                         })}
                                     </p>
+                                    {basisKey ? (
+                                        <p className="mt-1 text-xs text-muted-foreground">{t(basisKey)}</p>
+                                    ) : null}
                                 </div>
                                 {widget.total != null ? (
                                     <div className="text-right">
@@ -734,7 +740,8 @@ function ReportPaper({
                             </div>
                             <ReportWidgetRenderer widget={widget} />
                         </section>
-                    ))}
+                        );
+                    })}
                 </div>
             </section>
 

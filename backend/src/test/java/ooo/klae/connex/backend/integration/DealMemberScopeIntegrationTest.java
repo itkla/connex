@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -296,7 +297,7 @@ class DealMemberScopeIntegrationTest {
         deal.setWorkspaceId(workspace.getId());
         deal.setOwnerId(ownerId);
         deal.setName(name);
-        deal.setValue(100);
+        deal.setValue(new BigDecimal("100.00"));
         deal.setCurrency("USD");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());

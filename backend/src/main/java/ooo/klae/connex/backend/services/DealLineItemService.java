@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -20,6 +21,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.ProductMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -35,9 +37,12 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class DealLineItemService {
     private final DealLineItemMapper lineItemMapper;
     private final DealMapper dealMapper;
+    private final DealValueService dealValueService;
     private final ProductMapper productMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
+    private final RuleTriggerPublisher ruleTriggers;
+    private final NotificationChangePublisher notificationChanges;
 
     private static final int MONEY_SCALE = 2;
     private static final BigDecimal HUNDRED = new BigDecimal("100");
@@ -52,45 +57,74 @@ public class DealLineItemService {
     }
 
     /** Adds a line item to a deal and returns the refreshed view. */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealLineItemsResponse create(int dealId, DealLineItemRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
         DealLineItem item = new DealLineItem();
         item.setWorkspaceId(workspaceId);
         item.setDealId(deal.getId());
         applyRequest(workspaceId, deal, item, request, true);
         compute(item);
         lineItemMapper.insert(item);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        publishValueChange(workspaceId, deal, reconciled);
         auditService.record("deal.line_item.create", "deal", deal.getId(), deal.getName(),
             "Added line item " + item.getName() + " to " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
     }
 
     /** Updates a line item on a deal and returns the refreshed view. */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealLineItemsResponse update(int dealId, int itemId, DealLineItemRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
         DealLineItem item = requireLineItem(workspaceId, deal.getId(), itemId);
         applyRequest(workspaceId, deal, item, request, false);
         compute(item);
         lineItemMapper.update(item);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        publishValueChange(workspaceId, deal, reconciled);
         auditService.record("deal.line_item.update", "deal", deal.getId(), deal.getName(),
             "Updated line item " + item.getName() + " on " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
     }
 
     /** Removes a line item from a deal and returns the refreshed view. */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealLineItemsResponse delete(int dealId, int itemId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
         DealLineItem item = requireLineItem(workspaceId, deal.getId(), itemId);
         lineItemMapper.delete(workspaceId, itemId);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        publishValueChange(workspaceId, deal, reconciled);
         auditService.record("deal.line_item.delete", "deal", deal.getId(), deal.getName(),
             "Removed line item " + item.getName() + " from " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
+    }
+
+    /**
+     * Signals a line-item-driven change to the canonical deal value, matching the notification and
+     * rule-trigger signals the manual value-writing paths emit. Without this, workflows bound to
+     * {@code deal.value_changed} would never fire for line-item deals and deal-risk notification
+     * reconciliation would not see the new amount.
+     * @param workspaceId tenant scope
+     * @param deal the locked deal, carrying its value as of before reconciliation
+     * @param reconciled the canonical value after reconciliation
+     */
+    private void publishValueChange(int workspaceId, Deal deal, BigDecimal reconciled) {
+        BigDecimal previous = deal.getValue();
+        if (previous != null && reconciled != null && previous.compareTo(reconciled) == 0) {
+            return;
+        }
+        deal.setValue(reconciled);
+        notificationChanges.publish(workspaceId, "deal", deal.getId());
+        ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.updated");
+        ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.value_changed");
     }
 
     /**
@@ -213,6 +247,12 @@ public class DealLineItemService {
 
     private Deal requireDeal(int workspaceId, int dealId) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        return deal;
+    }
+
+    private Deal requireDealForUpdate(int workspaceId, int dealId) {
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         return deal;
     }

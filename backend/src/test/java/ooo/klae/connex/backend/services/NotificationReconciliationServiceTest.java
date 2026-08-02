@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -461,10 +462,10 @@ class NotificationReconciliationServiceTest {
         DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
 
-        DealRiskDto high = new DealRiskDto(101, 0.0, null, "high", 60,
+        DealRiskDto high = new DealRiskDto(101, BigDecimal.ZERO, null, "high", 60,
             List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 22L))),
             "2026-06-23 15:30:00");
-        DealRiskDto low = new DealRiskDto(102, 0.0, null, "low", 10,
+        DealRiskDto low = new DealRiskDto(102, BigDecimal.ZERO, null, "low", 10,
             List.of(new DealRiskFactor("no_stakeholders", "low", Map.of())),
             "2026-06-23 15:30:00");
         when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
@@ -522,7 +523,7 @@ class NotificationReconciliationServiceTest {
         DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
 
-        DealRiskDto medium = new DealRiskDto(101, 0.0, null, "medium", 25,
+        DealRiskDto medium = new DealRiskDto(101, BigDecimal.ZERO, null, "medium", 25,
             List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 40))),
             "2026-06-23 15:30:00");
         when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
@@ -564,7 +565,7 @@ class NotificationReconciliationServiceTest {
         when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
             .thenReturn(List.of(riskState(new DealRiskDto(
                 101,
-                0.0,
+                BigDecimal.ZERO,
                 null,
                 "high",
                 60,
@@ -860,7 +861,7 @@ class NotificationReconciliationServiceTest {
         when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
             .thenReturn(List.of(riskState(new DealRiskDto(
                 101,
-                0.0,
+                BigDecimal.ZERO,
                 null,
                 "high",
                 60,
@@ -1079,7 +1080,7 @@ class NotificationReconciliationServiceTest {
         String sourceStateHash = "d".repeat(64);
         DealRiskDto high = new DealRiskDto(
             101,
-            0.0,
+            BigDecimal.ZERO,
             null,
             "high",
             60,
@@ -1090,7 +1091,7 @@ class NotificationReconciliationServiceTest {
             "2026-06-23 15:30:00");
         DealRiskDto medium = new DealRiskDto(
             101,
-            0.0,
+            BigDecimal.ZERO,
             null,
             "medium",
             25,
@@ -1459,7 +1460,7 @@ class NotificationReconciliationServiceTest {
             .thenReturn(List.of(recipient(101, "Acme renewal", 42)));
         DealRiskDto none = new DealRiskDto(
             101,
-            0.0,
+            BigDecimal.ZERO,
             null,
             "none",
             0,

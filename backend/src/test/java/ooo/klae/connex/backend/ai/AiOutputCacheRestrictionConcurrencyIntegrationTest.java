@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -138,7 +139,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         deal = new Deal();
         deal.setWorkspaceId(granteeWorkspace.getId());
         deal.setName("AI cache deal " + unique);
-        deal.setValue(1000);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("USD");
         deal.setCompanyId(company.getId());
         deal.setPipelineId(pipeline.getId());

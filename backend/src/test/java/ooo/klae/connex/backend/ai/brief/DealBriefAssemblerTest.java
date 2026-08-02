@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.brief;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -87,8 +88,8 @@ class DealBriefAssemblerTest {
         DealSummaryDto summary = new DealSummaryDto(
                 DEAL_ID,
                 "Acme expansion",
-                125000,
-                0,
+                new BigDecimal("125000.00"),
+                new BigDecimal("0.00"),
                 "USD",
                 "open",
                 "2026-08-31",
@@ -123,7 +124,7 @@ class DealBriefAssemblerTest {
                 "medium",
                 Map.of("person", "Mina Patel", "email", "mina.patel@acme.example"));
         DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, 0.0, null, "medium", 25, List.of(riskFactor), "2026-07-09 18:30:00");
+                DEAL_ID, BigDecimal.ZERO, null, "medium", 25, List.of(riskFactor), "2026-07-09 18:30:00");
 
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal);
         when(dealService.getDealSummary(DEAL_ID)).thenReturn(summary);
@@ -154,6 +155,8 @@ class DealBriefAssemblerTest {
         assertFalse(serialized.contains("mina.patel@acme.example"));
         assertFalse(serialized.contains("+1 415 555 0199"));
         assertFalse(serialized.contains("1 Market Street"));
+        assertTrue(serialized.contains("Value: 125000 USD"));
+        assertFalse(serialized.contains("125000.0"));
         assertTrue(serialized.contains("2026-08-31"));
         assertTrue(serialized.contains("2026-07-01 09:00:00"));
         assertTrue(serialized.contains("2026-07-08 14:00:00"));
@@ -211,7 +214,7 @@ class DealBriefAssemblerTest {
                 new DealPerson(suspended, "Suspended role"),
                 new DealPerson(ceased, "Ceased role")));
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(new DealRiskDto(
-                DEAL_ID, 0, null, "high", 50, List.of(restrictedFactor), "2026-07-09 18:30:00"));
+                DEAL_ID, BigDecimal.ZERO, null, "high", 50, List.of(restrictedFactor), "2026-07-09 18:30:00"));
 
         String serialized = serialized(assembler.assemble(WORKSPACE_ID, DEAL_ID).prompt());
 
@@ -384,7 +387,7 @@ class DealBriefAssemblerTest {
     private static Deal deal() {
         Deal deal = new Deal();
         deal.setId(DEAL_ID);
-        deal.setValue(125000);
+        deal.setValue(new BigDecimal("125000.00"));
         deal.setCurrency("USD");
         deal.setExpectedCloseDate("2026-08-31");
         return deal;

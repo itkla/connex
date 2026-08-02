@@ -1,14 +1,16 @@
 package ooo.klae.connex.backend.dto;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import lombok.AllArgsConstructor;
@@ -38,11 +40,16 @@ public class DealDto {
     @Size(max = 255)
     private String name;
 
-    @PositiveOrZero
-    private double value;
+    @NotNull
+    @DecimalMin("0.00")
+    @Digits(integer = 13, fraction = 2)
+    private BigDecimal value;
 
-    // not annotating with @PositiveOrZero because actual value can be negative
-    private double actualValue;
+    @Digits(integer = 13, fraction = 2)
+    private BigDecimal actualValue;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String valueSource;
 
     @NotBlank
     @Size(max = 8)
@@ -69,8 +76,6 @@ public class DealDto {
     @Size(max = 1000)
     private String closedReason;
 
-    // Explicit outcome: TRUE=won, FALSE=lost, NULL=open. Client-settable; the server
-    // reconciles closed_at to match (and a terminal stage forces it).
     private Boolean won;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
@@ -96,8 +101,9 @@ public class DealDto {
         dto.workspaceId = d.getWorkspaceId();
         dto.ownerId = d.getOwnerId();
         dto.name = d.getName();
-        dto.value = d.getValue();
-        dto.actualValue = d.getActualValue();
+        dto.value = money(d.getValue());
+        dto.actualValue = money(d.getActualValue());
+        dto.valueSource = d.getValueSource();
         dto.currency = d.getCurrency();
         dto.pipeline = d.getPipelineId();
         dto.stage = d.getStageId();
@@ -109,10 +115,9 @@ public class DealDto {
         dto.won = d.getWon();
         dto.riskExcluded = d.isRiskExcluded();
 
-        // Hunter's note: i genuinely forgot how i made this. stackoverflow? idk but it's hard to read but once you understand it it works
         dto.personIds = d.getPeople() == null ? null : Arrays.stream(d.getPeople())
-            .filter(dp -> dp.getPerson() != null) // if person in lookup not null map
-            .mapToInt(dp -> dp.getPerson().getId()).toArray(); // is each person from getPeople null? yes : no, then map to array of person ids.map each person's deals so each person has an array of deal ids || null
+            .filter(dp -> dp.getPerson() != null)
+            .mapToInt(dp -> dp.getPerson().getId()).toArray();
         dto.activityIds = d.getActivities() == null ? null : Arrays.stream(d.getActivities()).mapToInt(Activity::getId).toArray();
         dto.noteIds = d.getNotes() == null ? null : Arrays.stream(d.getNotes()).mapToInt(Note::getId).toArray();
         dto.taskIds = d.getTasks() == null ? null : Arrays.stream(d.getTasks()).mapToInt(Task::getId).toArray();
@@ -131,9 +136,8 @@ public class DealDto {
         if (workspaceId != null) d.setWorkspaceId(workspaceId);
         d.setOwnerId(ownerId);
         d.setName(name);
-        d.setValue(value);
-        // if (actualValue != null && actualValue != 0) d.setActualValue(actualValue);
-        d.setActualValue(actualValue);
+        d.setValue(money(value));
+        d.setActualValue(money(actualValue));
         d.setCurrency(currency);
         d.setPipelineId(pipeline);
         d.setStageId(stage);
@@ -145,5 +149,9 @@ public class DealDto {
         d.setCreatedAt(createdAt);
         d.setUpdatedAt(updatedAt);
         return d;
+    }
+
+    private static BigDecimal money(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO.setScale(2) : value;
     }
 }

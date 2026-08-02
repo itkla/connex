@@ -1294,16 +1294,17 @@ class ReportIntegrationTest {
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.widgets[0].total").value(40.00))
-            .andExpect(jsonPath("$.widgets[0].priorTotal").value(150.00))
             .andExpect(jsonPath("$.widgets[0].changePercent").value(26.67))
-            .andExpect(jsonPath("$.widgets[1].total").value(90.00))
-            .andExpect(jsonPath("$.widgets[1].priorTotal").value(200.00))
             .andExpect(jsonPath("$.widgets[1].changePercent").value(45.00))
             .andReturn();
 
         JsonNode document = objectMapper.readTree(result.getResponse().getContentAsString());
         JsonNode ownerWidget = document.get("widgets").get(0);
+        JsonNode workspaceWidget = document.get("widgets").get(1);
+        assertDecimal("40.00", ownerWidget.get("total").decimalValue());
+        assertDecimal("150.00", ownerWidget.get("priorTotal").decimalValue());
+        assertDecimal("90.00", workspaceWidget.get("total").decimalValue());
+        assertDecimal("200.00", workspaceWidget.get("priorTotal").decimalValue());
         assertEquals(2, ownerWidget.get("points").size());
         Map<String, BigDecimal> actuals = pointValues(ownerWidget);
         Map<String, BigDecimal> targets = pointPriorValues(ownerWidget);
@@ -1334,16 +1335,19 @@ class ReportIntegrationTest {
 
         int reportId = createReport(
                 session, workspace, ATTAINMENT_BODY.replace("\"cadence\": \"monthly\"", "\"cadence\": \"quarterly\""));
-        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.widgets[1].total").value(75.00))
-            .andExpect(jsonPath("$.widgets[1].priorTotal").value(300.00))
-            .andExpect(jsonPath("$.widgets[1].changePercent").value(25.00));
+            .andExpect(jsonPath("$.widgets[1].changePercent").value(25.00))
+            .andReturn();
+        JsonNode workspaceWidget = objectMapper.readTree(result.getResponse().getContentAsString())
+            .get("widgets").get(1);
+        assertDecimal("75.00", workspaceWidget.get("total").decimalValue());
+        assertDecimal("300.00", workspaceWidget.get("priorTotal").decimalValue());
     }
 
     @Test
@@ -1369,19 +1373,21 @@ class ReportIntegrationTest {
 
         createRevenueGoal(session, workspace, manager.getId(), "2026-07-01", "0.00", "USD");
         createRevenueGoal(session, workspace, null, "2026-07-01", "0.00", "USD");
-        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.widgets[0].total").value(0.00))
-            .andExpect(jsonPath("$.widgets[0].priorTotal").value(0.00))
             .andExpect(jsonPath("$.widgets[0].changePercent").doesNotExist())
-            .andExpect(jsonPath("$.widgets[1].total").value(0.00))
-            .andExpect(jsonPath("$.widgets[1].priorTotal").value(0.00))
-            .andExpect(jsonPath("$.widgets[1].changePercent").doesNotExist());
+            .andExpect(jsonPath("$.widgets[1].changePercent").doesNotExist())
+            .andReturn();
+        JsonNode widgets = objectMapper.readTree(result.getResponse().getContentAsString()).get("widgets");
+        assertDecimal("0.00", widgets.get(0).get("total").decimalValue());
+        assertDecimal("0.00", widgets.get(0).get("priorTotal").decimalValue());
+        assertDecimal("0.00", widgets.get(1).get("total").decimalValue());
+        assertDecimal("0.00", widgets.get(1).get("priorTotal").decimalValue());
 
         mockMvc.perform(post("/api/reports/{id}/generate", reportId)
                 .header("X-Workspace-Id", workspace.getId())
@@ -1491,7 +1497,7 @@ class ReportIntegrationTest {
 
         int reportId = createReport(session, workspace, RELATIONSHIP_HEALTH_BODY);
 
-        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
@@ -1505,13 +1511,15 @@ class ReportIntegrationTest {
             .andExpect(jsonPath("$.widgets[0].points[2].value").value(2))
             .andExpect(jsonPath("$.widgets[1].total").value(4))
             .andExpect(jsonPath("$.widgets[2].points[0].label").value("USD · Gap One"))
-            .andExpect(jsonPath("$.widgets[2].points[0].value").value(200))
             .andExpect(jsonPath("$.widgets[2].points[1].label").value("USD · Gap Zero"))
-            .andExpect(jsonPath("$.widgets[2].points[1].value").value(100))
             .andExpect(jsonPath("$.widgets[3].total").value(1))
             .andExpect(jsonPath("$.widgets[3].priorTotal").doesNotExist())
-            .andExpect(jsonPath("$.widgets[4].total").value(100))
-            .andExpect(jsonPath("$.widgets[4].points[0].label").value("USD · Single Thread"));
+            .andExpect(jsonPath("$.widgets[4].points[0].label").value("USD · Single Thread"))
+            .andReturn();
+        JsonNode widgets = objectMapper.readTree(result.getResponse().getContentAsString()).get("widgets");
+        assertDecimal("200", widgets.get(2).get("points").get(0).get("value").decimalValue());
+        assertDecimal("100", widgets.get(2).get("points").get(1).get("value").decimalValue());
+        assertDecimal("100", widgets.get(4).get("total").decimalValue());
     }
 
     @Test

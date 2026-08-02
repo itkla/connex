@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.seeder;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -346,11 +348,12 @@ public class SeedDataGenerator {
                 ? 4
                 : DeterministicSeederRandom.bounded(workspaceSeed, DEAL_SALT, index, 1, 3);
         boolean usd = index % 4 == 0;
-        double value = usd
-            ? 5_000.0 + 2_500.0 * DeterministicSeederRandom.bounded(
+        long valueUnits = usd
+            ? 5_000L + 2_500L * DeterministicSeederRandom.bounded(
                 workspaceSeed, DEAL_SALT, index, 2, 80)
-            : 500_000.0 + 250_000.0 * DeterministicSeederRandom.bounded(
+            : 500_000L + 250_000L * DeterministicSeederRandom.bounded(
                 workspaceSeed, DEAL_SALT, index, 2, 120);
+        BigDecimal value = BigDecimal.valueOf(valueUnits).setScale(2);
         int createdBack = 20 + DeterministicSeederRandom.bounded(
             workspaceSeed, DEAL_SALT, index, 3, 528);
 
@@ -361,9 +364,10 @@ public class SeedDataGenerator {
             + String.format(Locale.ROOT, "%05d", index + 1));
         deal.setValue(value);
         deal.setActualValue(outcome < 2
-            ? value * (85 + DeterministicSeederRandom.bounded(
-                workspaceSeed, DEAL_SALT, index, 5, 31)) / 100.0
-            : 0.0);
+            ? value.multiply(BigDecimal.valueOf(85 + DeterministicSeederRandom.bounded(
+                workspaceSeed, DEAL_SALT, index, 5, 31)))
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP)
+            : BigDecimal.ZERO.setScale(2));
         deal.setCurrency(usd ? "USD" : "JPY");
         deal.setPipelineId(pipeline.pipeline().getId());
         deal.setStageId(pipeline.stages().get(stagePosition).getId());

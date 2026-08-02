@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -60,7 +61,8 @@ class RelationshipDashboardServiceTest {
                 new ooo.klae.connex.backend.dto.BandCounts(0, 0, 1, 0),
                 new ooo.klae.connex.backend.dto.TrendCounts(0, 1, 1),
                 new ooo.klae.connex.backend.dto.DecayCounts(0, 0, 0)));
-        DealRiskDto risk = new DealRiskDto(20, 500, "USD", "high", 50, List.of(), "2026-07-01 00:00:00");
+        DealRiskDto risk = new DealRiskDto(
+            20, new BigDecimal("500.00"), "USD", "high", 50, List.of(), "2026-07-01 00:00:00");
         when(riskService.assessDashboard(
             org.mockito.ArgumentMatchers.eq(workspaceId),
             argThat(map -> map.size() == 2 && map.get(1) == coolingContact),

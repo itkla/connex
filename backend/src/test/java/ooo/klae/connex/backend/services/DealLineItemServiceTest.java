@@ -73,6 +73,9 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         eq("0", totals.recurringTotal());
         eq("220.00", totals.grandTotal());
         assertEquals("JPY", totals.currency());
+        Deal persisted = dealMapper.getDealById(workspace.getId(), deal.getId());
+        eq("220.00", persisted.getValue());
+        assertEquals("line_items", persisted.getValueSource());
     }
 
     @Test
@@ -183,6 +186,9 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         assertEquals(originalName, updated.getName());
         eq("100.00", updated.getUnitPrice());
         eq("300.00", updated.getLineSubtotal());
+        Deal persisted = dealMapper.getDealById(workspace.getId(), deal.getId());
+        eq("330.00", persisted.getValue());
+        assertEquals("line_items", persisted.getValueSource());
     }
 
     @Test
@@ -203,14 +209,56 @@ class DealLineItemServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void deleteRecomputesTotals() {
+    void deletingOneOfSeveralLinesRecomputesTheDealValue() {
         Deal deal = jpyDeal();
         Product product = catalogProduct("JPY", "100.00", null, "one_time");
-        DealLineItemsResponse afterAdd = lineItemService.create(deal.getId(), line(product.getId(), "1"));
+        int firstId = lineItemService.create(deal.getId(), line(product.getId(), "1"))
+            .items().get(0).getId();
+        lineItemService.create(deal.getId(), line(product.getId(), "2"));
+
+        DealLineItemsResponse afterDelete = lineItemService.delete(deal.getId(), firstId);
+
+        assertEquals(1, afterDelete.items().size());
+        eq("200.00", afterDelete.totals().grandTotal());
+        Deal persisted = dealMapper.getDealById(workspace.getId(), deal.getId());
+        eq("200.00", persisted.getValue());
+        assertEquals("line_items", persisted.getValueSource());
+    }
+
+    @Test
+    void deletingLastLineRetainsTotalAndMakesItManuallyEditable() {
+        Deal deal = jpyDeal();
+        Product product = catalogProduct("JPY", "100.00", null, "one_time");
+        DealLineItemsResponse afterAdd = lineItemService.create(
+            deal.getId(), line(product.getId(), "2"));
         int itemId = afterAdd.items().get(0).getId();
 
         DealLineItemsResponse afterDelete = lineItemService.delete(deal.getId(), itemId);
+
         assertEquals(0, afterDelete.items().size());
         eq("0", afterDelete.totals().grandTotal());
+        Deal retained = dealMapper.getDealById(workspace.getId(), deal.getId());
+        eq("200.00", retained.getValue());
+        assertEquals("manual", retained.getValueSource());
+
+        Deal edited = dealService.updateValue(deal.getId(), new BigDecimal("225.00"));
+        eq("225.00", edited.getValue());
+        assertEquals("manual", edited.getValueSource());
+    }
+
+    @Test
+    void sumsIndividuallyRoundedLineTotalsExactly() {
+        Deal deal = jpyDeal();
+        Product first = catalogProduct("JPY", "1.00", "12.500", "one_time");
+        Product second = catalogProduct("JPY", "1.00", "37.500", "one_time");
+
+        lineItemService.create(deal.getId(), line(first.getId(), "1"));
+        DealLineItemsResponse response = lineItemService.create(
+            deal.getId(), line(second.getId(), "1"));
+
+        eq("2.51", response.totals().grandTotal());
+        Deal persisted = dealMapper.getDealById(workspace.getId(), deal.getId());
+        eq("2.51", persisted.getValue());
+        assertEquals("line_items", persisted.getValueSource());
     }
 }

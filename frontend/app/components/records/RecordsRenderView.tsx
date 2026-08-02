@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/pagination';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 import { copyToClipboard } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -781,6 +782,34 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             const content = col.render
                                                 ? col.render(item)
                                                 : (item as unknown as Record<string, ReactNode>)[col.key];
+                                            const editDisabledReason = col.editable?.disabled?.(item) ?? null;
+                                            if (!readOnly && col.editable && editDisabledReason) {
+                                                return (
+                                                    <td
+                                                        key={col.key}
+                                                        className={cn(
+                                                            'px-4 py-2.5 whitespace-nowrap text-foreground',
+                                                            colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
+                                                        )}
+                                                        style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                    >
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <button
+                                                                    type="button"
+                                                                    aria-label={`${content} — ${editDisabledReason}`}
+                                                                    className="cursor-help rounded-sm text-left decoration-border decoration-dotted underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                                                                >
+                                                                    {content}
+                                                                </button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p className="max-w-xs text-xs">{editDisabledReason}</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </td>
+                                                );
+                                            }
                                             if (!readOnly && col.editable) {
                                                 const editable = col.editable;
                                                 return (

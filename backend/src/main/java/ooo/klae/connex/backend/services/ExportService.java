@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -236,9 +237,8 @@ public class ExportService {
         return won ? "won" : "lost";
     }
 
-    private static String formatValue(double value) {
-        if (Double.isFinite(value) && value == Math.rint(value)) return Long.toString((long) value);
-        return Double.toString(value);
+    private static String formatValue(BigDecimal value) {
+        return value.stripTrailingZeros().toPlainString();
     }
 
     private static String value(String value) {

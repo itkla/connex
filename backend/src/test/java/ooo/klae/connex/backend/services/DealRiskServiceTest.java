@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -22,6 +24,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -131,7 +134,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
         deal.setWorkspaceId(workspaceId);
-        deal.setValue(1000.0);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(p.getId());
         deal.setStageId(s.getId());
@@ -261,7 +264,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
 
         assertThat(risk.getLevel()).isEqualTo("low");
-        assertThat(risk.getValue()).isEqualTo(deal.getValue());
+        assertThat(risk.getValue()).isEqualByComparingTo(deal.getValue());
         assertThat(risk.getCurrency()).isEqualTo(deal.getCurrency());
         assertThat(factor(risk, "no_stakeholders")).isNotNull();
     }
@@ -276,7 +279,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
         DealRiskDto single = service.assessDeal(workspace.getId(), deal.getId());
         assertThat(single.getLevel()).isEqualTo("none");
-        assertThat(single.getValue()).isEqualTo(deal.getValue());
+        assertThat(single.getValue()).isEqualByComparingTo(deal.getValue());
         assertThat(single.getCurrency()).isEqualTo(deal.getCurrency());
 
         assertThat(service.assessWorkspace(workspace.getId()))
@@ -303,9 +306,54 @@ class DealRiskServiceTest extends AbstractServiceTest {
             .isGreaterThanOrEqualTo(risks.get(risks.size() - 1).getScore());
         assertThat(risks).anyMatch(risk -> risk.getDealId() == overdue.getId());
         assertThat(risks).filteredOn(risk -> risk.getDealId() == overdue.getId())
-            .allMatch(risk -> risk.getValue() == overdue.getValue()
+            .allMatch(risk -> risk.getValue().compareTo(overdue.getValue()) == 0
                 && overdue.getCurrency().equals(risk.getCurrency()));
         assertThat(risks).noneMatch(risk -> risk.getDealId() == healthy.getId());
+    }
+
+    @Test
+    void currencySummaryAddsMoneyWithoutFloatingPointDrift() {
+        Deal first = openDeal();
+        closeDateOf(first, "2126-06-01");
+        dealMapper.updateValueAndSource(
+            workspace.getId(), first.getId(), new BigDecimal("0.10"), "manual");
+        Deal second = openDeal();
+        closeDateOf(second, "2126-06-01");
+        dealMapper.updateValueAndSource(
+            workspace.getId(), second.getId(), new BigDecimal("0.20"), "manual");
+
+        var summary = service.analytics(workspace.getId(), MemberScope.allTeam())
+            .currencies().stream()
+            .filter(currency -> "JPY".equals(currency.currency()))
+            .findFirst()
+            .orElseThrow();
+
+        assertThat(summary.value()).isEqualByComparingTo(new BigDecimal("0.30"));
+    }
+
+    @Test
+    void notificationFingerprintMatchesThePersistedLegacyDoubleFixture() throws Exception {
+        Deal deal = new Deal();
+        deal.setId(19);
+        deal.setValue(new BigDecimal("125000.00"));
+        deal.setCurrency("USD");
+        deal.setExpectedCloseDate("2026-08-31");
+        deal.setCreatedAt("2026-08-01 01:02:03");
+        deal.setUpdatedAt("2026-08-02 04:05:06");
+        Method method = DealRiskService.class.getDeclaredMethod(
+            "notificationSourceStateHash",
+            Deal.class,
+            String.class,
+            List.class,
+            Map.class,
+            Map.class);
+        method.setAccessible(true);
+
+        String hash = (String) method.invoke(
+            null, deal, "touch-hash", List.of(), Map.of(), Map.of());
+
+        assertThat(hash).isEqualTo(
+            "0d2aef6d95e2517852e272d91d5442f2572a7fff9dcbd8a4cecd4c7c5c3d9e64");
     }
 
     @Test

@@ -144,8 +144,15 @@ export default function QuickEditDealSheet({
                                     min="0"
                                     step="0.01"
                                     value={draft.value}
+                                    disabled={d.valueSource === 'line_items'}
+                                    aria-describedby={d.valueSource === 'line_items' ? `deal-value-hint-${d.id}` : undefined}
                                     onChange={(e) => updateDraft(d.id, { value: Number(e.target.value) })}
                                 />
+                                {d.valueSource === 'line_items' ? (
+                                    <p id={`deal-value-hint-${d.id}`} className="mt-1 text-xs text-muted-foreground">
+                                        {t('valueDerivedFromLineItems')}
+                                    </p>
+                                ) : null}
                             </QuickEditField>
                             <QuickEditField label={t('currency')} htmlFor={`deal-currency-${d.id}`}>
                                 <Input

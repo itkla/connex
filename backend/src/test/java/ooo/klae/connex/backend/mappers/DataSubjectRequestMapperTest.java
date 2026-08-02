@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -349,7 +350,7 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(actor.getId());
         deal.setName(name);
-        deal.setValue(1000);
+        deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());
         deal.setStageId(stage.getId());
