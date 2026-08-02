@@ -60,6 +60,25 @@ public class MailConfigResolver {
     }
 
     /**
+     * Names the sender-selection mode that produced a resolved workspace config. Diagnostics
+     * report this so the displayed mode always matches the branch {@link #resolveForWorkspace}
+     * actually took, rather than a separately derived capability value.
+     *
+     * @param config the config returned by {@link #resolveForWorkspace}, possibly null
+     * @return one of {@code managed}, {@code workspace_override}, {@code instance_default},
+     *         or {@code unconfigured}
+     */
+    public String effectiveMode(ResolvedMailConfig config) {
+        if (properties.isManaged()) {
+            return "managed";
+        }
+        if (config == null || !config.usable()) {
+            return "unconfigured";
+        }
+        return config.workspaceSupplied() ? "workspace_override" : "instance_default";
+    }
+
+    /**
      * The workspace's own sender only, with no instance fallback. Used by the test-send
      * action so it validates exactly what the workspace has configured. Returns no
      * override in managed mode.

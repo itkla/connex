@@ -17,7 +17,6 @@ import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.MailDnsDiagnosticsService;
 import ooo.klae.connex.backend.mail.MailMessage;
-import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mail.SmtpDestinationGuard;
@@ -35,7 +34,6 @@ public class MailDiagnosticsService {
     private final SessionSecurityService sessionSecurityService;
     private final UserMapper userMapper;
     private final MailConfigResolver mailConfigResolver;
-    private final MailProperties mailProperties;
     private final SmtpDestinationGuard smtpDestinationGuard;
     private final EmailTemplateRenderer templateRenderer;
     private final MailService mailService;
@@ -72,14 +70,14 @@ public class MailDiagnosticsService {
                     correlationId,
                     new Sender(null, null),
                     new Transport(
-                            mailMode(null),
+                            mailConfigResolver.effectiveMode(null),
                             null,
                             null,
                             "failed",
                             "mail_resolution_failed"),
                     dns);
         }
-        String mode = mailMode(config);
+        String mode = mailConfigResolver.effectiveMode(config);
         if (config == null || !config.usable()) {
             Dns dns = mailDnsDiagnosticsService.diagnose(null);
             return new MailDiagnosticTestDto(
@@ -130,16 +128,6 @@ public class MailDiagnosticsService {
         }
         Dns dns = mailDnsDiagnosticsService.diagnose(config.fromAddress());
         return new MailDiagnosticTestDto(correlationId, sender, transport, dns);
-    }
-
-    private String mailMode(ResolvedMailConfig config) {
-        if (mailProperties.isManaged()) {
-            return "managed";
-        }
-        if (config == null || !config.usable()) {
-            return "unconfigured";
-        }
-        return config.workspaceSupplied() ? "workspace_override" : "instance_default";
     }
 
     private static String safeAddress(String address, String username) {

@@ -37,7 +37,6 @@ import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Providers;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Scope;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.WorkspaceProviders;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
-import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
@@ -81,7 +80,6 @@ public class TenantDiagnosticsService {
     private final CapabilityRegistry capabilityRegistry;
     private final AiProviderReadiness aiProviderReadiness;
     private final MailConfigResolver mailConfigResolver;
-    private final MailProperties mailProperties;
     private final DeliveryProviderReadiness deliveryProviderReadiness;
     private final BusinessCardService businessCardService;
     private final ProviderCaptureMapper providerCaptureMapper;
@@ -191,7 +189,7 @@ public class TenantDiagnosticsService {
     private WorkspaceProviders workspaceProviders(int workspaceId, List<Capture> capture) {
         ResolvedMailConfig mailConfig = resolveMail(workspaceId);
         boolean mailConfigured = mailConfig != null && mailConfig.usable();
-        Mail mail = new Mail(mailMode(mailConfig), mailConfigured);
+        Mail mail = new Mail(mailConfigResolver.effectiveMode(mailConfig), mailConfigured);
         List<Delivery> delivery = new ArrayList<>();
         for (DeliveryChannel channel : DeliveryChannel.values()) {
             boolean implemented = channel == DeliveryChannel.EMAIL || channel == DeliveryChannel.SMS;
@@ -215,16 +213,6 @@ public class TenantDiagnosticsService {
         } catch (RuntimeException exception) {
             return false;
         }
-    }
-
-    private String mailMode(ResolvedMailConfig config) {
-        if (mailProperties.isManaged()) {
-            return "managed";
-        }
-        if (config == null || !config.usable()) {
-            return "unconfigured";
-        }
-        return config.workspaceSupplied() ? "workspace_override" : "instance_default";
     }
 
     private Map<Integer, List<Capture>> captureByWorkspace(

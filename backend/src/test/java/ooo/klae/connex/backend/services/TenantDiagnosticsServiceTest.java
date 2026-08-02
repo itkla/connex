@@ -38,7 +38,6 @@ import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Finding;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Job;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.WorkspaceProviders;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
-import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
@@ -56,7 +55,6 @@ class TenantDiagnosticsServiceTest {
     private CapabilityRegistry capabilityRegistry;
     private AiProviderReadiness aiProviderReadiness;
     private MailConfigResolver mailConfigResolver;
-    private MailProperties mailProperties;
     private DeliveryProviderReadiness deliveryProviderReadiness;
     private BusinessCardService businessCardService;
     private ProviderCaptureMapper providerCaptureMapper;
@@ -66,13 +64,24 @@ class TenantDiagnosticsServiceTest {
     private SecretStoreLifecycleService secretStoreLifecycleService;
     private TenantDiagnosticsService service;
 
+    private boolean managedMail;
+
     @BeforeEach
     void setUp() {
         deploymentProperties = new DeploymentProperties();
         capabilityRegistry = mock(CapabilityRegistry.class);
         aiProviderReadiness = mock(AiProviderReadiness.class);
         mailConfigResolver = mock(MailConfigResolver.class);
-        mailProperties = new MailProperties();
+        when(mailConfigResolver.effectiveMode(any())).thenAnswer(invocation -> {
+            ResolvedMailConfig resolved = invocation.getArgument(0);
+            if (managedMail) {
+                return "managed";
+            }
+            if (resolved == null || !resolved.usable()) {
+                return "unconfigured";
+            }
+            return resolved.workspaceSupplied() ? "workspace_override" : "instance_default";
+        });
         deliveryProviderReadiness = mock(DeliveryProviderReadiness.class);
         businessCardService = mock(BusinessCardService.class);
         providerCaptureMapper = mock(ProviderCaptureMapper.class);
@@ -85,7 +94,6 @@ class TenantDiagnosticsServiceTest {
                 capabilityRegistry,
                 aiProviderReadiness,
                 mailConfigResolver,
-                mailProperties,
                 deliveryProviderReadiness,
                 businessCardService,
                 providerCaptureMapper,
@@ -215,7 +223,7 @@ class TenantDiagnosticsServiceTest {
 
     @Test
     void managedModeRemainsManagedEvenWhenTransportIsUnconfigured() {
-        mailProperties.setManaged(true);
+        managedMail = true;
         when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
                 .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID), "[11]"));
         when(mailConfigResolver.resolveForWorkspace(WORKSPACE_ID)).thenReturn(null);

@@ -27,7 +27,6 @@ import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.MailDnsDiagnosticsService;
 import ooo.klae.connex.backend.mail.MailMessage;
-import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mail.SmtpDestinationGuard;
@@ -41,19 +40,29 @@ class MailDiagnosticsServiceTest {
     private SessionSecurityService sessionSecurityService;
     private UserMapper userMapper;
     private MailConfigResolver mailConfigResolver;
-    private MailProperties mailProperties;
     private SmtpDestinationGuard smtpDestinationGuard;
     private MailService mailService;
     private MailDnsDiagnosticsService dnsDiagnosticsService;
     private AuditService auditService;
     private MailDiagnosticsService service;
 
+    private boolean managedMail;
+
     @BeforeEach
     void setUp() {
         sessionSecurityService = mock(SessionSecurityService.class);
         userMapper = mock(UserMapper.class);
         mailConfigResolver = mock(MailConfigResolver.class);
-        mailProperties = new MailProperties();
+        when(mailConfigResolver.effectiveMode(any())).thenAnswer(invocation -> {
+            ResolvedMailConfig resolved = invocation.getArgument(0);
+            if (managedMail) {
+                return "managed";
+            }
+            if (resolved == null || !resolved.usable()) {
+                return "unconfigured";
+            }
+            return resolved.workspaceSupplied() ? "workspace_override" : "instance_default";
+        });
         smtpDestinationGuard = mock(SmtpDestinationGuard.class);
         mailService = mock(MailService.class);
         dnsDiagnosticsService = mock(MailDnsDiagnosticsService.class);
@@ -62,7 +71,6 @@ class MailDiagnosticsServiceTest {
                 sessionSecurityService,
                 userMapper,
                 mailConfigResolver,
-                mailProperties,
                 smtpDestinationGuard,
                 new EmailTemplateRenderer(),
                 mailService,
@@ -74,7 +82,7 @@ class MailDiagnosticsServiceTest {
 
     @Test
     void managedTransportSucceedsToExactlyTheActorEmail() {
-        mailProperties.setManaged(true);
+        managedMail = true;
         when(mailConfigResolver.resolveForWorkspace(WORKSPACE_ID))
                 .thenReturn(config(false));
 
