@@ -25,7 +25,7 @@ function requestLocale(init: RequestInit): string {
 }
 
 // The active workspace, read from the non-HttpOnly connex_workspace cookie and sent as a
-// header on every client request. SSR callers forward the cookie itself (see safeWithCookie).
+// header on every client request. SSR callers forward the cookie itself (see safeReadWithCookie).
 function clientWorkspaceId(): string | null {
     if (typeof document === "undefined") {
         return null;
@@ -591,7 +591,7 @@ async function deleteJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
 }
 
-async function safeWithCookie<T>(
+async function safeReadWithCookie<T>(
     fetcher: (init: RequestInit) => Promise<T[]>,
     cookie: string | null,
 ): Promise<T[]> {
@@ -606,7 +606,7 @@ async function safeWithCookie<T>(
 export type CookieResult<T> = { ok: true; data: T } | { ok: false };
 
 /**
- * As {@link safeWithCookie}, but reports a fetch failure distinctly from an empty result so the
+ * As {@link safeReadWithCookie}, but reports a fetch failure distinctly from an empty result so the
  * caller can render an error state instead of presenting a backend fault as an empty workspace.
  * A missing cookie also reports {@code ok: false} — the data could not be loaded either way.
  */
@@ -1039,6 +1039,26 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
         }
         return null;
     }
+}
+
+/**
+ * Resolves the authenticated user for a **public** page — documentation, marketing, legal —
+ * where the session only selects which call to action the header shows.
+ *
+ * Unlike {@link getCurrentUserFromCookie}, a transport failure resolves to `null` instead of
+ * propagating. That rethrow exists so an unreachable backend cannot masquerade as a logged-out
+ * session on an authenticated surface, but a page carrying no authenticated content has nothing
+ * to protect: applying it there turns any cookie — `NEXT_LOCALE` alone is enough — into a 500 on
+ * the pages most likely to be read during an outage. Degrading to the signed-out call to action
+ * costs a signed-in visitor one extra click and keeps the page readable.
+ *
+ * Authenticated surfaces must keep using {@link getCurrentUserFromCookie}.
+ * @param cookie the incoming request's cookie header, or null
+ * @returns the authenticated user, or null when unauthenticated or the backend is unreachable
+ */
+export async function getPublicPageUserFromCookie(cookie: string | null): Promise<Types.User | null> {
+    const user = await toResult(getCurrentUserFromCookie(cookie));
+    return user.ok ? user.data : null;
 }
 
 export function logout() {
@@ -1485,7 +1505,7 @@ export function getUsers(init: RequestInit = {}) {
 }
 
 export function getUsersFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.User>((init) => getUsers(init), cookie);
+    return safeReadWithCookie<Types.User>((init) => getUsers(init), cookie);
 }
 
 export function getUsersResultFromCookie(cookie: string | null) {
@@ -1509,15 +1529,15 @@ export function getUserNotes(id: number, init: RequestInit = {}) {
 }
 
 export function getUserTasksFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Task>((init) => getUserTasks(id, init), cookie);
+    return safeReadWithCookie<Types.Task>((init) => getUserTasks(id, init), cookie);
 }
 
 export function getUserActivitiesFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Activity>((init) => getUserActivities(id, init), cookie);
+    return safeReadWithCookie<Types.Activity>((init) => getUserActivities(id, init), cookie);
 }
 
 export function getUserNotesFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Note>((init) => getUserNotes(id, init), cookie);
+    return safeReadWithCookie<Types.Note>((init) => getUserNotes(id, init), cookie);
 }
 
 /*
@@ -1537,7 +1557,7 @@ export function getTaskById(id: number, init: RequestInit = {}) {
 }
 
 export function getTasksFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Task>((init) => getTasks(init), cookie);
+    return safeReadWithCookie<Types.Task>((init) => getTasks(init), cookie);
 }
 
 export function getTasksPageResultFromCookie(
@@ -1605,7 +1625,7 @@ export function getActivityById(id: number, init: RequestInit = {}) {
 }
 
 export function getActivitiesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Activity>((init) => getActivities(init), cookie);
+    return safeReadWithCookie<Types.Activity>((init) => getActivities(init), cookie);
 }
 
 export function getActivitiesPageResultFromCookie(
@@ -1651,7 +1671,7 @@ export function getWorkspaceNotes(init: RequestInit = {}) {
 }
 
 export function getNotesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
+    return safeReadWithCookie<Types.Note>((init) => getNotes(init), cookie);
 }
 
 export function getNotesPageResultFromCookie(
@@ -1747,7 +1767,7 @@ export function getCompanySegmentIds(params: Types.CompanySegmentPageParams, ini
 }
 
 export function getCompaniesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Company>((init) => getCompanies(init), cookie);
+    return safeReadWithCookie<Types.Company>((init) => getCompanies(init), cookie);
 }
 
 export function getCompanyById(id: number, init: RequestInit = {}) {
@@ -1815,11 +1835,11 @@ export function getCompanyTags(id: number, init: RequestInit = {}) {
 }
 
 export function addCompanyTag(id: number, tagId: number, init: RequestInit = {}) {
-    return postJson<void[]>(`/api/companies/${id}/tags/${tagId}`, {}, init);
+    return postJson<void>(`/api/companies/${id}/tags/${tagId}`, {}, init);
 }
 
 export function removeCompanyTag(id: number, tagId: number, init: RequestInit = {}) {
-    return deleteJson<void[]>(`/api/companies/${id}/tags/${tagId}`, init);
+    return deleteJson<void>(`/api/companies/${id}/tags/${tagId}`, init);
 }
 
 /*
@@ -1837,7 +1857,7 @@ export function getContacts(filters: Types.ContactFilters = {}, init: RequestIni
 }
 
 export function getContactsFromCookie(cookie: string | null, filters: Types.ContactFilters = {}) {
-    return safeWithCookie<Types.Contact>((init) => getContacts(filters, init), cookie);
+    return safeReadWithCookie<Types.Contact>((init) => getContacts(filters, init), cookie);
 }
 
 export function getContactsPage(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
@@ -2088,7 +2108,7 @@ export function getRecentMoves(init: RequestInit = {}) {
 }
 
 export function getRecentMovesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.JobMove>((init) => getRecentMoves(init), cookie);
+    return safeReadWithCookie<Types.JobMove>((init) => getRecentMoves(init), cookie);
 }
 
 export function getRecentMovesResultFromCookie(cookie: string | null) {
@@ -2135,7 +2155,7 @@ export function getContactEvidence(id: number, init: RequestInit = {}) {
 
 export function getContactTemperaturesFromCookie(cookie: string | null, ids: number[]) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
-    return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(ids, init), cookie);
+    return safeReadWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(ids, init), cookie);
 }
 
 export function getContactTemperaturesResultFromCookie(cookie: string | null, ids: number[]) {
@@ -2204,7 +2224,7 @@ export function generateIntroRationale(personAId: number, personBId: number, ini
 }
 
 export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: number) {
-    return safeWithCookie<Types.IntroSuggestion>((init) => getIntroSuggestions(init, limit), cookie);
+    return safeReadWithCookie<Types.IntroSuggestion>((init) => getIntroSuggestions(init, limit), cookie);
 }
 
 export function getIntroSuggestionsResultFromCookie(cookie: string | null, limit?: number) {
@@ -2416,56 +2436,47 @@ export function getContactTags(id: number, init: RequestInit = {}) {
     return getJson<Types.Tag[]>(`/api/persons/${id}/tags`, init);
 }
 export function getContactTagsFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Tag>((init) => getContactTags(id, init), cookie);
+    return safeReadWithCookie<Types.Tag>((init) => getContactTags(id, init), cookie);
 }
 
 export function addContactTag(id: number, tagId: number, init: RequestInit = {}) {
-    return postJson<void[]>(`/api/persons/${id}/tags/${tagId}`, {}, init);
-}
-export function addContactTagFromCookie(id: number, tagId: number, cookie: string | null) {
-    return safeWithCookie<void>((init) => addContactTag(id, tagId, init), cookie);
+    return postJson<void>(`/api/persons/${id}/tags/${tagId}`, {}, init);
 }
 
 export function removeContactTag(id: number, tagId: number, init: RequestInit = {}) {
-    return deleteJson<void[]>(`/api/persons/${id}/tags/${tagId}`, init);
-}
-export function removeContactTagFromCookie(id: number, tagId: number, cookie: string | null) {
-    return safeWithCookie<void>((init) => removeContactTag(id, tagId, init), cookie);
+    return deleteJson<void>(`/api/persons/${id}/tags/${tagId}`, init);
 }
 
 export function replaceContactTags(id: number, tagIds: number[], init: RequestInit = {}) {
     return putJson<Types.Tag[]>(`/api/persons/${id}/tags`, tagIds, init);
-}
-export function replaceContactTagsFromCookie(id: number, tagIds: number[], cookie: string | null) {
-    return safeWithCookie<Types.Tag>((init) => replaceContactTags(id, tagIds, init), cookie);
 }
 
 export function getContactDeals(id: number, init: RequestInit = {}) {
     return getJson<Types.Deal[]>(`/api/persons/${id}/deals`, init);
 }
 export function getContactDealsFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Deal>((init) => getContactDeals(id, init), cookie);
+    return safeReadWithCookie<Types.Deal>((init) => getContactDeals(id, init), cookie);
 }
 
 export function getContactActivities(id: number, init: RequestInit = {}) {
     return getJson<Types.Activity[]>(`/api/persons/${id}/activities`, init);
 }
 export function getContactActivitiesFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Activity>((init) => getContactActivities(id, init), cookie);
+    return safeReadWithCookie<Types.Activity>((init) => getContactActivities(id, init), cookie);
 }
 
 export function getContactNotes(id: number, init: RequestInit = {}) {
     return getJson<Types.Note[]>(`/api/persons/${id}/notes`, init);
 }
 export function getContactNotesFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Note>((init) => getContactNotes(id, init), cookie);
+    return safeReadWithCookie<Types.Note>((init) => getContactNotes(id, init), cookie);
 }
 
 export function getContactTasks(id: number, init: RequestInit = {}) {
     return getJson<Types.Task[]>(`/api/persons/${id}/tasks`, init);
 }
 export function getContactTasksFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.Task>((init) => getContactTasks(id, init), cookie);
+    return safeReadWithCookie<Types.Task>((init) => getContactTasks(id, init), cookie);
 }
 
 /*
@@ -2504,7 +2515,7 @@ export function getDealBoard(pipelineId: number, init: RequestInit = {}) {
 }
 
 export function getDealsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Deal>((init) => getDeals(init), cookie);
+    return safeReadWithCookie<Types.Deal>((init) => getDeals(init), cookie);
 }
 
 export function getDealsPageResultFromCookie(
@@ -2788,7 +2799,7 @@ export function getDealRisk(id: number, init: RequestInit = {}) {
 }
 
 export function getDealRisksFromCookie(cookie: string | null, ids: number[]) {
-    return safeWithCookie<Types.DealRisk>((init) => getDealRisks(ids, init), cookie);
+    return safeReadWithCookie<Types.DealRisk>((init) => getDealRisks(ids, init), cookie);
 }
 
 export function getDealRiskAnalyticsFromCookie(cookie: string | null) {
@@ -3061,7 +3072,7 @@ export function getPipelines(init: RequestInit = {}) {
 }
 
 export function getPipelinesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Pipeline>((init) => getPipelines(init), cookie);
+    return safeReadWithCookie<Types.Pipeline>((init) => getPipelines(init), cookie);
 }
 
 export function getPipelinesResultFromCookie(cookie: string | null) {
@@ -3074,7 +3085,7 @@ export function getAllStages(init: RequestInit = {}) {
 }
 
 export function getAllStagesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Stage>((init) => getAllStages(init), cookie);
+    return safeReadWithCookie<Types.Stage>((init) => getAllStages(init), cookie);
 }
 
 export function getAllStagesResultFromCookie(cookie: string | null) {
@@ -3122,7 +3133,7 @@ export function getTags(init: RequestInit = {}) {
 }
 
 export function getTagsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Tag>((init) => getTags(init), cookie);
+    return safeReadWithCookie<Types.Tag>((init) => getTags(init), cookie);
 }
 
 export function getTagById(id: number, init: RequestInit = {}) {
@@ -3146,7 +3157,7 @@ export function getProducts(params: Types.ProductSearchParams = {}, init: Reques
 }
 
 export function getProductsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Product>((init) => getProducts({}, init), cookie);
+    return safeReadWithCookie<Types.Product>((init) => getProducts({}, init), cookie);
 }
 
 export function getProductById(id: number, init: RequestInit = {}) {
@@ -3170,7 +3181,7 @@ export function getDocumentTemplates(init: RequestInit = {}) {
 }
 
 export function getDocumentTemplatesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.DocumentTemplate>((init) => getDocumentTemplates(init), cookie);
+    return safeReadWithCookie<Types.DocumentTemplate>((init) => getDocumentTemplates(init), cookie);
 }
 
 export function getDocumentTemplateById(id: number, init: RequestInit = {}) {
@@ -3194,7 +3205,7 @@ export function getDealDocuments(dealId: number, init: RequestInit = {}) {
 }
 
 export function getDealDocumentsFromCookie(dealId: number, cookie: string | null) {
-    return safeWithCookie<Types.DealDocument>(
+    return safeReadWithCookie<Types.DealDocument>(
         (init) => getDealDocuments(dealId, init), cookie);
 }
 
@@ -3219,7 +3230,7 @@ export function getApprovalPolicies(init: RequestInit = {}) {
 }
 
 export function getApprovalPoliciesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.ApprovalPolicy>((init) => getApprovalPolicies(init), cookie);
+    return safeReadWithCookie<Types.ApprovalPolicy>((init) => getApprovalPolicies(init), cookie);
 }
 
 export function createApprovalPolicy(payload: Types.CreateApprovalPolicyPayload) {
@@ -3330,7 +3341,7 @@ export function getAttachments(entityType: string, entityId: number, init: Reque
 }
 
 export function getAttachmentsFromCookie(entityType: string, entityId: number, cookie: string | null) {
-    return safeWithCookie<Types.Attachment>((init) => getAttachments(entityType, entityId, init), cookie);
+    return safeReadWithCookie<Types.Attachment>((init) => getAttachments(entityType, entityId, init), cookie);
 }
 
 /**
@@ -3342,7 +3353,7 @@ export function getAllAttachments(init: RequestInit = {}) {
 }
 
 export function getAllAttachmentsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Attachment>((init) => getAllAttachments(init), cookie);
+    return safeReadWithCookie<Types.Attachment>((init) => getAllAttachments(init), cookie);
 }
 
 /**
@@ -3635,7 +3646,7 @@ export function getEffectivePermissions(init: RequestInit = {}) {
 }
 
 export function getEffectivePermissionsFromCookie(cookie: string | null) {
-    return safeWithCookie<string>((init) => getEffectivePermissions(init), cookie);
+    return safeReadWithCookie<string>((init) => getEffectivePermissions(init), cookie);
 }
 
 export function getEffectivePermissionsResultFromCookie(cookie: string | null) {
@@ -3687,7 +3698,7 @@ export function getEntityCustomFieldsFromCookie(
     id: number,
     cookie: string | null,
 ) {
-    return safeWithCookie<Types.CustomFieldEntry>((init) => getEntityCustomFields(entityType, id, init), cookie);
+    return safeReadWithCookie<Types.CustomFieldEntry>((init) => getEntityCustomFields(entityType, id, init), cookie);
 }
 
 export function updateEntityCustomFields(
@@ -3821,7 +3832,7 @@ export async function getSavedViews(recordType: Types.SavedViewRecordType, init:
 }
 
 export function getSavedViewsFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null) {
-    return safeWithCookie<Types.SavedView>((init) => getSavedViews(recordType, init), cookie);
+    return safeReadWithCookie<Types.SavedView>((init) => getSavedViews(recordType, init), cookie);
 }
 
 /**
@@ -3923,11 +3934,11 @@ export function getReports(init: RequestInit = {}) {
 }
 
 export function getReportsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.ReportDefinition>((init) => getReports(init), cookie);
+    return safeReadWithCookie<Types.ReportDefinition>((init) => getReports(init), cookie);
 }
 
 export function getReportTemplatesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.ReportTemplate>((init) => getReportTemplates(init), cookie);
+    return safeReadWithCookie<Types.ReportTemplate>((init) => getReportTemplates(init), cookie);
 }
 
 export function getReport(id: number, init: RequestInit = {}) {
@@ -4000,7 +4011,7 @@ export function getGoals(init: RequestInit = {}) {
 }
 
 export function getGoalsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.ReportGoal>((init) => getGoals(init), cookie);
+    return safeReadWithCookie<Types.ReportGoal>((init) => getGoals(init), cookie);
 }
 
 export function getGoalsResultFromCookie(cookie: string | null) {
@@ -4294,7 +4305,7 @@ export function getDeliveryProviders(init: RequestInit = {}) {
 }
 
 export function getDeliveryProvidersFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.DeliveryProviderConfig>((init) => getDeliveryProviders(init), cookie);
+    return safeReadWithCookie<Types.DeliveryProviderConfig>((init) => getDeliveryProviders(init), cookie);
 }
 
 export function saveDeliveryProvider(payload: Types.DeliveryProviderConfigPayload) {
@@ -4317,7 +4328,7 @@ export function getConnectors(init: RequestInit = {}) {
 }
 
 export function getConnectorsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.ConnectorConfig>((init) => getConnectors(init), cookie);
+    return safeReadWithCookie<Types.ConnectorConfig>((init) => getConnectors(init), cookie);
 }
 
 export function saveConnector(payload: Types.ConnectorConfigPayload) {
@@ -4333,7 +4344,7 @@ export function getCampaigns(init: RequestInit = {}) {
 }
 
 export function getCampaignsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Campaign>((init) => getCampaigns(init), cookie);
+    return safeReadWithCookie<Types.Campaign>((init) => getCampaigns(init), cookie);
 }
 
 export function getCampaign(id: number, init: RequestInit = {}) {
@@ -4445,7 +4456,7 @@ export function getCampaignExports(id: number, init: RequestInit = {}) {
 }
 
 export function getCampaignExportsFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Types.CampaignAudienceExport>((init) => getCampaignExports(id, init), cookie);
+    return safeReadWithCookie<Types.CampaignAudienceExport>((init) => getCampaignExports(id, init), cookie);
 }
 
 export function createCampaignExport(id: number, payload: Types.CampaignAudienceExportPayload) {
@@ -4505,7 +4516,7 @@ export function getSuppressions(init: RequestInit = {}) {
 }
 
 export function getSuppressionsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.SuppressionEntry>((init) => getSuppressions(init), cookie);
+    return safeReadWithCookie<Types.SuppressionEntry>((init) => getSuppressions(init), cookie);
 }
 
 export function createSuppression(payload: Types.SuppressionEntryPayload) {

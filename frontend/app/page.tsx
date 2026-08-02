@@ -9,7 +9,7 @@ import {
     ShareIcon,
     UsersIcon,
 } from "@heroicons/react/24/outline";
-import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { getPublicPageUserFromCookie } from "@/app/lib/api";
 import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import HeroVisual from "@/app/components/landing/HeroVisual";
@@ -20,9 +20,13 @@ const btnPrimary =
 const FEATURE_RECORD_PEOPLE = ["MD", "TA", "JR", "SO"];
 const FEATURE_ANALYTICS_BARS = [38, 56, 46, 72, 90];
 
+/**
+ * Public landing page. The session only selects the header's call to action, so an
+ * unreachable backend falls back to the signed-out one rather than failing the page.
+ */
 export default async function Home() {
     const cookie = (await headers()).get("cookie");
-    const user = await getCurrentUserFromCookie(cookie);
+    const user = await getPublicPageUserFromCookie(cookie);
     const t = await getTranslations("CommonHome");
 
     const ctaHref = user ? "/dashboard" : "/auth/register";
