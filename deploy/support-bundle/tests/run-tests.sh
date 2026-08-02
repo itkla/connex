@@ -619,6 +619,81 @@ case_verify_detects_length_mismatch() (
     assert_contains length_mismatch_reason 'reason=length_mismatch' <(printf '%s\n' "$output") || return 1
 )
 
+# Regression: the verify loop read its rows from a process substitution, whose exit status is
+# covered by neither pipefail nor errexit. A manifest field legal for .path but illegal for @tsv
+# (an array-valued sha256) aborted jq before the first row, so the loop body never ran, EVERY hash
+# and length check was skipped, and verification returned success on a forged bundle.
+case_verify_rejects_unprojectable_inventory() (
+    source "$SANDBOX/support-bundle-lib.sh"
+    local work="$SANDBOX/unprojectable"
+    make_bundle "$work/src" ""
+    printf '{"forged":true}' > "$work/src/config.json"
+    jq '.files = [.files[] | .sha256 = ["deadbeef"]]' "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    mkdir -p "$work/out"
+    local output
+    output="$(support_bundle_verify_archive "$work/bundle.zip" "$work/out" 2>&1)"
+    assert_status unprojectable_rejected 67 "$?" || return 1
+    assert_contains unprojectable_reason 'reason=inventory_not_projectable' <(printf '%s\n' "$output") || return 1
+)
+
+case_read_refuses_forged_manifest_without_claiming_verified() (
+    local work="$SANDBOX/forged-read"
+    make_bundle "$work/src" ""
+    printf '{"forged":true}' > "$work/src/config.json"
+    jq '.files = [.files[] | .sha256 = ["deadbeef"]]' "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" 2>&1)"
+    local status=$?
+    assert_status forged_read_refused 67 "$status" || return 1
+    assert_absent forged_no_verified_claim 'integrity_verified' <(printf '%s\n' "$output") || return 1
+    assert_absent forged_no_success 'status=success' <(printf '%s\n' "$output") || return 1
+)
+
+# A short inventory projection must never be mistaken for a complete verification.
+case_verify_requires_every_row_examined() (
+    source "$SANDBOX/support-bundle-lib.sh"
+    local work="$SANDBOX/rowcount"
+    make_bundle "$work/src" ""
+    mkdir -p "$work/out"
+    support_bundle_extract "$work/bundle.zip" "$work/out" >/dev/null 2>&1 || true
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    rm -rf "$work/out"; mkdir -p "$work/out"
+    support_bundle_verify_archive "$work/bundle.zip" "$work/out" >/dev/null 2>&1
+    assert_status rowcount_ok 0 "$?" || return 1
+    grep -q 'inventory_rows_unverified' "$SANDBOX/support-bundle-lib.sh" || {
+        printf 'row-count backstop is missing from the library\n'; return 1; }
+)
+
+# A hostile bundle must not be able to repaint the operator's terminal and forge a summary line.
+case_read_strips_terminal_control_sequences() (
+    local work="$SANDBOX/ansi"
+    make_bundle "$work/src" ""
+    jq --arg v "$(printf 'x\033[2K\rts=2026-01-01T00:00:00Z level=info event=support_bundle_read_summary status=success exit_code=0')" \
+        '.omissions["client-errors.json"] = $v' "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" 2>&1)"
+    local status=$?
+    assert_status ansi_read_ok 0 "$status" || return 1
+    if printf '%s' "$output" | grep -q $'\033'; then
+        printf 'escape sequence reached the terminal\n'
+        return 1
+    fi
+    if printf '%s' "$output" | grep -q $'\r'; then
+        printf 'carriage return reached the terminal\n'
+        return 1
+    fi
+)
+
+run_case verify_rejects_unprojectable_inventory case_verify_rejects_unprojectable_inventory
+run_case read_refuses_forged_manifest_without_claiming_verified case_read_refuses_forged_manifest_without_claiming_verified
+run_case verify_requires_every_row_examined case_verify_requires_every_row_examined
+run_case read_strips_terminal_control_sequences case_read_strips_terminal_control_sequences
 run_case download_accepts_real_content_type_headers case_download_accepts_real_content_type_headers
 run_case verify_rejects_symlink_entry case_verify_rejects_symlink_entry
 run_case read_refuses_symlink_bundle_without_rendering case_read_refuses_symlink_bundle_without_rendering

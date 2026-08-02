@@ -253,6 +253,15 @@ support_bundle_redact_path() {
     '
 }
 
+# Bundle content is attacker-controlled text. Terminals act on control sequences, so an omission
+# reason or CSV cell carrying ESC[2K and a carriage return can repaint the line the operator just
+# read and forge a success summary. Only tab and newline survive; every other control byte,
+# carriage return included, is dropped before anything reaches the terminal. This affects display
+# only — the archive on disk and the bytes that were hashed are never modified.
+support_bundle_sanitize_output() {
+    LC_ALL=C tr -d '\000-\010\013-\037\177'
+}
+
 support_bundle_validate_archive_path() {
     local path="$1"
     support_bundle_validate_absolute_path archive "$path" || return "$EXIT_USAGE"
@@ -331,6 +340,7 @@ support_bundle_verify_inventory() {
     local directory="$1"
     local manifest="$directory/manifest.json"
     local schema_version listed path expected_hash expected_length actual_hash actual_length present
+    local rows expected_rows rows_read
     if [ ! -f "$manifest" ] || [ -L "$manifest" ]; then
         support_bundle_log error manifest_invalid reason manifest_missing
         return "$EXIT_INTEGRITY"
@@ -352,37 +362,66 @@ support_bundle_verify_inventory() {
         support_bundle_log error manifest_invalid reason inventory_missing
         return "$EXIT_INTEGRITY"
     fi
+    # jq's exit status must be observed BEFORE the loop. A process-substitution redirect is not
+    # covered by pipefail, and errexit is disabled in the caller's `|| exit_code=$?` context, so a
+    # jq abort would simply produce zero rows: every hash, length, path and self-listing check
+    # would be skipped and the function would fall through and return success. Any field legal for
+    # .files[].path but illegal for @tsv — an array-valued sha256, say — triggers it. The row file
+    # lives outside the extraction directory so it cannot disturb the listed/present cross-check.
+    rows="$(mktemp "${TMPDIR:-/tmp}/connex-support-bundle-rows.XXXXXX")"
+    if ! jq -er '.files[] | [.path, (.byteLength | tostring), .sha256] | @tsv' \
+            "$manifest" > "$rows" 2>/dev/null; then
+        rm -f "$rows"
+        support_bundle_log error manifest_invalid reason inventory_not_projectable
+        return "$EXIT_INTEGRITY"
+    fi
+    expected_rows="$(jq -r '.files | length' "$manifest")"
+    rows_read=0
     while IFS=$'\t' read -r path expected_length expected_hash; do
         if [ -z "$path" ]; then
             continue
         fi
+        rows_read=$((rows_read + 1))
         if [[ ! "$path" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
             support_bundle_log error manifest_invalid reason unsafe_inventory_path entry "$path"
+            rm -f "$rows"
             return "$EXIT_INTEGRITY"
         fi
         if [ "$path" = manifest.json ]; then
             support_bundle_log error manifest_invalid reason manifest_self_listed
+            rm -f "$rows"
             return "$EXIT_INTEGRITY"
         fi
         if [[ ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]]; then
             support_bundle_log error manifest_invalid reason invalid_digest entry "$path"
+            rm -f "$rows"
             return "$EXIT_INTEGRITY"
         fi
         if [ ! -f "$directory/$path" ] || [ -L "$directory/$path" ]; then
             support_bundle_log error integrity_failure reason inventory_entry_missing entry "$path"
+            rm -f "$rows"
             return "$EXIT_INTEGRITY"
         fi
         actual_length="$(stat -c '%s' "$directory/$path")"
         if [ "$expected_length" != "$actual_length" ]; then
             support_bundle_log error integrity_failure reason length_mismatch entry "$path" expected "$expected_length" actual "$actual_length"
+            rm -f "$rows"
             return "$EXIT_INTEGRITY"
         fi
         actual_hash="$(sha256sum "$directory/$path" | awk '{print $1}')"
         if [ "$expected_hash" != "$actual_hash" ]; then
             support_bundle_log error integrity_failure reason digest_mismatch entry "$path"
+            rm -f "$rows"
             return "$EXIT_INTEGRITY"
         fi
-    done < <(jq -r '.files[] | [.path, (.byteLength | tostring), .sha256] | @tsv' "$manifest")
+    done < "$rows"
+    rm -f "$rows"
+    # Belt and braces: even with the status checked, assert every declared row was actually
+    # examined, so a truncated projection can never masquerade as a complete verification.
+    if [ "$rows_read" != "$expected_rows" ]; then
+        support_bundle_log error integrity_failure reason inventory_rows_unverified expected "$expected_rows" verified "$rows_read"
+        return "$EXIT_INTEGRITY"
+    fi
     listed="$(jq -r '.files[].path' "$manifest" | sort)"
     present="$(find "$directory" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | grep -vx 'manifest.json' | sort)"
     if [ "$listed" != "$present" ]; then

@@ -89,7 +89,7 @@ support_bundle_render_json() {
         return 0
     fi
     support_bundle_heading "$title"
-    if ! jq . "$directory/$file"; then
+    if ! jq . "$directory/$file" | support_bundle_sanitize_output; then
         support_bundle_log error render_failed entry "$file"
         return "$EXIT_READ"
     fi
@@ -99,16 +99,18 @@ support_bundle_render_manifest() {
     local directory="$1"
     local manifest="$directory/manifest.json"
     support_bundle_heading "Manifest"
-    jq '{schemaVersion, productVersion, generatedAt, orgId, filters, omissions}' "$manifest" || return "$EXIT_READ"
+    jq '{schemaVersion, productVersion, generatedAt, orgId, filters, omissions}' "$manifest" \
+        | support_bundle_sanitize_output || return "$EXIT_READ"
     support_bundle_heading "Inventory (verified)"
     jq -r '.files[] | "\(.path)\t\(.byteLength) bytes\t\(.sha256[0:16])..."' "$manifest" \
-        | column -t -s $'\t' || return "$EXIT_READ"
+        | support_bundle_sanitize_output | column -t -s $'\t' || return "$EXIT_READ"
     # An omission is a deliberate statement that a source was unavailable or
     # unsafe to include, not an error; surfacing it stops a reader concluding
     # that an absent file means an absent problem.
     if jq -e '(.omissions | type) == "object" and (.omissions | length) > 0' "$manifest" >/dev/null 2>&1; then
         support_bundle_heading "Declared omissions"
-        jq -r '.omissions | to_entries[] | "\(.key): \(.value)"' "$manifest" || return "$EXIT_READ"
+        jq -r '.omissions | to_entries[] | "\(.key): \(.value)"' "$manifest" \
+            | support_bundle_sanitize_output || return "$EXIT_READ"
     fi
 }
 
@@ -121,17 +123,17 @@ support_bundle_render_audit() {
     fi
     if [ -z "$CORRELATION_ID" ]; then
         support_bundle_heading "Audit slice"
-        column -t -s , "$slice" || return "$EXIT_READ"
+        support_bundle_sanitize_output < "$slice" | column -t -s , || return "$EXIT_READ"
         return 0
     fi
     support_bundle_heading "Audit slice (correlation $CORRELATION_ID)"
-    head -n 1 "$slice" | column -t -s , || return "$EXIT_READ"
+    head -n 1 "$slice" | support_bundle_sanitize_output | column -t -s , || return "$EXIT_READ"
     matches="$(tail -n +2 "$slice" | grep -F -- "$CORRELATION_ID" || true)"
     if [ -z "$matches" ]; then
         printf '(no matching rows)\n'
         return 0
     fi
-    printf '%s\n' "$matches" | column -t -s , || return "$EXIT_READ"
+    printf '%s\n' "$matches" | support_bundle_sanitize_output | column -t -s , || return "$EXIT_READ"
 }
 
 support_bundle_render_journal() {
@@ -149,11 +151,11 @@ support_bundle_render_journal() {
             return 0
         fi
         printf '%s\n' "$matches" | jq -r '[.timestamp, .level, .method, .path, .status, .eventClass] | @tsv' \
-            | column -t -s $'\t' || return "$EXIT_READ"
+            | support_bundle_sanitize_output | column -t -s $'\t' || return "$EXIT_READ"
         return 0
     fi
     jq -r '[.timestamp, .level, .method, .path, .status, .eventClass] | @tsv' "$slice" \
-        | column -t -s $'\t' || return "$EXIT_READ"
+        | support_bundle_sanitize_output | column -t -s $'\t' || return "$EXIT_READ"
 }
 
 main() {
