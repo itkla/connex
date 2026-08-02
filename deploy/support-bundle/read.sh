@@ -85,7 +85,7 @@ support_bundle_render_json() {
     local directory="$1"
     local file="$2"
     local title="$3"
-    if [ ! -f "$directory/$file" ]; then
+    if [ ! -f "$directory/$file" ] || [ -L "$directory/$file" ]; then
         return 0
     fi
     support_bundle_heading "$title"
@@ -116,7 +116,7 @@ support_bundle_render_audit() {
     local directory="$1"
     local slice="$directory/audit-slice.csv"
     local matches
-    if [ ! -f "$slice" ]; then
+    if [ ! -f "$slice" ] || [ -L "$slice" ]; then
         return 0
     fi
     if [ -z "$CORRELATION_ID" ]; then
@@ -138,7 +138,7 @@ support_bundle_render_journal() {
     local directory="$1"
     local slice="$directory/journal-slice.jsonl"
     local matches
-    if [ ! -f "$slice" ]; then
+    if [ ! -f "$slice" ] || [ -L "$slice" ]; then
         return 0
     fi
     support_bundle_heading "Journal slice"

@@ -523,6 +523,107 @@ case_read_rejects_bad_arguments() (
     assert_status read_bad_section 64 "$status" || return 1
 )
 
+# Regression: awk's IGNORECASE is a gawk extension that mawk (the default awk on Debian and
+# Ubuntu) silently ignores, so a case-sensitive match against Content-Type rejected every real
+# Spring Boot response as unexpected_content_type.
+case_download_accepts_real_content_type_headers() (
+    source "$SANDBOX/collect-lib.sh" 2>/dev/null
+    WORK_DIR="$SANDBOX/ct"
+    mkdir -p "$WORK_DIR"
+    local header
+    for header in 'Content-Type: application/zip' \
+                  'content-type: application/zip' \
+                  'Content-Type:application/zip' \
+                  'Content-Type: application/zip;charset=UTF-8'; do
+        printf 'HTTP/1.1 200 OK\r\n%s\r\n\r\n' "$header" > "$WORK_DIR/response-headers"
+        local parsed
+        parsed="$(tr 'A-Z' 'a-z' < "$WORK_DIR/response-headers" | tr -d '\r' \
+            | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
+        case "$parsed" in
+            application/zip*) ;;
+            *) printf 'content-type not parsed from [%s]: got [%s]\n' "$header" "$parsed"; return 1 ;;
+        esac
+    done
+    printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n' > "$WORK_DIR/response-headers"
+    local parsed
+    parsed="$(tr 'A-Z' 'a-z' < "$WORK_DIR/response-headers" | tr -d '\r' \
+        | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
+    case "$parsed" in
+        application/zip*) printf 'html was accepted as zip\n'; return 1 ;;
+    esac
+)
+
+# Regression: a ZIP may store a symlink. `find -type f` excludes symlinks, so a symlinked entry
+# was absent from the cross-check set and slipped through unverified, and the renderers' plain
+# `[ -f ]` test then followed the link and printed the target.
+case_verify_rejects_symlink_entry() (
+    source "$SANDBOX/support-bundle-lib.sh"
+    local work="$SANDBOX/symlink"
+    make_bundle "$work/src" ""
+    printf 'TOP_SECRET_TARGET_CONTENT\n' > "$SANDBOX/secret-target.txt"
+    rm -f "$work/src/audit-slice.csv"
+    ln -s "$SANDBOX/secret-target.txt" "$work/src/audit-slice.csv"
+    rm -f "$work/bundle.zip"
+    ( cd "$work/src" && zip --quiet --symlinks --no-dir-entries -X "$work/bundle.zip" ./* )
+    mkdir -p "$work/out"
+    local output
+    output="$(support_bundle_verify_archive "$work/bundle.zip" "$work/out" 2>&1)"
+    assert_status symlink_entry_rejected 67 "$?" || return 1
+    assert_contains symlink_reason 'reason=non_regular_entry' <(printf '%s\n' "$output") || return 1
+)
+
+case_read_refuses_symlink_bundle_without_rendering() (
+    local work="$SANDBOX/symlink-read"
+    make_bundle "$work/src" ""
+    printf 'TOP_SECRET_TARGET_CONTENT\n' > "$SANDBOX/secret-target2.txt"
+    rm -f "$work/src/audit-slice.csv"
+    ln -s "$SANDBOX/secret-target2.txt" "$work/src/audit-slice.csv"
+    rm -f "$work/bundle.zip"
+    ( cd "$work/src" && zip --quiet --symlinks --no-dir-entries -X "$work/bundle.zip" ./* )
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" 2>&1)"
+    local status=$?
+    assert_status symlink_read_refused 67 "$status" || return 1
+    assert_absent symlink_no_target_leak 'TOP_SECRET_TARGET_CONTENT' <(printf '%s\n' "$output") || return 1
+    assert_absent symlink_no_verified_claim 'integrity_verified' <(printf '%s\n' "$output") || return 1
+)
+
+# Regression: GNU `mv -n` exits 0 without moving anything when the destination exists, so the
+# publish guard never fired: the verified bundle was deleted by the EXIT trap while the summary
+# reported success.
+case_publish_refuses_existing_output() (
+    local work="$SANDBOX/publish"
+    mkdir -p "$work"
+    printf 'PRE_EXISTING_DECOY\n' > "$work/out.zip"
+    printf 'verified-bundle-bytes\n' > "$work/src.bin"
+    if ln "$work/src.bin" "$work/out.zip" 2>/dev/null; then
+        printf 'hardlink overwrote an existing destination\n'
+        return 1
+    fi
+    assert_equals publish_decoy_intact 'PRE_EXISTING_DECOY' "$(cat "$work/out.zip")" || return 1
+)
+
+# Regression: a mutation to the byteLength comparison survived the suite, so the length check was
+# effectively untested. This bundle has a correct digest recorded against a wrong length.
+case_verify_detects_length_mismatch() (
+    source "$SANDBOX/support-bundle-lib.sh"
+    local work="$SANDBOX/length"
+    make_bundle "$work/src" ""
+    jq '.files[0].byteLength = 999999' "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    mkdir -p "$work/out"
+    local output
+    output="$(support_bundle_verify_archive "$work/bundle.zip" "$work/out" 2>&1)"
+    assert_status length_mismatch_rejected 67 "$?" || return 1
+    assert_contains length_mismatch_reason 'reason=length_mismatch' <(printf '%s\n' "$output") || return 1
+)
+
+run_case download_accepts_real_content_type_headers case_download_accepts_real_content_type_headers
+run_case verify_rejects_symlink_entry case_verify_rejects_symlink_entry
+run_case read_refuses_symlink_bundle_without_rendering case_read_refuses_symlink_bundle_without_rendering
+run_case publish_refuses_existing_output case_publish_refuses_existing_output
+run_case verify_detects_length_mismatch case_verify_detects_length_mismatch
 run_case log_format case_log_format
 run_case summary_lines case_summary_lines
 run_case exit_code_catalog case_exit_code_catalog

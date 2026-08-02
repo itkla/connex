@@ -300,9 +300,19 @@ support_bundle_validate_entry_names() {
 support_bundle_extract() {
     local archive="$1"
     local destination="$2"
+    local irregular
     support_bundle_validate_entry_names "$archive" || return "$EXIT_INTEGRITY"
     if ! unzip -qq -o -DD "$archive" -d "$destination" >/dev/null 2>&1; then
         support_bundle_log error archive_invalid reason extraction_failed
+        return "$EXIT_INTEGRITY"
+    fi
+    # A ZIP may store a symlink. Nothing but a regular file may survive extraction: the inventory
+    # cross-check enumerates regular files, so a symlinked entry would be absent from that set and
+    # slip through unverified, and every reader that opens a path with a plain existence test
+    # would then follow the link and render whatever it points at.
+    irregular="$(find "$destination" -mindepth 1 ! -type f -print -quit)"
+    if [ -n "$irregular" ]; then
+        support_bundle_log error archive_invalid reason non_regular_entry entry "$(basename "$irregular")"
         return "$EXIT_INTEGRITY"
     fi
 }

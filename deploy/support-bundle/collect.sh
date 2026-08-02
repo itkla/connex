@@ -229,7 +229,12 @@ support_bundle_download() {
         return "$EXIT_API"
     fi
     support_bundle_classify_status "$status" || return $?
-    content_type="$(awk 'BEGIN { IGNORECASE = 1 } /^content-type:/ { print tolower($2) }' "$headers" | tr -d '\r' | head -n 1)"
+    # Header names are case-insensitive and the value may follow the colon with no space.
+    # awk's IGNORECASE is a gawk extension that mawk — the default awk on Debian and Ubuntu —
+    # silently ignores, so the whole line is lowercased first and the value is taken by cutting
+    # at the colon rather than by field splitting.
+    content_type="$(tr 'A-Z' 'a-z' < "$headers" | tr -d '\r' \
+        | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
     if [[ "$content_type" != application/zip* ]]; then
         support_bundle_log error request_failed reason unexpected_content_type content_type "$content_type"
         return "$EXIT_API"
@@ -392,9 +397,27 @@ main() {
 
     SUPPORT_BUNDLE_PHASE=publishing
     chmod 0600 "$WORK_DIR/bundle.partial"
-    if ! mv -n "$WORK_DIR/bundle.partial" "$OUTPUT"; then
-        support_bundle_finish "$EXIT_INTEGRITY" support_bundle_collect_summary org_id "$ORG_ID" reason publish_failed
-        exit "$EXIT_INTEGRITY"
+    # `mv -n` exits 0 without moving anything when the destination exists, so it cannot be used as
+    # a guard; a hardlink fails atomically instead, which also closes the window between the
+    # earlier existence check and this publish.
+    if ! ln "$WORK_DIR/bundle.partial" "$OUTPUT" 2>/dev/null; then
+        support_bundle_finish "$EXIT_USAGE" support_bundle_collect_summary org_id "$ORG_ID" \
+            reason publish_refused output "$OUTPUT"
+        exit "$EXIT_USAGE"
+    fi
+    rm -f "$WORK_DIR/bundle.partial"
+
+    SUPPORT_BUNDLE_PHASE=verifying_published
+    # The summary must describe what is actually on disk, not what was verified in the work
+    # directory, so the published file is re-verified and measured in place.
+    rm -rf "$WORK_DIR/staging-published"
+    mkdir -p "$WORK_DIR/staging-published"
+    exit_code=0
+    support_bundle_verify_archive "$OUTPUT" "$WORK_DIR/staging-published" || exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+        support_bundle_finish "$exit_code" support_bundle_collect_summary org_id "$ORG_ID" \
+            reason published_archive_invalid output "$OUTPUT"
+        exit "$exit_code"
     fi
 
     SUPPORT_BUNDLE_PHASE=complete
