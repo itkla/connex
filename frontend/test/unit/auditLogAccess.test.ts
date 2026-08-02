@@ -12,8 +12,27 @@ function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
 }
 
+function isMessageCatalog(value: unknown): value is Record<string, Record<string, string>> {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        !Array.isArray(value) &&
+        Object.values(value).every(
+            (namespace) =>
+                typeof namespace === 'object' &&
+                namespace !== null &&
+                !Array.isArray(namespace) &&
+                Object.values(namespace).every((message) => typeof message === 'string'),
+        )
+    );
+}
+
 function messages(locale: 'en' | 'ja'): Record<string, Record<string, string>> {
-    return JSON.parse(source(`messages/${locale}/admin.json`));
+    const parsed: unknown = JSON.parse(source(`messages/${locale}/admin.json`));
+    if (!isMessageCatalog(parsed)) {
+        throw new Error(`messages/${locale}/admin.json is not a message catalog`);
+    }
+    return parsed;
 }
 
 describe('loadCollection', () => {

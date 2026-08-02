@@ -26,6 +26,10 @@ export type RecordAccess<T> =
  * `forbidden`; a 404 or a `null`/`undefined` result reports `missing`; and **every
  * other failure is rethrown** so a genuine server fault still reaches the segment
  * `error.tsx` instead of masquerading as a tidy 404.
+ * A 401, or a bodyless 403 — which is how Spring Security answers a missing or expired
+ * session on a deployment without the OAuth entry point — redirects to sign-in rather
+ * than reporting a denial. In-memory sessions are dropped on every backend restart, and
+ * routing that to "you don't have access" would strand the caller on a dead end.
  * @param load fetches the record, resolving to `null` when the API models absence that way
  * @returns the record, or the reason it could not be shown
  */
@@ -36,7 +40,7 @@ export async function loadRecord<T>(
         const record = await load();
         return record == null ? { kind: 'missing' } : { kind: 'found', record };
     } catch (error) {
-        if (deniedByPermission(error)) {
+        if (deniedByPermissionRatherThanMissingSession(error)) {
             return { kind: 'forbidden' };
         }
         if (error instanceof ApiError && error.status === 404) {
@@ -73,24 +77,14 @@ export async function loadCollection<T>(load: () => Promise<T[]>): Promise<Colle
     try {
         return { kind: 'loaded', items: await load() };
     } catch (error) {
-        if (deniedByPermission(error)) {
+        if (deniedByPermissionRatherThanMissingSession(error)) {
             return { kind: 'forbidden' };
         }
         throw error;
     }
 }
 
-/**
- * Whether a failure is a genuine authorization denial, redirecting an unauthenticated
- * caller to sign in on the way past.
- *
- * A 401, or a bodyless 403 — which is how Spring Security answers a missing or expired
- * session on a deployment without the OAuth entry point — is redirected rather than
- * shown a denial. This matters because in-memory sessions are dropped on every backend
- * restart, and routing that to "you don't have access — ask an admin" would strand the
- * user on an unrecoverable dead-end.
- */
-function deniedByPermission(error: unknown): boolean {
+function deniedByPermissionRatherThanMissingSession(error: unknown): boolean {
     if (!(error instanceof ApiError)) {
         return false;
     }
