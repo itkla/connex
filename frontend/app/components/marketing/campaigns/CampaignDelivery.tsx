@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { InformationCircleIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -56,6 +56,9 @@ const EMPTY_REVISION_DRAFT: RevisionDraft = { locale: "en", subject: "", bodyHtm
  * The message-authoring and send lifecycle surface for a campaign. Holds the messages and sends as
  * a single source of truth so a freshly authored message is immediately sendable, and gates the
  * queue/pause/cancel controls on the caller's resolved permissions.
+ *
+ * Delivery is an instance capability that is off by default, so the queue control states that up
+ * front rather than letting the reader discover it from a 403 they already committed to.
  */
 export default function CampaignDelivery({
     campaignId,
@@ -64,6 +67,7 @@ export default function CampaignDelivery({
     snapshots,
     canManage,
     canSend,
+    deliveryEnabled,
 }: {
     campaignId: number;
     initialMessages: CampaignMessage[];
@@ -71,6 +75,7 @@ export default function CampaignDelivery({
     snapshots: CampaignAudienceSnapshotSummary[];
     canManage: boolean;
     canSend: boolean;
+    deliveryEnabled: boolean;
 }) {
     const t = useTranslations("CampaignMessages");
     const st = useTranslations("CampaignSends");
@@ -97,7 +102,9 @@ export default function CampaignDelivery({
     const [sendScheduledAt, setSendScheduledAt] = useState<string>("");
     const [isCreatingSend, setIsCreatingSend] = useState(false);
     const [actionSendId, setActionSendId] = useState<number | null>(null);
-    const [deliveryUnavailable, setDeliveryUnavailable] = useState(false);
+    const [deliveryRefused, setDeliveryRefused] = useState(false);
+
+    const deliveryUnavailable = !deliveryEnabled || deliveryRefused;
 
     const selectedMessage = useMemo(
         () => messages.find((message) => message.id === selectedMessageId) ?? null,
@@ -228,7 +235,7 @@ export default function CampaignDelivery({
             toastSuccess(st("queued"));
         } catch (err) {
             if (err instanceof ApiError && err.status === 403) {
-                setDeliveryUnavailable(true);
+                setDeliveryRefused(true);
                 toastError(st("deliveryUnavailable"));
             } else {
                 toastError(err instanceof Error ? err.message : String(err));
@@ -501,6 +508,17 @@ export default function CampaignDelivery({
 
             <Panel title={st("title")} subtitle={st("subtitle")}>
                 <div className="flex flex-col gap-6">
+                    {deliveryUnavailable && (
+                        <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
+                            <InformationCircleIcon
+                                aria-hidden
+                                className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                {st("deliveryUnavailable")}
+                            </p>
+                        </div>
+                    )}
                     {canManage && (
                         <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -716,11 +734,6 @@ export default function CampaignDelivery({
                                             </div>
                                         )}
 
-                                        {canQueue && deliveryUnavailable && (
-                                            <p className="text-xs text-muted-foreground">
-                                                {st("deliveryUnavailable")}
-                                            </p>
-                                        )}
                                     </li>
                                 );
                             })}

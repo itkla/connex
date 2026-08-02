@@ -3087,6 +3087,7 @@ export type InstanceCapabilities = {
     mailManaged: boolean;
     businessCardScanning: boolean;
     businessCardImport: boolean;
+    campaignDelivery: boolean;
 };
 
 export type ConnectedAccountProvider = 'google' | 'microsoft';

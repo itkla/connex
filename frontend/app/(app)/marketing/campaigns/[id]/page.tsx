@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
+    DEFAULT_CAPABILITIES,
     getCampaign,
     getCampaignAudienceFromCookie,
     getCampaignEngagement,
@@ -8,6 +9,7 @@ import {
     getCampaignMessages,
     getCampaignSends,
     getCampaignSnapshots,
+    getCapabilities,
     getCurrentUserFromCookie,
     getEffectivePermissionsResultFromCookie,
     type CookieResult,
@@ -19,6 +21,7 @@ import {
     type CampaignEngagement,
     type CampaignMessage,
     type CampaignSend,
+    type InstanceCapabilities,
 } from "@/app/lib/types";
 import CampaignDetail from "@/app/components/marketing/campaigns/CampaignDetail";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
@@ -51,7 +54,16 @@ export default async function CampaignDetailPage({
     }
 
     const init = { headers: { cookie: cookie ?? "" }, cache: "no-store" } as const;
-    const [audienceResult, snapshots, messages, sends, exports, engagement, effectivePermissions]: [
+    const [
+        audienceResult,
+        snapshots,
+        messages,
+        sends,
+        exports,
+        engagement,
+        effectivePermissions,
+        capabilities,
+    ]: [
         { ok: true; data: CampaignAudience | undefined } | { ok: false },
         CampaignAudienceSnapshotSummary[],
         CampaignMessage[],
@@ -59,6 +71,7 @@ export default async function CampaignDetailPage({
         CampaignAudienceExport[],
         CampaignEngagement | null,
         CookieResult<string[]>,
+        InstanceCapabilities,
     ] = await Promise.all([
         getCampaignAudienceFromCookie(id, cookie),
         getCampaignSnapshots(id, init).catch(() => []),
@@ -67,6 +80,7 @@ export default async function CampaignDetailPage({
         getCampaignExports(id, init).catch(() => []),
         getCampaignEngagement(id, init).catch(() => null),
         getEffectivePermissionsResultFromCookie(cookie),
+        getCapabilities(init).catch(() => DEFAULT_CAPABILITIES),
     ]);
     if (!effectivePermissions.ok) {
         return <PermissionsUnavailablePage />;
@@ -86,6 +100,7 @@ export default async function CampaignDetailPage({
             initialEngagement={engagement}
             canManage={effectivePermissions.data.includes("CAMPAIGN_MANAGE")}
             canSend={effectivePermissions.data.includes("CAMPAIGN_SEND")}
+            deliveryEnabled={capabilities.campaignDelivery}
         />
     );
 }

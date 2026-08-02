@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
+import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,17 +29,22 @@ const CONNECTORS = ["http_list"];
 /**
  * The audience-export surface for a campaign. Pushes a frozen snapshot to an external connector and
  * lists the resulting exports, gating the create action on the caller's resolved manage permission.
+ *
+ * Exporting rides the same instance delivery capability as sending, so an instance without it says
+ * so before the reader fills the form rather than answering with a 403 afterwards.
  */
 export default function CampaignExportPanel({
     campaignId,
     initialExports,
     snapshots,
     canManage,
+    deliveryEnabled,
 }: {
     campaignId: number;
     initialExports: CampaignAudienceExport[];
     snapshots: CampaignAudienceSnapshotSummary[];
     canManage: boolean;
+    deliveryEnabled: boolean;
 }) {
     const t = useTranslations("CampaignExports");
     const locale = useLocale();
@@ -47,7 +53,9 @@ export default function CampaignExportPanel({
     const [exportSnapshot, setExportSnapshot] = useState<string>("");
     const [exportConnector, setExportConnector] = useState<string>("");
     const [isCreatingExport, setIsCreatingExport] = useState(false);
-    const [exportUnavailable, setExportUnavailable] = useState(false);
+    const [exportRefused, setExportRefused] = useState(false);
+
+    const exportUnavailable = !deliveryEnabled || exportRefused;
 
     const chosenSnapshot = useMemo(
         () => snapshots.find((snapshot) => String(snapshot.version) === exportSnapshot) ?? null,
@@ -72,7 +80,7 @@ export default function CampaignExportPanel({
             toastSuccess(t("created"));
         } catch (err) {
             if (err instanceof ApiError && err.status === 403) {
-                setExportUnavailable(true);
+                setExportRefused(true);
                 toastError(t("exportUnavailable"));
             } else {
                 toastError(err instanceof Error ? err.message : String(err));
@@ -166,7 +174,15 @@ export default function CampaignExportPanel({
                         </div>
 
                         {exportUnavailable && (
-                            <p className="text-xs text-muted-foreground">{t("exportUnavailable")}</p>
+                            <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
+                                <InformationCircleIcon
+                                    aria-hidden
+                                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                                />
+                                <p className="text-sm text-muted-foreground">
+                                    {t("exportUnavailable")}
+                                </p>
+                            </div>
                         )}
                     </div>
                 )}

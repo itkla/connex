@@ -82,6 +82,7 @@ export default function CampaignDetail({
     initialEngagement,
     canManage,
     canSend,
+    deliveryEnabled,
 }: {
     campaign: Campaign;
     initialAudience: CampaignAudience | null;
@@ -92,6 +93,7 @@ export default function CampaignDetail({
     initialEngagement: CampaignEngagementData | null;
     canManage: boolean;
     canSend: boolean;
+    deliveryEnabled: boolean;
 }) {
     const t = useTranslations("CampaignDetail");
     const at = useTranslations("CampaignAudience");
@@ -457,6 +459,7 @@ export default function CampaignDetail({
                             snapshots={snapshots}
                             canManage={canManage}
                             canSend={canSend}
+                            deliveryEnabled={deliveryEnabled}
                         />
                     </TabsContent>
 
@@ -470,6 +473,7 @@ export default function CampaignDetail({
                             initialExports={initialExports}
                             snapshots={snapshots}
                             canManage={canManage}
+                            deliveryEnabled={deliveryEnabled}
                         />
                     </TabsContent>
                 </Tabs>
