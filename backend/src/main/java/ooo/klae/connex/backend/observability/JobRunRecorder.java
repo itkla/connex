@@ -115,11 +115,10 @@ public class JobRunRecorder {
             });
         } catch (RuntimeException exception) {
             log.warn(
-                "Job run recording failed jobName={} status={} exceptionClass={} message={}",
+                "Job run recording failed jobName={} status={} exceptionClass={}",
                 loggedJobName,
-                status == null ? "unknown" : status.token(),
-                exception.getClass().getSimpleName(),
-                exception.getMessage());
+                status == null ? "unknown" : status.name(),
+                exception.getClass().getSimpleName());
         }
     }
 

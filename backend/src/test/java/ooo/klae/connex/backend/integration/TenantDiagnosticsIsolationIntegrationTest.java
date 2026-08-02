@@ -6,11 +6,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +21,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -59,8 +63,12 @@ class TenantDiagnosticsIsolationIntegrationTest {
     @Autowired private UserMapper userMapper;
     @Autowired private MailConfigMapper mailConfigMapper;
     @Autowired private SecretValueMapper secretValueMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
+    private final List<Integer> createdWorkspaceIds = new ArrayList<>();
+    private final List<Integer> createdOrganizationIds = new ArrayList<>();
+    private final List<Integer> createdUserIds = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -68,6 +76,26 @@ class TenantDiagnosticsIsolationIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
+    }
+
+    @AfterEach
+    void removeCommittedFixtures() {
+        for (Integer workspaceId : createdWorkspaceIds) {
+            jdbcTemplate.update("DELETE FROM workspace_mail_config WHERE workspace_id = ?", workspaceId);
+            jdbcTemplate.update("DELETE FROM secret_value WHERE workspace_id = ?", workspaceId);
+            jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspaceId);
+            jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
+        }
+        for (Integer organizationId : createdOrganizationIds) {
+            jdbcTemplate.update("DELETE FROM org_member WHERE org_id = ?", organizationId);
+            jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organizationId);
+        }
+        for (Integer userId : createdUserIds) {
+            jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", userId);
+        }
+        createdWorkspaceIds.clear();
+        createdOrganizationIds.clear();
+        createdUserIds.clear();
     }
 
     @Test
@@ -181,6 +209,7 @@ class TenantDiagnosticsIsolationIntegrationTest {
         organization.setName("Diagnostics Org " + suffix);
         organization.setSlug("diagnostics-org-" + suffix);
         organizationMapper.insert(organization);
+        createdOrganizationIds.add(organization.getId());
         return organization;
     }
 
@@ -191,6 +220,7 @@ class TenantDiagnosticsIsolationIntegrationTest {
         workspace.setName("Diagnostics Workspace " + suffix);
         workspace.setSlug("diagnostics-workspace-" + suffix);
         workspaceMapper.insert(workspace);
+        createdWorkspaceIds.add(workspace.getId());
         return workspace;
     }
 
@@ -203,6 +233,7 @@ class TenantDiagnosticsIsolationIntegrationTest {
         user.setPasswordHash(passwordEncoder.encode(PASSWORD));
         user.setTimezone("UTC");
         userMapper.insert(user);
+        createdUserIds.add(user.getId());
         return user;
     }
 }
