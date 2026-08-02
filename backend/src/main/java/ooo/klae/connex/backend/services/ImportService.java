@@ -114,6 +114,10 @@ public class ImportService {
     private static final String DEFAULT_CURRENCY = "USD";
     private static final int DEAL_VALUE_SCALE = 2;
     private static final int CUSTOM_NUMBER_SCALE = 4;
+    private static final String DEAL_VALUE_LINE_ITEM_CONFLICT =
+        "Cannot import a deal value while line items exist; update or remove the line items first";
+    private static final String DEAL_CURRENCY_LINE_ITEM_CONFLICT =
+        "Cannot change the deal currency while it has line items; remove the line items first";
 
     private static final Set<String> PERSON_FIELDS = Set.of("name", "email", "phone", "title", "company");
     private static final Set<String> COMPANY_FIELDS = Set.of("name", "website", "industry", "phone", "address");
@@ -1256,18 +1260,26 @@ public class ImportService {
         String beforeExpectedCloseDate = existing.getExpectedCloseDate();
         String beforeClosedAt = existing.getClosedAt();
         String beforeClosedReason = existing.getClosedReason();
-        existing.setName(merge(action, existing.getName(), row.std.get("name")));
-        existing.setCurrency(merge(action, existing.getCurrency(), row.std.get("currency")));
-        existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
+        String mergedCurrency = merge(action, existing.getCurrency(), row.std.get("currency"));
+        boolean currencyChanged = mergedCurrency != null
+            && !mergedCurrency.equalsIgnoreCase(existing.getCurrency());
         String value = row.std.get("value");
         BigDecimal incomingValue = parseValue(value);
         boolean shouldUpdateValue = value != null
             && (OVERWRITE.equals(action) || existing.getValue().signum() == 0)
             && existing.getValue().compareTo(incomingValue) != 0;
-        boolean valueChanged = false;
-        if (shouldUpdateValue
+        if ((currencyChanged || shouldUpdateValue)
                 && dealLineItemMapper.countByDealIdForUpdate(
-                    workspaceId, existing.getId()) == 0) {
+                    workspaceId, existing.getId()) > 0) {
+            fail(row, currencyChanged
+                ? DEAL_CURRENCY_LINE_ITEM_CONFLICT : DEAL_VALUE_LINE_ITEM_CONFLICT);
+            return false;
+        }
+        existing.setName(merge(action, existing.getName(), row.std.get("name")));
+        existing.setCurrency(mergedCurrency);
+        existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
+        boolean valueChanged = false;
+        if (shouldUpdateValue) {
             existing.setValue(dealValueService.setManualValue(
                 workspaceId, existing, incomingValue));
             valueChanged = true;
@@ -1297,6 +1309,7 @@ public class ImportService {
         if (parentChanged) {
             dealMapper.update(existing);
         }
+        dealValueService.reconcileRealizedValue(workspaceId, existing, beforeOutcome, null);
         if (afterStageId != null && !afterStageId.equals(beforeStageId)) {
             dealStageHistoryService.recordTransition(
                 workspaceId, existing.getId(), afterStageId, beforeOutcome, existing.getWon());

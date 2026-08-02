@@ -153,6 +153,55 @@ class DealValueServiceTest {
     }
 
     @Test
+    void reconcileZeroesALostDealAndIgnoresARequestedAmount() {
+        Deal deal = deal("line_items", "5000000.00", "5000000.00");
+        deal.setWon(Boolean.FALSE);
+
+        assertMoney("0.00", service.reconcileRealizedValue(
+            WORKSPACE_ID, deal, Boolean.TRUE, new BigDecimal("999999.00")));
+
+        assertMoney("0.00", deal.getActualValue());
+        verify(dealMapper).updateActualValue(WORKSPACE_ID, DEAL_ID, new BigDecimal("0.00"));
+        verifyNoInteractions(dealLineItemMapper);
+    }
+
+    @Test
+    void reconcileDerivesTheLineItemTotalOnAFreshWin() {
+        Deal deal = deal("line_items", "5000000.00", "0.00");
+        deal.setWon(Boolean.TRUE);
+        when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(1);
+        when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID))
+            .thenReturn(new BigDecimal("5000000.00"));
+
+        assertMoney("5000000.00",
+            service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null));
+
+        assertMoney("5000000.00", deal.getActualValue());
+        verify(dealMapper).updateActualValue(WORKSPACE_ID, DEAL_ID, new BigDecimal("5000000.00"));
+    }
+
+    @Test
+    void reconcileLeavesAnAlreadyWonDealsRealizedValueFrozen() {
+        Deal deal = deal("line_items", "7000000.00", "5000000.00");
+        deal.setWon(Boolean.TRUE);
+
+        assertMoney("5000000.00",
+            service.reconcileRealizedValue(WORKSPACE_ID, deal, Boolean.TRUE, null));
+
+        verifyNoInteractions(dealMapper);
+    }
+
+    @Test
+    void newDealsOnlyCarryRealizedValueWhenCreatedWon() {
+        assertMoney("999999.00", service.resolveRealizedValueForNewDeal(
+            Boolean.TRUE, new BigDecimal("999999.00")));
+        assertMoney("0.00", service.resolveRealizedValueForNewDeal(
+            Boolean.FALSE, new BigDecimal("999999.00")));
+        assertMoney("0.00", service.resolveRealizedValueForNewDeal(
+            null, new BigDecimal("999999.00")));
+    }
+
+    @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void writeMethodsRequireAnExistingTransaction() {
         Deal deal = deal("manual", "10.00", "0.00");
@@ -162,6 +211,8 @@ class DealValueServiceTest {
                 () -> service.setManualValue(WORKSPACE_ID, deal, BigDecimal.TEN)),
             () -> assertThrows(IllegalTransactionStateException.class,
                 () -> service.reconcileLineItems(WORKSPACE_ID, deal)),
+            () -> assertThrows(IllegalTransactionStateException.class,
+                () -> service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null)),
             () -> assertThrows(IllegalTransactionStateException.class,
                 () -> service.resolveActualValueForClose(WORKSPACE_ID, deal, true, null)));
     }

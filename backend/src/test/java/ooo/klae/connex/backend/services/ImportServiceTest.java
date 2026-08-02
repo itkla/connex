@@ -54,6 +54,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Autowired ImportService importService;
     @Autowired ExportService exportService;
+    @Autowired DealService dealService;
     @Autowired DealLineItemService dealLineItemService;
     @Autowired DealStageHistoryService dealStageHistoryService;
     @Autowired CustomFieldValueService customFieldValueService;
@@ -2032,16 +2033,12 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void dealImportPreservesValueWhenMatchedDealHasLineItems() {
+    void dealImportRejectsAValueColumnWhenMatchedDealHasLineItems() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
-        DealLineItemRequest lineItem = new DealLineItemRequest();
-        lineItem.setName("Imported deal line " + unique());
-        lineItem.setUnitPrice(new BigDecimal("25.00"));
-        lineItem.setQuantity(BigDecimal.ONE);
-        dealLineItemService.create(deal.getId(), lineItem);
+        addLineItem(deal, "25.00");
 
         ImportResult result = reviewAndCommitDeals(req(
             List.of(
@@ -2057,10 +2054,117 @@ class ImportServiceTest extends AbstractServiceTest {
             "overwrite"));
 
         Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
-        assertEquals(1, result.getUpdated());
-        assertTrue(result.getFailed().isEmpty());
+        assertEquals(0, result.getUpdated());
+        assertEquals(1, result.getFailed().size());
+        assertTrue(result.getFailed().get(0).getReason().contains("line items"));
         assertEquals(0, new BigDecimal("25.00").compareTo(updated.getValue()));
-        assertEquals("2027-12-31", updated.getExpectedCloseDate());
+        assertNull(updated.getExpectedCloseDate());
+    }
+
+    @Test
+    void dealImportRejectsACurrencyChangeWhenMatchedDealHasLineItems() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        addLineItem(deal, "25.00");
+
+        ImportResult result = reviewAndCommitDeals(req(
+            List.of(
+                map("Deal", "name"),
+                map("Currency", "currency"),
+                map("Company", "company")),
+            List.of(Map.of(
+                "Deal", deal.getName(),
+                "Currency", "USD",
+                "Company", company.getName())),
+            "overwrite"));
+
+        Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(0, result.getUpdated());
+        assertEquals(1, result.getFailed().size());
+        assertTrue(result.getFailed().get(0).getReason().contains("currency"));
+        assertEquals("JPY", updated.getCurrency());
+    }
+
+    @Test
+    void dealImportLosingAWonDealRecordsZeroRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = terminalStage(pipeline, 1, false);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, open, company);
+        addLineItem(deal, "5000000.00");
+        dealService.close(deal.getId(), true, "Signed", null);
+
+        ImportResult result = reviewAndCommitDeals(req(
+            List.of(
+                map("Deal", "name"),
+                map("Pipe", "pipeline"),
+                map("Stage", "stage"),
+                map("Company", "company")),
+            List.of(Map.of(
+                "Deal", deal.getName(),
+                "Pipe", pipeline.getName(),
+                "Stage", lost.getName(),
+                "Company", company.getName())),
+            "overwrite"));
+
+        Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(1, result.getUpdated());
+        assertEquals(Boolean.FALSE, updated.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(updated.getActualValue()));
+    }
+
+    @Test
+    void dealImportWinningALineItemDealDerivesRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage won = terminalStage(pipeline, 1, true);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, open, company);
+        addLineItem(deal, "5000000.00");
+
+        ImportResult result = reviewAndCommitDeals(req(
+            List.of(
+                map("Deal", "name"),
+                map("Pipe", "pipeline"),
+                map("Stage", "stage"),
+                map("Company", "company")),
+            List.of(Map.of(
+                "Deal", deal.getName(),
+                "Pipe", pipeline.getName(),
+                "Stage", won.getName(),
+                "Company", company.getName())),
+            "overwrite"));
+
+        Deal updated = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(1, result.getUpdated());
+        assertEquals(Boolean.TRUE, updated.getWon());
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(updated.getActualValue()));
+    }
+
+    private Stage terminalStage(Pipeline pipeline, int position, boolean success) {
+        Stage stage = new Stage();
+        stage.setName((success ? "Won " : "Lost ") + unique());
+        stage.setPipeline(pipeline);
+        stage.setPosition(position);
+        stage.setWorkspaceId(workspace.getId());
+        if (success) {
+            stage.setSuccess(true);
+        } else {
+            stage.setFailure(true);
+        }
+        pipelineMapper.insertStage(stage);
+        return stage;
+    }
+
+    private void addLineItem(Deal deal, String unitPrice) {
+        DealLineItemRequest lineItem = new DealLineItemRequest();
+        lineItem.setName("Imported deal line " + unique());
+        lineItem.setUnitPrice(new BigDecimal(unitPrice));
+        lineItem.setQuantity(BigDecimal.ONE);
+        dealLineItemService.create(deal.getId(), lineItem);
     }
 
     @Test

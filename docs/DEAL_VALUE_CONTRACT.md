@@ -34,30 +34,61 @@ before touching a line. After every line write the deal value is recomputed and 
 Deleting the **last** line reverts `value_source` to `manual` and **retains the last derived
 total** — the number does not reset to zero, it simply becomes editable again.
 
+### Line-item guards apply to CSV import too
+
+A deal whose value comes from line items rejects a manual value and a currency change on **every**
+writer, not only `PUT`. `PUT /api/deals/{id}` answers 409 (value) and 400 (currency). CSV import
+raises the same two refusals as **row-level failures** in `ImportResult.failed`, not as a
+whole-request 409: import is a batch under one transaction, so aborting it would discard every
+other good row for one deal that happens to carry line items. A rejected row is applied in full or
+not at all — no partial column writes. Import never silently drops a `value` column.
+
 ### Winning or losing a deal — every path
 
-Realized value (`actual_value`) is resolved the same way on **every** win transition, not just the
-close dialog. A deal wins through three paths, and all three agree:
+Realized value (`actual_value`) is resolved the same way on **every** outcome transition, not just
+the close dialog. `DealValueService.reconcileRealizedValue` is the single owner of that resolution,
+and every route calls it immediately after the broad update statement:
 
-1. The close dialog (`POST /api/deals/{id}/close`).
-2. A Kanban drag onto a "Closed Won" stage (`move`).
-3. A form edit that sets a won-outcome stage (`update`).
+| Route | Entry point |
+| --- | --- |
+| Close dialog | `POST /api/deals/{id}/close` → `DealService.close` |
+| Form edit | `PUT /api/deals/{id}` → `DealService.update` |
+| Kanban drag | `POST /api/deals/{id}/move` → `DealService.moveInternal` |
+| Bulk stage change | `POST /api/deals/bulk/stage` → `BulkOperationService.changeStageForDeals` |
+| Rule action | workflow `change_stage` → `RuleActionExecutor` |
+| CSV import | `POST /api/import/deals` → `ImportService.applyDealUpdate` |
 
-- **Won deals with line items:** `actual_value` is derived from the line-item total on whichever
-  path wins the deal. Through the close dialog, supplying a value that differs from the derived
-  total is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409); the drag and edit paths carry no value
-  input and simply take the derived total. So the same ¥5M line-item deal reports ¥5M realized
-  whether it is won by dialog, drag, or edit — the figure never depends on how it was won.
-- **Won deals without line items:** realized value keeps the amount entered in the close dialog, or
-  the deal's existing `actual_value` (zero for a deal that was open) when no amount is supplied.
-- **Lost deals:** `actual_value` is **always zero**, on every path. A client-supplied value on a
-  lost close is ignored, and `CloseDealRequest.actualValue` rejects negatives.
+The reconciliation resolves these cases:
+
+- **Lost deals:** `actual_value` is **always zero**, on every route. Any client-supplied value is
+  ignored rather than rejected, so a form that round-trips a won deal's figure while moving it to a
+  lost stage still lands on zero instead of failing. `CloseDealRequest.actualValue` additionally
+  rejects negatives.
+- **Freshly won deals with line items:** `actual_value` is derived from the line-item total on
+  whichever path wins the deal. Through the close dialog, supplying a value that differs from the
+  derived total is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409); the drag, edit, bulk, rule and
+  import paths carry no value input and simply take the derived total. So the same ¥5M line-item
+  deal reports ¥5M realized however it was won — the figure never depends on the route.
+- **Freshly won deals without line items:** realized value keeps the amount entered in the close
+  dialog, or the deal's existing `actual_value` (zero for a deal that was open) when none is given.
+- **Already-won and still-open deals:** realized value stays frozen (see below) and only an explicit
+  operator edit moves it.
+
+A deal **created** already closed goes through `resolveRealizedValueForNewDeal` instead, because it
+has no line items yet: created won it keeps the supplied amount, created lost or open it records
+zero. A client therefore cannot seed reported revenue by posting `actualValue` alongside a lost
+stage.
 
 The lost-deal rule exists because the deal-browser `closed_revenue` figure sums `actual_value`
-across **all** closed deals, not just won ones. Deriving the booking value into a lost deal would
-inflate reported revenue by the full value of every deal the business failed to win. A lost deal
-records zero realized revenue; its booking value remains visible through `deal.value` and its line
-items.
+across **all** closed deals, not just won ones. Deriving — or retaining — the booking value on a
+lost deal would inflate reported revenue by the full value of every deal the business failed to
+win. A lost deal records zero realized revenue; its booking value remains visible through
+`deal.value` and its line items.
+
+Two architecture tests keep this closed. `updateActualValue` is callable only from `DealMapper` and
+`DealValueService`, and any main-source file that writes a deal outcome through the broad
+`dealMapper.update` statement must also call `reconcileRealizedValue` — so a new route cannot
+silently opt out of the contract.
 
 ### Realized value is frozen at the win
 

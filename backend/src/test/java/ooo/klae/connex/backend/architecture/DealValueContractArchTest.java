@@ -80,13 +80,32 @@ class DealValueContractArchTest {
                 }
                 String source = Files.readString(file);
                 if (source.contains("updateValueAndSource(")
-                        || source.contains("updateValueSource(")) {
+                        || source.contains("updateValueSource(")
+                        || source.contains("updateActualValue(")) {
                     violations.add(sourceRoot.relativize(file).toString());
                 }
             }
         }
         assertTrue(violations.isEmpty(),
             "Canonical deal-value writes escaped DealValueService: " + violations);
+    }
+
+    @Test
+    void everyDealOutcomeWriterReconcilesRealizedValue() throws Exception {
+        Path sourceRoot = repoRoot().resolve("backend/src/main/java");
+        List<String> violations = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(sourceRoot)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String source = Files.readString(file);
+                if (source.contains("dealMapper.update(")
+                        && !source.contains("reconcileRealizedValue(")) {
+                    violations.add(sourceRoot.relativize(file).toString());
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(),
+            "A route writes the deal outcome without reconciling realized value, so a won-to-lost"
+                + " transition would keep the won figure and inflate closed revenue: " + violations);
     }
 
     @Test
