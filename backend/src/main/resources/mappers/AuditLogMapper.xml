@@ -86,6 +86,58 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
+  <sql id="supportColumns">
+    al.id, al.workspace_id, al.org_id, al.action, al.entity_type, al.entity_id,
+    al.actor_id, al.outcome, al.request_id, al.created_at
+  </sql>
+
+  <resultMap id="AuditSupportRow" type="ooo.klae.connex.backend.dto.AuditSupportRowDto">
+    <result property="auditId" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="orgId" column="org_id"/>
+    <result property="action" column="action"/>
+    <result property="entityType" column="entity_type"/>
+    <result property="entityId" column="entity_id"/>
+    <result property="actorId" column="actor_id"/>
+    <result property="outcome" column="outcome"/>
+    <result property="requestId" column="request_id"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <select id="findOrgSupportSlice" resultMap="AuditSupportRow" timeout="20">
+    SELECT <include refid="supportColumns"/>
+    FROM audit_log al
+    WHERE al.org_id = #{orgId}
+      AND al.workspace_id IS NULL
+      AND (
+        (al.chain_scope_type = 'organization' AND al.chain_scope_id = #{orgId})
+        OR (al.chain_scope_type IS NULL AND al.integrity_workspace_id IS NULL)
+      )
+      AND al.created_at &gt;= #{since}
+      AND al.created_at &lt;= #{until}
+      <if test="requestId != null">
+        AND al.request_id = #{requestId} COLLATE utf8mb4_0900_as_cs
+      </if>
+    ORDER BY al.created_at ASC, al.id ASC
+    LIMIT #{limit}
+  </select>
+
+  <select id="findEntitySupportSlice" resultMap="AuditSupportRow" timeout="20">
+    SELECT <include refid="supportColumns"/>
+    FROM audit_log al
+    WHERE al.workspace_id = #{workspaceId}
+      AND al.org_id = #{orgId}
+      AND al.entity_type = #{entityType}
+      AND al.entity_id = #{entityId}
+      AND al.created_at &gt;= #{since}
+      AND al.created_at &lt;= #{until}
+      <if test="requestId != null">
+        AND al.request_id = #{requestId} COLLATE utf8mb4_0900_as_cs
+      </if>
+    ORDER BY al.created_at ASC, al.id ASC
+    LIMIT #{limit}
+  </select>
+
   <select id="findOrgExport" resultMap="AuditLogResult">
     SELECT <include refid="auditColumns"/>
     FROM audit_log al

@@ -508,6 +508,17 @@ line is found by grepping for the digest value itself:
 digest, the page path, and the client stack. Both lookups run entirely against the deployment's
 own logs — that pairing is the support path for deployments Connex does not operate.
 
+**Support bundle:** an organization administrator can download a redacted, manifest-bearing
+support bundle from `GET /api/orgs/{orgId}/support-bundle` and hand it to a support engineer, so a
+ticket can be diagnosed without database or SSH access. The bundle carries readiness, allowlisted
+configuration, migration history, and a windowed audit slice — and never carries secrets, hosts,
+record values, or personal names. Note that the audit slice is keyed by a server-minted request
+id, not by the `X-Correlation-Id` a user can quote; the two are deliberately separate and
+`SUPPORT_BUNDLE.md` explains how to pivot. Collect and read it with
+[`deploy/support-bundle/`](../deploy/support-bundle/README.md); the full contents, redaction
+contract, and a worked "a contact vanished" investigation are in
+[`SUPPORT_BUNDLE.md`](SUPPORT_BUNDLE.md).
+
 ## Local evaluation (not for production)
 
 For a zero-config local trial against the bundled MySQL, build from source and use the eval env,

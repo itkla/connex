@@ -27,6 +27,7 @@ jobs:
       ocr: ${{ steps.classify.outputs.ocr }}
       migrations: ${{ steps.classify.outputs.migrations }}
       backup: ${{ steps.classify.outputs.backup }}
+      support_bundle: ${{ steps.classify.outputs.support_bundle }}
       cross_stack: ${{ steps.classify.outputs.cross_stack }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -109,6 +110,19 @@ jobs:
         run: shellcheck -x deploy/backup/*.sh deploy/backup/tests/run-tests.sh
       - name: Selection, coverage, and retention regression tests
         run: bash deploy/backup/tests/run-tests.sh
+
+  support-bundle:
+    name: Support bundle tooling — offline regression tests
+    needs: classify
+    if: needs.classify.outputs.support_bundle == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Lint the support bundle shell tooling
+        run: shellcheck -x deploy/support-bundle/*.sh deploy/support-bundle/tests/run-tests.sh
+      - name: Integrity, redaction, and transport regression tests
+        run: bash deploy/support-bundle/tests/run-tests.sh
 
   backend:
     name: Backend — build & test
@@ -332,7 +346,7 @@ jobs:
   required:
     name: CI — required
     if: always()
-    needs: [classify, ocr, migrations, backup, backend, frontend, frontend-tests]
+    needs: [classify, ocr, migrations, backup, support-bundle, backend, frontend, frontend-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -342,6 +356,7 @@ jobs:
           OCR_RESULT: ${{ needs.ocr.result }}
           MIGRATIONS_RESULT: ${{ needs.migrations.result }}
           BACKUP_RESULT: ${{ needs.backup.result }}
+          SUPPORT_BUNDLE_RESULT: ${{ needs.support-bundle.result }}
           BACKEND_RESULT: ${{ needs.backend.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_TESTS_RESULT: ${{ needs.frontend-tests.result }}
@@ -352,6 +367,7 @@ jobs:
             "$OCR_RESULT" \
             "$MIGRATIONS_RESULT" \
             "$BACKUP_RESULT" \
+            "$SUPPORT_BUNDLE_RESULT" \
             "$BACKEND_RESULT" \
             "$FRONTEND_RESULT" \
             "$FRONTEND_TESTS_RESULT"; do

@@ -64,6 +64,12 @@ class CiChangeClassificationTest(unittest.TestCase):
     def test_backup_change_does_not_boot_the_application(self) -> None:
         categories = self.classify("deploy/backup/backup.sh")
         self.assertTrue(categories["backup"])
+
+    def test_support_bundle_change_runs_its_own_offline_suite(self) -> None:
+        categories = self.classify("deploy/support-bundle/collect.sh")
+        self.assertTrue(categories["support_bundle"])
+        self.assertFalse(categories["backup"])
+        self.assertFalse(categories["profile_boot"])
         self.assertFalse(categories["compose"])
         self.assertFalse(categories["profile_boot"])
 

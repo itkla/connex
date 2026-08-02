@@ -92,6 +92,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper.workspaceIdsWithExpired",
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findRecentByOrg",
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport",
+        "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgSupportSlice",
         "ooo.klae.connex.backend.mappers.NoteMapper.countAuthoredAnywhere",
         "ooo.klae.connex.backend.mappers.ActivityMapper.countCreatedAnywhere",
         "ooo.klae.connex.backend.mappers.IntroductionMapper.countIntroducedAnywhere",

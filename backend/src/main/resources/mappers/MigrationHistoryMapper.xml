@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.MigrationHistoryMapper">
+
+  <select id="findHistory" resultType="ooo.klae.connex.backend.dto.MigrationHistoryEntryDto" timeout="20">
+    SELECT version AS version,
+           description AS description,
+           success AS success,
+           installed_on AS installedOn
+    FROM flyway_schema_history
+    ORDER BY installed_rank
+  </select>
+
+</mapper>
