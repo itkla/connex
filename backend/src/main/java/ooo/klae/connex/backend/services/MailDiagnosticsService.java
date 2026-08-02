@@ -99,9 +99,7 @@ public class MailDiagnosticsService {
                     dns);
         }
 
-        Sender sender = new Sender(
-                safeAddress(config.fromAddress(), config.username()),
-                safeDisplayName(config.fromName()));
+        Sender sender = senderIdentity(config);
         String visibleHost = tenantVisibleHost(config);
         Integer visiblePort = tenantVisiblePort(config);
         Transport transport;
@@ -152,6 +150,27 @@ public class MailDiagnosticsService {
             log.warn("Diagnostic test email audit could not be written for workspace {}", workspaceId);
             return "audit_not_recorded";
         }
+    }
+
+    /**
+     * Returns the sender identity for the response.
+     *
+     * <p>The sender address is deliberately reported for managed and instance transports too,
+     * unlike the SMTP host and port. The test message is delivered to the requesting
+     * administrator's own mailbox, so its {@code From} address is already disclosed to exactly
+     * this actor and withholding it in the response only makes the report harder to read. The
+     * relay host and port are withheld because they are not otherwise disclosed and a tenant
+     * cannot act on the operator's transport, and the advisory DNS lookup is skipped for a
+     * sender the tenant does not control because it has no tenant value and is the
+     * domain-existence oracle vector.
+     *
+     * @param config resolved transport
+     * @return redacted sender identity
+     */
+    private static Sender senderIdentity(ResolvedMailConfig config) {
+        return new Sender(
+                safeAddress(config.fromAddress(), config.username()),
+                safeDisplayName(config.fromName()));
     }
 
     private static String tenantVisibleHost(ResolvedMailConfig config) {

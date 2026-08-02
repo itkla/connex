@@ -14,11 +14,11 @@ import { StatusPill } from "./StatusPill";
 export function SecretStoreSection({
     data,
     loading,
-    error,
+    unavailable,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
-    error: string | null;
+    unavailable?: boolean;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const store = data?.secretStore ?? null;
@@ -28,8 +28,8 @@ export function SecretStoreSection({
             title={t("secretStoreTitle")}
             description={t("secretStoreDescription")}
             loading={loading}
-            error={error}
-            isEmpty={!loading && !error && !store}
+            unavailable={unavailable}
+            isEmpty={!loading && !unavailable && !store}
             emptyLabel={t("secretStoreEmpty")}
         >
             {store ? (

@@ -223,6 +223,30 @@ class ObjectDeletionRetryQueueTest {
 
         verify(transactionExecutor).retryTenant(
             org.mockito.ArgumentMatchers.eq(second), any());
+        verify(jobRunRecorder).record(
+            eq(JobRunRecorder.OBJECT_DELETION_RETRY),
+            eq(7),
+            eq(JobRunRecorder.JobRunStatus.FAILED),
+            any());
+    }
+
+    @Test
+    void tenantSweepWithNoFailuresRecordsSucceeded() {
+        ObjectDeletionTask only = new ObjectDeletionTask(
+            11, 7, "workspaces/7/attachments/only.pdf", 2, 1);
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
+        when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt(), anyInt())).thenReturn(List.of(7));
+        when(tenantQueueMapper.findDue(org.mockito.ArgumentMatchers.eq(7), any(), anyInt()))
+            .thenReturn(List.of(only));
+
+        queue.retryPending();
+
+        verify(jobRunRecorder).record(
+            eq(JobRunRecorder.OBJECT_DELETION_RETRY),
+            eq(7),
+            eq(JobRunRecorder.JobRunStatus.SUCCEEDED),
+            any());
     }
 
     @Test

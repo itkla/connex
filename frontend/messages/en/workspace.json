@@ -679,6 +679,20 @@
       "capture_paused": "A capture stream is paused"
     },
     "staleAfterRefresh": "Showing the last successful report. Refresh failed.",
-    "jobWorkspacesFailing": "{count} workspaces failing"
+    "jobWorkspacesFailing": "{count, plural, one {# workspace failing} other {# workspaces failing}}",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "sectionUnavailable": "This section could not be checked",
+    "sectionUnavailableBody": "The report ran, but this source did not respond. Refresh to try again.",
+    "captureStatus": {
+      "idle": "Idle",
+      "queued": "Queued",
+      "backfilling": "Backfilling",
+      "syncing": "Syncing",
+      "retrying": "Retrying",
+      "intervention_required": "Needs attention",
+      "paused": "Paused",
+      "purging": "Purging"
+    }
   }
 }

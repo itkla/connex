@@ -128,8 +128,8 @@ class TenantDiagnosticsServiceTest {
         when(deliveryProviderReadiness.isReady(WORKSPACE_ID, DeliveryChannel.SMS)).thenReturn(false);
         when(providerCaptureMapper.findDiagnosticsAggregates(WORKSPACE_ID, "[11]"))
                 .thenReturn(List.of(
-                        capture("account_paused", 2, 1, 0, 5, 8, "2026-07-01 01:00:00"),
-                        capture("policy_paused", 3, 0, 2, 7, 9, "2026-07-02 01:00:00")));
+                        capture("account_paused", 2, 1, 0, 5, 8, LocalDateTime.of(2026, 7, 1, 1, 0)),
+                        capture("policy_paused", 3, 0, 2, 7, 9, LocalDateTime.of(2026, 7, 2, 1, 0))));
         when(aiProviderReadiness.isReadyForOrg(ORG_ID)).thenReturn(true);
         when(aiProviderReadiness.isImageInputReadyForOrg(ORG_ID)).thenReturn(false);
         JobRun last = run(
@@ -173,7 +173,7 @@ class TenantDiagnosticsServiceTest {
         assertEquals(2, capture.pageCursorCount());
         assertEquals(12, capture.processedItems());
         assertEquals(17, capture.estimatedItems());
-        assertEquals("2026-07-02 01:00:00", capture.lastSuccessAt());
+        assertEquals(LocalDateTime.of(2026, 7, 2, 1, 0), capture.lastSuccessAt());
         assertEquals(List.of("account_paused", "policy_paused"), capture.errorCodes());
         Set<String> findingCodes = result.findings().stream()
                 .map(Finding::code)
@@ -270,7 +270,7 @@ class TenantDiagnosticsServiceTest {
             long pageCursorCount,
             long processedItems,
             long estimatedItems,
-            String lastSuccessAt) {
+            LocalDateTime lastSuccessAt) {
         return new ProviderCaptureDiagnosticsRow(
                 WORKSPACE_ID,
                 "google",
@@ -282,7 +282,7 @@ class TenantDiagnosticsServiceTest {
                 pageCursorCount,
                 processedItems,
                 estimatedItems,
-                "2026-07-03 01:00:00",
+                LocalDateTime.of(2026, 7, 3, 1, 0),
                 lastSuccessAt,
                 null);
     }

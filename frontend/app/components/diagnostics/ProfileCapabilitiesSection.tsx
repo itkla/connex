@@ -19,11 +19,11 @@ function capabilityTone(profileAllowed: boolean, available: boolean): Diagnostic
 export function ProfileCapabilitiesSection({
     data,
     loading,
-    error,
+    unavailable,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
-    error: string | null;
+    unavailable?: boolean;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const deployment = data?.deployment ?? null;
@@ -34,8 +34,8 @@ export function ProfileCapabilitiesSection({
             title={t("profileTitle")}
             description={t("profileDescription")}
             loading={loading}
-            error={error}
-            isEmpty={!loading && !error && capabilities.length === 0}
+            unavailable={unavailable}
+            isEmpty={!loading && !unavailable && capabilities.length === 0}
             emptyLabel={t("profileEmpty")}
         >
             <div className="space-y-4">

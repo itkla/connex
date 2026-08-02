@@ -3533,6 +3533,11 @@ export type DiagnosticsFinding = {
     stream?: string | null;
 };
 
+export type DiagnosticsSectionFault = {
+    section: string;
+    reason: string;
+};
+
 export type TenantDiagnostics = {
     scope: DiagnosticsScope;
     deployment: DiagnosticsDeployment;
@@ -3540,6 +3545,7 @@ export type TenantDiagnostics = {
     jobs: DiagnosticsJob[];
     findings: DiagnosticsFinding[];
     secretStore: SecretStoreDiagnostics | null;
+    unavailableSections: DiagnosticsSectionFault[];
 };
 
 export type MailDnsAdvisoryRecord = {

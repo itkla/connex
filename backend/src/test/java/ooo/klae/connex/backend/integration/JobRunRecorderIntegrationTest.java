@@ -52,6 +52,23 @@ class JobRunRecorderIntegrationTest {
     }
 
     @Test
+    void aFailureSurvivesLaterSuccessesBecauseRetentionPartitionsByStatus() {
+        record(WORKSPACE_ONE, JobRunStatus.FAILED, 0);
+        for (int index = 1; index < 60; index++) {
+            record(WORKSPACE_ONE, JobRunStatus.SUCCEEDED, index);
+        }
+
+        Integer failures = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM job_run WHERE job_name = ? AND workspace_id = ? AND status = ?",
+                Integer.class, JOB_NAME, WORKSPACE_ONE, "failed");
+
+        assertEquals(1, failures,
+                "Retention must partition by status. Without that, a five-second job evicts its own "
+                        + "last failure within minutes and the diagnostics panel reports a broken job "
+                        + "as healthy.");
+    }
+
+    @Test
     void recordingSurvivesRollbackOfTheSurroundingJobTransaction() {
         TransactionTemplate outer = new TransactionTemplate(transactionManager);
         outer.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
@@ -99,6 +116,16 @@ class JobRunRecorderIntegrationTest {
         assertEquals(3, workspaceTwoIds.size());
         assertEquals(50, nullIds.size());
         assertFalse(nullIds.contains(oldestNullId));
+    }
+
+    private void record(Integer workspaceId, JobRunStatus status, int sequence) {
+        recorder.record(
+                JOB_NAME,
+                workspaceId,
+                status,
+                new JobRunDetail(
+                        STARTED_AT.plusSeconds(sequence),
+                        Map.of("phase", "retention_test", "deletedCount", sequence)));
     }
 
     private void record(Integer workspaceId, int sequence) {

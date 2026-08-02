@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.time.LocalDateTime;
+
 /**
  * Metadata-only grouped connected-capture state used by tenant diagnostics.
  */
@@ -14,7 +16,7 @@ public record ProviderCaptureDiagnosticsRow(
         long pageCursorCount,
         long processedItems,
         long estimatedItems,
-        String lastAttemptAt,
-        String lastSuccessAt,
-        String nextAttemptAt) {
+        LocalDateTime lastAttemptAt,
+        LocalDateTime lastSuccessAt,
+        LocalDateTime nextAttemptAt) {
 }

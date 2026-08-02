@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Mail;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Ocr;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Providers;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Scope;
+import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.SectionFault;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.WorkspaceProviders;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
@@ -103,7 +105,9 @@ public class TenantDiagnosticsService {
         WorkspaceScope organizationScope = workspaceScopeControlAccess.getForWorkspace(workspaceId);
         WorkspaceScope workspaceScope = new WorkspaceScope(
                 organizationScope.orgId(), List.of(workspaceId), "[" + workspaceId + "]");
+        List<SectionFault> faults = new ArrayList<>();
         TenantSections sections = guarded(
+                "jobs_providers", faults,
                 () -> tenantAccess.inWorkspace(
                         workspaceId,
                         organizationScope.orgId(),
@@ -111,12 +115,14 @@ public class TenantDiagnosticsService {
                         () -> tenantSections(workspaceScope)),
                 TenantSections.empty());
         SecretStoreDiagnosticsDto secretStore = guarded(
+                "secret_store", faults,
                 () -> secretStoreLifecycleService.diagnosticsForWorkspace(workspaceId), null);
         return assemble(
                 new Scope("workspace", workspaceId),
                 organizationScope.orgId(),
                 sections,
-                secretStore);
+                secretStore,
+                faults);
     }
 
     /**
@@ -127,23 +133,28 @@ public class TenantDiagnosticsService {
      * @return metadata-only diagnostics
      */
     public TenantDiagnosticsDto forOrganization(int orgId, int actorId) {
+        List<SectionFault> faults = new ArrayList<>();
         WorkspaceScope scope = workspaceScopeControlAccess.getForOrg(orgId);
         TenantSections sections = scope.workspaceIds().isEmpty()
                 ? TenantSections.empty()
                 : guarded(
+                        "jobs_providers", faults,
                         () -> tenantAccess.inOrganization(scope, actorId, () -> tenantSections(scope)),
                         TenantSections.empty());
         SecretStoreDiagnosticsDto secretStore = guarded(
+                "secret_store", faults,
                 () -> secretStoreLifecycleService.diagnosticsForOrg(orgId), null);
-        return assemble(new Scope("organization", orgId), orgId, sections, secretStore);
+        return assemble(new Scope("organization", orgId), orgId, sections, secretStore, faults);
     }
 
-    private <T> T guarded(Supplier<T> source, T unavailable) {
+    private <T> T guarded(
+            String section, List<SectionFault> faults, Supplier<T> source, T unavailable) {
         try {
             return source.get();
         } catch (RuntimeException exception) {
-            log.warn("Diagnostics section unavailable exceptionClass={}",
-                    exception.getClass().getSimpleName());
+            log.warn("Diagnostics section {} unavailable exceptionClass={}",
+                    section, exception.getClass().getSimpleName());
+            faults.add(new SectionFault(section, "source_unavailable"));
             return unavailable;
         }
     }
@@ -152,28 +163,32 @@ public class TenantDiagnosticsService {
             Scope scope,
             int orgId,
             TenantSections sections,
-            SecretStoreDiagnosticsDto secretStore) {
+            SecretStoreDiagnosticsDto secretStore,
+            List<SectionFault> faults) {
         Deployment deployment = guarded(
-                this::deployment, new Deployment(null, false, List.of()));
+                "deployment", faults, this::deployment, new Deployment(null, false, List.of()));
         Ai ai = guarded(
+                "ai", faults,
                 () -> new Ai(
                         aiProviderReadiness.isReadyForOrg(orgId),
                         aiProviderReadiness.isImageInputReadyForOrg(orgId)),
                 new Ai(false, false));
         Ocr ocr = guarded(
+                "ocr", faults,
                 () -> new Ocr(
                         businessCardService.isAvailableCached(),
                         businessCardService.isImportAvailableCached()),
                 new Ocr(false, false));
         List<Finding> findings = guarded(
-                () -> findings(ai, sections.workspaces()), List.of());
+                "findings", faults, () -> findings(ai, sections.workspaces()), List.of());
         return new TenantDiagnosticsDto(
                 scope,
                 deployment,
                 new Providers(ai, ocr, sections.workspaces()),
                 sections.jobs(),
                 findings,
-                secretStore);
+                secretStore,
+                List.copyOf(faults));
     }
 
     private Deployment deployment() {
@@ -286,13 +301,13 @@ public class TenantDiagnosticsService {
         return rows.stream().mapToLong(value).sum();
     }
 
-    private static String maximum(
+    private static LocalDateTime maximum(
             List<ProviderCaptureDiagnosticsRow> rows,
-            Function<ProviderCaptureDiagnosticsRow, String> value) {
+            Function<ProviderCaptureDiagnosticsRow, LocalDateTime> value) {
         return rows.stream()
                 .map(value)
                 .filter(Objects::nonNull)
-                .max(String::compareTo)
+                .max(LocalDateTime::compareTo)
                 .orElse(null);
     }
 

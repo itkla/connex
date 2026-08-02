@@ -27,10 +27,14 @@ export type DiagnosticsScope = "workspace" | "organization";
  *
  * The endpoint is a single aggregate, so the fetch has one failure mode: if the request itself
  * fails the page shows one error with one retry, rather than repeating the same doomed retry in
- * every section. Partial degradation is carried in the payload instead — the backend guards each
- * source independently and returns that section empty rather than failing the report — and each
- * section is additionally wrapped in a render boundary so one broken widget cannot blank the rest.
- * A failed retry never discards the last good payload.
+ * every section. Partial degradation is carried in the payload — the backend guards each source
+ * independently and names the ones that failed in `unavailableSections`, so a degraded section is
+ * never presented as a healthy empty one — and each section is wrapped in a render boundary keyed
+ * on the scope and reload count, so a tripped boundary recovers on the next refresh. Refresh is
+ * always available, and a failed refresh keeps the last good payload behind a stale banner.
+ *
+ * The mail section owns its own endpoint and state, so it stays mounted even when the aggregate
+ * fails: a broken aggregate is exactly when an administrator needs the send test.
  */
 export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope }) {
     const t = useTranslations("TenantDiagnostics");
@@ -76,11 +80,14 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
         };
     }, [scope, scopeId, reloadToken, t]);
 
-    const retry = useCallback(() => {
+    const refresh = useCallback(() => {
         setReloadToken((token) => token + 1);
     }, []);
 
-    const findings = data?.findings ?? [];
+    const showLoading = scopeId !== null && loading;
+    const findings = showLoading ? [] : (data?.findings ?? []);
+    const faulted = new Set((data?.unavailableSections ?? []).map((fault) => fault.section));
+    const boundaryKey = `${scopeId ?? "none"}:${reloadToken}`;
 
     return (
         <div className="space-y-10">
@@ -88,13 +95,26 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
                 <div className="flex flex-wrap gap-2">
                     {findings.map((finding) => (
                         <StatusPill
-                            key={`${finding.code}:${finding.workspaceId ?? ""}:${finding.channel ?? ""}`}
+                            key={[finding.code, finding.workspaceId ?? "", finding.capability ?? "", finding.provider ?? "", finding.channel ?? "", finding.stream ?? ""].join(":")}
                             tone={finding.severity === "warning" ? "warn" : "neutral"}
                             label={t(`finding.${finding.code}`)}
                         />
                     ))}
                 </div>
             ) : null}
+
+            <div className="flex items-center justify-end">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={refresh}
+                    disabled={showLoading}
+                    className="transition-transform duration-150 ease-out active:scale-[0.97]"
+                >
+                    {showLoading ? t("refreshing") : t("refresh")}
+                </Button>
+            </div>
 
             {error && !data ? (
                 <div className="rounded-lg border border-border bg-card p-4">
@@ -109,7 +129,7 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
                         variant="outline"
                         size="sm"
                         className="mt-3"
-                        onClick={retry}
+                        onClick={refresh}
                     >
                         {t("retry")}
                     </Button>
@@ -119,27 +139,49 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
                     {error ? (
                         <div className="rounded-lg border border-border bg-card px-4 py-3">
                             <p className="text-sm text-muted-foreground">{t("staleAfterRefresh")}</p>
+                            {referenceId ? (
+                                <p className="mt-1 font-mono text-xs text-muted-foreground">
+                                    {t("referenceId", { id: referenceId })}
+                                </p>
+                            ) : null}
                         </div>
                     ) : null}
-                    <SectionBoundary resetKey={scopeId}>
-                        <ProfileCapabilitiesSection data={data} loading={loading} error={null} />
-                    </SectionBoundary>
-                    <SectionBoundary resetKey={scopeId}>
-                        <ProviderReadinessSection data={data} loading={loading} error={null} />
-                    </SectionBoundary>
-                    <SectionBoundary resetKey={scopeId}>
-                        <JobRunsSection data={data} loading={loading} error={null} />
-                    </SectionBoundary>
-                    <SectionBoundary resetKey={scopeId}>
-                        <MailDeliverabilitySection
-                            workspaceId={scope === "workspace" ? workspaceId : null}
+                    <SectionBoundary resetKey={boundaryKey}>
+                        <ProfileCapabilitiesSection
+                            data={data}
+                            loading={showLoading}
+                            unavailable={faulted.has("deployment")}
                         />
                     </SectionBoundary>
-                    <SectionBoundary resetKey={scopeId}>
-                        <SecretStoreSection data={data} loading={loading} error={null} />
+                    <SectionBoundary resetKey={boundaryKey}>
+                        <ProviderReadinessSection
+                            data={data}
+                            loading={showLoading}
+                            unavailable={faulted.has("jobs_providers")}
+                        />
+                    </SectionBoundary>
+                    <SectionBoundary resetKey={boundaryKey}>
+                        <JobRunsSection
+                            data={data}
+                            loading={showLoading}
+                            unavailable={faulted.has("jobs_providers")}
+                        />
+                    </SectionBoundary>
+                    <SectionBoundary resetKey={boundaryKey}>
+                        <SecretStoreSection
+                            data={data}
+                            loading={showLoading}
+                            unavailable={faulted.has("secret_store")}
+                        />
                     </SectionBoundary>
                 </>
             )}
+
+            <SectionBoundary resetKey={boundaryKey}>
+                <MailDeliverabilitySection
+                    workspaceId={scope === "workspace" ? workspaceId : null}
+                />
+            </SectionBoundary>
         </div>
     );
 }

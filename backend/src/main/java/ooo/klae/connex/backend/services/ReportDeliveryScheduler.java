@@ -329,16 +329,19 @@ public class ReportDeliveryScheduler {
     }
 
     private void auditFailure(ReportScheduleRef ref, String reason, JobRunDetail runDetail) {
-        tenantWorkScope.unrouted(() -> {
-            auditService.recordFailureScoped(
-                    "report.schedule.delivery", "report_schedule", ref.scheduleId(),
-                    ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), null,
-                    "Scheduled report delivery failed", reason);
-            return null;
-        });
-        record(ref, JobRunStatus.FAILED, runDetail, Map.of(
-                "phase", "delivery_failed",
-                "scheduleId", ref.scheduleId()));
+        try {
+            record(ref, JobRunStatus.FAILED, runDetail, Map.of(
+                    "phase", "delivery_failed",
+                    "scheduleId", ref.scheduleId()));
+        } finally {
+            tenantWorkScope.unrouted(() -> {
+                auditService.recordFailureScoped(
+                        "report.schedule.delivery", "report_schedule", ref.scheduleId(),
+                        ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), null,
+                        "Scheduled report delivery failed", reason);
+                return null;
+            });
+        }
     }
 
     private void recordSkipped(ReportScheduleRef ref, String phase, JobRunDetail runDetail) {

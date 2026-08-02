@@ -26,11 +26,11 @@ function detailEntries(run: DiagnosticsJobRun): string[] {
 export function JobRunsSection({
     data,
     loading,
-    error,
+    unavailable,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
-    error: string | null;
+    unavailable?: boolean;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const jobs = data?.jobs ?? [];
@@ -40,8 +40,8 @@ export function JobRunsSection({
             title={t("jobsTitle")}
             description={t("jobsDescription")}
             loading={loading}
-            error={error}
-            isEmpty={!loading && !error && jobs.length === 0}
+            unavailable={unavailable}
+            isEmpty={!loading && !unavailable && jobs.length === 0}
             emptyLabel={t("jobsEmpty")}
         >
             <ul className="divide-y divide-border rounded-lg border border-border bg-card">

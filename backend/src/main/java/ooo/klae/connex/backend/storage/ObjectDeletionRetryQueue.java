@@ -339,7 +339,9 @@ public class ObjectDeletionRetryQueue {
                             task.workspaceId());
                     }
                 }
-                record(workspaceId, JobRunStatus.SUCCEEDED,
+                record(
+                    workspaceId,
+                    failedCount > 0 ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED,
                     new JobRunDetail(detail.startedAt(), Map.of(
                         "attemptedCount", tasks.size(),
                         "failedCount", failedCount)));

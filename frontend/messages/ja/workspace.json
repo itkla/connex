@@ -679,6 +679,20 @@
       "capture_paused": "取り込みストリームが一時停止中です"
     },
     "staleAfterRefresh": "最後に取得できた内容を表示しています。更新に失敗しました。",
-    "jobWorkspacesFailing": "{count} ワークスペースで失敗"
+    "jobWorkspacesFailing": "{count, plural, other {# ワークスペースで失敗}}",
+    "refresh": "更新",
+    "refreshing": "更新中…",
+    "sectionUnavailable": "このセクションを確認できませんでした",
+    "sectionUnavailableBody": "レポートは実行されましたが、この情報源が応答しませんでした。更新して再試行してください。",
+    "captureStatus": {
+      "idle": "待機中",
+      "queued": "キュー済み",
+      "backfilling": "バックフィル中",
+      "syncing": "同期中",
+      "retrying": "再試行中",
+      "intervention_required": "対応が必要",
+      "paused": "一時停止",
+      "purging": "削除中"
+    }
   }
 }

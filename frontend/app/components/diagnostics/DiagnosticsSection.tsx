@@ -1,23 +1,25 @@
 "use client";
 
+import { ExclamationTriangleIcon, InboxIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 
-import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/app/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 
 /**
- * Independently bounded frame for one diagnostics section. Each section owns its loading,
- * error, and empty presentation so a single failing area never blanks the rest of the page.
- * The reference id is surfaced verbatim when the backend supplied a correlation id.
+ * Frame for one diagnostics section.
+ *
+ * A section whose backend source failed renders as explicitly unavailable rather than as an
+ * ordinary empty result. That distinction is the whole point on this page: an aggregation fault
+ * and a genuinely idle instance both produce an empty list, and presenting the former as
+ * "nothing recorded yet" would tell an operator the opposite of the truth.
  */
 export function DiagnosticsSection({
     title,
     description,
     loading,
-    error,
-    referenceId,
-    onRetry,
+    unavailable,
     isEmpty,
     emptyLabel,
     children,
@@ -25,9 +27,7 @@ export function DiagnosticsSection({
     title: string;
     description?: string;
     loading: boolean;
-    error: string | null;
-    referenceId?: string | null;
-    onRetry?: () => void;
+    unavailable?: boolean;
     isEmpty?: boolean;
     emptyLabel?: string;
     children: React.ReactNode;
@@ -42,30 +42,15 @@ export function DiagnosticsSection({
                     <Skeleton className="h-9 w-4/5 rounded-lg" />
                     <Skeleton className="h-9 w-2/3 rounded-lg" />
                 </div>
-            ) : error ? (
-                <div className="rounded-lg border border-border bg-card p-4">
-                    <p className="text-sm text-foreground">{error}</p>
-                    {referenceId ? (
-                        <p className="mt-1 font-mono text-xs text-muted-foreground">
-                            {t("referenceId", { id: referenceId })}
-                        </p>
-                    ) : null}
-                    {onRetry ? (
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="mt-3"
-                            onClick={onRetry}
-                        >
-                            {t("retry")}
-                        </Button>
-                    ) : null}
-                </div>
+            ) : unavailable ? (
+                <EmptyState
+                    icon={ExclamationTriangleIcon}
+                    tone="muted"
+                    title={t("sectionUnavailable")}
+                    body={t("sectionUnavailableBody")}
+                />
             ) : isEmpty ? (
-                <div className="rounded-lg border border-dashed border-border bg-card/40 p-6 text-center">
-                    <p className="text-sm text-muted-foreground">{emptyLabel ?? t("empty")}</p>
-                </div>
+                <EmptyState icon={InboxIcon} tone="muted" title={emptyLabel ?? t("empty")} />
             ) : (
                 children
             )}

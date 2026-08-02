@@ -13,7 +13,8 @@ public record TenantDiagnosticsDto(
         Providers providers,
         List<Job> jobs,
         List<Finding> findings,
-        SecretStoreDiagnosticsDto secretStore) {
+        SecretStoreDiagnosticsDto secretStore,
+        List<SectionFault> unavailableSections) {
 
     /** Defensively copies every diagnostics collection. */
     public TenantDiagnosticsDto {
@@ -23,6 +24,17 @@ public record TenantDiagnosticsDto(
 
     /** Requested diagnostics scope. */
     public record Scope(String type, int id) {
+    }
+
+    /**
+     * Names a section whose source failed, so the client can distinguish a degraded diagnostic
+     * from a healthy empty one. Without this an aggregation fault and a genuinely idle instance
+     * both render as an empty list, which is the failure mode this whole feature exists to avoid.
+     *
+     * @param section stable section code
+     * @param reason stable, non-sensitive reason code
+     */
+    public record SectionFault(String section, String reason) {
     }
 
     /** Deployment profile and capability posture. */
@@ -84,9 +96,9 @@ public record TenantDiagnosticsDto(
             long pageCursorCount,
             long processedItems,
             long estimatedItems,
-            String lastAttemptAt,
-            String lastSuccessAt,
-            String nextAttemptAt,
+            LocalDateTime lastAttemptAt,
+            LocalDateTime lastSuccessAt,
+            LocalDateTime nextAttemptAt,
             List<String> errorCodes) {
         /** Defensively copies stable error codes. */
         public Capture {

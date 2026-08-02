@@ -28,11 +28,11 @@ function readyTone(ready: boolean): DiagnosticTone {
 export function ProviderReadinessSection({
     data,
     loading,
-    error,
+    unavailable,
 }: {
     data: TenantDiagnostics | null;
     loading: boolean;
-    error: string | null;
+    unavailable?: boolean;
 }) {
     const t = useTranslations("TenantDiagnostics");
     const locale = useLocale();
@@ -44,8 +44,8 @@ export function ProviderReadinessSection({
             title={t("providersTitle")}
             description={t("providersDescription")}
             loading={loading}
-            error={error}
-            isEmpty={!loading && !error && !providers}
+            unavailable={unavailable}
+            isEmpty={!loading && !unavailable && !providers}
             emptyLabel={t("providersEmpty")}
         >
             <div className="space-y-4">
@@ -158,7 +158,10 @@ function WorkspaceProviders({
                                     : ""}
                             </p>
                         </div>
-                        <StatusPill tone={captureTone(stream.status)} label={stream.status} />
+                        <StatusPill
+                            tone={captureTone(stream.status)}
+                            label={t(`captureStatus.${stream.status}`)}
+                        />
                     </div>
                 ))}
             </div>
