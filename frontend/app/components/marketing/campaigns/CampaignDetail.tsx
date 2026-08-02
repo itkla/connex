@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { ArrowLeftIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,7 @@ import AudienceEstimatePanel from "@/app/components/marketing/campaigns/Audience
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
+import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
 import { PageShell } from "@/app/components/PageShell";
 import {
     type Campaign,
@@ -44,6 +45,7 @@ import {
     type CampaignAudienceSnapshotSummary,
     type CampaignEngagement as CampaignEngagementData,
     type CampaignMessage,
+    type CampaignPayload,
     type CampaignSend,
     type SegmentDefinition,
     type SegmentFields,
@@ -52,13 +54,35 @@ import {
     deleteCampaign,
     estimateCampaignAudience,
     getSegmentFields,
+    isFieldError,
     setCampaignAudience,
     snapshotCampaignAudience,
+    updateCampaign,
 } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatCurrency, formatDate } from "@/app/lib/utils";
 
 const RECORD_TYPES: CampaignAudienceRecordType[] = ["person", "company", "deal"];
+
+/**
+ * Seeds the edit form from a campaign. `PUT /api/campaigns/{id}` replaces the whole record, so the
+ * fields the form does not show — owner and parent campaign — are carried through rather than
+ * dropped, and the timestamps are trimmed to the minute a `datetime-local` input accepts.
+ */
+function toPayload(campaign: Campaign): CampaignPayload {
+    return {
+        name: campaign.name,
+        objective: campaign.objective,
+        type: campaign.type,
+        status: campaign.status,
+        ownerUserId: campaign.ownerUserId,
+        budgetAmount: campaign.budgetAmount,
+        budgetCurrency: campaign.budgetCurrency,
+        startAt: campaign.startAt?.slice(0, 16) ?? null,
+        endAt: campaign.endAt?.slice(0, 16) ?? null,
+        parentCampaignId: campaign.parentCampaignId,
+    };
+}
 
 function GlanceTile({ label, value }: { label: string; value: string }) {
     return (
@@ -116,6 +140,10 @@ export default function CampaignDetail({
     const [isDeleting, setIsDeleting] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [tab, setTab] = useState("overview");
+    const [current, setCurrent] = useState<Campaign>(campaign);
+    const [editOpen, setEditOpen] = useState(false);
+    const [editPayload, setEditPayload] = useState<CampaignPayload>(() => toPayload(campaign));
+    const [isSavingCampaign, setIsSavingCampaign] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -147,7 +175,7 @@ export default function CampaignDetail({
     const saveAudience = async () => {
         setIsSaving(true);
         try {
-            await setCampaignAudience(campaign.id, { recordType, definition });
+            await setCampaignAudience(current.id, { recordType, definition });
             setAudienceSaved(true);
             toastSuccess(at("saved"));
         } catch (err) {
@@ -160,7 +188,7 @@ export default function CampaignDetail({
     const runEstimate = async () => {
         setIsEstimating(true);
         try {
-            setEstimate(await estimateCampaignAudience(campaign.id));
+            setEstimate(await estimateCampaignAudience(current.id));
         } catch (err) {
             toastError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -171,7 +199,7 @@ export default function CampaignDetail({
     const freezeSnapshot = async () => {
         setIsFreezing(true);
         try {
-            const snapshot = await snapshotCampaignAudience(campaign.id);
+            const snapshot = await snapshotCampaignAudience(current.id);
             setSnapshots((prev) => [snapshot, ...prev]);
             toastSuccess(at("frozen"));
         } catch (err) {
@@ -181,10 +209,34 @@ export default function CampaignDetail({
         }
     };
 
+    const openEdit = () => {
+        setEditPayload(toPayload(current));
+        setEditOpen(true);
+    };
+
+    const saveCampaign = async () => {
+        setIsSavingCampaign(true);
+        try {
+            const updated = await updateCampaign(current.id, {
+                ...editPayload,
+                objective: editPayload.objective?.trim() || null,
+            });
+            setCurrent(updated);
+            setIsSavingCampaign(false);
+            setEditOpen(false);
+            toastSuccess(t("saved"));
+            router.refresh();
+        } catch (err) {
+            setIsSavingCampaign(false);
+            if (isFieldError(err)) throw err;
+            toastError(err instanceof Error ? err.message : String(err));
+        }
+    };
+
     const removeCampaign = async () => {
         setIsDeleting(true);
         try {
-            await deleteCampaign(campaign.id);
+            await deleteCampaign(current.id);
             router.push("/marketing/campaigns");
         } catch (err) {
             setIsDeleting(false);
@@ -193,12 +245,12 @@ export default function CampaignDetail({
     };
 
     const budget =
-        campaign.budgetAmount != null && campaign.budgetCurrency
-            ? formatCurrency(campaign.budgetAmount, campaign.budgetCurrency, locale)
+        current.budgetAmount != null && current.budgetCurrency
+            ? formatCurrency(current.budgetAmount, current.budgetCurrency, locale)
             : t("noValue");
     const windowText =
-        campaign.startAt || campaign.endAt
-            ? `${formatDate(campaign.startAt ?? undefined, locale)} – ${formatDate(campaign.endAt ?? undefined, locale)}`
+        current.startAt || current.endAt
+            ? `${formatDate(current.startAt ?? undefined, locale)} – ${formatDate(current.endAt ?? undefined, locale)}`
             : t("noValue");
     const latestSnapshot = snapshots[0] ?? null;
 
@@ -216,20 +268,26 @@ export default function CampaignDetail({
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
                         <div className="flex min-w-0 flex-wrap items-center gap-3">
                             <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
-                                {campaign.name}
+                                {current.name}
                             </h1>
-                            <CampaignStatusBadge status={campaign.status} />
+                            <CampaignStatusBadge status={current.status} />
                         </div>
                         {canManage && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setConfirmDelete(true)}
-                                className="shrink-0 text-muted-foreground hover:text-destructive"
-                            >
-                                <TrashIcon className="size-4" />
-                                {t("delete")}
-                            </Button>
+                            <div className="flex shrink-0 items-center gap-1">
+                                <Button variant="outline" size="sm" onClick={openEdit}>
+                                    <PencilSquareIcon className="size-4" />
+                                    {t("edit")}
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setConfirmDelete(true)}
+                                    className="text-muted-foreground hover:text-destructive"
+                                >
+                                    <TrashIcon className="size-4" />
+                                    {t("delete")}
+                                </Button>
+                            </div>
                         )}
                     </div>
                 </Rise>
@@ -253,18 +311,18 @@ export default function CampaignDetail({
                                 <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                                     <InfoRow
                                         label={t("objective")}
-                                        value={campaign.objective ?? t("noValue")}
+                                        value={current.objective ?? t("noValue")}
                                     />
-                                    <InfoRow label={t("type")} value={campaign.type} />
+                                    <InfoRow label={t("type")} value={current.type} />
                                     <InfoRow label={t("budget")} value={budget} />
                                     <InfoRow label={t("window")} value={windowText} />
                                     <InfoRow
                                         label={t("created")}
-                                        value={formatDate(campaign.createdAt, locale)}
+                                        value={formatDate(current.createdAt, locale)}
                                     />
                                     <InfoRow
                                         label={t("updated")}
-                                        value={formatDate(campaign.updatedAt, locale)}
+                                        value={formatDate(current.updatedAt, locale)}
                                     />
                                 </dl>
                             </div>
@@ -463,7 +521,7 @@ export default function CampaignDetail({
 
                     <TabsContent value="delivery" forceMount className="data-[state=inactive]:hidden">
                         <CampaignDelivery
-                            campaignId={campaign.id}
+                            campaignId={current.id}
                             initialMessages={initialMessages}
                             initialSends={initialSends}
                             snapshots={snapshots}
@@ -479,7 +537,7 @@ export default function CampaignDetail({
 
                     <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">
                         <CampaignExportPanel
-                            campaignId={campaign.id}
+                            campaignId={current.id}
                             initialExports={initialExports}
                             snapshots={snapshots}
                             canManage={canManage}
@@ -489,6 +547,16 @@ export default function CampaignDetail({
                 </Tabs>
                 </Rise>
             </PageShell>
+
+            <CampaignFormDialog
+                mode="edit"
+                open={editOpen}
+                onOpenChange={setEditOpen}
+                payload={editPayload}
+                setPayload={setEditPayload}
+                isSubmitting={isSavingCampaign}
+                onSubmit={saveCampaign}
+            />
 
             <ResponsiveDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
                 <ResponsiveDialogContent className="p-0 sm:max-w-md">

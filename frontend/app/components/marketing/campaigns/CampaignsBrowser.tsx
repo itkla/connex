@@ -11,7 +11,7 @@ import { type Campaign, type CampaignPayload } from "@/app/lib/types";
 import { createCampaign, isFieldError } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { formatCurrency, formatShortDate } from "@/app/lib/utils";
-import NewCampaignDialog from "@/app/components/marketing/campaigns/NewCampaignDialog";
+import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
@@ -161,14 +161,15 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                 )}
             </PageShell>
 
-            <NewCampaignDialog
+            <CampaignFormDialog
+                mode="create"
                 open={open}
                 onOpenChange={setOpen}
                 payload={payload}
                 setPayload={setPayload}
-                isCreating={isCreating}
+                isSubmitting={isCreating}
                 isSuccess={isSuccess}
-                createNewCampaign={createNewCampaign}
+                onSubmit={createNewCampaign}
             />
         </>
     );
