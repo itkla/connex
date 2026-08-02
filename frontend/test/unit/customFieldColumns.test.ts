@@ -71,7 +71,7 @@ describe("custom-field administration stays gated", () => {
     it("refuses the settings panel by permission rather than by catching a 403", () => {
         const panel = source(PANEL);
 
-        expect(panel).toMatch(/usePermission\(["']CUSTOM_FIELD_MANAGE["']\)/);
+        expect(panel).toMatch(/usePermissionCheck\(["']CUSTOM_FIELD_MANAGE["']\)/);
         expect(panel).toMatch(/if \(!canManage \|\|/);
         expect(panel).toMatch(/if \(!workspaceId \|\| !canManage\) return;/);
     });
@@ -80,6 +80,8 @@ describe("custom-field administration stays gated", () => {
         const layout = source(APP_LAYOUT);
 
         expect(layout).toMatch(/permissionsResult\.ok \? permissionsResult\.data : \[\]/);
-        expect(layout).toMatch(/<PermissionsProvider permissions=\{effectivePermissions\}>/);
+        expect(layout).toMatch(
+            /<PermissionsProvider permissions=\{effectivePermissions\} status=\{permissionsStatus\}>/,
+        );
     });
 });
