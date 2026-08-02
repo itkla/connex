@@ -213,6 +213,14 @@ swap_frontend_build() {
         mv .next .next-old
     fi
     mv .next-new .next
+    # next.config.ts sets output: standalone, so the build bakes its distDir into
+    # standalone/server.js as .next-new — a directory this swap has just renamed away. Staging
+    # serves with `next start` and never reads it, but leaving an unusable server.js behind is a
+    # trap for anyone who later switches to the standalone runtime, so drop it.
+    if [ -d .next/standalone ]; then
+        rm -rf .next/standalone
+        log "Removed standalone output (its baked distDir does not survive the .next-new swap)"
+    fi
 }
 
 restore_frontend_build() {
