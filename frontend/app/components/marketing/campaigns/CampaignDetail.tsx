@@ -47,6 +47,7 @@ import {
     type CampaignMessage,
     type CampaignPayload,
     type CampaignSend,
+    type CampaignStatus,
     type SegmentDefinition,
     type SegmentFields,
 } from "@/app/lib/types";
@@ -59,15 +60,44 @@ import {
     snapshotCampaignAudience,
     updateCampaign,
 } from "@/app/lib/api";
+import {
+    canEstimateAudience,
+    canFreezeSnapshot,
+    type CampaignAccess,
+} from "@/app/lib/campaignAccess";
+import AccessDenied from "@/app/components/AccessDenied";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatCurrency, formatDate } from "@/app/lib/utils";
 
 const RECORD_TYPES: CampaignAudienceRecordType[] = ["person", "company", "deal"];
 
+const TERMINAL_STATUSES: CampaignStatus[] = ["completed", "archived"];
+
+/**
+ * Renders a stored timestamp for a `datetime-local` input, which accepts no finer than a minute.
+ *
+ * Deliberately a plain truncation rather than the `toDatetimeLocalValue` used for deals and
+ * activities: those round-trip through `toMysqlDateTime`, which emits a space-separated UTC string,
+ * while `CampaignRequest` binds `LocalDateTime` and the create path posts the raw input value. Read
+ * and write must agree, so campaign timestamps stay in the wall-clock form the backend stores.
+ */
+function toFormValue(value: string | null): string | null {
+    return value?.slice(0, 16) ?? null;
+}
+
+/**
+ * Returns the stored timestamp when the reader never touched the field, so saving an unrelated
+ * change cannot silently drop the seconds of a campaign window that has them.
+ */
+function restoreUntouched(edited: string | null | undefined, stored: string | null): string | null {
+    const next = edited ?? null;
+    return next !== null && next === toFormValue(stored) ? stored : next;
+}
+
 /**
  * Seeds the edit form from a campaign. `PUT /api/campaigns/{id}` replaces the whole record, so the
  * fields the form does not show — owner and parent campaign — are carried through rather than
- * dropped, and the timestamps are trimmed to the minute a `datetime-local` input accepts.
+ * dropped, and the timestamps are rendered at the precision the input accepts.
  */
 function toPayload(campaign: Campaign): CampaignPayload {
     return {
@@ -78,8 +108,8 @@ function toPayload(campaign: Campaign): CampaignPayload {
         ownerUserId: campaign.ownerUserId,
         budgetAmount: campaign.budgetAmount,
         budgetCurrency: campaign.budgetCurrency,
-        startAt: campaign.startAt?.slice(0, 16) ?? null,
-        endAt: campaign.endAt?.slice(0, 16) ?? null,
+        startAt: toFormValue(campaign.startAt),
+        endAt: toFormValue(campaign.endAt),
         parentCampaignId: campaign.parentCampaignId,
     };
 }
@@ -104,8 +134,8 @@ export default function CampaignDetail({
     initialSends,
     initialExports,
     initialEngagement,
-    canManage,
-    canSend,
+    access,
+    snapshotsRestricted,
     deliveryEnabled,
 }: {
     campaign: Campaign;
@@ -115,8 +145,8 @@ export default function CampaignDetail({
     initialSends: CampaignSend[];
     initialExports: CampaignAudienceExport[];
     initialEngagement: CampaignEngagementData | null;
-    canManage: boolean;
-    canSend: boolean;
+    access: CampaignAccess;
+    snapshotsRestricted: boolean;
     deliveryEnabled: boolean;
 }) {
     const t = useTranslations("CampaignDetail");
@@ -144,6 +174,16 @@ export default function CampaignDetail({
     const [editOpen, setEditOpen] = useState(false);
     const [editPayload, setEditPayload] = useState<CampaignPayload>(() => toPayload(campaign));
     const [isSavingCampaign, setIsSavingCampaign] = useState(false);
+
+    const [syncedCampaign, setSyncedCampaign] = useState(campaign);
+    if (campaign !== syncedCampaign) {
+        setSyncedCampaign(campaign);
+        setCurrent(campaign);
+    }
+
+    const canManage = access.manage;
+    const canEstimate = canEstimateAudience(access, recordType);
+    const canFreeze = canFreezeSnapshot(access, recordType);
 
     useEffect(() => {
         let active = true;
@@ -220,6 +260,8 @@ export default function CampaignDetail({
             const updated = await updateCampaign(current.id, {
                 ...editPayload,
                 objective: editPayload.objective?.trim() || null,
+                startAt: restoreUntouched(editPayload.startAt, current.startAt),
+                endAt: restoreUntouched(editPayload.endAt, current.endAt),
             });
             setCurrent(updated);
             setIsSavingCampaign(false);
@@ -413,7 +455,9 @@ export default function CampaignDetail({
                                             variant="brand"
                                             size="sm"
                                             onClick={runEstimate}
-                                            disabled={!audienceSaved || isEstimating}
+                                            disabled={
+                                                !audienceSaved || isEstimating || !canEstimate
+                                            }
                                         >
                                             {isEstimating ? (
                                                 <>
@@ -425,6 +469,12 @@ export default function CampaignDetail({
                                             )}
                                         </Button>
                                     </div>
+
+                                    {!canEstimate && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {at("estimateDeniedHint")}
+                                        </p>
+                                    )}
 
                                     {estimate ? (
                                         <div className="flex flex-col gap-4 border-t border-border pt-4">
@@ -440,7 +490,7 @@ export default function CampaignDetail({
                                                 estimate={estimate}
                                                 recordType={recordType}
                                             />
-                                            {canManage && (
+                                            {canFreeze && (
                                                 <div>
                                                     <Button
                                                         variant="outline"
@@ -476,7 +526,13 @@ export default function CampaignDetail({
                             </Panel>
 
                             <Panel title={at("snapshots")} subtitle={at("snapshotsSubtitle")}>
-                                {snapshots.length === 0 ? (
+                                {snapshotsRestricted ? (
+                                    <AccessDenied
+                                        variant="inline"
+                                        title={at("snapshotsDeniedTitle")}
+                                        body={at("snapshotsDeniedBody")}
+                                    />
+                                ) : snapshots.length === 0 ? (
                                     <p className="py-4 text-sm text-muted-foreground">
                                         {at("noSnapshots")}
                                     </p>
@@ -525,8 +581,7 @@ export default function CampaignDetail({
                             initialMessages={initialMessages}
                             initialSends={initialSends}
                             snapshots={snapshots}
-                            canManage={canManage}
-                            canSend={canSend}
+                            access={access}
                             deliveryEnabled={deliveryEnabled}
                         />
                     </TabsContent>
@@ -540,7 +595,7 @@ export default function CampaignDetail({
                             campaignId={current.id}
                             initialExports={initialExports}
                             snapshots={snapshots}
-                            canManage={canManage}
+                            access={access}
                             deliveryEnabled={deliveryEnabled}
                         />
                     </TabsContent>
@@ -555,6 +610,7 @@ export default function CampaignDetail({
                 payload={editPayload}
                 setPayload={setEditPayload}
                 isSubmitting={isSavingCampaign}
+                statusLocked={TERMINAL_STATUSES.includes(current.status)}
                 onSubmit={saveCampaign}
             />
 

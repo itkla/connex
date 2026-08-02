@@ -8,6 +8,7 @@
         "new": "New campaign",
         "empty": "No campaigns yet",
         "emptyHint": "Create a campaign to define an explainable audience before you launch.",
+        "emptyHintReadOnly": "Campaigns created by your workspace will appear here.",
         "deniedTitle": "Campaign access required",
         "deniedBody": "Only members with campaign access can view this workspace's campaigns. Ask a workspace admin if you need it.",
         "colName": "Name",
@@ -50,6 +51,7 @@
         "editDescription": "Update this campaign's details. Its audience and messages are unchanged.",
         "editSubmit": "Save changes",
         "editSaving": "Saving…",
+        "statusLockedHint": "A completed or archived campaign cannot change status.",
         "created": "Campaign created"
     },
     "CampaignDetail": {
@@ -96,6 +98,7 @@
         "saved": "Audience saved",
         "estimate": "Estimate",
         "estimating": "Estimating…",
+        "estimateDeniedHint": "Estimating a person audience needs consent access.",
         "noAudience": "No audience defined yet",
         "noAudienceHint": "Add smart-segment conditions above, save, then estimate who qualifies.",
         "noAudienceHintReadOnly": "Audience conditions are set by members with campaign management access.",
@@ -117,6 +120,8 @@
         "snapshots": "Snapshots",
         "snapshotsSubtitle": "Immutable records of who qualified, and why, at each freeze.",
         "noSnapshots": "No snapshots frozen yet",
+        "snapshotsDeniedTitle": "Consent access required",
+        "snapshotsDeniedBody": "This campaign's snapshots cover people, so viewing them needs consent access. Ask a workspace admin if you need it.",
         "version": "v{version}",
         "snapshotIncluded": "{count} included",
         "snapshotExcluded": "{count} excluded"

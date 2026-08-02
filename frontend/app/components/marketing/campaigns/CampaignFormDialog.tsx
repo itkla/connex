@@ -57,6 +57,7 @@ type Props = {
     setPayload: Dispatch<SetStateAction<CampaignPayload>>;
     isSubmitting: boolean;
     isSuccess?: boolean;
+    statusLocked?: boolean;
     onSubmit: () => void | Promise<void>;
 };
 
@@ -67,6 +68,8 @@ type Props = {
  * The fields here are exactly the ones `PUT /api/campaigns/{id}` rewrites, so an edit that seeds
  * the payload from the campaign round-trips without dropping anything the form does not show.
  * @param mode which verb the copy and the submit button describe
+ * @param statusLocked whether the campaign has reached a terminal status, which the backend
+ * refuses to transition out of; the control is shown but inert rather than offering a doomed choice
  */
 export default function CampaignFormDialog({
     mode,
@@ -76,6 +79,7 @@ export default function CampaignFormDialog({
     setPayload,
     isSubmitting,
     isSuccess = false,
+    statusLocked = false,
     onSubmit,
 }: Props) {
     const t = useTranslations("CampaignsNewDialog");
@@ -220,6 +224,7 @@ export default function CampaignFormDialog({
                                 <Label htmlFor="campaign-status">{t("status")}</Label>
                                 <Select
                                     value={payload.status ?? "draft"}
+                                    disabled={statusLocked}
                                     onValueChange={(value) =>
                                         setPayload((prev) => ({ ...prev, status: value as CampaignStatus }))
                                     }
@@ -235,6 +240,11 @@ export default function CampaignFormDialog({
                                         ))}
                                     </SelectContent>
                                 </Select>
+                                {statusLocked && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {t("statusLockedHint")}
+                                    </p>
+                                )}
                             </div>
                         </div>
 

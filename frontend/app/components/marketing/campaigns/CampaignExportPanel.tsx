@@ -21,6 +21,7 @@ import {
     type CampaignAudienceExport,
     type CampaignAudienceSnapshotSummary,
 } from "@/app/lib/types";
+import { canCreateExport, type CampaignAccess } from "@/app/lib/campaignAccess";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 
@@ -37,13 +38,13 @@ export default function CampaignExportPanel({
     campaignId,
     initialExports,
     snapshots,
-    canManage,
+    access,
     deliveryEnabled,
 }: {
     campaignId: number;
     initialExports: CampaignAudienceExport[];
     snapshots: CampaignAudienceSnapshotSummary[];
-    canManage: boolean;
+    access: CampaignAccess;
     deliveryEnabled: boolean;
 }) {
     const t = useTranslations("CampaignExports");
@@ -53,9 +54,8 @@ export default function CampaignExportPanel({
     const [exportSnapshot, setExportSnapshot] = useState<string>("");
     const [exportConnector, setExportConnector] = useState<string>("");
     const [isCreatingExport, setIsCreatingExport] = useState(false);
-    const [exportRefused, setExportRefused] = useState(false);
-
-    const exportUnavailable = !deliveryEnabled || exportRefused;
+    const exportUnavailable = !deliveryEnabled;
+    const canPushExport = canCreateExport(access);
 
     const chosenSnapshot = useMemo(
         () => snapshots.find((snapshot) => String(snapshot.version) === exportSnapshot) ?? null,
@@ -79,8 +79,7 @@ export default function CampaignExportPanel({
             setExportConnector("");
             toastSuccess(t("created"));
         } catch (err) {
-            if (err instanceof ApiError && err.status === 403) {
-                setExportRefused(true);
+            if (err instanceof ApiError && err.status === 403 && !deliveryEnabled) {
                 toastError(t("exportUnavailable"));
             } else {
                 toastError(err instanceof Error ? err.message : String(err));
@@ -93,7 +92,7 @@ export default function CampaignExportPanel({
     return (
         <Panel title={t("title")} subtitle={t("subtitle")}>
             <div className="flex flex-col gap-6">
-                {canManage && (
+                {canPushExport && (
                     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="grid gap-1.5">

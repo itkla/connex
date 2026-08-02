@@ -8,7 +8,7 @@ const SEGMENT = 'app/(app)/overview/reports/[id]/snapshots';
 
 function digestOf(error: unknown): string {
     if (typeof error === 'object' && error !== null && 'digest' in error) {
-        const { digest } = error as { digest?: unknown };
+        const { digest } = error;
         if (typeof digest === 'string') return digest;
     }
     throw new Error('expected a Next.js navigation error carrying a digest');

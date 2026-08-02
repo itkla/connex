@@ -28,8 +28,18 @@ const EMPTY_PAYLOAD: CampaignPayload = {
     parentCampaignId: null,
 };
 
-/** The Campaigns list surface: a permission-aware roster with an inline create flow. */
-export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] }) {
+/**
+ * The Campaigns list surface: a roster with an inline create flow, offered only to a viewer who
+ * may actually create one. `POST /api/campaigns` requires `CAMPAIGN_MANAGE`, which the built-in
+ * `member` role does not hold.
+ */
+export default function CampaignsBrowser({
+    campaigns,
+    canCreate,
+}: {
+    campaigns: Campaign[];
+    canCreate: boolean;
+}) {
     const t = useTranslations("CampaignsPage");
     const locale = useLocale();
     const router = useRouter();
@@ -69,10 +79,12 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                         title={t("title")}
                         description={t("subtitle")}
                         actions={
-                            <Button variant="brand" onClick={openDialog} className="shrink-0">
-                                <PlusIcon className="size-4" />
-                                {t("new")}
-                            </Button>
+                            canCreate ? (
+                                <Button variant="brand" onClick={openDialog} className="shrink-0">
+                                    <PlusIcon className="size-4" />
+                                    {t("new")}
+                                </Button>
+                            ) : null
                         }
                     />
                 </Rise>
@@ -83,11 +95,15 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
                             <MegaphoneIcon className="size-6" />
                         </span>
                         <h2 className="text-lg font-semibold">{t("empty")}</h2>
-                        <p className="max-w-sm text-sm text-muted-foreground">{t("emptyHint")}</p>
-                        <Button variant="brand" onClick={openDialog} className="mt-2">
-                            <PlusIcon className="size-4" />
-                            {t("new")}
-                        </Button>
+                        <p className="max-w-sm text-sm text-muted-foreground">
+                            {canCreate ? t("emptyHint") : t("emptyHintReadOnly")}
+                        </p>
+                        {canCreate && (
+                            <Button variant="brand" onClick={openDialog} className="mt-2">
+                                <PlusIcon className="size-4" />
+                                {t("new")}
+                            </Button>
+                        )}
                     </Rise>
                 ) : (
                     <Rise delay={0.06} className="flex flex-col gap-3">

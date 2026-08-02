@@ -37,6 +37,7 @@ import {
     type CampaignMessagePayload,
     type CampaignSend,
 } from "@/app/lib/types";
+import { canCreateSend, type CampaignAccess } from "@/app/lib/campaignAccess";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 
@@ -65,16 +66,14 @@ export default function CampaignDelivery({
     initialMessages,
     initialSends,
     snapshots,
-    canManage,
-    canSend,
+    access,
     deliveryEnabled,
 }: {
     campaignId: number;
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
     snapshots: CampaignAudienceSnapshotSummary[];
-    canManage: boolean;
-    canSend: boolean;
+    access: CampaignAccess;
     deliveryEnabled: boolean;
 }) {
     const t = useTranslations("CampaignMessages");
@@ -104,6 +103,9 @@ export default function CampaignDelivery({
     const [deliveryRefused, setDeliveryRefused] = useState(false);
 
     const deliveryUnavailable = !deliveryEnabled || deliveryRefused;
+    const canManage = access.manage;
+    const canSend = access.send;
+    const canMaterializeSend = canCreateSend(access);
 
     const selectedMessage = useMemo(
         () => messages.find((message) => message.id === selectedMessageId) ?? null,
@@ -514,7 +516,7 @@ export default function CampaignDelivery({
                             {deliveryUnavailable ? st("deliveryUnavailable") : st("queueHint")}
                         </p>
                     </div>
-                    {canManage && (
+                    {canMaterializeSend && (
                         <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                                 <div className="grid gap-1.5">

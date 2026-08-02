@@ -8,6 +8,7 @@
         "new": "新規キャンペーン",
         "empty": "キャンペーンはまだありません",
         "emptyHint": "キャンペーンを作成し、配信前に対象者を明確に定義しましょう。",
+        "emptyHintReadOnly": "ワークスペースで作成されたキャンペーンがここに表示されます。",
         "deniedTitle": "キャンペーンの閲覧権限が必要です",
         "deniedBody": "このワークスペースのキャンペーンを表示できるのは、キャンペーン権限を持つメンバーのみです。必要な場合はワークスペース管理者にご依頼ください。",
         "colName": "名称",
@@ -50,6 +51,7 @@
         "editDescription": "キャンペーンの詳細を更新します。対象者とメッセージは変更されません。",
         "editSubmit": "変更を保存",
         "editSaving": "保存中…",
+        "statusLockedHint": "完了または保管済みのキャンペーンはステータスを変更できません。",
         "created": "キャンペーンを作成しました"
     },
     "CampaignDetail": {
@@ -96,6 +98,7 @@
         "saved": "対象者を保存しました",
         "estimate": "試算",
         "estimating": "試算中…",
+        "estimateDeniedHint": "個人を対象とする対象者の試算には、許諾情報の権限が必要です。",
         "noAudience": "対象者が未定義です",
         "noAudienceHint": "上でスマートセグメントの条件を追加・保存し、対象者を試算してください。",
         "noAudienceHintReadOnly": "対象者の条件は、キャンペーンの管理権限を持つメンバーが設定します。",
@@ -117,6 +120,8 @@
         "snapshots": "スナップショット",
         "snapshotsSubtitle": "各確定時点で誰が対象となったか、その理由を記録した不変の履歴です。",
         "noSnapshots": "確定済みのスナップショットはありません",
+        "snapshotsDeniedTitle": "許諾情報の権限が必要です",
+        "snapshotsDeniedBody": "このキャンペーンのスナップショットは個人を対象とするため、表示には許諾情報の権限が必要です。必要な場合はワークスペース管理者にご依頼ください。",
         "version": "v{version}",
         "snapshotIncluded": "{count}件が対象",
         "snapshotExcluded": "{count}件を除外"

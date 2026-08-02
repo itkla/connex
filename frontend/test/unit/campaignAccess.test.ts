@@ -3,11 +3,22 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ApiError, DEFAULT_CAPABILITIES } from '@/app/lib/api';
+import {
+    canCreateExport,
+    canCreateSend,
+    canEstimateAudience,
+    canFreezeSnapshot,
+    resolveCampaignAccess,
+} from '@/app/lib/campaignAccess';
 import { NO_NAV_ACCESS, resolveNavAccess } from '@/app/lib/navAccess';
 import { loadCollection } from '@/app/lib/recordAccess';
 
 const CAMPAIGN_DETAIL = 'app/components/marketing/campaigns/CampaignDetail.tsx';
 const CAMPAIGN_LIST = 'app/(app)/marketing/campaigns/page.tsx';
+const CAMPAIGN_DETAIL_PAGE = 'app/(app)/marketing/campaigns/[id]/page.tsx';
+const DELIVERY_PANEL = 'app/components/marketing/campaigns/CampaignDelivery.tsx';
+const EXPORT_PANEL = 'app/components/marketing/campaigns/CampaignExportPanel.tsx';
+const BROWSER = 'app/components/marketing/campaigns/CampaignsBrowser.tsx';
 const SIDEBAR = 'app/components/Sidebar.tsx';
 const NAV_BRIDGE = 'app/components/actions/NavActionsBridge.tsx';
 const SEED_ACTIONS = 'app/lib/actions/seedActions.ts';
@@ -39,82 +50,127 @@ function message(locale: 'en' | 'ja', namespace: string, key: string): string {
     return value;
 }
 
-const MANAGE_GATE = '{canManage && (';
+/** Mirrors `WorkspaceService.memberPermissions()`. */
+const MEMBER_PERMISSIONS: readonly string[] = [
+    'COMPANY_CREATE', 'COMPANY_UPDATE',
+    'PERSON_CREATE', 'PERSON_UPDATE', 'PERSON_DELETE',
+    'DEAL_CREATE', 'DEAL_UPDATE', 'DEAL_DELETE',
+    'ACTIVITY_CREATE', 'ACTIVITY_UPDATE', 'ACTIVITY_DELETE',
+    'NOTE_CREATE', 'NOTE_UPDATE', 'NOTE_DELETE',
+    'TASK_CREATE', 'TASK_UPDATE', 'TASK_DELETE',
+    'ATTACHMENT_CREATE', 'ATTACHMENT_DELETE',
+    'REPORT_READ', 'REPORT_CREATE', 'REPORT_UPDATE', 'REPORT_DELETE',
+    'GOAL_READ', 'CAMPAIGN_VIEW',
+];
 
-/** The source of every `{canManage && ( … )}` block, balanced on parentheses. */
-function manageGatedBlocks(text: string): string[] {
-    const blocks: string[] = [];
-    for (let from = 0; ; ) {
-        const start = text.indexOf(MANAGE_GATE, from);
-        if (start === -1) return blocks;
-        let depth = 0;
-        let index = start + MANAGE_GATE.length - 1;
-        for (; index < text.length; index += 1) {
-            if (text[index] === '(') depth += 1;
-            else if (text[index] === ')' && (depth -= 1) === 0) break;
-        }
-        blocks.push(text.slice(start, index + 1));
-        from = index + 1;
-    }
-}
-
-function occurrences(haystack: string, needle: string): number {
-    return haystack.split(needle).length - 1;
-}
+/** Mirrors the campaign-relevant additions in `WorkspaceService.adminPermissions()`. */
+const ADMIN_PERMISSIONS: readonly string[] = [
+    ...MEMBER_PERMISSIONS,
+    'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+];
 
 /**
- * Every control below calls an endpoint the backend guards with `CAMPAIGN_MANAGE`, which the
- * built-in `member` role does not hold. Rendering them for a member is a guaranteed 403, so each
- * must appear only inside a `canManage` gate — not merely somewhere after one.
+ * The backend guards person data with `CONSENT_MANAGE` on top of the campaign permissions, and the
+ * built-in `member` role holds neither that nor `CAMPAIGN_MANAGE`. These assert the resolved
+ * contract rather than the presence of a gate in the source, because an earlier revision of this
+ * file pinned the *wrong* contract — that estimating needs only `CAMPAIGN_VIEW` — and stayed green.
  */
-describe('campaign detail offers a member no control that will 403', () => {
-    const detail = source(CAMPAIGN_DETAIL);
-    const gated = manageGatedBlocks(detail);
+describe('the built-in member role is offered no campaign control that would 403', () => {
+    const member = resolveCampaignAccess(MEMBER_PERMISSIONS);
 
-    function onlyRenderedWhenManaging(trigger: string): void {
-        const total = occurrences(detail, trigger);
-        const inGate = gated.reduce((count, block) => count + occurrences(block, trigger), 0);
-
-        expect(total).toBeGreaterThan(0);
-        expect(inGate).toBe(total);
-    }
-
-    it('gates the delete control rather than letting a member press it', () => {
-        onlyRenderedWhenManaging('setConfirmDelete(true)');
+    it('holds campaign view but neither campaign management nor consent', () => {
+        expect(member).toEqual({ manage: false, send: false, consent: false });
     });
 
-    it('gates saving the audience, which also requires campaign management', () => {
-        onlyRenderedWhenManaging('onClick={saveAudience}');
+    it('cannot estimate a person audience, which is the UI default', () => {
+        expect(canEstimateAudience(member, 'person')).toBe(false);
     });
 
-    it('gates freezing a snapshot, which also requires campaign management', () => {
-        onlyRenderedWhenManaging('onClick={freezeSnapshot}');
+    it('can still estimate audiences that never reach person data', () => {
+        expect(canEstimateAudience(member, 'company')).toBe(true);
+        expect(canEstimateAudience(member, 'deal')).toBe(true);
     });
 
-    it('gates editing the campaign, which also requires campaign management', () => {
-        onlyRenderedWhenManaging('onClick={openEdit}');
+    it('cannot freeze a snapshot of any audience', () => {
+        expect(canFreezeSnapshot(member, 'person')).toBe(false);
+        expect(canFreezeSnapshot(member, 'company')).toBe(false);
     });
 
-    it('still offers estimating, which only requires campaign view', () => {
-        const total = occurrences(detail, 'onClick={runEstimate}');
-        const inGate = gated.reduce(
-            (count, block) => count + occurrences(block, 'onClick={runEstimate}'),
-            0,
-        );
+    it('cannot materialize a send or push an export', () => {
+        expect(canCreateSend(member)).toBe(false);
+        expect(canCreateExport(member)).toBe(false);
+    });
+});
 
-        expect(total).toBe(1);
-        expect(inGate).toBe(0);
+describe('the built-in admin role is offered every campaign control', () => {
+    const admin = resolveCampaignAccess(ADMIN_PERMISSIONS);
+
+    it('resolves all three campaign permissions', () => {
+        expect(admin).toEqual({ manage: true, send: true, consent: true });
     });
 
-    it('does not tell a member to save an audience they cannot save', () => {
-        expect(detail).toContain('at("noAudienceHintReadOnly")');
+    it('may estimate, freeze, send and export', () => {
+        expect(canEstimateAudience(admin, 'person')).toBe(true);
+        expect(canFreezeSnapshot(admin, 'person')).toBe(true);
+        expect(canCreateSend(admin)).toBe(true);
+        expect(canCreateExport(admin)).toBe(true);
+    });
+});
 
-        for (const locale of ['en', 'ja'] as const) {
-            const readOnly = message(locale, 'CampaignAudience', 'noAudienceHintReadOnly');
+describe('a custom role with campaign management but no consent is still held back', () => {
+    const manager = resolveCampaignAccess(['CAMPAIGN_VIEW', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND']);
 
-            expect(readOnly).toBeTruthy();
-            expect(readOnly).not.toBe(message(locale, 'CampaignAudience', 'noAudienceHint'));
-        }
+    it('may author a campaign but not reach person data', () => {
+        expect(manager.manage).toBe(true);
+        expect(canEstimateAudience(manager, 'person')).toBe(false);
+        expect(canFreezeSnapshot(manager, 'person')).toBe(false);
+        expect(canCreateSend(manager)).toBe(false);
+        expect(canCreateExport(manager)).toBe(false);
+    });
+
+    it('may still work an audience that never reaches person data', () => {
+        expect(canFreezeSnapshot(manager, 'company')).toBe(true);
+    });
+});
+
+describe('the campaign surface consumes the resolved contract', () => {
+    it('disables estimating on the consent-aware answer, not on campaign view', () => {
+        const detail = source(CAMPAIGN_DETAIL);
+
+        expect(detail).toContain('canEstimateAudience(access, recordType)');
+        expect(detail).toContain('!audienceSaved || isEstimating || !canEstimate');
+    });
+
+    it('gates freezing on the consent-aware answer', () => {
+        const detail = source(CAMPAIGN_DETAIL);
+
+        expect(detail).toContain('canFreezeSnapshot(access, recordType)');
+        expect(detail).toContain('{canFreeze && (');
+    });
+
+    it('gates send and export creation on consent as well as management', () => {
+        expect(source(DELIVERY_PANEL)).toContain('canCreateSend(access)');
+        expect(source(DELIVERY_PANEL)).toContain('{canMaterializeSend && (');
+        expect(source(EXPORT_PANEL)).toContain('canCreateExport(access)');
+        expect(source(EXPORT_PANEL)).toContain('{canPushExport && (');
+    });
+
+    it('gates campaign creation, which needs campaign management', () => {
+        expect(source(BROWSER)).toContain('canCreate');
+        expect(source(CAMPAIGN_LIST)).toContain('includes("CAMPAIGN_MANAGE")');
+    });
+});
+
+describe('an export refusal is not blamed on the instance flag', () => {
+    it('only claims delivery is disabled when the capability says so', () => {
+        const panel = source(EXPORT_PANEL);
+
+        expect(panel).toContain('err.status === 403 && !deliveryEnabled');
+        expect(panel).toContain('const exportUnavailable = !deliveryEnabled;');
+    });
+
+    it('keeps no latched refusal that would outlive the request', () => {
+        expect(source(EXPORT_PANEL)).not.toContain('exportRefused');
     });
 });
 
@@ -155,6 +211,35 @@ describe('/marketing/campaigns never manufactures an empty campaign list', () =>
     });
 });
 
+describe('restricted snapshots are reported as restricted, not as none', () => {
+    it('classifies a refused snapshot listing instead of catching it away', () => {
+        const page = source(CAMPAIGN_DETAIL_PAGE);
+
+        expect(page).toContain('loadCollection(() => getCampaignSnapshots(id, init))');
+        expect(page).not.toContain('getCampaignSnapshots(id, init).catch');
+        expect(page).toContain('snapshotsRestricted={snapshotsAccess.kind === "forbidden"}');
+    });
+
+    it('renders the denial grammar rather than the empty-snapshot copy', () => {
+        const detail = source(CAMPAIGN_DETAIL);
+
+        expect(detail).toContain('{snapshotsRestricted ? (');
+        expect(detail).toContain('variant="inline"');
+        expect(detail.indexOf('snapshotsRestricted ?')).toBeLessThan(
+            detail.indexOf('at("noSnapshots")'),
+        );
+    });
+
+    it('localizes the restriction copy in both supported locales', () => {
+        for (const locale of ['en', 'ja'] as const) {
+            expect(message(locale, 'CampaignAudience', 'snapshotsDeniedTitle')).toBeTruthy();
+            expect(message(locale, 'CampaignAudience', 'snapshotsDeniedBody')).not.toBe(
+                message(locale, 'CampaignAudience', 'noSnapshots'),
+            );
+        }
+    });
+});
+
 describe('the campaigns nav is gated on the permission it needs', () => {
     it('offers campaigns to a viewer holding CAMPAIGN_VIEW', () => {
         expect(resolveNavAccess(DEFAULT_CAPABILITIES, ['CAMPAIGN_VIEW']).campaigns).toBe(true);
@@ -177,7 +262,6 @@ describe('the campaigns nav is gated on the permission it needs', () => {
     it('gates the sidebar section and the palette on the same resolved access', () => {
         expect(source(SIDEBAR)).toContain('...(navAccess.campaigns ? [marketingSection] : [])');
         expect(source(NAV_BRIDGE)).toContain('if (navAccess.campaigns) {');
-        expect(source(NAV_BRIDGE)).toContain('navAccess.campaigns');
         expect(source(SEED_ACTIONS)).not.toContain('/marketing/campaigns');
     });
 });

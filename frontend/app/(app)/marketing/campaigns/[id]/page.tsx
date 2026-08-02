@@ -26,7 +26,8 @@ import {
 import CampaignDetail from "@/app/components/marketing/campaigns/CampaignDetail";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailablePage";
-import { loadRecord } from "@/app/lib/recordAccess";
+import { loadCollection, loadRecord, type CollectionAccess } from "@/app/lib/recordAccess";
+import { resolveCampaignAccess } from "@/app/lib/campaignAccess";
 
 export default async function CampaignDetailPage({
     params,
@@ -56,7 +57,7 @@ export default async function CampaignDetailPage({
     const init = { headers: { cookie: cookie ?? "" }, cache: "no-store" } as const;
     const [
         audienceResult,
-        snapshots,
+        snapshotsAccess,
         messages,
         sends,
         exports,
@@ -65,7 +66,7 @@ export default async function CampaignDetailPage({
         capabilities,
     ]: [
         { ok: true; data: CampaignAudience | undefined } | { ok: false },
-        CampaignAudienceSnapshotSummary[],
+        CollectionAccess<CampaignAudienceSnapshotSummary>,
         CampaignMessage[],
         CampaignSend[],
         CampaignAudienceExport[],
@@ -74,7 +75,7 @@ export default async function CampaignDetailPage({
         InstanceCapabilities,
     ] = await Promise.all([
         getCampaignAudienceFromCookie(id, cookie),
-        getCampaignSnapshots(id, init).catch(() => []),
+        loadCollection(() => getCampaignSnapshots(id, init)),
         getCampaignMessages(id, init).catch(() => []),
         getCampaignSends(id, init).catch(() => []),
         getCampaignExports(id, init).catch(() => []),
@@ -93,13 +94,13 @@ export default async function CampaignDetailPage({
         <CampaignDetail
             campaign={campaignAccess.record}
             initialAudience={initialAudience}
-            initialSnapshots={snapshots}
+            initialSnapshots={snapshotsAccess.kind === "loaded" ? snapshotsAccess.items : []}
+            snapshotsRestricted={snapshotsAccess.kind === "forbidden"}
             initialMessages={messages}
             initialSends={sends}
             initialExports={exports}
             initialEngagement={engagement}
-            canManage={effectivePermissions.data.includes("CAMPAIGN_MANAGE")}
-            canSend={effectivePermissions.data.includes("CAMPAIGN_SEND")}
+            access={resolveCampaignAccess(effectivePermissions.data)}
             deliveryEnabled={capabilities.campaignDelivery}
         />
     );
