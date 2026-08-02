@@ -20,6 +20,12 @@
     ORDER BY position, id
   </select>
 
+  <select id="getActiveByEntityType" resultType="CustomFieldDefinition">
+    SELECT id, label, field_type, options_json, required FROM custom_field_definition
+    WHERE workspace_id = #{workspaceId} AND entity_type = #{entityType} AND archived = FALSE
+    ORDER BY position, id
+  </select>
+
   <select id="getById" resultType="CustomFieldDefinition">
     SELECT <include refid="columns"/> FROM custom_field_definition
     WHERE workspace_id = #{workspaceId} AND id = #{id}

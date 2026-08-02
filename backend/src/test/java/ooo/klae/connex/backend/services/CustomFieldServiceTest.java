@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -18,6 +19,7 @@ import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CustomFieldOption;
+import ooo.klae.connex.backend.dto.CustomFieldSchemaDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -219,27 +221,74 @@ class CustomFieldServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void read_asMember_returnsTheWorkspaceCatalog() {
-        CustomFieldDefinition created = service.create(def("person", "text", "member_visible"), null);
+    void catalog_asMember_staysForbidden() {
+        CustomFieldDefinition created = service.create(def("person", "text", "admin_only"), null);
         User member = newUser();
         authenticateAs(member, workspace.getId());
 
         assertEquals("member", tenantContext.getRole());
-        assertTrue(service.getAll().stream().anyMatch(d -> d.getId() == created.getId()));
-        assertTrue(service.getByEntityType("person").stream().anyMatch(d -> d.getId() == created.getId()));
-        assertEquals("member_visible", service.getById(created.getId()).getFieldKey());
+        assertThrows(ForbiddenException.class, () -> service.getAll());
+        assertThrows(ForbiddenException.class, () -> service.getByEntityType("person"));
+        assertThrows(ForbiddenException.class, () -> service.getById(created.getId()));
     }
 
     @Test
-    void read_asMember_doesNotReachAnotherWorkspace() {
+    void visibleSchema_asMember_returnsTheFieldsThatDrawColumns() {
+        CustomFieldDefinition text = service.create(def("person", "text", "member_visible"), null);
+        CustomFieldDefinition select = service.create(
+            def("person", "select", "member_choice"),
+            List.of(new CustomFieldOption("a", "A"), new CustomFieldOption("b", "B")));
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertEquals("member", tenantContext.getRole());
+        List<CustomFieldSchemaDto> schema = service.getVisibleSchema("person");
+
+        CustomFieldSchemaDto textColumn = schema.stream()
+            .filter(entry -> entry.definitionId() == text.getId()).findFirst().orElseThrow();
+        assertEquals("Label", textColumn.label());
+        assertEquals("text", textColumn.fieldType());
+        assertNull(textColumn.options());
+
+        CustomFieldSchemaDto selectColumn = schema.stream()
+            .filter(entry -> entry.definitionId() == select.getId()).findFirst().orElseThrow();
+        assertEquals(2, selectColumn.options().size());
+    }
+
+    @Test
+    void visibleSchema_omitsArchivedFieldsAndOtherEntityTypes() {
+        CustomFieldDefinition live = service.create(def("company", "text", "live_field"), null);
+        CustomFieldDefinition retired = service.create(def("company", "text", "retired_field"), null);
+        CustomFieldDefinition edit = def("company", "text", "retired_field");
+        edit.setArchived(true);
+        service.update(retired.getId(), edit, null);
+        CustomFieldDefinition onPerson = service.create(def("person", "text", "person_field"), null);
+
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+        List<Integer> visible = service.getVisibleSchema("company").stream()
+            .map(CustomFieldSchemaDto::definitionId).toList();
+
+        assertTrue(visible.contains(live.getId()));
+        assertFalse(visible.contains(retired.getId()));
+        assertFalse(visible.contains(onPerson.getId()));
+    }
+
+    @Test
+    void visibleSchema_rejectsAnUnsupportedEntityType() {
+        assertThrows(BadRequestException.class, () -> service.getVisibleSchema("invoice"));
+    }
+
+    @Test
+    void visibleSchema_doesNotReachAnotherWorkspace() {
         CustomFieldDefinition otherWorkspaceField = service.create(def("company", "text", "other_ws_only"), null);
         Workspace other = newWorkspaceInSameOrg();
         User member = newUser();
         workspaceMapper.addMember(other.getId(), member.getId(), "member");
         authenticateAs(member, other.getId());
 
-        assertTrue(service.getAll().stream().noneMatch(d -> d.getId() == otherWorkspaceField.getId()));
-        assertThrows(ResourceNotFoundException.class, () -> service.getById(otherWorkspaceField.getId()));
+        assertTrue(service.getVisibleSchema("company").stream()
+            .noneMatch(entry -> entry.definitionId() == otherWorkspaceField.getId()));
     }
 
     private Workspace newWorkspaceInSameOrg() {

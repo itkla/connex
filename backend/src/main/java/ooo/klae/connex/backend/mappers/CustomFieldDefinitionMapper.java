@@ -13,6 +13,7 @@ import java.util.List;
 public interface CustomFieldDefinitionMapper {
     List<CustomFieldDefinition> getAll(int workspaceId);
     List<CustomFieldDefinition> getByEntityType(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType);
+    List<CustomFieldDefinition> getActiveByEntityType(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType);
     CustomFieldDefinition getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     CustomFieldDefinition getByKey(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("fieldKey") String fieldKey);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);

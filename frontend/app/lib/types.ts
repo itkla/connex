@@ -1555,6 +1555,19 @@ export type CustomFieldEntry = {
     value: CustomFieldCellValue;
 };
 
+/**
+ * The member-facing projection of a custom-field definition, as returned by
+ * `GET /api/custom-fields/schema`. Deliberately narrower than {@link CustomFieldDefinition}: it
+ * omits data classifications and archived fields, which stay on the admin-gated catalog.
+ */
+export type CustomFieldSchemaEntry = {
+    definitionId: number;
+    label: string;
+    fieldType: CustomFieldType;
+    options: CustomFieldOption[] | null;
+    required: boolean;
+};
+
 export type CustomFieldCellValue = string | number | boolean | null;
 
 export type EntityCustomFieldValues = Record<string, Record<string, CustomFieldCellValue>>;

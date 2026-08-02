@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.dto.CustomFieldOption;
+import ooo.klae.connex.backend.dto.CustomFieldSchemaDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -22,12 +23,14 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
- * Business logic for the custom-field catalog — which fields a workspace's records may carry.
- * Defining, editing, and retiring a field is administration and requires
- * {@code CUSTOM_FIELD_MANAGE}; reading the catalog is not, because the definitions describe the
- * shape of records the caller can already read. Any member of the active workspace may read
- * them, exactly as {@code CustomFieldValueService} already lets any member who can see a record
- * read that record's definitions. Every read stays workspace-scoped through the mapper.
+ * Business logic for the custom-field catalog — the admin surface for managing
+ * which fields a workspace's records may carry. Every catalog operation, reads
+ * included, requires {@code CUSTOM_FIELD_MANAGE}, matching how the other
+ * definition catalogs in this codebase are gated.
+ * The one exception is {@link #getVisibleSchema(String)}, a deliberately narrow
+ * member-facing projection that carries neither data classifications nor archived
+ * fields; member-facing rendering of a single record's fields goes through the
+ * record (entity) endpoints, not this catalog.
  * {@code entityType}, {@code fieldKey}, and {@code fieldType} are fixed at
  * creation; label, data classification, options, required, position, and
  * archived are editable.
@@ -53,29 +56,63 @@ public class CustomFieldDefinitionService {
             "required", "position", "archived");
 
     /**
-     * All field definitions in the active workspace, across entity types. Readable by any member
-     * of the workspace so list views can render the columns their records carry.
+     * All field definitions in the active workspace, across entity types.
      */
+    @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public List<CustomFieldDefinition> getAll() {
         return definitionMapper.getAll(workspaceService.getCurrentWorkspaceId());
     }
 
     /**
-     * Field definitions for one entity type in the active workspace. Readable by any member of
-     * the workspace so list views can render the columns their records carry.
+     * Field definitions for one entity type in the active workspace.
      */
+    @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public List<CustomFieldDefinition> getByEntityType(String entityType) {
         return definitionMapper.getByEntityType(workspaceService.getCurrentWorkspaceId(), normalize(entityType));
     }
 
     /**
-     * A single definition by ID, scoped to the active workspace. Readable by any member of the
-     * workspace.
+     * A single definition by ID, scoped to the active workspace.
      */
+    @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public CustomFieldDefinition getById(int id) {
         CustomFieldDefinition def = definitionMapper.getById(workspaceService.getCurrentWorkspaceId(), id);
         if (def == null) throw new ResourceNotFoundException("Custom field not found with id: " + id);
         return def;
+    }
+
+    /**
+     * The non-archived fields of one entity type, projected down to what a member needs to render
+     * and edit them in a list view.
+     *
+     * This is the only ungated read on the catalog, and it is ungated rather than carrying its own
+     * permission on purpose: a grantable read permission would be absent from custom roles and
+     * would silently strip columns from the very members this serves. Access is still bounded —
+     * {@code TenantResolutionInterceptor} refuses a caller who is not a member of the resolved
+     * workspace, and the query is workspace-scoped like every other.
+     *
+     * The projection, not the caller, is what keeps this safe: the mapper selects only the five
+     * columns below, so a field's data classification never leaves the database on this path, and
+     * archived definitions are excluded exactly as the per-record member path already excludes
+     * them. Reading the full catalog remains {@code CUSTOM_FIELD_MANAGE}.
+     *
+     * @param entityType company, person, or deal
+     * @return the visible fields in display order
+     * @throws BadRequestException when the entity type is not one of the supported three
+     */
+    public List<CustomFieldSchemaDto> getVisibleSchema(String entityType) {
+        String type = normalize(entityType);
+        if (!ENTITY_TYPES.contains(type)) {
+            throw new BadRequestException("Unsupported entity type: " + entityType);
+        }
+        return definitionMapper.getActiveByEntityType(workspaceService.getCurrentWorkspaceId(), type).stream()
+            .map(def -> new CustomFieldSchemaDto(
+                def.getId(),
+                def.getLabel(),
+                def.getFieldType(),
+                parseOptions(def.getOptionsJson()),
+                def.isRequired()))
+            .toList();
     }
 
     /**
