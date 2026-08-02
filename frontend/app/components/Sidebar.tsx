@@ -116,6 +116,14 @@ function useSections(navAccess: NavAccess): NavSection[] {
             ? [{ label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon }]
             : []),
     ];
+    const marketingSection: NavSection = {
+        id: "marketing",
+        label: t("sectionMarketing"),
+        activePaths: ["/marketing"],
+        items: [
+            { label: t("navCampaigns"), href: "/marketing/campaigns", icon: MegaphoneIcon },
+        ],
+    };
     return [
         {
             id: "overview",
@@ -146,14 +154,7 @@ function useSections(navAccess: NavAccess): NavSection[] {
                 { label: t("navApprovalPolicies"), href: "/records/approval-policies", icon: ShieldCheckIcon },
             ],
         },
-        {
-            id: "marketing",
-            label: t("sectionMarketing"),
-            activePaths: ["/marketing"],
-            items: [
-                { label: t("navCampaigns"), href: "/marketing/campaigns", icon: MegaphoneIcon },
-            ],
-        },
+        ...(navAccess.campaigns ? [marketingSection] : []),
         {
             id: "activity",
             label: t("sectionActivity"),

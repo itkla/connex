@@ -8,6 +8,8 @@
         "new": "New campaign",
         "empty": "No campaigns yet",
         "emptyHint": "Create a campaign to define an explainable audience before you launch.",
+        "deniedTitle": "Campaign access required",
+        "deniedBody": "Only members with campaign access can view this workspace's campaigns. Ask a workspace admin if you need it.",
         "colName": "Name",
         "colStatus": "Status",
         "colType": "Type",

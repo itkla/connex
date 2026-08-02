@@ -4344,10 +4344,6 @@ export function getCampaigns(init: RequestInit = {}) {
     return getJson<Types.Campaign[]>(`/api/campaigns`, init);
 }
 
-export function getCampaignsFromCookie(cookie: string | null) {
-    return safeReadWithCookie<Types.Campaign>((init) => getCampaigns(init), cookie);
-}
-
 export function getCampaign(id: number, init: RequestInit = {}) {
     return getJson<Types.Campaign>(`/api/campaigns/${id}`, init);
 }

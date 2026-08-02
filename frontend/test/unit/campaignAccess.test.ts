@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { ApiError, DEFAULT_CAPABILITIES } from '@/app/lib/api';
+import { NO_NAV_ACCESS, resolveNavAccess } from '@/app/lib/navAccess';
+import { loadCollection } from '@/app/lib/recordAccess';
+
 const CAMPAIGN_DETAIL = 'app/components/marketing/campaigns/CampaignDetail.tsx';
+const CAMPAIGN_LIST = 'app/(app)/marketing/campaigns/page.tsx';
+const SIDEBAR = 'app/components/Sidebar.tsx';
+const NAV_BRIDGE = 'app/components/actions/NavActionsBridge.tsx';
+const SEED_ACTIONS = 'app/lib/actions/seedActions.ts';
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
@@ -107,5 +115,69 @@ describe('campaign detail offers a member no control that will 403', () => {
             expect(readOnly).toBeTruthy();
             expect(readOnly).not.toBe(message(locale, 'CampaignAudience', 'noAudienceHint'));
         }
+    });
+});
+
+describe('/marketing/campaigns never manufactures an empty campaign list', () => {
+    it('reports a refused campaign fetch as forbidden rather than as empty', async () => {
+        const access = await loadCollection(async () => {
+            throw new ApiError('Requires the CAMPAIGN_VIEW permission in this workspace', 403);
+        });
+
+        expect(access).toEqual({ kind: 'forbidden' });
+    });
+
+    it('does not swallow a refused fetch into an empty list', () => {
+        const page = source(CAMPAIGN_LIST);
+
+        expect(page).not.toMatch(/\.catch\s*\(/);
+        expect(page).toContain('loadCollection(');
+        expect(page).not.toContain('getCampaignsFromCookie');
+    });
+
+    it('returns the denial state for a viewer who lacks campaign access', () => {
+        const page = source(CAMPAIGN_LIST);
+
+        expect(page).toMatch(/access\.kind === "forbidden"/);
+        expect(page).toContain('<AccessDeniedPage');
+        expect(page.indexOf('forbidden')).toBeLessThan(page.indexOf('<CampaignsBrowser'));
+    });
+
+    it('localizes the denial copy in both supported locales', () => {
+        for (const locale of ['en', 'ja'] as const) {
+            const title = message(locale, 'CampaignsPage', 'deniedTitle');
+            const body = message(locale, 'CampaignsPage', 'deniedBody');
+
+            expect(title).toBeTruthy();
+            expect(body).toBeTruthy();
+            expect(body).not.toBe(message(locale, 'CampaignsPage', 'emptyHint'));
+        }
+    });
+});
+
+describe('the campaigns nav is gated on the permission it needs', () => {
+    it('offers campaigns to a viewer holding CAMPAIGN_VIEW', () => {
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, ['CAMPAIGN_VIEW']).campaigns).toBe(true);
+    });
+
+    it('hides campaigns from a custom role built without CAMPAIGN_VIEW', () => {
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, ['GOAL_READ']).campaigns).toBe(false);
+    });
+
+    it('stays visible on an instance that cannot dispatch, since planning still works', () => {
+        expect(DEFAULT_CAPABILITIES.campaignDelivery).toBe(false);
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, ['CAMPAIGN_VIEW']).campaigns).toBe(true);
+    });
+
+    it('fails closed when permissions could not be resolved', () => {
+        expect(NO_NAV_ACCESS.campaigns).toBe(false);
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, []).campaigns).toBe(false);
+    });
+
+    it('gates the sidebar section and the palette on the same resolved access', () => {
+        expect(source(SIDEBAR)).toContain('...(navAccess.campaigns ? [marketingSection] : [])');
+        expect(source(NAV_BRIDGE)).toContain('if (navAccess.campaigns) {');
+        expect(source(NAV_BRIDGE)).toContain('navAccess.campaigns');
+        expect(source(SEED_ACTIONS)).not.toContain('/marketing/campaigns');
     });
 });

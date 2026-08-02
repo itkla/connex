@@ -1,6 +1,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getCampaignsFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
+import { getTranslations } from "next-intl/server";
+import { getCampaigns, getCurrentUserFromCookie } from "@/app/lib/api";
+import { loadCollection } from "@/app/lib/recordAccess";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import CampaignsBrowser from "@/app/components/marketing/campaigns/CampaignsBrowser";
 
 export default async function CampaignsPage() {
@@ -10,6 +13,14 @@ export default async function CampaignsPage() {
         redirect("/auth/login");
     }
 
-    const campaigns = await getCampaignsFromCookie(cookie);
-    return <CampaignsBrowser campaigns={campaigns} />;
+    const access = await loadCollection(() =>
+        getCampaigns({ headers: { cookie: cookie ?? "" }, cache: "no-store" }),
+    );
+
+    if (access.kind === "forbidden") {
+        const t = await getTranslations("CampaignsPage");
+        return <AccessDeniedPage title={t("deniedTitle")} body={t("deniedBody")} />;
+    }
+
+    return <CampaignsBrowser campaigns={access.items} />;
 }
