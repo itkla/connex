@@ -930,6 +930,8 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         entityLabel="contact"
                         selectionActions={selectionActions}
                         loading={loading}
+                        filtersActive={hasActiveFilters}
+                        onClearFilters={clearAll}
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                         sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
                     />

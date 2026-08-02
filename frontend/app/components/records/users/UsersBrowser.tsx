@@ -88,6 +88,9 @@ export default function UsersBrowser({ users }: { users: User[] }) {
         ? [{ id: "q", label: tf("chipSearch", { query: query.trim() }), onRemove: () => setQuery("") }]
         : [];
 
+    const hasActiveFilters = query.trim() !== "";
+    const clearAll = () => setQuery("");
+
     const viewSelected = () => {
         if (selectedUsers.length === 1) {
             router.push(`/users/${selectedUsers[0].id}`);
@@ -113,8 +116,8 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                     <FilterBar
                         reduce={reduce}
                         chips={chips}
-                        hasActiveFilters={query.trim() !== ""}
-                        onClearAll={() => setQuery("")}
+                        hasActiveFilters={hasActiveFilters}
+                        onClearAll={clearAll}
                         clearAllLabel={tf("clearAll")}
                         search={
                             <SearchField
@@ -162,6 +165,8 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                         onSelectedIdsChange={setSelectedIds}
                         entityLabel={t("entityLabel")}
                         selectionActions={selectionActions}
+                        filtersActive={hasActiveFilters}
+                        onClearFilters={clearAll}
                         sortState={sortState}
                     />
                 </Rise>

@@ -1080,6 +1080,8 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
+                        filtersActive={hasActiveFilters}
+                        onClearFilters={clearAll}
                         sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                     />

@@ -1629,6 +1629,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             gridClassName="grid grid-cols-1 gap-3"
                             entityLabel={t('entityLabel')}
                             selectionActions={selectionActions}
+                            filtersActive={hasActiveFilters}
+                            onClearFilters={clearAll}
                             pagination={{
                                 page,
                                 pageSize: size,

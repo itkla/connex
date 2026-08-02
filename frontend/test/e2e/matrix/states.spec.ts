@@ -342,9 +342,9 @@ test.describe('no results — a filtered miss must not read as a broken page', (
      * record that the first-run empty state is not covered, rather than letting a filtered miss stand
      * in for it.
      *
-     * The two are currently indistinguishable in the DOM anyway — `ContactsBrowser` never passes
-     * `filtersActive`, so `RecordsRenderView` renders the first-run empty state, with no
-     * clear-filters escape hatch, for a search that matches nothing.
+     * The two are distinguishable in the DOM: `ContactsBrowser` passes `filtersActive`, so
+     * `RecordsRenderView` renders the muted no-results state with a clear-filters escape hatch
+     * rather than the brand first-run state that would claim the workspace is empty.
      */
     test('a search that matches nothing renders an empty state', async ({ browser }) => {
         const context = await matrixContext(browser, { ...DESKTOP, role: 'owner' });
@@ -377,6 +377,10 @@ test.describe('no results — a filtered miss must not read as a broken page', (
 
         expect(landing.ok, `a filtered miss must stay on the collection — ${describeLanding(landing)}`).toBe(true);
         expect(emptyStates, 'a search with no matches must render an empty state, not a blank page').toBeGreaterThan(0);
+        expect(
+            clearFilters,
+            'a filtered miss must offer a way back to the unfiltered list',
+        ).toBeGreaterThan(0);
         expect(
             await page.locator(NOT_FOUND_MARKER).count(),
             'a filtered miss must not read as a missing page',
