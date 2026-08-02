@@ -194,6 +194,19 @@ and workspace SMTP overrides stay available.
 Full profile semantics, the capability×profile matrix, and how to demonstrate the difference are
 in [DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md).
 
+### Email deliverability
+
+Connex is an SMTP submission client only: it signs nothing with DKIM, publishes and evaluates no
+SPF/DKIM/DMARC records, and never sets a separate envelope sender. Whether your mail reaches an
+inbox is decided by the relay you point `CONNEX_MAIL_HOST` at and by the DNS records on the domain in
+your `CONNEX_MAIL_FROM` address. Note also that `CONNEX_MAIL_ENABLED=true` wires the transport but
+does not by itself start sending password-reset or verification mail — each of those flows has its
+own flag, all defaulting off.
+
+Which records to publish for each mail shape, how the workspace-override fallback changes the sending
+identity, what the built-in send-test does and does not prove, and the common failure modes are in
+[DELIVERABILITY.md](DELIVERABILITY.md).
+
 ### Database TLS
 
 The bundled MySQL is included for convenience. **Production requires TLS to the database.** Either

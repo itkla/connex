@@ -120,8 +120,9 @@ connex:
             default-catalog: ${CONNEX_TENANCY_ROUTING_DEFAULT_CATALOG:}
     deployment:
         # Authoritative deployment profile: saas | silo | on-prem. Drives fail-closed posture
-        # enforcement (issue #497). Unset is tolerated for now (soft-launch: a warning is logged
-        # in non-dev) and will become mandatory once every deployment sets it.
+        # enforcement (issue #497) and is mandatory: unset, blank, or not one of the three values
+        # fails startup outside the dev/test/seeder profiles. Seeder runs in fact require it
+        # unset, because a fixture-loading run is not a deployment.
         profile: ${CONNEX_DEPLOYMENT_PROFILE:}
     maintenance:
         mode: ${CONNEX_MAINTENANCE_MODE:off}
