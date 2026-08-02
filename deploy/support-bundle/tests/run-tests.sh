@@ -170,11 +170,12 @@ case_summary_lines() (
 case_exit_code_catalog() (
     # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
+    # 68 is deliberately absent: it belonged to the removed journal-collection step and is left
+    # unallocated so the surrounding codes stay stable for operators' automation.
     assert_equals exit_codes '64
 65
 66
 67
-68
 69' "$(support_bundle_exit_code_catalog)" || return 1
 )
 
@@ -461,51 +462,7 @@ case_collect_status_classification() (
     assert_contains status_403_remedy 'step-up' <(printf '%s\n' "$output") || return 1
 )
 
-# The journal projection is the one place operator tooling touches raw log
-# records, so it gets the strictest assertions: the sentinel secret, the raw
-# message body and the stack trace must all be gone, and the path redacted.
-case_journal_projection_drops_bodies() (
-    # shellcheck source=deploy/support-bundle/collect.sh
-    source "$SANDBOX/collect-lib.sh" 2>/dev/null
-    WORK_DIR="$SANDBOX/journal"
-    mkdir -p "$WORK_DIR"
-    CORRELATION_ID=
-    JOURNAL_UNIT=connex-backend.service
-    journalctl() {
-        cat <<'JSON'
-{"__REALTIME_TIMESTAMP":"1785000000000000","PRIORITY":"3","SYSLOG_IDENTIFIER":"connex","MESSAGE":"Login failed for user@example.com password=SENTINEL_SECRET_VALUE","CONNEX_CORRELATION_ID":"abcd1234efgh","CONNEX_REQUEST_METHOD":"GET","CONNEX_REQUEST_PATH":"/invite/aBc123defGhi456jklMno","CONNEX_RESPONSE_STATUS":"500","CONNEX_EVENT_CLASS":"AuthFailure","STACK":"java.lang.RuntimeException: SENTINEL_SECRET_VALUE\n\tat ooo.klae"}
-JSON
-    }
-    support_bundle_journal_projection '2026-07-24T05:00:00Z' '2026-07-31T05:00:00Z' "$WORK_DIR/slice.jsonl" >/dev/null 2>&1
-    assert_status journal_projection_ok 0 "$?" || return 1
-    assert_absent journal_no_sentinel 'SENTINEL_SECRET_VALUE' "$WORK_DIR/slice.jsonl" || return 1
-    assert_absent journal_no_message 'Login failed' "$WORK_DIR/slice.jsonl" || return 1
-    assert_absent journal_no_stack 'java.lang.RuntimeException' "$WORK_DIR/slice.jsonl" || return 1
-    assert_absent journal_no_email 'user@example.com' "$WORK_DIR/slice.jsonl" || return 1
-    assert_absent journal_no_raw_token 'aBc123defGhi456jklMno' "$WORK_DIR/slice.jsonl" || return 1
-    assert_contains journal_redacted_path '{token}' "$WORK_DIR/slice.jsonl" || return 1
-    assert_contains journal_keeps_correlation 'abcd1234efgh' "$WORK_DIR/slice.jsonl" || return 1
-    assert_contains journal_keeps_status '500' "$WORK_DIR/slice.jsonl" || return 1
-)
 
-case_journal_correlation_filter() (
-    # shellcheck source=deploy/support-bundle/collect.sh
-    source "$SANDBOX/collect-lib.sh" 2>/dev/null
-    WORK_DIR="$SANDBOX/journal-filter"
-    mkdir -p "$WORK_DIR"
-    CORRELATION_ID='abcd1234efgh'
-    JOURNAL_UNIT=connex-backend.service
-    journalctl() {
-        cat <<'JSON'
-{"__REALTIME_TIMESTAMP":"1785000000000000","PRIORITY":"6","CONNEX_CORRELATION_ID":"abcd1234efgh","CONNEX_REQUEST_PATH":"/api/people/1","CONNEX_RESPONSE_STATUS":"200"}
-{"__REALTIME_TIMESTAMP":"1785000000000001","PRIORITY":"6","CONNEX_CORRELATION_ID":"zzzzzzzzzzzz","CONNEX_REQUEST_PATH":"/api/people/2","CONNEX_RESPONSE_STATUS":"200"}
-JSON
-    }
-    support_bundle_journal_projection '2026-07-24T05:00:00Z' '2026-07-31T05:00:00Z' "$WORK_DIR/slice.jsonl" >/dev/null 2>&1
-    assert_status journal_filter_ok 0 "$?" || return 1
-    assert_equals journal_filter_count 1 "$(wc -l < "$WORK_DIR/slice.jsonl")" || return 1
-    assert_absent journal_filter_excluded 'zzzzzzzzzzzz' "$WORK_DIR/slice.jsonl" || return 1
-)
 
 case_read_renders_and_filters() (
     local work="$SANDBOX/read"
@@ -1011,6 +968,117 @@ case_extract_refuses_an_oversized_archive() (
     rm -f "$work/bundle.zip"
 )
 
+# A correlation id is a prefix-free-less token: every 8-64 character prefix is itself valid, so a
+# substring search over the whole row presented an unrelated request as a match.
+case_read_matches_correlation_ids_exactly() (
+    local work="$SANDBOX/exact-correlation"
+    make_bundle "$work/src" ""
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
+    printf '9001,workspace,7,3,person.archive,person,412,55,success,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
+    printf '9002,workspace,7,3,person.update,person,413,56,success,abcd1234,2026-07-31T04:05:07Z,true\r\n' >> "$work/src/audit-slice.csv"
+    local length hash
+    length="$(stat -c '%s' "$work/src/audit-slice.csv")"
+    hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
+    jq --argjson len "$length" --arg sha "$hash" \
+        '.files = [.files[] | if .path == "audit-slice.csv" then .byteLength = $len | .sha256 = $sha else . end]' \
+        "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --correlation-id abcd1234 --section audit 2>&1)"
+    assert_status exact_correlation_ok 0 "$?" || { printf '%s\n' "$output"; return 1; }
+    assert_contains exact_correlation_hit '9002' <(printf '%s\n' "$output") || return 1
+    # The longer id merely starts with the requested one and must not be presented as a match.
+    if printf '%s\n' "$output" | grep -q '9001'; then
+        printf 'a prefix match was rendered as an exact match\n'
+        return 1
+    fi
+)
+
+case_validate_instant_accepts_fractional_seconds() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
+    source "$SANDBOX/support-bundle-lib.sh"
+    support_bundle_validate_instant since '2026-07-31T05:00:00.123Z' >/dev/null 2>&1
+    assert_status instant_fractional 0 "$?" || return 1
+    support_bundle_validate_instant since '2026-07-31T05:00:00Z' >/dev/null 2>&1
+    assert_status instant_whole 0 "$?" || return 1
+    support_bundle_validate_instant since '2026-07-31T05:00:00+09:00' >/dev/null 2>&1
+    assert_status instant_offset_rejected 64 "$?" || return 1
+)
+
+case_base_url_rejects_query_fragment_and_userinfo() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
+    source "$SANDBOX/support-bundle-lib.sh"
+    local bad
+    for bad in 'https://connex.example.com?tenant=x' \
+               'https://connex.example.com#frag' \
+               'https://user:pw@connex.example.com' \
+               'https://connex.example.com/a b'; do
+        support_bundle_validate_base_url "$bad" >/dev/null 2>&1
+        assert_status "base_url_rejects_$bad" 64 "$?" || return 1
+    done
+    support_bundle_validate_base_url 'https://connex.example.com/base' >/dev/null 2>&1
+    assert_status base_url_with_path 0 "$?" || return 1
+)
+
+# An archive of manifest.json plus one correctly-hashed arbitrary file previously verified clean
+# and then rendered nothing at all, which reads to an operator as "no problems found".
+case_verify_requires_the_declared_bundle_entries() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
+    source "$SANDBOX/support-bundle-lib.sh"
+    local work="$SANDBOX/schema-entries"
+    mkdir -p "$work/src"
+    printf 'arbitrary\n' > "$work/src/foo"
+    local length hash
+    length="$(stat -c '%s' "$work/src/foo")"
+    hash="$(sha256sum "$work/src/foo" | awk '{print $1}')"
+    jq -n --argjson len "$length" --arg sha "$hash" '{
+        schemaVersion: 1, productVersion: "x", generatedAt: "2026-07-31T05:00:00Z", orgId: 3,
+        filters: {since: "a", until: "b"},
+        files: [{path: "foo", mediaType: "application/json", byteLength: $len, sha256: $sha}],
+        omissions: {}
+    }' > "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    mkdir -p "$work/out"
+    local output
+    output="$(support_bundle_verify_archive "$work/bundle.zip" "$work/out" 2>&1)"
+    assert_status unknown_entry_rejected 67 "$?" || return 1
+    assert_contains unknown_entry_reason 'reason=unknown_inventory_entry' <(printf '%s\n' "$output") || return 1
+)
+
+case_verify_requires_each_core_entry_present_or_declared() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
+    source "$SANDBOX/support-bundle-lib.sh"
+    local work="$SANDBOX/missing-core"
+    make_bundle "$work/src" ""
+    rm -f "$work/src/config.json"
+    jq '.files = [.files[] | select(.path != "config.json")]' "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    mkdir -p "$work/out"
+    local output
+    output="$(support_bundle_verify_archive "$work/bundle.zip" "$work/out" 2>&1)"
+    assert_status core_entry_required 67 "$?" || return 1
+    assert_contains core_entry_reason 'reason=required_entry_absent' <(printf '%s\n' "$output") || return 1
+)
+
+case_collect_has_no_journal_option() (
+    if grep -q -- '--include-journal' "$BUNDLE_DIR/collect.sh"; then
+        printf 'the journal option is still present; it cannot be scoped to one organization\n'
+        return 1
+    fi
+    local output
+    output="$(bash "$BUNDLE_DIR/collect.sh" --base-url https://connex.example.com --org-id 3 \
+        --cookie-file /dev/null --include-journal 2>&1 || true)"
+    assert_contains journal_option_rejected 'unknown_argument' <(printf '%s\n' "$output") || return 1
+)
+
+run_case read_matches_correlation_ids_exactly case_read_matches_correlation_ids_exactly
+run_case validate_instant_accepts_fractional_seconds case_validate_instant_accepts_fractional_seconds
+run_case base_url_rejects_query_fragment_and_userinfo case_base_url_rejects_query_fragment_and_userinfo
+run_case verify_requires_the_declared_bundle_entries case_verify_requires_the_declared_bundle_entries
+run_case verify_requires_each_core_entry_present_or_declared case_verify_requires_each_core_entry_present_or_declared
+run_case collect_has_no_journal_option case_collect_has_no_journal_option
 run_case read_parses_quoted_csv_fields case_read_parses_quoted_csv_fields
 run_case extract_refuses_an_oversized_archive case_extract_refuses_an_oversized_archive
 run_case log_escaper_strips_terminal_control_bytes case_log_escaper_strips_terminal_control_bytes
@@ -1052,8 +1120,6 @@ run_case manifest_self_listing_rejected case_manifest_self_listing_rejected
 run_case collect_rejects_partial_entity_filter case_collect_rejects_partial_entity_filter
 run_case collect_query_encoding case_collect_query_encoding
 run_case collect_status_classification case_collect_status_classification
-run_case journal_projection_drops_bodies case_journal_projection_drops_bodies
-run_case journal_correlation_filter case_journal_correlation_filter
 run_case read_renders_and_filters case_read_renders_and_filters
 run_case read_no_matching_rows_is_success case_read_no_matching_rows_is_success
 run_case read_refuses_tampered_archive case_read_refuses_tampered_archive

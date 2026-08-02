@@ -60,7 +60,7 @@ support_bundle_parse_arguments() {
         return "$EXIT_USAGE"
     fi
     case "$SECTION" in
-        all|manifest|readiness|config|migrations|job-runs|audit|journal)
+        all|manifest|readiness|config|migrations|job-runs|audit)
             ;;
         *)
             support_bundle_log error config_error reason invalid_section section "$SECTION"
@@ -140,36 +140,34 @@ support_bundle_render_audit() {
         return 0
     fi
     support_bundle_heading "Audit slice (correlation $CORRELATION_ID)"
-    head -n 1 "$slice" | support_bundle_render_csv || return "$EXIT_READ"
-    matches="$(tail -n +2 "$slice" | grep -F -- "$CORRELATION_ID" || true)"
-    if [ -z "$matches" ]; then
+    # Compare the requestId COLUMN for equality. A substring search over the whole row would match
+    # an unrelated request whose id merely starts with this one — every 8-64 character prefix is
+    # itself a valid correlation id — and would present it to support as the same request.
+    matches="$(SUPPORT_BUNDLE_CORRELATION_ID="$CORRELATION_ID" python3 -c '
+import csv, os, sys
+wanted = os.environ["SUPPORT_BUNDLE_CORRELATION_ID"]
+reader = csv.reader(sys.stdin)
+header = next(reader, None)
+if header is None:
+    sys.exit(0)
+writer = csv.writer(sys.stdout, lineterminator="\n")
+writer.writerow(header)
+column = header.index("requestId") if "requestId" in header else None
+count = 0
+for row in reader:
+    if column is not None and column < len(row) and row[column] == wanted:
+        writer.writerow(row)
+        count += 1
+sys.stderr.write(str(count))
+' < "$slice" 2>"$WORK_DIR/match-count")" || return "$EXIT_READ"
+    if [ "$(cat "$WORK_DIR/match-count" 2>/dev/null || printf 0)" = 0 ]; then
+        printf '%s\n' "$matches" | support_bundle_render_csv || return "$EXIT_READ"
         printf '(no matching rows)\n'
         return 0
     fi
     printf '%s\n' "$matches" | support_bundle_render_csv || return "$EXIT_READ"
 }
 
-support_bundle_render_journal() {
-    local directory="$1"
-    local slice="$directory/journal-slice.jsonl"
-    local matches
-    if [ ! -f "$slice" ] || [ -L "$slice" ]; then
-        return 0
-    fi
-    support_bundle_heading "Journal slice"
-    if [ -n "$CORRELATION_ID" ]; then
-        matches="$(grep -F -- "$CORRELATION_ID" "$slice" || true)"
-        if [ -z "$matches" ]; then
-            printf '(no matching records)\n'
-            return 0
-        fi
-        printf '%s\n' "$matches" | jq -r '[.timestamp, .level, .method, .path, .status, .eventClass] | @tsv' \
-            | support_bundle_sanitize_output | column -t -s $'\t' || return "$EXIT_READ"
-        return 0
-    fi
-    jq -r '[.timestamp, .level, .method, .path, .status, .eventClass] | @tsv' "$slice" \
-        | support_bundle_sanitize_output | column -t -s $'\t' || return "$EXIT_READ"
-}
 
 main() {
     local exit_code=0
@@ -210,9 +208,6 @@ main() {
         fi
         if [ "$exit_code" -eq 0 ] && support_bundle_section_wanted audit; then
             support_bundle_render_audit "$WORK_DIR" || exit_code=$?
-        fi
-        if [ "$exit_code" -eq 0 ] && support_bundle_section_wanted journal; then
-            support_bundle_render_journal "$WORK_DIR" || exit_code=$?
         fi
     } || exit_code=$?
 

@@ -21,8 +21,9 @@ holds.
 
 ## Requirements
 
-`curl`, `jq`, `unzip`, `zipinfo`, `sha256sum`, `column`. The optional journal
-slice additionally needs `journalctl` and `zip`. Missing dependencies exit 64.
+`curl`, `jq`, `unzip`, `zipinfo`, `sha256sum`, `column`, and `python3` (used to parse CSV
+correctly, so a comma inside a quoted field cannot shift values under the wrong header). Missing
+dependencies exit 64.
 
 ## Authentication
 
@@ -88,24 +89,21 @@ SHA-256, and every extracted file present in the inventory. A bundle whose
 manifest is missing — the shape a truncated backend stream produces — is refused
 rather than partially displayed.
 
-## Optional journal slice
+## Why there is no journal slice
 
-The backend never reads logs from disk, so a journal slice is an operator-side
-addition available only when `collect.sh` runs on the host:
+An earlier revision could append a projection of the systemd journal. It was removed, because a
+unit's journal cannot be scoped to one organization from here: on a multi-tenant backend unit,
+collecting the time window would append other tenants' correlation ids, request paths, statuses,
+and event classes to an artifact built specifically to leave the deployment. That is the exact
+failure this feature exists to prevent.
 
-```bash
-deploy/support-bundle/collect.sh ... --include-journal --journal-unit connex-backend.service
-```
+It was also ineffective. In the production logging configuration Spring writes ECS JSON to the
+console and journald stores that whole record in `MESSAGE`; nothing emits the native structured
+fields the projection read, so every projected record would have been empty anyway.
 
-This appends `journal-slice.jsonl` and records its hash in the manifest. It is a
-**closed-field projection**, not a redacted copy of log output: only timestamp,
-level, logger, correlation ID, request method, redacted request path, response
-status, and event class survive. Raw `MESSAGE` bodies, stack traces, headers,
-hosts, and unknown fields are dropped, because a log line may quote user data or
-a credential that never passed through the backend's redaction contract. Request
-paths are additionally passed through the ported `RequestPathRedactor` rules.
-
-If the projection fails there is no raw fallback; the run exits 68.
+Re-introducing it needs a trustworthy per-record organization discriminator to filter on exactly.
+Until then, correlate against the deployment's own logs directly, as
+[`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) describes.
 
 ## Exit codes
 
@@ -116,7 +114,6 @@ If the projection fails there is no raw fallback; the run exits 68.
 | 65 | Authentication, organization authorization, or step-up failure. |
 | 66 | API transport failure, including 400 and 429. |
 | 67 | Bundle integrity: ZIP structure, manifest schema, inventory coverage, or SHA-256 mismatch. |
-| 68 | Journal collection, redaction, or manifest repack failure. |
 | 69 | Reader extraction, rendering, or filtering failure. |
 
 Every run emits single-line structured events (`ts=… level=… event=… key=value`)

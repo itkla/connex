@@ -194,6 +194,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AuditLogMapper.insert",
         MAPPERS + "AuditLogMapper.findRecentByOrg",
         MAPPERS + "AuditLogMapper.findOrgExport",
+        MAPPERS + "AuditLogMapper.findOrgSupportSlice",
         MAPPERS + "RoleMapper.findPermissions",
         MAPPERS + "NoteMapper.countAuthoredAnywhere",
         MAPPERS + "ActivityMapper.countCreatedAnywhere",

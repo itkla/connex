@@ -64,7 +64,7 @@ may contain:
 - client error messages or stack traces;
 - job-run `detail` payloads;
 - personal names, email addresses, or any record field values;
-- raw journald messages or stack traces;
+- raw journald messages or stack traces (no log content is collected at all);
 - IP addresses, user agents, or session identifiers.
 
 ## Redaction contract
@@ -161,15 +161,21 @@ empty result under that filter means "no rows carried this id", not "nothing hap
 manifest records `auditSliceInconclusive: true` for exactly that case so an empty slice is not
 misread as evidence of absence.
 
-### Journal slice
+### Why there is no journal slice
 
-The backend never reads logs from disk. When `collect.sh` runs on the host,
-`--include-journal` appends a **closed-field projection** of the systemd
-journal: timestamp, level, logger, correlation id, request method, redacted
-request path, response status, and event class. Raw `MESSAGE` bodies and stack
-traces are dropped wholesale rather than filtered, and paths pass through the
-same redaction rules as `RequestPathRedactor`. There is no raw fallback: if the
-projection fails, the run fails.
+The backend never reads logs from disk, and the operator tooling no longer collects them either.
+
+A systemd unit's journal cannot be scoped to one organization: on a multi-tenant unit, collecting
+a time window would append other tenants' correlation ids, request paths, statuses, and event
+classes into an artifact designed to travel to support. A filter that cannot be proven exact is
+not a filter, and a bundle that silently mixes tenants is worse than one with no log slice at all.
+
+It was ineffective as well as unsafe. In the production logging configuration Spring writes ECS
+JSON to the console and journald stores that record in `MESSAGE`, so nothing emits the native
+structured fields the projection read.
+
+Re-introducing it requires a trustworthy per-record organization discriminator to filter on
+exactly. Until then, correlate against the deployment's own logs directly.
 
 ## Access control
 
@@ -288,8 +294,10 @@ quoted id against logs or the optional journal slice.
 | 65 | Authentication, organization authorization, step-up failure, or a `404` from the endpoint. |
 | 66 | API transport failure, including `400`, `429`, other `5xx`, and any non-2xx that is not an authorization outcome. |
 | 67 | Bundle integrity: unreadable or missing archive, ZIP structure, manifest schema, inventory coverage, byte length, or SHA-256 mismatch. |
-| 68 | Journal collection, redaction, or manifest repack failure. |
 | 69 | Reader rendering or filtering failure. |
+
+`68` is unallocated: it belonged to the removed journal-collection step and is left free so the
+other codes stay stable for existing automation.
 
 Note that `EXIT_INTEGRITY` is `67` here while `deploy/backup` uses `69` for its own integrity
 class; the two catalogs are independent and both export their constants, so do not source the two

@@ -11,8 +11,9 @@
 # journal projection, and the read command is strictly read-only.
 #
 # Exit codes: 64 usage/configuration/dependency, 65 authentication or
-# authorization, 66 API transport, 67 bundle integrity, 68 journal collection,
-# 69 reader failure.
+# authorization, 66 API transport, 67 bundle integrity, 69 reader failure.
+# 68 is deliberately unallocated: it belonged to the removed journal-collection
+# step, and the remaining codes are kept stable for operators' automation.
 
 set -euo pipefail
 
@@ -38,13 +39,15 @@ declare -rx EXIT_USAGE=64
 declare -rx EXIT_AUTH=65
 declare -rx EXIT_API=66
 declare -rx EXIT_INTEGRITY=67
-declare -rx EXIT_JOURNAL=68
 declare -rx EXIT_READ=69
 
 declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=1
 
 # Mirrors the backend's own uncompressed ceiling.
 declare -rx SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES=67108864
+
+# The closed set of entries a bundle of this schema version may contain.
+declare -rx SUPPORT_BUNDLE_KNOWN_ENTRIES='["readiness.json","config.json","migrations.json","audit-slice.csv","job-runs.json","client-errors.json"]' 
 
 SUPPORT_BUNDLE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPPORT_BUNDLE_STARTED_EPOCH="$(date +%s)"
@@ -57,7 +60,6 @@ support_bundle_exit_code_catalog() {
         "$EXIT_AUTH" \
         "$EXIT_API" \
         "$EXIT_INTEGRITY" \
-        "$EXIT_JOURNAL" \
         "$EXIT_READ"
 }
 
@@ -169,7 +171,9 @@ support_bundle_validate_entity_type() {
 support_bundle_validate_instant() {
     local name="$1"
     local value="$2"
-    if [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    # The endpoint parses with Instant.parse, which accepts fractional seconds. Rejecting them
+    # here would refuse a timestamp copied straight out of a manifest this tool produced.
+    if [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$ ]]; then
         support_bundle_log error config_error reason invalid_instant key "$name" value "$value"
         return "$EXIT_USAGE"
     fi
@@ -181,12 +185,19 @@ support_bundle_validate_instant() {
 
 support_bundle_validate_base_url() {
     local value="$1"
-    if [[ "$value" =~ ^https://[A-Za-z0-9._~:/?#@!$\&\'\(\)*+,\;=%-]+$ ]]; then
+    # A query string, fragment or user-info component would silently corrupt the request: the
+    # endpoint path is appended as text, so "https://host?tenant=x" would put /api/orgs/... inside
+    # the query, and a fragment would never be transmitted at all.
+    if [[ "$value" == *"?"* || "$value" == *"#"* || "$value" == *"@"* ]]; then
+        support_bundle_log error config_error reason base_url_has_query_fragment_or_userinfo
+        return "$EXIT_USAGE"
+    fi
+    if [[ "$value" =~ ^https://[A-Za-z0-9._-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$ ]]; then
         return 0
     fi
     # Plaintext HTTP is only ever acceptable against a loopback development
     # backend; anywhere else it would put the session cookie on the wire.
-    if [[ "$value" =~ ^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?(/.*)?$ ]]; then
+    if [[ "$value" =~ ^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$ ]]; then
         support_bundle_log warn insecure_base_url reason loopback_plaintext
         return 0
     fi
@@ -348,7 +359,11 @@ support_bundle_extract() {
         return "$EXIT_INTEGRITY"
     fi
     support_bundle_validate_entry_names "$archive" || return "$EXIT_INTEGRITY"
-    if ! unzip -qq -o -DD "$archive" -d "$destination" >/dev/null 2>&1; then
+    # The declared size above comes from the archive's own central directory and can lie, so
+    # extraction additionally runs under a hard file-size rlimit: an oversized member is killed by
+    # the kernel rather than being allowed to fill the filesystem.
+    if ! ( ulimit -f "$(( SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES / 512 ))" 2>/dev/null
+           unzip -qq -o -DD "$archive" -d "$destination" >/dev/null 2>&1 ); then
         support_bundle_log error archive_invalid reason extraction_failed
         return "$EXIT_INTEGRITY"
     fi
@@ -463,6 +478,27 @@ support_bundle_verify_inventory() {
         support_bundle_log error integrity_failure reason inventory_rows_unverified expected "$expected_rows" verified "$rows_read"
         return "$EXIT_INTEGRITY"
     fi
+    local unexpected
+    unexpected="$(jq -r --argjson known "$SUPPORT_BUNDLE_KNOWN_ENTRIES" \
+        '[.files[].path] - $known | .[]' "$manifest")"
+    if [ -n "$unexpected" ]; then
+        support_bundle_log error manifest_invalid reason unknown_inventory_entry \
+            entry "$(printf '%s' "$unexpected" | head -n 1)"
+        return "$EXIT_INTEGRITY"
+    fi
+    # Every entry the schema requires must be present or explicitly declared as omitted; silence
+    # is not an acceptable third state for a diagnostic the reader promises to render.
+    local required present_or_omitted
+    for required in readiness.json config.json migrations.json audit-slice.csv; do
+        present_or_omitted="$(jq -r --arg path "$required" \
+            'if ([.files[].path] | index($path)) != null then "present"
+             elif (.omissions | has($path)) then "omitted"
+             else "missing" end' "$manifest")"
+        if [ "$present_or_omitted" = missing ]; then
+            support_bundle_log error manifest_invalid reason required_entry_absent entry "$required"
+            return "$EXIT_INTEGRITY"
+        fi
+    done
     listed="$(jq -r '.files[].path' "$manifest" | sort)"
     present="$(find "$directory" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | grep -vx 'manifest.json' | sort)"
     if [ "$listed" != "$present" ]; then
@@ -497,16 +533,26 @@ support_bundle_publish() {
             return "$EXIT_INTEGRITY"
             ;;
     esac
-    if ! (set -C; : > "$destination") 2>/dev/null; then
-        support_bundle_log error publish_refused reason output_exists path "$destination"
-        return "$EXIT_USAGE"
-    fi
-    chmod 0600 "$destination"
-    if ! cp "$source" "$destination"; then
-        rm -f "$destination"
+    # Stage on the DESTINATION filesystem and link into place, so the output path never exists in
+    # a partially-written state: a concurrent reader either sees no file or sees the complete
+    # archive, and a crash mid-copy leaves only the staging file behind.
+    local staging
+    staging="$(mktemp "${destination}.partial.XXXXXX")" || {
+        support_bundle_log error publish_failed reason staging_failed path "$destination"
+        return "$EXIT_INTEGRITY"
+    }
+    chmod 0600 "$staging"
+    if ! cp "$source" "$staging"; then
+        rm -f "$staging"
         support_bundle_log error publish_failed reason copy_failed path "$destination"
         return "$EXIT_INTEGRITY"
     fi
+    if ! ln "$staging" "$destination" 2>/dev/null; then
+        rm -f "$staging"
+        support_bundle_log error publish_refused reason output_exists path "$destination"
+        return "$EXIT_USAGE"
+    fi
+    rm -f "$staging"
 }
 
 support_bundle_verify_archive() {
