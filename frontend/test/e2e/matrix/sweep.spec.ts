@@ -1,15 +1,17 @@
 import { test, expect } from '@playwright/test';
 
 import { MATRIX_ROUTES, type MatrixRoute } from './routes';
-import type { PageFault } from './support/matrix';
+import type { PageFault, ResponseFailure } from './support/matrix';
 import {
     blockExternalRequests,
     captureFaults,
+    captureResponseFailures,
     clearFaultRules,
     matrixContext,
     record,
     significantFaults,
     unexpectedFaults,
+    unexpectedResponseFailures,
     type Axes,
 } from './support/matrix';
 
@@ -47,11 +49,17 @@ async function sweepCell(
     browser: Parameters<typeof matrixContext>[0],
     route: MatrixRoute,
     axes: Axes,
-): Promise<{ faults: PageFault[]; status: number | null; heading: string | null }> {
+): Promise<{
+    faults: PageFault[];
+    badResponses: ResponseFailure[];
+    status: number | null;
+    heading: string | null;
+}> {
     const context = await matrixContext(browser, { ...axes, role: route.role });
     const blocked = blockExternalRequests(context);
     const page = await context.newPage();
     const faults = captureFaults(page);
+    const responseFailures = captureResponseFailures(page);
     let status: number | null = null;
     try {
         const response = await page.goto(route.path, { waitUntil: 'domcontentloaded' });
@@ -64,10 +72,16 @@ async function sweepCell(
             state: 'success',
             axes: { ...axes, role: route.role },
             faults: significantFaults(faults),
+            responseFailures: unexpectedResponseFailures(responseFailures),
             httpStatus: status,
             notes: blocked.size > 0 ? `blocked off-origin hosts: ${[...blocked].sort().join(', ')}` : undefined,
         });
-        return { faults: unexpectedFaults(faults), status, heading: heading?.trim() ?? null };
+        return {
+            faults: unexpectedFaults(faults),
+            badResponses: unexpectedResponseFailures(responseFailures),
+            status,
+            heading: heading?.trim() ?? null,
+        };
     } finally {
         await context.close();
     }
@@ -82,11 +96,15 @@ test.describe('route/state matrix — breadth sweep', () => {
         for (const axes of TIER_AXES[route.tier]) {
             const label = `${route.id} @ ${axes.viewport}/${axes.locale}/${axes.theme}`;
             test(label, async ({ browser }) => {
-                const { faults, status, heading } = await sweepCell(browser, route, axes);
+                const { faults, badResponses, status, heading } = await sweepCell(browser, route, axes);
                 expect(status, `${route.path} should not be a server error`).not.toBe(500);
                 expect(
                     faults.map((fault) => `${fault.kind}: ${fault.text}`),
                     `${route.path} rendered with console/page errors`,
+                ).toEqual([]);
+                expect(
+                    badResponses.map((failure) => `${failure.status} ${failure.url}`),
+                    `${route.path} issued requests that failed`,
                 ).toEqual([]);
                 expect(heading, `${route.path} must expose a level-1 heading as its accessible name`).not.toBeNull();
             });

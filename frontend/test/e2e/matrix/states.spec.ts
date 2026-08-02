@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import {
     blockExternalRequests,
     captureFaults,
+    degradedSections,
     clearFaultRules,
     matrixContext,
     record,
@@ -41,7 +42,7 @@ test.describe('partial failure — Home section isolation', () => {
 
         await page.goto('/dashboard', { waitUntil: 'domcontentloaded' });
         await page.waitForLoadState('networkidle').catch(() => undefined);
-        const healthy = await page.getByRole('status').count();
+        const healthy = await degradedSections(page).count();
         await record(page, {
             routeId: 'home',
             path: '/dashboard',
@@ -56,7 +57,7 @@ test.describe('partial failure — Home section isolation', () => {
         setFaultRules({ fail: ['/api/notes/page'] });
         await page.reload({ waitUntil: 'domcontentloaded' });
         await page.waitForLoadState('networkidle').catch(() => undefined);
-        const degraded = await page.getByRole('status').count();
+        const degraded = await degradedSections(page).count();
         await record(page, {
             routeId: 'home',
             path: '/dashboard',

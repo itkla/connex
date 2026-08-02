@@ -102,6 +102,19 @@ export function blockExternalRequests(context: BrowserContext): Set<string> {
     return blocked;
 }
 
+/**
+ * Locates the failed-section states on a page.
+ *
+ * `SectionUnavailable` carries `role="status"`, but so does the app's toast region — an empty
+ * `aria-live` container present on every authenticated page. Counting bare `role="status"` therefore
+ * reports one phantom degraded section on a perfectly healthy page. The retry control is what
+ * distinguishes a real failed section, and it is locale-independent, unlike matching the heading.
+ * @param page the page to inspect
+ */
+export function degradedSections(page: Page) {
+    return page.locator('[role="status"]:has(button)');
+}
+
 /** A console error or uncaught page error observed while rendering a route. */
 export type PageFault = { kind: 'console' | 'pageerror'; text: string };
 
@@ -129,10 +142,10 @@ export function captureFaults(page: Page): PageFault[] {
  * defect the sweep exists to find, so each entry names a cause that cannot be a product bug.
  */
 const IGNORED_FAULTS: readonly RegExp[] = [
-    /Failed to load resource: the server responded with a status of 401/i,
     /favicon\.ico/i,
     /Download the React DevTools/i,
     /net::ERR_(NAME_NOT_RESOLVED|BLOCKED_BY_CLIENT|FAILED|INTERNET_DISCONNECTED)/i,
+    /Failed to load resource/i,
 ];
 
 /**
@@ -143,16 +156,52 @@ const IGNORED_FAULTS: readonly RegExp[] = [
  *
  * Each entry must name the filed issue. An entry without one does not belong here.
  */
-const KNOWN_FILED_FAULTS: readonly { pattern: RegExp; issue: string }[] = [
-    {
-        pattern: /_next\/static\/chunks\/.*\.js/i,
-        issue: 'records browsers reference a lazy chunk the build never emitted',
-    },
-    {
-        pattern: /status of 403/i,
-        issue: 'records browsers probe admin-only /api/custom-fields as a member (403 used as a permission probe)',
-    },
+const KNOWN_FILED_FAULTS: readonly { pattern: RegExp; issue: string }[] = [];
+
+/** A response the page requested that came back at or above 400. */
+export type ResponseFailure = { status: number; url: string };
+
+/**
+ * Failing responses that are real, already filed, and expected on every load.
+ *
+ * Matched on URL rather than on console text: Chromium's console message for a failed subresource is
+ * generic ("Failed to load resource: the server responded with a status of 404") and carries no URL,
+ * so allowlisting by console text would mean suppressing *every* 404 — exactly the over-broad
+ * suppression that would hide the next real defect.
+ */
+const KNOWN_FILED_RESPONSES: readonly { pattern: RegExp; issue: string }[] = [
+    { pattern: /\/_next\/static\/chunks\/.*\.js$/i, issue: '#972 lazy chunk never emitted by the build' },
+    { pattern: /\/api\/custom-fields(\?|$)/i, issue: '#973 admin-only catalog probed as a member' },
+    { pattern: /\/api\/auth\/(me|csrf)(\?|$)/i, issue: 'unauthenticated bootstrap probe before session attaches' },
 ];
+
+/**
+ * Records every response at or above 400, with its URL.
+ *
+ * The console stream alone cannot support precise triage here, so the sweep watches responses
+ * directly and keeps the URL, which is what makes the allowlist above narrow enough to be safe.
+ * @param page the page to observe
+ * @returns a live array of failing responses
+ */
+export function captureResponseFailures(page: Page): ResponseFailure[] {
+    const failures: ResponseFailure[] = [];
+    page.on('response', (response) => {
+        if (response.status() >= 400) failures.push({ status: response.status(), url: response.url() });
+    });
+    return failures;
+}
+
+/** Failing responses that are not already filed, de-duplicated by status and URL. */
+export function unexpectedResponseFailures(failures: readonly ResponseFailure[]): ResponseFailure[] {
+    const seen = new Set<string>();
+    return failures.filter((failure) => {
+        if (KNOWN_FILED_RESPONSES.some((known) => known.pattern.test(failure.url))) return false;
+        const key = `${failure.status} ${failure.url}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
 
 /** Filters environmental noise out of captured faults, keeping everything a reviewer should see. */
 export function significantFaults(faults: readonly PageFault[]): PageFault[] {
@@ -178,6 +227,7 @@ export type ManifestEntry = {
     axes: Axes;
     screenshot: string;
     faults: PageFault[];
+    responseFailures?: ResponseFailure[];
     httpStatus: number | null;
     notes?: string;
 };
