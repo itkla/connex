@@ -5227,6 +5227,10 @@
                             [
                                 "Audit log",
                                 "Shipped and on."
+                            ],
+                            [
+                                "Tenant diagnostics",
+                                "Shipped and on. A read-only health page for your workspace, and an organisation-wide view for administrators."
                             ]
                         ]
                     },
@@ -5482,6 +5486,107 @@
                     }
                 ]
             },
+            "diagnostics-and-support": {
+                "title": "Diagnostics & support",
+                "description": "Check your workspace's health yourself, and give support what it needs.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "When something looks wrong, Connex gives you a page that answers the first round of questions without anyone needing access to a database or a server. It reports what your instance is configured for, which providers are ready, whether background jobs are running, and whether email is working.",
+                            "You will find it under Settings, and administrators get an organisation-wide version covering every workspace."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What the page reports",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Deployment and capabilities",
+                                "description": "Which edition this instance runs as, and for each capability whether the edition forbids it or it is simply not configured. Those are different problems with different fixes."
+                            },
+                            {
+                                "title": "Provider readiness",
+                                "description": "AI, business-card reading, email, delivery channels and capture streams, each reported as ready or not."
+                            },
+                            {
+                                "title": "Scheduled jobs",
+                                "description": "The latest run of each background job, with its most recent success and its most recent failure kept separately, so a run of failures never hides the last time it worked."
+                            },
+                            {
+                                "title": "Email and secret storage",
+                                "description": "Whether mail is configured and usable, plus key-health counts for stored credentials. Only counts and status, never any stored value."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Opening the page contacts nothing",
+                        "body": "Everything on it is read back from saved configuration, so looking is always safe: it never calls your AI provider, your mail server or any connected account. Sending a test email is the only action on the page that reaches the outside world."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Sending a test email",
+                        "items": [
+                            {
+                                "title": "Confirm it is you",
+                                "description": "The test asks for a passkey first, like other administrative actions."
+                            },
+                            {
+                                "title": "Check your own inbox",
+                                "description": "It only ever sends to your own address, and your address has to be verified. Nobody can use it to send mail to anyone else."
+                            },
+                            {
+                                "title": "Read the result",
+                                "description": "You get the sending identity and the transport outcome. On a workspace that supplies its own mail server you also get an advisory note on whether SPF and DMARC records exist for that domain."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Three tests in five minutes, and the fourth says Failed",
+                        "body": "The test is limited to three sends every five minutes for each person in each workspace. Going over that limit does not produce a special message: the result comes back as Failed, looking exactly like a broken mail server, with a rate-limited reason code. If you have been testing repeatedly and suddenly everything fails, wait five minutes before believing it."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "When you do need to raise a ticket",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "Quote the codes, not the screenshots",
+                                "description": "Findings on the page carry short stable codes, and a failure gives you a reference identifier. Those two things let whoever runs your deployment find the exact matching record in their own logs."
+                            },
+                            {
+                                "title": "Say what you expected",
+                                "description": "The record you were on, what you clicked, what you expected, and whether it happens every time. That last one narrows the search more than anything else."
+                            },
+                            {
+                                "title": "Know who your operator is",
+                                "description": "On a self-hosted deployment your own team holds the logs and can match your reference directly. Otherwise it goes to Connex support."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Operational boundaries",
+                                "description": "What Connex can reach in your deployment, and how support works without that access.",
+                                "href": "/docs/operations/operational-boundaries"
+                            },
+                            {
+                                "title": "Email deliverability basics",
+                                "description": "What the SPF and DMARC hints mean, and what still has to be done on your DNS.",
+                                "href": "/docs/operations/deliverability-basics"
+                            }
+                        ]
+                    }
+                ]
+            },
             "deliverability-basics": {
                 "title": "Email deliverability basics",
                 "description": "Why Connex mail does or does not reach an inbox, and what to check first.",
@@ -5489,7 +5594,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "Connex hands your email to a mail server and nothing more. It does not sign your mail, does not publish or check any of the records that receiving servers look at, and cannot make a message land in an inbox on its own. Whether your mail arrives is decided by the mail server you point Connex at and by the DNS records on your sending domain.",
+                            "Connex hands your email to a mail server and nothing more. It does not sign your mail, publishes none of the records that receiving servers look at, and cannot make a message land in an inbox on its own. It can now tell you whether two of those records exist, but only as a hint, and only for a workspace that supplies its own mail server. Whether your mail arrives is decided by the mail server you point Connex at and by the DNS records on your sending domain.",
                             "That is worth knowing before you debug a delivery problem, because the fix is almost never inside Connex."
                         ]
                     },
@@ -5532,7 +5637,7 @@
                             },
                             {
                                 "title": "Read what it proves",
-                                "description": "A successful test means the host, port and credentials work and the server accepted the message. It does not check any DNS records and does not tell you where the message landed."
+                                "description": "A successful test means the host, port and credentials work and the server accepted the message. It does not tell you where the message landed. This test checks no DNS records at all; the diagnostics test described below is the one that does."
                             }
                         ]
                     },
