@@ -128,16 +128,16 @@ class DealValueServiceTest {
     }
 
     @Test
-    void lostCloseWithLinesNeverDerivesAndHonoursExplicitActualValue() {
+    void lostCloseAlwaysResolvesToZeroRegardlessOfRequestedActualValue() {
         Deal deal = deal("line_items", "75.56", "4.00");
-        when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(2);
-        when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID))
-            .thenReturn(new BigDecimal("75.56"));
 
         assertMoney("0.00",
             service.resolveActualValueForClose(WORKSPACE_ID, deal, false, null));
-        assertMoney("-8.25", service.resolveActualValueForClose(
-            WORKSPACE_ID, deal, false, new BigDecimal("-8.25")));
+        assertMoney("0.00", service.resolveActualValueForClose(
+            WORKSPACE_ID, deal, false, new BigDecimal("500.00")));
+        assertMoney("0.00", service.resolveActualValueForClose(
+            WORKSPACE_ID, deal, null, new BigDecimal("500.00")));
+        verify(dealLineItemMapper, never()).countByDealId(WORKSPACE_ID, DEAL_ID);
         verify(dealLineItemMapper, never()).sumLineTotals(WORKSPACE_ID, DEAL_ID);
     }
 

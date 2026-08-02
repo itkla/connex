@@ -63,24 +63,26 @@ public class DealValueService {
     }
 
     /**
-     * Resolves the actual value for close. Only a won deal derives its realized value from existing
-     * line items. Lost deals never derive because {@code deal_metrics.closed_revenue} sums
-     * {@code actual_value} for every closed deal, so copying booking value into a lost deal would
-     * inflate reported revenue.
+     * Resolves the realized value for a won or lost transition. Only a won deal carries realized
+     * value: with line items it derives from the line-item total, otherwise it keeps the supplied or
+     * existing amount. A lost or undetermined outcome always resolves to zero regardless of any
+     * client-supplied value, because {@code deal_metrics.closed_revenue} sums {@code actual_value}
+     * for every closed deal, so crediting a lost deal with booking value would inflate reported
+     * revenue.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public BigDecimal resolveActualValueForClose(
             int workspaceId, Deal lockedDeal, Boolean won, BigDecimal requestedActualValue) {
+        if (!Boolean.TRUE.equals(won)) {
+            return money(null);
+        }
         boolean hasLineItems = dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0;
-        if (hasLineItems && Boolean.TRUE.equals(won)) {
+        if (hasLineItems) {
             BigDecimal derived = money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
             if (requestedActualValue != null && money(requestedActualValue).compareTo(derived) != 0) {
                 throw new ConflictException(LINE_ITEM_VALUE_CONFLICT);
             }
             return derived;
-        }
-        if (hasLineItems) {
-            return requestedActualValue == null ? money(null) : money(requestedActualValue);
         }
         return requestedActualValue == null
             ? money(lockedDeal.getActualValue())

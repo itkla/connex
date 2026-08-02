@@ -168,6 +168,29 @@ public class DealService {
     }
 
     /**
+     * Persists realized value when a deal first transitions to won outside the close dialog — a
+     * Kanban drag onto a won stage or a stage edit. Won deals with line items derive
+     * {@code actual_value} from the line-item total, the same rule {@link #close} applies, so every
+     * win path reports one realized figure. Realized value is frozen at the win: later line-item
+     * edits move {@code value} but never re-derive {@code actual_value}. Must run inside the
+     * caller's transaction, after the broad update that no longer writes {@code actual_value}.
+     * @param workspaceId tenant scope
+     * @param deal the deal whose outcome was just reconciled
+     * @param previousOutcome the won flag before this transition
+     */
+    private void deriveRealizedValueOnWin(int workspaceId, Deal deal, Boolean previousOutcome) {
+        if (Boolean.TRUE.equals(previousOutcome) || !Boolean.TRUE.equals(deal.getWon())) {
+            return;
+        }
+        BigDecimal realized = dealValueService.resolveActualValueForClose(
+            workspaceId, deal, Boolean.TRUE, null);
+        if (realized.compareTo(deal.getActualValue()) != 0) {
+            deal.setActualValue(realized);
+            dealMapper.updateActualValue(workspaceId, deal.getId(), realized);
+        }
+    }
+
+    /**
      * Re-derives the deal's {@code closedReason} @/# references and notifies newly-mentioned members.
      * Passing a null/blank reason (e.g. a reopened deal, whose reason was just cleared) purges the set.
      */
@@ -999,6 +1022,7 @@ public class DealService {
         reconcileCloseState(deal);
         boolean reopened = previousOutcome != null && deal.getWon() == null;
         dealMapper.update(deal);
+        deriveRealizedValueOnWin(workspaceId, deal, previousOutcome);
         if ((stageChanged || reopened) && newStage != null) {
             dealStageHistoryService.recordTransition(
                 workspaceId, id, newStage, previousOutcome, deal.getWon());
@@ -1566,6 +1590,7 @@ public class DealService {
         deal.setPosition(index);
         reconcileCloseState(deal);
         dealMapper.update(deal);
+        deriveRealizedValueOnWin(workspaceId, deal, previousOutcome);
         if (stageChanged) {
             dealStageHistoryService.recordTransition(
                 workspaceId, dealId, stageId, previousOutcome, deal.getWon());

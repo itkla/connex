@@ -423,8 +423,11 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(open.getId()), top.topOpen().stream().map(DealSummaryDto::getId).toList());
         assertEquals(List.of(currentWon.getId(), previousWon.getId()),
             top.topWon().stream().map(DealSummaryDto::getId).toList());
-        assertEquals(List.of(80.0, 40.0),
-            top.topWon().stream().map(DealSummaryDto::getActualValue).toList());
+        List<BigDecimal> topWonActuals = top.topWon().stream()
+            .map(DealSummaryDto::getActualValue).toList();
+        assertEquals(2, topWonActuals.size());
+        assertEquals(0, new BigDecimal("80.00").compareTo(topWonActuals.get(0)));
+        assertEquals(0, new BigDecimal("40.00").compareTo(topWonActuals.get(1)));
         assertTrue(top.topWon().stream().allMatch(summary -> company.getName().equals(summary.getCompanyName())));
     }
 
@@ -1352,6 +1355,108 @@ class DealServiceTest extends AbstractServiceTest {
         person.setName(name);
         personMapper.insert(person);
         return person;
+    }
+
+    @Test
+    void draggingLineItemDealOntoWonStageDerivesRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage won = newSuccessStage(pipeline, 1);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, open, company);
+        addLineItem(deal, "5000000.00");
+
+        dealService.move(deal.getId(), won.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void editingLineItemDealToWonStageDerivesRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage won = newSuccessStage(pipeline, 1);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, open, company);
+        addLineItem(deal, "5000000.00");
+
+        Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+        edit.setStageId(won.getId());
+        dealService.update(deal.getId(), edit);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void everyWinPathPersistsTheSameRealizedValueForALineItemDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage won = newSuccessStage(pipeline, 1);
+        Company company = newCompany();
+
+        Deal viaClose = newDeal(pipeline, open, company);
+        addLineItem(viaClose, "1234567.00");
+        Deal viaMove = newDeal(pipeline, open, company);
+        addLineItem(viaMove, "1234567.00");
+        Deal viaEdit = newDeal(pipeline, open, company);
+        addLineItem(viaEdit, "1234567.00");
+
+        dealService.close(viaClose.getId(), true, "Signed", null);
+        dealService.move(viaMove.getId(), won.getId(), 0);
+        Deal edit = dealMapper.getDealById(workspace.getId(), viaEdit.getId());
+        edit.setStageId(won.getId());
+        dealService.update(viaEdit.getId(), edit);
+
+        BigDecimal expected = new BigDecimal("1234567.00");
+        assertEquals(0, expected.compareTo(storedActualValue(viaClose.getId())));
+        assertEquals(0, expected.compareTo(storedActualValue(viaMove.getId())));
+        assertEquals(0, expected.compareTo(storedActualValue(viaEdit.getId())));
+    }
+
+    @Test
+    void losingLineItemDealByDragRecordsZeroRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, open, company);
+        addLineItem(deal, "5000000.00");
+
+        dealService.move(deal.getId(), lost.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.FALSE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    private Stage newSuccessStage(Pipeline pipeline, int position) {
+        Stage stage = new Stage();
+        stage.setName("Won " + unique());
+        stage.setPipeline(pipeline);
+        stage.setPosition(position);
+        stage.setSuccess(true);
+        stage.setWorkspaceId(workspace.getId());
+        pipelineMapper.insertStage(stage);
+        return stage;
+    }
+
+    private Stage newFailureStage(Pipeline pipeline, int position) {
+        Stage stage = new Stage();
+        stage.setName("Lost " + unique());
+        stage.setPipeline(pipeline);
+        stage.setPosition(position);
+        stage.setFailure(true);
+        stage.setWorkspaceId(workspace.getId());
+        pipelineMapper.insertStage(stage);
+        return stage;
+    }
+
+    private BigDecimal storedActualValue(int dealId) {
+        return dealMapper.getDealById(workspace.getId(), dealId).getActualValue();
     }
 
     private Deal dealDraft(Pipeline pipeline, Stage stage, Company company) {
