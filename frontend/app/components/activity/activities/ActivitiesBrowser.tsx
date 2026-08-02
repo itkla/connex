@@ -18,6 +18,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
+import { useNow } from '@/app/hooks/useNow';
 import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '@/app/components/filters';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -131,7 +132,7 @@ export default function ActivitiesBrowser({
     const tf = useTranslations('Filters');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
-    const [now] = useState(() => Date.now());
+    const now = useNow();
 
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);

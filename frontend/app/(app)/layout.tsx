@@ -13,6 +13,7 @@ import {
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { NotificationProvider } from "@/app/hooks/useNotifications";
+import { NowProvider } from "@/app/hooks/useNow";
 import { WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 import { ActionProvider } from "@/app/hooks/useActions";
@@ -26,6 +27,7 @@ import DraftResumeBridge from "@/app/components/DraftResumeBridge";
 import { SidebarModeProvider } from "@/app/hooks/useSidebarMode";
 import NavActionsBridge from "@/app/components/actions/NavActionsBridge";
 import { resolveNavAccess } from "@/app/lib/navAccess";
+import { requestNow } from "@/app/lib/requestClock";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
 
 const SIDEBAR_SURFACE_CLASS = "bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl";
@@ -65,41 +67,43 @@ export default async function AppLayout({
     );
 
     return (
-        <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
-            <NotificationProvider key={user.id} recipientId={user.id}>
-                <NavTrailProvider>
-                    <ActionProvider user={user}>
-                        <NotificationActionsBridge />
-                        <PreferenceActionsBridge
-                            userLocale={resolveLocale(user.locale)}
-                            cookieLocale={localePreferenceFromCookieHeader(cookie)}
-                        />
-                        <DraftResumeBridge />
-                        <NavActionsBridge navAccess={navAccess} />
-                        <PinnedViewsProvider>
-                            <PinnedViewsActionsBridge />
-                            <RecentRecordsProvider>
-                                <RecentRecordsActionsBridge />
-                                <SidebarModeProvider>
-                                    <ContentShell
-                                        sidebar={
-                                            <Suspense fallback={<SidebarFallback className={SIDEBAR_SURFACE_CLASS} />}>
-                                                <Sidebar
-                                                    user={user}
-                                                    navAccess={navAccess}
-                                                    className={SIDEBAR_SURFACE_CLASS}
-                                                />
-                                            </Suspense>
-                                        }
-                                    >
-                                        {children}
-                                    </ContentShell>
-                                </SidebarModeProvider>
-                            </RecentRecordsProvider>
-                        </PinnedViewsProvider>
-                    </ActionProvider>
-                </NavTrailProvider>
-            </NotificationProvider>
-        </WorkspaceProvider>
+        <NowProvider value={requestNow()}>
+            <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
+                <NotificationProvider key={user.id} recipientId={user.id}>
+                    <NavTrailProvider>
+                        <ActionProvider user={user}>
+                            <NotificationActionsBridge />
+                            <PreferenceActionsBridge
+                                userLocale={resolveLocale(user.locale)}
+                                cookieLocale={localePreferenceFromCookieHeader(cookie)}
+                            />
+                            <DraftResumeBridge />
+                            <NavActionsBridge navAccess={navAccess} />
+                            <PinnedViewsProvider>
+                                <PinnedViewsActionsBridge />
+                                <RecentRecordsProvider>
+                                    <RecentRecordsActionsBridge />
+                                    <SidebarModeProvider>
+                                        <ContentShell
+                                            sidebar={
+                                                <Suspense fallback={<SidebarFallback className={SIDEBAR_SURFACE_CLASS} />}>
+                                                    <Sidebar
+                                                        user={user}
+                                                        navAccess={navAccess}
+                                                        className={SIDEBAR_SURFACE_CLASS}
+                                                    />
+                                                </Suspense>
+                                            }
+                                        >
+                                            {children}
+                                        </ContentShell>
+                                    </SidebarModeProvider>
+                                </RecentRecordsProvider>
+                            </PinnedViewsProvider>
+                        </ActionProvider>
+                    </NavTrailProvider>
+                </NotificationProvider>
+            </WorkspaceProvider>
+        </NowProvider>
     );
 }

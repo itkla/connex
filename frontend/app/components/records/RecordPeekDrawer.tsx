@@ -34,6 +34,7 @@ import {
     type RecordCollection,
     type RecordReturnSelectionSnapshot,
 } from '@/app/lib/recordReturnPath';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { formatCurrency, formatRelativeTime } from '@/app/lib/utils';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
@@ -337,6 +338,7 @@ function Facts({ rows }: { rows: [string, string][] }) {
 }
 
 function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: ReturnType<typeof useTranslations> }) {
+    const now = useLiveNow();
     return (
         <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -351,7 +353,7 @@ function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: R
                         <li key={task.id} className="flex items-center justify-between gap-3 text-sm">
                             <span className="min-w-0 truncate text-foreground">{task.description}</span>
                             {task.dueDate && (
-                                <span className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(task.dueDate, locale)}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(task.dueDate, locale, now)}</span>
                             )}
                         </li>
                     ))}
@@ -362,6 +364,7 @@ function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: R
 }
 
 function ActivitySection({ activities, locale, t }: { activities: Activity[]; locale: string; t: ReturnType<typeof useTranslations> }) {
+    const now = useLiveNow();
     return (
         <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -377,7 +380,7 @@ function ActivitySection({ activities, locale, t }: { activities: Activity[]; lo
                             <p className="truncate text-sm text-foreground">{activity.subject}</p>
                             <p className="text-xs text-muted-foreground">
                                 {activity.type}
-                                {activity.timestamp ? ` · ${formatRelativeTime(activity.timestamp, locale)}` : ''}
+                                {activity.timestamp ? ` · ${formatRelativeTime(activity.timestamp, locale, now)}` : ''}
                             </p>
                         </li>
                     ))}

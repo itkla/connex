@@ -4,6 +4,7 @@ import { useLocale, useTranslations } from 'next-intl';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { formatRelativeTime, warmthDotClass, warmthSurfaceClasses } from '@/app/lib/utils';
 import type { RelationshipTemperature } from '@/app/lib/types';
 
@@ -17,6 +18,7 @@ import type { RelationshipTemperature } from '@/app/lib/types';
 export default function TemperaturePill({ temp }: { temp?: RelationshipTemperature | null }) {
     const t = useTranslations('Temperature');
     const locale = useLocale();
+    const now = useLiveNow();
 
     if (!temp) return <span className="text-sm text-muted-foreground">—</span>;
 
@@ -34,7 +36,7 @@ export default function TemperaturePill({ temp }: { temp?: RelationshipTemperatu
         );
     }
 
-    const lastTouch = formatRelativeTime(temp.lastTouchAt, locale);
+    const lastTouch = formatRelativeTime(temp.lastTouchAt, locale, now);
 
     return (
         <Tooltip>
@@ -53,7 +55,7 @@ export default function TemperaturePill({ temp }: { temp?: RelationshipTemperatu
                 <div>{t('tooltip', { score: temp.score, lastTouch })}</div>
                 {temp.daysUntilCold != null && temp.goesColdAt ? (
                     <div className="opacity-80">
-                        {t('goesCold', { when: formatRelativeTime(temp.goesColdAt, locale) })}
+                        {t('goesCold', { when: formatRelativeTime(temp.goesColdAt, locale, now) })}
                     </div>
                 ) : null}
             </TooltipContent>

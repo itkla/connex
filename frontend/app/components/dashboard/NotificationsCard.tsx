@@ -8,6 +8,7 @@ import { useNotificationWorkspaceActions } from '@/app/components/notifications/
 import { getNotifications } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import type { Notification } from '@/app/lib/types';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { formatRelativeTime } from '@/app/lib/utils';
 import {
     notificationContent,
@@ -111,6 +112,7 @@ export function NotificationsCardView({
 }) {
     const t = useTranslations('Notifications');
     const locale = useLocale();
+    const now = useLiveNow();
 
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
@@ -160,7 +162,7 @@ export function NotificationsCardView({
                                     <div className="flex min-w-0 flex-1 items-center gap-3">{inner}</div>
                                 )}
                                 <time className="shrink-0 text-xs text-muted-foreground">
-                                    {formatRelativeTime(item.triggeredAt, locale)}
+                                    {formatRelativeTime(item.triggeredAt, locale, now)}
                                 </time>
                             </li>
                         );

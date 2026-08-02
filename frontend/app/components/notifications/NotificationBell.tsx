@@ -17,6 +17,7 @@ import {
     snoozeNotification,
 } from "@/app/lib/api";
 import { type Notification, type SnoozeRequest } from "@/app/lib/types";
+import { useLiveNow } from "@/app/hooks/useNow";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
@@ -34,6 +35,7 @@ import {
 export default function NotificationBell() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
+    const now = useLiveNow();
     const { recipientId, unread, refreshUnread } = useNotifications();
     const { executeInNotificationWorkspace, openNotification } = useNotificationWorkspaceActions();
     const [items, setItems] = useState<Notification[]>([]);
@@ -253,7 +255,7 @@ export default function NotificationBell() {
                                             </div>
                                             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{content.body}</p>
                                             <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                                                {formatRelativeTime(item.triggeredAt, locale)}
+                                                {formatRelativeTime(item.triggeredAt, locale, now)}
                                                 {item.workspaceName ? (
                                                     <span className="rounded-full bg-muted px-1.5 py-0.5 font-medium">
                                                         {item.workspaceName}

@@ -20,6 +20,7 @@ import {
     unsnoozeNotification,
 } from "@/app/lib/api";
 import { type Notification, type NotificationFacets, type NotificationState, type SnoozeRequest } from "@/app/lib/types";
+import { useLiveNow } from "@/app/hooks/useNow";
 import { formatDateTime, formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
@@ -70,6 +71,7 @@ export default function NotificationsInbox() {
     const t = useTranslations("Notifications");
     const tf = useTranslations("Filters");
     const locale = useLocale();
+    const now = useLiveNow();
     const reduce = useReducedMotion() ?? false;
     const { recipientId, unread, snoozed, refreshUnread } = useNotifications();
     const { executeInNotificationWorkspace, openInNotificationWorkspace } = useNotificationWorkspaceActions();
@@ -827,7 +829,7 @@ export default function NotificationsInbox() {
                                             </h2>
                                             {!item.readAt ? <span className={cn("size-1.5 shrink-0 rounded-full", style.dot)} /> : null}
                                             <span className="text-xs text-muted-foreground">
-                                                {formatRelativeTime(item.triggeredAt, locale)}
+                                                {formatRelativeTime(item.triggeredAt, locale, now)}
                                             </span>
                                             {item.workspaceName ? (
                                                 <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">

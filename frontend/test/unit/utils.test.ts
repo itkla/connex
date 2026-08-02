@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     ensureUrlScheme,
     fixedOffsetSeconds,
@@ -82,6 +84,42 @@ describe("formatRelativeTime", () => {
     it("returns a dash for invalid input", () => {
         expect(formatRelativeTime(null, "en-US", now)).toBe("—");
         expect(formatRelativeTime("garbage", "en-US", now)).toBe("—");
+    });
+});
+
+describe("formatRelativeTime is deterministic across the hydration boundary", () => {
+    const source = readFileSync(path.resolve(process.cwd(), "app/lib/utils.ts"), "utf8");
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("takes no ambient clock, so a caller cannot omit the reference time", () => {
+        expect(formatRelativeTime.length).toBe(3);
+        expect(source).not.toMatch(/now\s*:\s*number\s*=\s*Date\.now\(\)/);
+    });
+
+    it("renders identically for a server render and a hydration that share one clock", () => {
+        const shared = Date.UTC(2026, 6, 15, 12, 0, 0);
+        const justBeforeTheMinuteFlips = "2026-07-15 11:58:31";
+
+        vi.useFakeTimers();
+        vi.setSystemTime(shared);
+        const serverRender = formatRelativeTime(justBeforeTheMinuteFlips, "en-US", shared);
+
+        vi.setSystemTime(shared + 40_000);
+        const hydration = formatRelativeTime(justBeforeTheMinuteFlips, "en-US", shared);
+
+        expect(hydration).toBe(serverRender);
+        expect(serverRender).toBe("1 min. ago");
+    });
+
+    it("does move between buckets when the reference time itself advances", () => {
+        const base = Date.UTC(2026, 6, 15, 12, 0, 0);
+        const value = "2026-07-15 11:58:31";
+
+        expect(formatRelativeTime(value, "en-US", base)).toBe("1 min. ago");
+        expect(formatRelativeTime(value, "en-US", base + 40_000)).toBe("2 min. ago");
     });
 });
 

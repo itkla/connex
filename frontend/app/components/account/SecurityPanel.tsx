@@ -27,6 +27,7 @@ import {
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastInfo, toastSuccess } from "@/app/lib/toast";
+import { useLiveNow } from "@/app/hooks/useNow";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,6 +108,7 @@ function isCancellation(err: unknown): boolean {
 export default function SecurityPanel() {
     const t = useTranslations("AccountSecurity");
     const locale = useLocale();
+    const now = useLiveNow();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
 
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);
@@ -328,12 +330,12 @@ export default function SecurityPanel() {
                                         </span>
                                         <span className="block truncate text-xs text-muted-foreground">
                                             {t("addedOn", {
-                                                date: formatRelativeTime(passkey.createdAt, locale),
+                                                date: formatRelativeTime(passkey.createdAt, locale, now),
                                             })}
                                             {" · "}
                                             {passkey.lastUsedAt
                                                 ? t("lastUsed", {
-                                                      date: formatRelativeTime(passkey.lastUsedAt, locale),
+                                                      date: formatRelativeTime(passkey.lastUsedAt, locale, now),
                                                   })
                                                 : t("neverUsed")}
                                         </span>

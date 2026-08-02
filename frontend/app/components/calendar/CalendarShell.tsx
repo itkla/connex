@@ -9,6 +9,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
+import { useNow } from '@/app/hooks/useNow';
 import { isTypingTarget, parseCalendarDate } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, RelationshipTemperature, Task } from '@/app/lib/types';
 import {
@@ -100,7 +101,8 @@ export default function CalendarShell({
     const coarse = useCoarsePointer();
     const isWide = useMediaQuery('(min-width: 1024px)');
     const swipeRef = useRef<HTMLDivElement>(null);
-    const [today] = useState(() => startOfDay(new Date()));
+    const now = useNow();
+    const today = useMemo(() => startOfDay(new Date(now)), [now]);
     const [openEventId, setOpenEventId] = useState<string | null>(null);
     const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
     const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
