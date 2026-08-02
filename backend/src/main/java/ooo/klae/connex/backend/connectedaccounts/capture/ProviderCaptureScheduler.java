@@ -18,7 +18,12 @@ import ooo.klae.connex.backend.connectedaccounts.ConnectedCaptureProperties;
 import ooo.klae.connex.backend.dto.ProviderCaptureSyncRef;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+
+import java.util.Map;
 
 /**
  * Fair catalog-aware polling scheduler instantiated only when capture work is authorized.
@@ -40,6 +45,7 @@ public class ProviderCaptureScheduler {
     private final ProviderCaptureWorker worker;
     private final TenantWorkScope tenantWorkScope;
     private final ConnectedCaptureProperties properties;
+    private final JobRunRecorder jobRunRecorder;
 
     /** Runs at most one due stream per workspace per sweep before taking another. */
     @Scheduled(fixedDelayString = "${connex.connected-capture.scheduler-delay:PT5S}")
@@ -62,17 +68,32 @@ public class ProviderCaptureScheduler {
             if (processed >= properties.getSchedulerBatchSize()) {
                 break;
             }
+            JobRunDetail detail = JobRunDetail.startedUtc();
             try {
-                List<ProviderCaptureSyncRef> refs = tenantWorkScope.inWorkspace(
-                    workspaceId,
-                    () -> captureMapper.findDueSyncRefs(
-                        workspaceId, mysql(Instant.now()), 1));
-                for (ProviderCaptureSyncRef ref : refs) {
-                    tenantWorkScope.inWorkspace(
-                        workspaceId,
-                        () -> worker.runPage(workspaceId, ref.syncStateId()));
-                    processed++;
-                }
+                int[] processedInWorkspace = {0};
+                tenantWorkScope.inWorkspace(workspaceId, () -> {
+                    try {
+                        List<ProviderCaptureSyncRef> refs = captureMapper.findDueSyncRefs(
+                            workspaceId, mysql(Instant.now()), 1);
+                        for (ProviderCaptureSyncRef ref : refs) {
+                            worker.runPage(workspaceId, ref.syncStateId());
+                            processedInWorkspace[0]++;
+                        }
+                        if (!refs.isEmpty()) {
+                            record(workspaceId, JobRunStatus.SUCCEEDED,
+                                new JobRunDetail(
+                                    detail.startedAt(),
+                                    Map.of("dueCount", refs.size())));
+                        }
+                    } catch (RuntimeException exception) {
+                        record(workspaceId, JobRunStatus.FAILED,
+                            new JobRunDetail(
+                                detail.startedAt(),
+                                Map.of("phase", "workspace_sweep")));
+                        throw exception;
+                    }
+                });
+                processed += processedInWorkspace[0];
             } catch (RuntimeException exception) {
                 log.warn(
                     "Skipping provider capture workspace {}: {}",
@@ -85,5 +106,16 @@ public class ProviderCaptureScheduler {
 
     private static String mysql(Instant value) {
         return LocalDateTime.ofInstant(value, ZoneOffset.UTC).format(MYSQL_TIMESTAMP);
+    }
+
+    private void record(int workspaceId, JobRunStatus status, JobRunDetail detail) {
+        try {
+            jobRunRecorder.record(JobRunRecorder.PROVIDER_CAPTURE, workspaceId, status, detail);
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Job run recording failed jobName={} exceptionClass={}",
+                JobRunRecorder.PROVIDER_CAPTURE,
+                exception.getClass().getSimpleName());
+        }
     }
 }
