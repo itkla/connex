@@ -48,7 +48,7 @@ type Props = {
 
 /**
  * Controlled create-message dialog. The parent owns the payload and the submit handler, which
- * re-throws field errors so this form can surface them per field, mirroring {@code NewCampaignDialog}.
+ * re-throws field errors so this form can surface them per field, mirroring {@code CampaignFormDialog}.
  */
 export default function NewMessageDialog({
     open,

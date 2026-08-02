@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
+    DEFAULT_CAPABILITIES,
     getCampaign,
     getCampaignAudienceFromCookie,
     getCampaignEngagement,
@@ -8,6 +9,7 @@ import {
     getCampaignMessages,
     getCampaignSends,
     getCampaignSnapshots,
+    getCapabilities,
     getCurrentUserFromCookie,
     getEffectivePermissionsResultFromCookie,
     type CookieResult,
@@ -19,11 +21,13 @@ import {
     type CampaignEngagement,
     type CampaignMessage,
     type CampaignSend,
+    type InstanceCapabilities,
 } from "@/app/lib/types";
 import CampaignDetail from "@/app/components/marketing/campaigns/CampaignDetail";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailablePage";
-import { loadRecord } from "@/app/lib/recordAccess";
+import { loadCollection, loadRecord, type CollectionAccess } from "@/app/lib/recordAccess";
+import { resolveCampaignAccess } from "@/app/lib/campaignAccess";
 
 export default async function CampaignDetailPage({
     params,
@@ -51,22 +55,33 @@ export default async function CampaignDetailPage({
     }
 
     const init = { headers: { cookie: cookie ?? "" }, cache: "no-store" } as const;
-    const [audienceResult, snapshots, messages, sends, exports, engagement, effectivePermissions]: [
+    const [
+        audienceResult,
+        snapshotsAccess,
+        messages,
+        sends,
+        exports,
+        engagement,
+        effectivePermissions,
+        capabilities,
+    ]: [
         { ok: true; data: CampaignAudience | undefined } | { ok: false },
-        CampaignAudienceSnapshotSummary[],
+        CollectionAccess<CampaignAudienceSnapshotSummary>,
         CampaignMessage[],
         CampaignSend[],
         CampaignAudienceExport[],
         CampaignEngagement | null,
         CookieResult<string[]>,
+        InstanceCapabilities,
     ] = await Promise.all([
         getCampaignAudienceFromCookie(id, cookie),
-        getCampaignSnapshots(id, init).catch(() => []),
+        loadCollection(() => getCampaignSnapshots(id, init)),
         getCampaignMessages(id, init).catch(() => []),
         getCampaignSends(id, init).catch(() => []),
         getCampaignExports(id, init).catch(() => []),
         getCampaignEngagement(id, init).catch(() => null),
         getEffectivePermissionsResultFromCookie(cookie),
+        getCapabilities(init).catch(() => DEFAULT_CAPABILITIES),
     ]);
     if (!effectivePermissions.ok) {
         return <PermissionsUnavailablePage />;
@@ -79,13 +94,14 @@ export default async function CampaignDetailPage({
         <CampaignDetail
             campaign={campaignAccess.record}
             initialAudience={initialAudience}
-            initialSnapshots={snapshots}
+            initialSnapshots={snapshotsAccess.kind === "loaded" ? snapshotsAccess.items : []}
+            snapshotsRestricted={snapshotsAccess.kind === "forbidden"}
             initialMessages={messages}
             initialSends={sends}
             initialExports={exports}
             initialEngagement={engagement}
-            canManage={effectivePermissions.data.includes("CAMPAIGN_MANAGE")}
-            canSend={effectivePermissions.data.includes("CAMPAIGN_SEND")}
+            access={resolveCampaignAccess(effectivePermissions.data)}
+            deliveryEnabled={capabilities.campaignDelivery}
         />
     );
 }

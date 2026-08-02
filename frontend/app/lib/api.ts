@@ -1215,8 +1215,8 @@ export function deletePasskey(credentialId: string) {
 
 /**
  * Fetches the instance capability flags that gate optional UI: enterprise SSO, consumer social
- * login, instance-managed mail, business-card scanning, and source-image import. Consolidates the
- * former per-feature `/enabled` endpoints.
+ * login, instance-managed mail, business-card scanning, source-image import, and native campaign
+ * delivery. Consolidates the former per-feature `/enabled` endpoints.
  * @param init optional fetch overrides
  * @returns the resolved instance capabilities
  */
@@ -1240,6 +1240,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     mailManaged: false,
     businessCardScanning: false,
     businessCardImport: false,
+    campaignDelivery: false,
 };
 
 export function getProviderConnections(init: RequestInit = {}) {
@@ -4343,10 +4344,6 @@ export function getCampaigns(init: RequestInit = {}) {
     return getJson<Types.Campaign[]>(`/api/campaigns`, init);
 }
 
-export function getCampaignsFromCookie(cookie: string | null) {
-    return safeReadWithCookie<Types.Campaign>((init) => getCampaigns(init), cookie);
-}
-
 export function getCampaign(id: number, init: RequestInit = {}) {
     return getJson<Types.Campaign>(`/api/campaigns/${id}`, init);
 }
@@ -4453,10 +4450,6 @@ export function cancelCampaignSend(id: number, sendId: number) {
 
 export function getCampaignExports(id: number, init: RequestInit = {}) {
     return getJson<Types.CampaignAudienceExport[]>(`/api/campaigns/${id}/exports`, init);
-}
-
-export function getCampaignExportsFromCookie(id: number, cookie: string | null) {
-    return safeReadWithCookie<Types.CampaignAudienceExport>((init) => getCampaignExports(id, init), cookie);
 }
 
 export function createCampaignExport(id: number, payload: Types.CampaignAudienceExportPayload) {

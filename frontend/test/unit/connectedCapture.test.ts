@@ -25,6 +25,7 @@ const CAPABILITIES: InstanceCapabilities = {
     mailManaged: false,
     businessCardScanning: false,
     businessCardImport: false,
+    campaignDelivery: false,
 };
 
 const WORKSPACE_POLICY: WorkspaceCapturePolicy = {

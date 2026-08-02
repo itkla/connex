@@ -13,6 +13,13 @@ export type NavAccess = {
     auditLog: boolean;
     /** The connected-capture review queue requires at least one capture-enabled provider. */
     captureReviews: boolean;
+    /**
+     * Campaigns require {@code CAMPAIGN_VIEW}. Gated on the permission alone, not on the
+     * {@code campaignDelivery} capability: planning a campaign, defining its audience and authoring
+     * its messages all work on an instance that cannot dispatch, so hiding the section there would
+     * hide working functionality rather than a broken promise.
+     */
+    campaigns: boolean;
 };
 
 /** The fail-closed default applied when capabilities or permissions could not be loaded. */
@@ -20,6 +27,7 @@ export const NO_NAV_ACCESS: NavAccess = {
     goals: false,
     auditLog: false,
     captureReviews: false,
+    campaigns: false,
 };
 
 /**
@@ -39,5 +47,6 @@ export function resolveNavAccess(
         auditLog: effectivePermissions.includes("AUDIT_READ"),
         captureReviews:
             capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft,
+        campaigns: effectivePermissions.includes("CAMPAIGN_VIEW"),
     };
 }

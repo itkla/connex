@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { ArrowLeftIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,7 @@ import AudienceEstimatePanel from "@/app/components/marketing/campaigns/Audience
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
+import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
 import { PageShell } from "@/app/components/PageShell";
 import {
     type Campaign,
@@ -44,7 +45,9 @@ import {
     type CampaignAudienceSnapshotSummary,
     type CampaignEngagement as CampaignEngagementData,
     type CampaignMessage,
+    type CampaignPayload,
     type CampaignSend,
+    type CampaignStatus,
     type SegmentDefinition,
     type SegmentFields,
 } from "@/app/lib/types";
@@ -52,13 +55,64 @@ import {
     deleteCampaign,
     estimateCampaignAudience,
     getSegmentFields,
+    isFieldError,
     setCampaignAudience,
     snapshotCampaignAudience,
+    updateCampaign,
 } from "@/app/lib/api";
+import {
+    canEstimateAudience,
+    canFreezeSnapshot,
+    type CampaignAccess,
+} from "@/app/lib/campaignAccess";
+import AccessDenied from "@/app/components/AccessDenied";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatCurrency, formatDate } from "@/app/lib/utils";
 
 const RECORD_TYPES: CampaignAudienceRecordType[] = ["person", "company", "deal"];
+
+const TERMINAL_STATUSES: CampaignStatus[] = ["completed", "archived"];
+
+/**
+ * Renders a stored timestamp for a `datetime-local` input, which accepts no finer than a minute.
+ *
+ * Deliberately a plain truncation rather than the `toDatetimeLocalValue` used for deals and
+ * activities: those round-trip through `toMysqlDateTime`, which emits a space-separated UTC string,
+ * while `CampaignRequest` binds `LocalDateTime` and the create path posts the raw input value. Read
+ * and write must agree, so campaign timestamps stay in the wall-clock form the backend stores.
+ */
+function toFormValue(value: string | null): string | null {
+    return value?.slice(0, 16) ?? null;
+}
+
+/**
+ * Returns the stored timestamp when the reader never touched the field, so saving an unrelated
+ * change cannot silently drop the seconds of a campaign window that has them.
+ */
+function restoreUntouched(edited: string | null | undefined, stored: string | null): string | null {
+    const next = edited ?? null;
+    return next !== null && next === toFormValue(stored) ? stored : next;
+}
+
+/**
+ * Seeds the edit form from a campaign. `PUT /api/campaigns/{id}` replaces the whole record, so the
+ * fields the form does not show — owner and parent campaign — are carried through rather than
+ * dropped, and the timestamps are rendered at the precision the input accepts.
+ */
+function toPayload(campaign: Campaign): CampaignPayload {
+    return {
+        name: campaign.name,
+        objective: campaign.objective,
+        type: campaign.type,
+        status: campaign.status,
+        ownerUserId: campaign.ownerUserId,
+        budgetAmount: campaign.budgetAmount,
+        budgetCurrency: campaign.budgetCurrency,
+        startAt: toFormValue(campaign.startAt),
+        endAt: toFormValue(campaign.endAt),
+        parentCampaignId: campaign.parentCampaignId,
+    };
+}
 
 function GlanceTile({ label, value }: { label: string; value: string }) {
     return (
@@ -80,8 +134,9 @@ export default function CampaignDetail({
     initialSends,
     initialExports,
     initialEngagement,
-    canManage,
-    canSend,
+    access,
+    snapshotsRestricted,
+    deliveryEnabled,
 }: {
     campaign: Campaign;
     initialAudience: CampaignAudience | null;
@@ -90,8 +145,9 @@ export default function CampaignDetail({
     initialSends: CampaignSend[];
     initialExports: CampaignAudienceExport[];
     initialEngagement: CampaignEngagementData | null;
-    canManage: boolean;
-    canSend: boolean;
+    access: CampaignAccess;
+    snapshotsRestricted: boolean;
+    deliveryEnabled: boolean;
 }) {
     const t = useTranslations("CampaignDetail");
     const at = useTranslations("CampaignAudience");
@@ -114,6 +170,20 @@ export default function CampaignDetail({
     const [isDeleting, setIsDeleting] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [tab, setTab] = useState("overview");
+    const [current, setCurrent] = useState<Campaign>(campaign);
+    const [editOpen, setEditOpen] = useState(false);
+    const [editPayload, setEditPayload] = useState<CampaignPayload>(() => toPayload(campaign));
+    const [isSavingCampaign, setIsSavingCampaign] = useState(false);
+
+    const [syncedCampaign, setSyncedCampaign] = useState(campaign);
+    if (campaign !== syncedCampaign) {
+        setSyncedCampaign(campaign);
+        setCurrent(campaign);
+    }
+
+    const canManage = access.manage;
+    const canEstimate = canEstimateAudience(access, recordType);
+    const canFreeze = canFreezeSnapshot(access, recordType);
 
     useEffect(() => {
         let active = true;
@@ -145,7 +215,7 @@ export default function CampaignDetail({
     const saveAudience = async () => {
         setIsSaving(true);
         try {
-            await setCampaignAudience(campaign.id, { recordType, definition });
+            await setCampaignAudience(current.id, { recordType, definition });
             setAudienceSaved(true);
             toastSuccess(at("saved"));
         } catch (err) {
@@ -158,7 +228,7 @@ export default function CampaignDetail({
     const runEstimate = async () => {
         setIsEstimating(true);
         try {
-            setEstimate(await estimateCampaignAudience(campaign.id));
+            setEstimate(await estimateCampaignAudience(current.id));
         } catch (err) {
             toastError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -169,7 +239,7 @@ export default function CampaignDetail({
     const freezeSnapshot = async () => {
         setIsFreezing(true);
         try {
-            const snapshot = await snapshotCampaignAudience(campaign.id);
+            const snapshot = await snapshotCampaignAudience(current.id);
             setSnapshots((prev) => [snapshot, ...prev]);
             toastSuccess(at("frozen"));
         } catch (err) {
@@ -179,10 +249,36 @@ export default function CampaignDetail({
         }
     };
 
+    const openEdit = () => {
+        setEditPayload(toPayload(current));
+        setEditOpen(true);
+    };
+
+    const saveCampaign = async () => {
+        setIsSavingCampaign(true);
+        try {
+            const updated = await updateCampaign(current.id, {
+                ...editPayload,
+                objective: editPayload.objective?.trim() || null,
+                startAt: restoreUntouched(editPayload.startAt, current.startAt),
+                endAt: restoreUntouched(editPayload.endAt, current.endAt),
+            });
+            setCurrent(updated);
+            setIsSavingCampaign(false);
+            setEditOpen(false);
+            toastSuccess(t("saved"));
+            router.refresh();
+        } catch (err) {
+            setIsSavingCampaign(false);
+            if (isFieldError(err)) throw err;
+            toastError(err instanceof Error ? err.message : String(err));
+        }
+    };
+
     const removeCampaign = async () => {
         setIsDeleting(true);
         try {
-            await deleteCampaign(campaign.id);
+            await deleteCampaign(current.id);
             router.push("/marketing/campaigns");
         } catch (err) {
             setIsDeleting(false);
@@ -191,12 +287,12 @@ export default function CampaignDetail({
     };
 
     const budget =
-        campaign.budgetAmount != null && campaign.budgetCurrency
-            ? formatCurrency(campaign.budgetAmount, campaign.budgetCurrency, locale)
+        current.budgetAmount != null && current.budgetCurrency
+            ? formatCurrency(current.budgetAmount, current.budgetCurrency, locale)
             : t("noValue");
     const windowText =
-        campaign.startAt || campaign.endAt
-            ? `${formatDate(campaign.startAt ?? undefined, locale)} – ${formatDate(campaign.endAt ?? undefined, locale)}`
+        current.startAt || current.endAt
+            ? `${formatDate(current.startAt ?? undefined, locale)} – ${formatDate(current.endAt ?? undefined, locale)}`
             : t("noValue");
     const latestSnapshot = snapshots[0] ?? null;
 
@@ -214,19 +310,27 @@ export default function CampaignDetail({
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
                         <div className="flex min-w-0 flex-wrap items-center gap-3">
                             <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
-                                {campaign.name}
+                                {current.name}
                             </h1>
-                            <CampaignStatusBadge status={campaign.status} />
+                            <CampaignStatusBadge status={current.status} />
                         </div>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmDelete(true)}
-                            className="shrink-0 text-muted-foreground hover:text-destructive"
-                        >
-                            <TrashIcon className="size-4" />
-                            {t("delete")}
-                        </Button>
+                        {canManage && (
+                            <div className="flex shrink-0 items-center gap-1">
+                                <Button variant="outline" size="sm" onClick={openEdit}>
+                                    <PencilSquareIcon className="size-4" />
+                                    {t("edit")}
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setConfirmDelete(true)}
+                                    className="text-muted-foreground hover:text-destructive"
+                                >
+                                    <TrashIcon className="size-4" />
+                                    {t("delete")}
+                                </Button>
+                            </div>
+                        )}
                     </div>
                 </Rise>
 
@@ -249,18 +353,18 @@ export default function CampaignDetail({
                                 <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                                     <InfoRow
                                         label={t("objective")}
-                                        value={campaign.objective ?? t("noValue")}
+                                        value={current.objective ?? t("noValue")}
                                     />
-                                    <InfoRow label={t("type")} value={campaign.type} />
+                                    <InfoRow label={t("type")} value={current.type} />
                                     <InfoRow label={t("budget")} value={budget} />
                                     <InfoRow label={t("window")} value={windowText} />
                                     <InfoRow
                                         label={t("created")}
-                                        value={formatDate(campaign.createdAt, locale)}
+                                        value={formatDate(current.createdAt, locale)}
                                     />
                                     <InfoRow
                                         label={t("updated")}
-                                        value={formatDate(campaign.updatedAt, locale)}
+                                        value={formatDate(current.updatedAt, locale)}
                                     />
                                 </dl>
                             </div>
@@ -320,34 +424,40 @@ export default function CampaignDetail({
                             >
                                 <div className="flex flex-col gap-4">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <SegmentBuilder
-                                            definition={definition}
-                                            fields={segmentFields}
-                                            onChange={changeDefinition}
-                                            recordType={recordType}
-                                            options={null}
-                                            advanced
-                                        />
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={saveAudience}
-                                            disabled={isSaving || audienceSaved}
-                                        >
-                                            {isSaving ? (
-                                                <>
-                                                    <Loader2Icon className="size-4 animate-spin" />
-                                                    {at("saving")}
-                                                </>
-                                            ) : (
-                                                at("saveAudience")
-                                            )}
-                                        </Button>
+                                        {canManage && (
+                                            <>
+                                                <SegmentBuilder
+                                                    definition={definition}
+                                                    fields={segmentFields}
+                                                    onChange={changeDefinition}
+                                                    recordType={recordType}
+                                                    options={null}
+                                                    advanced
+                                                />
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={saveAudience}
+                                                    disabled={isSaving || audienceSaved}
+                                                >
+                                                    {isSaving ? (
+                                                        <>
+                                                            <Loader2Icon className="size-4 animate-spin" />
+                                                            {at("saving")}
+                                                        </>
+                                                    ) : (
+                                                        at("saveAudience")
+                                                    )}
+                                                </Button>
+                                            </>
+                                        )}
                                         <Button
                                             variant="brand"
                                             size="sm"
                                             onClick={runEstimate}
-                                            disabled={!audienceSaved || isEstimating}
+                                            disabled={
+                                                !audienceSaved || isEstimating || !canEstimate
+                                            }
                                         >
                                             {isEstimating ? (
                                                 <>
@@ -359,6 +469,12 @@ export default function CampaignDetail({
                                             )}
                                         </Button>
                                     </div>
+
+                                    {!canEstimate && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {at("estimateDeniedHint")}
+                                        </p>
+                                    )}
 
                                     {estimate ? (
                                         <div className="flex flex-col gap-4 border-t border-border pt-4">
@@ -374,23 +490,25 @@ export default function CampaignDetail({
                                                 estimate={estimate}
                                                 recordType={recordType}
                                             />
-                                            <div>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={freezeSnapshot}
-                                                    disabled={isFreezing}
-                                                >
-                                                    {isFreezing ? (
-                                                        <>
-                                                            <Loader2Icon className="size-4 animate-spin" />
-                                                            {at("freezing")}
-                                                        </>
-                                                    ) : (
-                                                        at("freeze")
-                                                    )}
-                                                </Button>
-                                            </div>
+                                            {canFreeze && (
+                                                <div>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={freezeSnapshot}
+                                                        disabled={isFreezing}
+                                                    >
+                                                        {isFreezing ? (
+                                                            <>
+                                                                <Loader2Icon className="size-4 animate-spin" />
+                                                                {at("freezing")}
+                                                            </>
+                                                        ) : (
+                                                            at("freeze")
+                                                        )}
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </div>
                                     ) : (
                                         <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
@@ -398,7 +516,9 @@ export default function CampaignDetail({
                                                 {at("noAudience")}
                                             </p>
                                             <p className="mt-1 text-xs text-muted-foreground">
-                                                {at("noAudienceHint")}
+                                                {canManage
+                                                    ? at("noAudienceHint")
+                                                    : at("noAudienceHintReadOnly")}
                                             </p>
                                         </div>
                                     )}
@@ -406,7 +526,13 @@ export default function CampaignDetail({
                             </Panel>
 
                             <Panel title={at("snapshots")} subtitle={at("snapshotsSubtitle")}>
-                                {snapshots.length === 0 ? (
+                                {snapshotsRestricted ? (
+                                    <AccessDenied
+                                        variant="inline"
+                                        title={at("snapshotsDeniedTitle")}
+                                        body={at("snapshotsDeniedBody")}
+                                    />
+                                ) : snapshots.length === 0 ? (
                                     <p className="py-4 text-sm text-muted-foreground">
                                         {at("noSnapshots")}
                                     </p>
@@ -451,12 +577,12 @@ export default function CampaignDetail({
 
                     <TabsContent value="delivery" forceMount className="data-[state=inactive]:hidden">
                         <CampaignDelivery
-                            campaignId={campaign.id}
+                            campaignId={current.id}
                             initialMessages={initialMessages}
                             initialSends={initialSends}
                             snapshots={snapshots}
-                            canManage={canManage}
-                            canSend={canSend}
+                            access={access}
+                            deliveryEnabled={deliveryEnabled}
                         />
                     </TabsContent>
 
@@ -466,15 +592,27 @@ export default function CampaignDetail({
 
                     <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">
                         <CampaignExportPanel
-                            campaignId={campaign.id}
+                            campaignId={current.id}
                             initialExports={initialExports}
                             snapshots={snapshots}
-                            canManage={canManage}
+                            access={access}
+                            deliveryEnabled={deliveryEnabled}
                         />
                     </TabsContent>
                 </Tabs>
                 </Rise>
             </PageShell>
+
+            <CampaignFormDialog
+                mode="edit"
+                open={editOpen}
+                onOpenChange={setEditOpen}
+                payload={editPayload}
+                setPayload={setEditPayload}
+                isSubmitting={isSavingCampaign}
+                statusLocked={TERMINAL_STATUSES.includes(current.status)}
+                onSubmit={saveCampaign}
+            />
 
             <ResponsiveDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
                 <ResponsiveDialogContent className="p-0 sm:max-w-md">

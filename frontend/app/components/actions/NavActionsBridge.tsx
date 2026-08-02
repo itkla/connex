@@ -1,7 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
-import { ClipboardDocumentListIcon, FlagIcon, InboxIcon } from "@heroicons/react/24/outline";
+import {
+    ClipboardDocumentListIcon,
+    FlagIcon,
+    InboxIcon,
+    MegaphoneIcon,
+} from "@heroicons/react/24/outline";
 
 import { useRegisterActions } from "@/app/hooks/useActions";
 import type { AppAction } from "@/app/lib/actions/types";
@@ -34,6 +39,18 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 },
             });
         }
+        if (navAccess.campaigns) {
+            gated.push({
+                id: "navigate.campaigns",
+                group: "navigate",
+                labelKey: "navigate.campaigns",
+                icon: MegaphoneIcon,
+                order: 130,
+                execute: (_context, helpers) => {
+                    helpers.router.push("/marketing/campaigns");
+                },
+            });
+        }
         if (navAccess.captureReviews) {
             gated.push({
                 id: "navigate.capture-reviews",
@@ -60,7 +77,7 @@ export default function NavActionsBridge({ navAccess }: Props): null {
             });
         }
         return gated;
-    }, [navAccess.goals, navAccess.captureReviews, navAccess.auditLog]);
+    }, [navAccess.goals, navAccess.campaigns, navAccess.captureReviews, navAccess.auditLog]);
 
     useRegisterActions(actions);
     return null;

@@ -50,34 +50,46 @@ const STATUSES: CampaignStatus[] = [
 ];
 
 type Props = {
+    mode: "create" | "edit";
     open: boolean;
     onOpenChange: (open: boolean) => void;
     payload: CampaignPayload;
     setPayload: Dispatch<SetStateAction<CampaignPayload>>;
-    isCreating: boolean;
+    isSubmitting: boolean;
     isSuccess?: boolean;
-    createNewCampaign: () => void | Promise<void>;
+    statusLocked?: boolean;
+    onSubmit: () => void | Promise<void>;
 };
 
 /**
- * Controlled create-campaign dialog. The parent owns the payload and the submit handler,
- * which re-throws field errors so this form can surface them per field.
+ * Controlled campaign form dialog, shared by creation and editing. The parent owns the payload and
+ * the submit handler, which re-throws field errors so this form can surface them per field.
+ *
+ * The fields here are exactly the ones `PUT /api/campaigns/{id}` rewrites, so an edit that seeds
+ * the payload from the campaign round-trips without dropping anything the form does not show.
+ * @param mode which verb the copy and the submit button describe
+ * @param statusLocked whether the campaign has reached a terminal status, which the backend
+ * refuses to transition out of; the control is shown but inert rather than offering a doomed choice
  */
-export default function NewCampaignDialog({
+export default function CampaignFormDialog({
+    mode,
     open,
     onOpenChange,
     payload,
     setPayload,
-    isCreating,
+    isSubmitting,
     isSuccess = false,
-    createNewCampaign,
+    statusLocked = false,
+    onSubmit,
 }: Props) {
     const t = useTranslations("CampaignsNewDialog");
     const statusT = useTranslations("CampaignStatus");
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
+    const editing = mode === "edit";
+
     const hasErrors = Object.keys(fieldErrors).length > 0;
-    const status: "idle" | "loading" | "success" | "error" = isCreating
+    const status: "idle" | "loading" | "success" | "error" = isSubmitting
         ? "loading"
         : hasErrors
             ? "error"
@@ -92,16 +104,16 @@ export default function NewCampaignDialog({
     }
 
     const handleOpenChange = (next: boolean) => {
-        if (!next && isCreating) return;
+        if (!next && isSubmitting) return;
         onOpenChange(next);
     };
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (isCreating) return;
+        if (isSubmitting) return;
         resetFieldErrors();
         try {
-            await createNewCampaign();
+            await onSubmit();
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
@@ -122,14 +134,16 @@ export default function NewCampaignDialog({
                 <div className="px-6 pt-6">
                     <ResponsiveDialogHeader className="mb-5">
                         <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">
-                            {t("title")}
+                            {editing ? t("editTitle") : t("title")}
                         </ResponsiveDialogTitle>
-                        <ResponsiveDialogDescription>{t("description")}</ResponsiveDialogDescription>
+                        <ResponsiveDialogDescription>
+                            {editing ? t("editDescription") : t("description")}
+                        </ResponsiveDialogDescription>
                     </ResponsiveDialogHeader>
                 </div>
 
                 <div className="max-h-[70dvh] overflow-y-auto px-6 pb-4">
-                    <form id="new-campaign-form" onSubmit={handleSubmit} className="grid gap-5">
+                    <form id="campaign-form" onSubmit={handleSubmit} className="grid gap-5">
                         <div className="grid gap-1.5">
                             <Label htmlFor="campaign-name">
                                 {t("name")} <span className="text-muted-foreground">*</span>
@@ -210,6 +224,7 @@ export default function NewCampaignDialog({
                                 <Label htmlFor="campaign-status">{t("status")}</Label>
                                 <Select
                                     value={payload.status ?? "draft"}
+                                    disabled={statusLocked}
                                     onValueChange={(value) =>
                                         setPayload((prev) => ({ ...prev, status: value as CampaignStatus }))
                                     }
@@ -225,6 +240,11 @@ export default function NewCampaignDialog({
                                         ))}
                                     </SelectContent>
                                 </Select>
+                                {statusLocked && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {t("statusLockedHint")}
+                                    </p>
+                                )}
                             </div>
                         </div>
 
@@ -330,24 +350,24 @@ export default function NewCampaignDialog({
 
                 <ResponsiveDialogFooter className="border-t border-border/60 bg-popover px-6 py-4">
                     <ResponsiveDialogClose asChild>
-                        <Button type="button" variant="outline" disabled={isCreating}>
+                        <Button type="button" variant="outline" disabled={isSubmitting}>
                             {t("cancel")}
                         </Button>
                     </ResponsiveDialogClose>
                     <Button
                         type="submit"
-                        form="new-campaign-form"
+                        form="campaign-form"
                         variant="brand"
-                        disabled={isCreating || hasErrors || isSuccess}
+                        disabled={isSubmitting || hasErrors || isSuccess}
                         className="min-w-24 shadow-sm transition hover:shadow-md"
                     >
-                        {isCreating ? (
+                        {isSubmitting ? (
                             <>
                                 <Loader2Icon className="size-4 animate-spin" />
-                                {t("creating")}
+                                {editing ? t("editSaving") : t("creating")}
                             </>
                         ) : (
-                            t("submit")
+                            editing ? t("editSubmit") : t("submit")
                         )}
                     </Button>
                 </ResponsiveDialogFooter>

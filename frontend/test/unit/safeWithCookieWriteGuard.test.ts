@@ -12,7 +12,7 @@ const DELETED_SSR_WRITE_WRAPPERS = [
     'replaceContactTagsFromCookie',
 ] as const;
 
-const SWALLOWING_READ_CALL_SITES = 39;
+const SWALLOWING_READ_CALL_SITES = 37;
 
 const ANY_SINGLE_PARAM_ARROW_TO_FETCHER = /\(\s*\w+\s*\)\s*=>\s*(\w+)\(/;
 
