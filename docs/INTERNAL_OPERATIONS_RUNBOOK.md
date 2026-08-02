@@ -40,21 +40,33 @@ Workspace creation is disabled on this instance            # allow-self-service-
 `AuthService.register` only auto-provisions a workspace when the self-service flag is on. When it is
 off, the frontend sees an empty workspace list and redirects the new account to `/onboarding`, which
 offers exactly two moves: create a workspace (which will `403` on this posture) or paste an invite
-link. **The invite link is the real path.**
+link. **The invite is the real path — but do not tell anyone to paste a shareable link into that
+box.** It parses only the marker `/invite/` and then routes to `/invite/{token}`, so an emailed
+invite URL works while a **shareable link (`/invite-link/{token}`) does not**: the marker never
+matches, the parser keeps the first segment of the pasted URL, and the tester lands on
+`/invite/https:` and is told the invite does not exist. Pasting only the bare token of a shareable
+link fails the same way, on the wrong route. **Have them open the shareable URL directly instead**
+(that is exactly the URL Settings → Members copies). This mismatch is **tracked**; until it is
+fixed, the paste box is for emailed invites only.
 
 **This does not vary by deployment profile in code.** Neither flag appears in
 `FORBIDDEN_KEYS_BY_PROFILE`, so no profile forces either value. It varies only by **env template**:
 both [`deploy/silo.env.example`](../deploy/silo.env.example) and
 [`deploy/onprem.env.example`](../deploy/onprem.env.example) set
-`CONNEX_WORKSPACES_ALLOW_CREATION=false`. An instance configured by hand rather than from a template
-gets whatever the operator set — check it, do not assume it.
+`CONNEX_WORKSPACES_ALLOW_CREATION=false` — but
+[`deploy/eval.env.example`](../deploy/eval.env.example) declares
+`CONNEX_DEPLOYMENT_PROFILE=silo` and sets `CONNEX_WORKSPACES_ALLOW_CREATION=true` (it also activates
+the `dev` Spring profile), so "it is a silo template" is not evidence that self-service is off.
+An instance configured by hand rather than from a template gets whatever the operator set — check
+it, do not assume it.
 
 ### `invite` and `domain` signup modes are declared, not implemented
 
 `connex.signup.mode` documents three values — `open`, `invite`, `domain` — and
 `CONNEX_SIGNUP_ALLOWED_DOMAINS` exists alongside them. **Only `open` is implemented.** The guard is a
-single equality check against `open`; **any** other value, including `invite`, `domain`, or a typo,
-simply refuses self-service registration outright. There is no invite-gated registration flow and no
+single comparison against `open` — case-insensitive and trimmed, so `OPEN` and `" Open "` also open
+registration — and **any** other value, including `invite`, `domain`, or a typo, simply refuses
+self-service registration outright. There is no invite-gated registration flow and no
 domain-allowlist enforcement behind those names. Set `CONNEX_SIGNUP_MODE` to something other than
 `open` when you want registration closed — but do not describe the instance as running "invite mode"
 as if that were a distinct behaviour, and do not rely on `CONNEX_SIGNUP_ALLOWED_DOMAINS` to restrict
@@ -90,10 +102,12 @@ Its behaviour matters more than its configuration:
 - It **never aborts startup**. Misconfiguration is logged and skipped. A blank username, email, or
   password produces a `WARN` and no owner; a thrown exception produces an `ERROR` and no owner. In
   both cases the instance boots normally with **no owner at all**. Grep the boot log rather than
-  assuming it worked:
+  assuming it worked — and match **both** phrasings, because the blank-credential `WARN` reads
+  "Bootstrap is enabled but username, email, and password are not all set" and contains no
+  "Bootstrap owner" substring:
 
   ```bash
-  journalctl -u <backend-unit> | grep -i 'Bootstrap owner'
+  journalctl -u <backend-unit> | grep -iE 'Bootstrap owner|Bootstrap is enabled'
   ```
 
 - The bootstrap password is read from the environment and is **never logged**.
@@ -104,6 +118,34 @@ permission-gated and **unaffected by `connex.signup.mode`** — an admin can cre
 instance where self-service registration is refused. It still only auto-creates a workspace when
 `allow-self-service-creation` is on, so on the normal posture an admin-created user also lands with
 zero workspaces and must be invited into one.
+
+**It cannot bootstrap an empty instance.** `POST /api/users` calls the no-argument
+`requirePermission(MEMBER_MANAGE)`, which resolves against the caller's **active workspace** — and
+with no workspace resolved it falls back to the caller's default membership and throws
+`The authenticated user does not belong to a workspace`. The caller must already be an admin
+somewhere, so this path extends an existing tenant; it never creates the first one.
+
+### First owner on a `saas`-shaped instance — the only working path
+
+Put these three facts together and one deployment shape has no obvious way in: the bootstrap runner
+is **forbidden under `saas`**, admin user creation needs a pre-existing membership, and workspace
+creation is refused while `allow-self-service-creation` is `false`. On `silo` and `on-prem` use the
+bootstrap runner. On `saas`, the working sequence is a **temporary, deliberate flag flip**:
+
+1. Confirm `CONNEX_SIGNUP_MODE` is `open` (the shipped default).
+2. Set **`CONNEX_WORKSPACES_ALLOW_CREATION=true`** and restart. The flag is bound at startup, so a
+   restart is required — twice, once each way.
+3. Have the intended first owner **self-register in the app**. Registration mints their user, and
+   because no tenant context is resolved for a fresh account, `provisionWorkspace` creates a **new
+   organization**, records them as its **founding `org_member` owner**, and adds them as workspace
+   `owner`. That founding row is what later authorizes export and teardown.
+4. Set **`CONNEX_WORKSPACES_ALLOW_CREATION=false`** and restart again.
+5. Verify: the account appears as `owner` in Settings → Members **and** as organization `owner` at
+   **Organization → Members**. Everyone else joins by invite from here.
+
+**Keep the open window short and record it.** Between steps 2 and 4 any account that can reach the
+instance can register *and* provision itself an organization, so do this before the instance is
+publicly reachable, or behind an access control you already trust.
 
 ## Workspace policy
 
@@ -134,6 +176,13 @@ Three things in that table catch operators out:
   This is the single most common "AI is broken" false report.
 - **`MEMBER` does not have `AUDIT_READ` or `REPORT_*` management beyond its own bundle** — but it
   *does* have full report CRUD and record CRUD. Members are not read-only.
+- **`MEMBER` holds `CAMPAIGN_VIEW` but not `CAMPAIGN_MANAGE`, and the campaign UI does not respect
+  that.** Campaign detail renders its **Delete** button unconditionally, so **every default member**
+  sees a control that returns `403` when pressed — the exact case in
+  [#959](https://github.com/itkla/connex/issues/959). Recognize this report on sight ("Delete on a
+  campaign does nothing / says forbidden") instead of investigating the instance: the role is
+  correct, the button should not be there. The fix is a frontend permission guard, not a role
+  change; do not grant `CAMPAIGN_MANAGE` to work around it.
 
 Two permission constants exist but are **inert and non-grantable**: `SSO_MANAGE` (SSO is authorized
 org-side instead) and `WORKSPACE_DELETE` (no endpoint uses it). They are retained only so stored
@@ -159,8 +208,15 @@ DELETE /api/workspaces/{workspaceId}/roles/{roleId}
 - Deleting a custom role nulls the reference, so its members fall back to their built-in role rather
   than losing everything.
 - **No one can confer a permission they do not themselves hold.** This cap is enforced on role
-  create, update, and delete, on custom-role assignment, and on built-in role change. Non-grantable
+  **create** and **update**, on custom-role assignment, and on built-in role change. Non-grantable
   values are rejected on input and silently dropped on read.
+- **Deletion is the exception, and it is not a cap at all.** `deleteRole` runs the same
+  authorization lock but passes an **empty** requested-permission set into the grantable check, so
+  the check iterates nothing: **any `ROLE_MANAGE` holder can delete a custom role that grants
+  permissions they do not hold.** The blast radius is a privilege *reduction* — deleted members fall
+  back to their built-in bundle — but do not describe deletion to a customer as
+  permission-capped, and treat "someone deleted the role that held our elevated access" as a
+  reachable state for any `ROLE_MANAGE` holder.
 - `GET /api/permissions` lists grantable names; `GET /api/permissions/effective` returns the calling
   member's effective set — that endpoint is the fastest way to settle a "why can't I do X" ticket.
 
@@ -185,11 +241,20 @@ mention-visibility helper is explicitly documented as **never to be used for aut
 | Redeems an emailed token invite | **`active` immediately** |
 | Redeems a shareable invite link | **`active` immediately** |
 | Added by an admin when the email **already belongs to a Connex user** | **`pending`** — they must accept |
+| **Emailed an invite** at an address that **already belongs to a Connex user** | **`pending`** — and **no email is sent** |
 
-So a `pending` row only appears on the "add an existing user" path. `pending → active` happens only
-via the invitee's own `POST /api/workspaces/{id}/accept`, which re-applies the organization email
--domain ceiling on activation. Declining deletes the row. A user whose only memberships are pending
-can log in but has no accessible workspace.
+**That last row is the trap.** `createInvite` checks the address first: when it already belongs to a
+Connex account it silently switches to `addPendingMember` and returns a member instead of an invite
+— **no token row, no email, no link to hand over**. The invitee gets only an in-app
+`workspace.join` notification and a row in their own pending list, neither of which they will see
+until they happen to sign in. From the admin's side the roster just shows `pending`, which looks
+identical to an invite that was emailed and ignored. **So a `pending` row does not mean "they
+ignored the email" — on this path there was never an email.** Chase it by telling the person
+directly to sign in and accept at **Settings → Membership**.
+
+`pending → active` happens only via the invitee's own `POST /api/workspaces/{id}/accept`, which
+re-applies the organization email-domain ceiling on activation. Declining deletes the row. A user
+whose only memberships are pending can log in but has no accessible workspace.
 
 Note that `workspace_invite.status` (`pending` / `accepted` / `revoked`) is a **different** thing
 from membership status; invite links use a separate revoked flag. Do not conflate them when reading
@@ -202,8 +267,8 @@ member — **and every one of them additionally requires step-up**:
 
 | Action | Endpoint | Permission |
 |---|---|---|
-| Create / list / revoke token invites | `POST`/`GET`/`DELETE` `/api/workspaces/{id}/invites` | `MEMBER_MANAGE` |
-| Create / list / revoke invite links | `POST`/`GET`/`DELETE` `/api/workspaces/{id}/invite-links` | `MEMBER_MANAGE` |
+| Create / revoke token invites | `POST`/`DELETE` `/api/workspaces/{id}/invites` | `MEMBER_MANAGE` |
+| Create / revoke invite links | `POST`/`DELETE` `/api/workspaces/{id}/invite-links` | `MEMBER_MANAGE` |
 | Add an existing user directly | `POST /api/workspaces/{id}/members` | `MEMBER_MANAGE` |
 | Remove a member | `DELETE /api/workspaces/{id}/members/{userId}` | `MEMBER_MANAGE` |
 | Change a built-in role | `PATCH /api/workspaces/{id}/members/{userId}` (`role`) | `MEMBER_MANAGE` |
@@ -211,6 +276,10 @@ member — **and every one of them additionally requires step-up**:
 | Create a brand-new user account | `POST /api/users` | `MEMBER_MANAGE` |
 
 Reading the roster (`GET /api/workspaces/{id}/members`) needs only membership, not `MEMBER_MANAGE`.
+**Listing invites is permission-only** — `GET /api/workspaces/{id}/invites` and
+`GET /api/workspaces/{id}/invite-links` need `MEMBER_MANAGE` but **no step-up**. Only create and
+revoke are step-up gated, so an admin without a passkey can still see what is outstanding; they
+simply cannot issue or withdraw anything.
 
 Guardrails worth knowing before you promise something to a customer:
 
@@ -240,25 +309,91 @@ This distinction decides who can perform the offboarding calls:
 
 **No `Permission` constant gates teardown at all** — do not go looking for one.
 
+**How an `org_member` row comes to exist — there are exactly two ways.** This is the question every
+offboarding rehearsal actually turns on, and neither way is a workspace operation:
+
+| Path | Who it produces |
+|---|---|
+| **Founding owner at organization creation** — `provisionWorkspace` mints an organization whenever the creator has no administrative tenant context, and calls `addFoundingOwner` | The first `owner`, set once, automatically |
+| **Organization → Members** — `POST`/`PUT` `/api/orgs/{orgId}/members`, **org-owner-only plus step-up**, target must already be a Connex account (`No Connex account uses that email address`) | Every subsequent `owner` or `admin` |
+
+> **A workspace owner who joined by invite has no `org_member` row at all** — invite redemption and
+> `addMember` write workspace membership only. They will pass every workspace check, look like the
+> most senior person in the tenant, and then fail **both** offboarding calls with
+> `Organization administrator access required` / `Organization owner access required`.
+
+So designate the organization owner explicitly at onboarding: either the partner's intended owner is
+the account that **created** the organization, or an existing org owner adds them at
+**Organization → Members**. An organization always keeps at least one owner
+(`An organization must keep at least one owner`), so the founding row cannot be stranded by a later
+demotion.
+
 ### Step-up requires a passkey — plan for this
 
 "Step-up" is not a password re-prompt. `requireRecentAuthentication` checks for a WebAuthn step-up
 stamp on the current session, bound to the same user id, inside the recent-authentication window
 (`CONNEX_RECENT_AUTHENTICATION_WINDOW`, default **10 minutes**).
 
-**An ordinary password login clears that stamp.** Only a passkey login or the dedicated step-up
-ceremony sets it. Therefore:
+**Any login other than a passkey login clears that stamp** — password, SSO, SSO-link, and the
+auto-login that runs after registration all route through the one session ceremony
+(`AuthService.establishAuthenticatedSession`), which removes it. Only a passkey login or the
+dedicated step-up ceremony (`POST /api/auth/webauthn/step-up/options` →
+`POST /api/auth/webauthn/step-up`) sets it. Therefore:
 
-> **A user with no registered passkey can never complete any step-up-guarded operation** — creating
-> an invite, changing a role, editing workspace mail settings, exporting a tenant, or tearing one
-> down.
+> **A user with no registered passkey cannot complete any step-up-guarded operation** — creating an
+> invite, changing a role, editing workspace mail settings, exporting a tenant, or tearing one down
+> — **until they enrol one.**
 
-The failure is a `403` with a machine-readable code, which the frontend recognizes and turns into a
-passkey prompt:
+Those examples are illustrative, not exhaustive. Step-up is called from 44 sites across 20 classes, so
+an administrator without a passkey will also hit it on organization member management, SSO connection
+setup, allowed-domain changes, the organization AI provider, delivery and connector configuration,
+APPI incident records, data-subject-request handling, and connecting or disconnecting their own
+Google or Microsoft account. Treat "any administrative write outside ordinary CRM records" as the
+working rule rather than memorising the list.
+
+#### Enrolling a first passkey — the unblock is self-service
+
+The barrier is one extra ceremony, not a dead end. **First-passkey enrolment is not itself gated on
+having a passkey**, so a stuck user unblocks themselves:
+
+1. Sign in normally (password or SSO).
+2. Enrol a passkey at **Account → Security** (`/account/security`).
+3. Retry the operation — the passkey now satisfies step-up.
+
+`GET /api/auth/webauthn/register/requirements` tells the client which proof the account owes;
+`AuthService.requireFirstPasskeyBootstrapAuthentication` then takes one of exactly two paths:
+
+| Account type | What authorizes the first passkey |
+|---|---|
+| Has a password | **The current password** (`requireCurrentPassword`) — the UI asks for it in a dialog. It is rate-limited like a login. |
+| Passwordless (SSO-only) | **A freshly established session** (`requireFreshAuthenticatedSession`) — the *login* timestamp must be inside the same recent-authentication window. |
+
+**Say the consequence out loud, because it is the opposite of what "step-up" sounds like: for a
+password-backed account, step-up is not a second factor.** Whoever holds the password can sign in,
+enrol their own passkey, and step up — three requests, no other credential — so a stolen password
+yields full administrative capability, including tenant export and teardown. Step-up buys
+phishing-resistant confirmation for accounts that are already passkey- or SSO-backed; it does not
+add a factor on top of a password. Where that matters contractually, enforce SSO for the account
+(`SsoEnforcedException` refuses password login) rather than relying on step-up.
+
+**The passwordless 10-minute trap.** An SSO-only owner who has been signed in for longer than the
+recent-authentication window **cannot bootstrap a passkey at all**:
+`requireFreshAuthenticatedSession` tests the **login** timestamp against that same window, and its
+refusal is a plain `ForbiddenException("Recent sign-in required")` with **no machine-readable
+code** — so the frontend's code-based step-up handling never fires and the user sees only an
+unexplained `403`. **The fix is to sign out, sign back in, and enrol immediately.** Brief SSO-only
+partner owners on this before they need it; nothing in the UI says it.
+
+The step-up failure itself is a `403` with a machine-readable code:
 
 ```json
 { "code": "RECENT_AUTHENTICATION_REQUIRED", "message": "Recent WebAuthn authentication required" }
 ```
+
+**The frontend turns that into a passkey prompt only on mutating requests.** The retry helper in
+`app/lib/api.ts` refuses to prompt unless the request was a mutation, so a **`GET`** that needs
+step-up — and the tenant export is a `GET` — returns a bare `403` with no prompt and no in-app way
+to recover. See [Offboarding](#offboarding) for the procedure that works around it.
 
 Operationally: **make sure the customer's organization owner registers a passkey during onboarding,
 not on the day they need to offboard.** Setting the window to zero or a negative value disables
@@ -271,6 +406,18 @@ step-up entirely — do not do that to work around a missing passkey.
 The workspace must exist first (see provisioning above). Then choose the path that matches the
 instance's mail posture.
 
+**Before choosing a path, check that the tester can even get an account.** Redeeming an invite is
+**not** a registration path: both `/invite/{token}` and `/invite-link/{token}` redirect an anonymous
+visitor to **`/auth/login`** (never to `/auth/register`), and the accept endpoints act on the
+signed-in user. So the tester must already have an account and be signed in when they open the link.
+
+| Instance posture | How the tester gets an account |
+|---|---|
+| `CONNEX_SIGNUP_MODE=open` (shipped default) | They self-register, then open the invite. Their account lands with zero workspaces; the invite supplies the workspace. |
+| **Signup mode anything else** | **They cannot self-register at all.** An admin must create the account first with `POST /api/users` — in the UI that is the **Users** page (`/users`), not Settings → Members — and then invite it. An invite link on a closed-signup instance is otherwise a dead end. |
+
+Then choose the delivery path that matches the instance's mail posture.
+
 | Situation | Path |
 |---|---|
 | Mail is configured and working | Emailed invite — `InviteService.createInvite` |
@@ -278,11 +425,21 @@ instance's mail posture.
 | The tester already has a Connex account on this instance | `addExistingMember` — adds them directly, no email round-trip, but lands them **`pending`** until they accept |
 
 **Use the shareable link by default during a pilot.** The emailed invite is dispatched through
-`MailService.sendForWorkspace`, which is `@Async` and **swallows every delivery failure** — it logs
-at `ERROR` and returns. The invite row is created either way; `InviteEmailService` is explicit that
-"a mail outage never blocks creating the invite. When no sender is configured the invite is still
-created; only the email is skipped." From the operator's side that is indistinguishable from
-success. The link path removes the ambiguity: you hold the credential and deliver it yourself.
+`MailService.sendForWorkspace`, which is `@Async` and reports nothing to the caller either way. Two
+distinct silences, and the second is the common one on a pilot instance:
+
+- a delivery attempt that throws is logged at **`ERROR`** ("Failed to send email to …") and swallowed;
+- **no usable SMTP configuration at all** is logged only at **`WARN`** ("Email to … not sent: no
+  usable SMTP configuration") and skipped before anything is attempted.
+
+The invite row is created either way; `InviteEmailService` is explicit that "a mail outage never
+blocks creating the invite. When no sender is configured the invite is still created; only the email
+is skipped." From the operator's side both are indistinguishable from success. The link path removes
+the ambiguity: you hold the credential and deliver it yourself.
+
+**Also remember the existing-account branch:** emailing an invite to an address that already belongs
+to a Connex user sends **no mail at all** and produces a `pending` member instead — see "Membership
+states" above.
 
 Shareable links are created in the UI at **Settings → Members**, or directly:
 
@@ -300,11 +457,20 @@ DELETE /api/workspaces/{workspaceId}/invite-links/{linkId}
 - The tester redeems at `/invite-link/{token}` — `GET /api/invite-links/{token}` previews,
   `POST /api/invite-links/{token}/accept` joins and sets the active-workspace cookie. Redemption
   makes them **`active` immediately**; there is no separate acceptance step to chase.
+  **Deliver the whole URL** (`https://<host>/invite-link/{token}`) and tell them to open it. It is
+  the one thing the `/onboarding` paste box cannot handle — see "Admin-only provisioning" above.
 - Emailed invites use the parallel `/invite/{token}` route and are built from
   `connex.mail.app-base-url`, **never** from a request header. If that base URL is wrong, every
-  emailed invite link is wrong.
-- Invite tokens are redacted from request-path logging, so you cannot recover a lost link from the
-  logs. Reissue it.
+  emailed invite link is wrong. Their expiry is **14 days, hardcoded in the mapper SQL** — no
+  property overrides it — and unlike a shareable link each one is **single-use and bound to the
+  invited address**: a different signed-in user gets
+  `This invite was sent to a different email address`, and a second redemption gets
+  `This invite is no longer available`.
+- **Tokens never reach the logs** — there is no request/access logging of paths in the backend at
+  all, error-report paths are redacted by `RequestPathRedactor`, and the invite email itself is
+  never logged. But a "lost" link does **not** need reissuing: the raw token is returned on create
+  and is listed again by `GET /api/workspaces/{id}/invites` and
+  `GET /api/workspaces/{id}/invite-links` (`MEMBER_MANAGE`, no step-up). Read it back and re-send.
 
 **Caveat.** If `connex.registration-verification.enabled=true`, joining a domain-restricted
 workspace through a shareable link additionally requires a verified email address — which needs the
@@ -334,12 +500,22 @@ bash gradlew seedData \
 - Run from `backend/`. Inputs are `-PseederProfile=small|volume` (default `small`),
   `-PseederSeed=<long>` (default `853`), `-PseederWorkspaces=<1..100>` (default `1`),
   `-PseederAnchorDate=YYYY-MM-DD`, `-PseederAllowRemoteHost=true|false` (default `false`).
-- **It must target a dedicated, disposable schema.** The validator refuses a protected Connex
-  catalog and requires a numeric loopback host unless remote hosts are explicitly allowed. **Never
-  point it at `connex_pub` or any staging or customer schema.**
-- **It is one-shot.** Slugs, usernames, and emails are deterministic and globally unique, so a
-  second run against a seeded schema fails on unique constraints **by design**. A mid-run failure
-  means drop and recreate the schema, not resume.
+- **It must target a dedicated, disposable schema, and the name is part of the contract.** The
+  catalog must **start with `connex_seed` or `cnx_seeder_`** (`must name a dedicated seeder
+  catalog`), so a perfectly disposable schema called `demo_seed` is still refused. The two protected
+  catalogs `connex_pub` and `connexdb` are refused outright, at startup and again against the
+  effective datasource at run time. **Never point it at `connex_pub` or any staging or customer
+  schema.**
+- **Host rule: numeric loopback.** `127.0.0.1`, `::1`, and `0:0:0:0:0:0:0:1` pass. The hostname
+  **`localhost` is refused even with `-PseederAllowRemoteHost=true`** (`must use a numeric loopback
+  address`) — a detail that costs people ten minutes. Any other host needs
+  `-PseederAllowRemoteHost=true` explicitly.
+- **It is one-shot.** Workspace and organization slugs and seeded **usernames and user emails** are
+  deterministic, so a second run **with the same seed** against a seeded schema fails on unique
+  constraints **by design**. (Seeded *person* emails are fixtures, repeat across workspaces, and are
+  not unique-constrained — do not use them to reason about collisions.) Each workspace commits in
+  its own transaction, so a mid-run failure leaves the earlier workspaces committed: drop and
+  recreate the schema, never resume.
 - **`connex.deployment.profile` must be unset** for a seeder run — the seeder validator refuses a
   set profile, because a fixture-loading run is not a deployment. This is why `seeder` is exempt
   from the mandatory-profile check.
@@ -348,7 +524,13 @@ bash gradlew seedData \
   customer environment.
 - Seeding writes through the same MyBatis inserts but does **not** call entity services, rule
   triggers, notification publishers, or audit publishers — so a seeded workspace generates no
-  automation or notification traffic and has a thin audit trail. That is expected.
+  automation and no notification traffic, and writes **no audit rows at all**: `audit_log` is empty
+  on a seeded schema. That is expected, and it means a seeded workspace is useless for demonstrating
+  the audit trail.
+- **The anchor date is not an upper bound.** Interactions are spread backwards from it, but open
+  deals are given expected close dates up to **60 days after** the anchor, so a seeded workspace has
+  a forward-looking pipeline as well as a history. Pick an anchor with that in mind when you are
+  demonstrating forecast or close-date behaviour.
 
 **Real import.** For a partner evaluating on their own data, import instead of seeding, and agree
 field mapping and data ownership up front.
@@ -511,18 +693,56 @@ paraphrasing this section.
 ## Offboarding
 
 The sequence is **export → verify → delete workspaces → delete organization**. There is **no CLI for
-any of it.** Offboarding is HTTP plus owner step-up, performed by the customer's own organization
-owner or administrator against their own deployment.
+any of it** — and, less obviously, **no UI for any of it either**: nothing in the frontend calls the
+export or teardown endpoints. Offboarding is hand-assembled HTTP against the deployment, performed
+by the customer's own organization owner or administrator.
 
 **Confirm before you start that the operator has a registered passkey.** Both the export and both
 teardown calls are step-up-guarded, and step-up is WebAuthn-only — a password-only session fails
 every one of them with `RECENT_AUTHENTICATION_REQUIRED`. Discovering this at termination, when the
-account may already be the last one standing, is a bad day.
+account may already be the last one standing, is a bad day. If they have no passkey, enrol one
+first: **Account → Security**, see "Step-up requires a passkey" above.
+
+### 0. Get the session stamped — do this first, it is not obvious
+
+The export is a **`GET`** (`TenantLifecycleController.export`), and the frontend's automatic passkey
+prompt fires **only on mutating requests**. There is also no manual "step up now" control anywhere
+in the UI, and `curl` cannot perform a WebAuthn ceremony. So there is no direct way to satisfy
+step-up on the export call itself. The working procedure is indirect, and every step of it must
+happen inside one recent-authentication window (default **10 minutes**):
+
+1. **Sign in as the organization owner or administrator in a browser, with a passkey.**
+2. **Perform an unrelated step-up-guarded *mutation* purely to stamp the session.** The least
+   invasive is renaming one of your own passkeys at **Account → Security**
+   (`PATCH /api/auth/webauthn/credentials/{credentialId}`) — it is step-up-guarded, touches no
+   tenant data, and you can rename it straight back. Creating and then revoking a throwaway invite
+   link (**Settings → Members**) also works. Complete the passkey prompt the frontend raises.
+3. **Reuse that same authenticated session for the export.** The stamp lives on the servlet session,
+   so it travels with the `JSESSIONID` cookie:
+   - *Simplest:* paste the export URL into the same browser. It is a `GET` with
+     `Content-Disposition: attachment`, so the ZIP just downloads.
+   - *Scripted:* copy `JSESSIONID` from the browser's devtools (Application → Cookies) and replay it
+     with `curl`.
+4. **The stamp is not consumed by use** — every call inside the window succeeds — but it does
+   expire. A long export or a careful ZIP verification will outlive it, so **re-stamp with another
+   mutation before the teardown calls**.
+
+> **This is a current product gap, not a design.** The missing export/teardown UI and the missing
+> manual step-up trigger are **tracked**; until they land, the sequence above is the documented
+> procedure and a tester cannot complete an offboarding without it. Do not "fix" it by setting
+> `CONNEX_RECENT_AUTHENTICATION_WINDOW` to zero — that disables step-up for the whole instance.
 
 ### 1. Export
 
 ```text
 GET /api/orgs/{orgId}/workspaces/{workspaceId}/export
+```
+
+With a session stamped per step 0, either open that URL in the same browser or replay the cookie:
+
+```bash
+curl -sS -OJ -b "JSESSIONID=<value-from-devtools>" \
+  https://<partner-host>/api/orgs/<orgId>/workspaces/<workspaceId>/export
 ```
 
 - Requires **organization administrator** access (`Organization administrator access required`) and
@@ -554,6 +774,19 @@ at generation.
 ```text
 DELETE /api/orgs/{orgId}/workspaces/{workspaceId}     body: { "confirmation": "<workspace-slug>" }
 DELETE /api/orgs/{orgId}                              body: { "confirmation": "<organization-slug>" }
+```
+
+These are mutations with a JSON body and no UI, so they need the session cookie **and** a CSRF token
+from the same session — plus a step-up stamp that is still inside the window (re-stamp per step 0 if
+verifying the ZIP took longer than that):
+
+```bash
+BOOTSTRAP=$(curl -sS -b "JSESSIONID=<value>" https://<partner-host>/api/auth/csrf)
+curl -sS -X DELETE -b "JSESSIONID=<value>" \
+  -H "$(jq -r .headerName <<<"$BOOTSTRAP"): $(jq -r .token <<<"$BOOTSTRAP")" \
+  -H 'Content-Type: application/json' \
+  -d '{"confirmation":"<workspace-slug>"}' \
+  https://<partner-host>/api/orgs/<orgId>/workspaces/<workspaceId>
 ```
 
 Both return `204`. Both are guarded four ways:
