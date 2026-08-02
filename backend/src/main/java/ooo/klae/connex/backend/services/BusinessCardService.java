@@ -142,6 +142,27 @@ public class BusinessCardService {
     }
 
     /**
+     * Returns last-known scanning readiness without starting a storage or sidecar probe. Read-only
+     * diagnostics use this so opening a report never contacts the OCR sidecar or object storage.
+     *
+     * @return capability readiness as of the latest completed observation
+     */
+    public boolean isAvailableCached() {
+        return binaryStore.isReadyCached()
+                && properties.isEnabled()
+                && ocrClient.isReadyCached();
+    }
+
+    /**
+     * Returns last-known manual-import readiness without starting a storage probe.
+     *
+     * @return manual import readiness as of the latest completed observation
+     */
+    public boolean isImportAvailableCached() {
+        return binaryStore.isReadyCached();
+    }
+
+    /**
      * Returns business-card readiness for the authorized active workspace.
      *
      * @return workspace-scoped scan and import readiness

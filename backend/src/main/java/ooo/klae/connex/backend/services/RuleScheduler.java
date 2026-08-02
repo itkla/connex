@@ -9,7 +9,12 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+
+import java.util.Map;
 
 /**
  * Periodically evaluates time-based (schedule) rules. Mirrors the notification scheduler: it fans out
@@ -25,6 +30,7 @@ public class RuleScheduler {
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final RuleEngineService ruleEngineService;
+    private final JobRunRecorder jobRunRecorder;
 
     private static final Logger log = LoggerFactory.getLogger(RuleScheduler.class);
     private static final String[] CADENCES = {"hourly", "daily", "weekly"};
@@ -56,19 +62,41 @@ public class RuleScheduler {
      */
     private void evaluateCatalog(String catalog) {
         for (int workspaceId : tenantWorkScope.withCatalog(catalog, ruleMapper::workspaceIdsWithEnabledScheduleRules)) {
+            JobRunDetail detail = JobRunDetail.startedUtc();
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {
+                    int completedCadences = 0;
+                    int failedCadences = 0;
                     for (String cadence : CADENCES) {
                         try {
                             ruleEngineService.runSchedule(workspaceId, cadence);
+                            completedCadences++;
                         } catch (Exception e) {
+                            failedCadences++;
                             log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
                         }
                     }
+                    record(
+                        workspaceId,
+                        failedCadences == 0 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED,
+                        new JobRunDetail(detail.startedAt(), Map.of(
+                            "completedCadences", completedCadences,
+                            "failedCadences", failedCadences)));
                 });
             } catch (Exception e) {
                 log.warn("Schedule evaluation skipped for workspace {}: {}", workspaceId, e.getMessage());
             }
+        }
+    }
+
+    private void record(int workspaceId, JobRunStatus status, JobRunDetail detail) {
+        try {
+            jobRunRecorder.record(JobRunRecorder.RULE_SCHEDULER, workspaceId, status, detail);
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Job run recording failed jobName={} exceptionClass={}",
+                JobRunRecorder.RULE_SCHEDULER,
+                exception.getClass().getSimpleName());
         }
     }
 }

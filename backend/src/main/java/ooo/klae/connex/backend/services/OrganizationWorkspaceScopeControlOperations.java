@@ -41,6 +41,24 @@ public class OrganizationWorkspaceScopeControlOperations {
         return new WorkspaceScope(orgId, workspaceIds, workspaceIdsJson);
     }
 
+    /**
+     * Resolves the complete organization workspace scope, including an empty organization.
+     *
+     * @param orgId organization to resolve
+     * @return sorted workspace IDs and their JSON representation
+     */
+    @Transactional(readOnly = true)
+    public WorkspaceScope getForOrg(int orgId) {
+        List<Integer> workspaceIds = workspaceMapper.findByOrgId(orgId).stream()
+            .map(Workspace::getId)
+            .sorted()
+            .toList();
+        String workspaceIdsJson = workspaceIds.stream()
+            .map(String::valueOf)
+            .collect(Collectors.joining(",", "[", "]"));
+        return new WorkspaceScope(orgId, workspaceIds, workspaceIdsJson);
+    }
+
     /** Complete control-derived workspace scope for one organization. */
     public record WorkspaceScope(int orgId, List<Integer> workspaceIds, String workspaceIdsJson) {
         public WorkspaceScope {

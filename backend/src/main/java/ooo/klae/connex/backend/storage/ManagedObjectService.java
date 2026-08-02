@@ -73,6 +73,16 @@ public class ManagedObjectService implements ApplicationRunner {
         return snapshot != null && snapshot.ready();
     }
 
+    /**
+     * Returns last-known object-storage readiness without starting a storage probe.
+     *
+     * @return {@code true} when the latest completed readiness observation succeeded
+     */
+    public boolean isReadyCached() {
+        ReadinessSnapshot snapshot = readinessSnapshot;
+        return snapshot != null && snapshot.ready();
+    }
+
     @Override
     public void run(ApplicationArguments args) {
         refreshReadiness();

@@ -27,6 +27,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
@@ -183,6 +184,7 @@ class OrganizationWorkspaceScopeControlAccessTest {
 
             tenantContext.set(7, 901, 42, "member", "cnx_tenant");
             assertThrows(IllegalStateException.class, () -> controlAccess.getForWorkspace(7));
+            assertThrows(ResourceNotFoundException.class, () -> controlAccess.getForOrg(900));
         }
     }
 

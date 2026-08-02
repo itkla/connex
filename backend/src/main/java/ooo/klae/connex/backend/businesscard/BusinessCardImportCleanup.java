@@ -12,8 +12,13 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+
+import java.util.Map;
 
 /**
  * Bounded catalog-aware retention cleanup for business-card import reservations and claims.
@@ -28,6 +33,7 @@ public class BusinessCardImportCleanup {
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final Clock clock;
+    private final JobRunRecorder jobRunRecorder;
 
     @Scheduled(
         fixedDelayString = "${connex.business-cards.idempotency-cleanup-delay:PT1M}",
@@ -51,7 +57,33 @@ public class BusinessCardImportCleanup {
         int perWorkspace = properties.getIdempotencyCleanupPerWorkspaceBatchSize();
         List<Integer> workspaceIds = mapper.workspaceIdsWithExpired(cutoff, perWorkspace);
         for (int workspaceId : workspaceIds) {
-            mapper.deleteExpired(workspaceId, cutoff, perWorkspace);
+            JobRunDetail detail = JobRunDetail.started(clock);
+            try {
+                int deletedCount = mapper.deleteExpired(workspaceId, cutoff, perWorkspace);
+                record(workspaceId, JobRunStatus.SUCCEEDED,
+                    new JobRunDetail(detail.startedAt(), Map.of("deletedCount", deletedCount)));
+            } catch (RuntimeException exception) {
+                record(workspaceId, JobRunStatus.FAILED,
+                    new JobRunDetail(detail.startedAt(), Map.of("phase", "workspace_cleanup")));
+                log.warn(
+                    "Business-card import retention cleanup failed for workspace {}",
+                    workspaceId);
+            }
+        }
+    }
+
+    private void record(int workspaceId, JobRunStatus status, JobRunDetail detail) {
+        try {
+            jobRunRecorder.record(
+                JobRunRecorder.BUSINESS_CARD_IMPORT_CLEANUP,
+                workspaceId,
+                status,
+                detail);
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Job run recording failed jobName={} exceptionClass={}",
+                JobRunRecorder.BUSINESS_CARD_IMPORT_CLEANUP,
+                exception.getClass().getSimpleName());
         }
     }
 }

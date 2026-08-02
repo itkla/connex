@@ -21,6 +21,9 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -40,6 +43,7 @@ public class ObjectDeletionRetryQueue {
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final Clock clock;
+    private final JobRunRecorder jobRunRecorder;
     private final Map<String, Integer> tenantCatalogCursors = new ConcurrentHashMap<>();
     private final ExecutorService retryExecutor = Executors.newFixedThreadPool(
         2,
@@ -248,22 +252,61 @@ public class ObjectDeletionRetryQueue {
     }
 
     private void retryUserCatalog() {
-        try {
-            tenantWorkScope.unrouted(() -> {
+        JobRunDetail detail = JobRunDetail.started(clock);
+        JobRunStatus[] outcome = {null};
+        tenantWorkScope.unrouted(() -> {
+            try {
                 List<ObjectDeletionTask> tasks = userQueueMapper.findDue(
                     now(), properties.getDeleteRetryBatchSize());
+                boolean anyTaskFailed = false;
                 for (ObjectDeletionTask task : tasks) {
                     try {
                         LocalDateTime current = now();
                         transactionExecutor.retryUser(task, current);
                     } catch (RuntimeException exception) {
+                        anyTaskFailed = true;
                         log.warn("User object deletion task could not be finalized");
                     }
                 }
-                return null;
-            });
-        } catch (RuntimeException exception) {
-            log.warn("Private user object deletion sweep failed");
+                if (anyTaskFailed) {
+                    outcome[0] = JobRunStatus.FAILED;
+                } else if (!tasks.isEmpty()) {
+                    outcome[0] = JobRunStatus.SUCCEEDED;
+                }
+            } catch (RuntimeException exception) {
+                outcome[0] = JobRunStatus.FAILED;
+                log.warn("Private user object deletion sweep failed");
+            }
+            return null;
+        });
+        recordInstanceSweep(outcome[0], detail);
+    }
+
+    /**
+     * Publishes one control-plane sweep outcome into every active tenant catalog.
+     *
+     * <p>{@code job_run} belongs to the tenant lineage, so a row written from the unrouted
+     * control-plane scope is not readable by diagnostics, which reads under each organization's
+     * placement. Writing the instance row once per active catalog keeps the erasure signal visible
+     * in every mode; under {@code single-database} that is exactly one write.
+     *
+     * @param status sweep outcome, or {@code null} when there was nothing due
+     * @param detail sweep start time
+     */
+    private void recordInstanceSweep(JobRunStatus status, JobRunDetail detail) {
+        if (status == null) {
+            return;
+        }
+        for (String catalog : placementRegistry.activeCatalogs()) {
+            try {
+                tenantWorkScope.withCatalog(catalog, () -> {
+                    record(null, status,
+                        new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
+                    return null;
+                });
+            } catch (RuntimeException exception) {
+                log.warn("Instance sweep diagnostics could not be recorded for a tenant catalog");
+            }
         }
     }
 
@@ -281,19 +324,51 @@ public class ObjectDeletionRetryQueue {
             int workspaceId = workspaceIds.get(index);
             int workspacesRemaining = workspaceIds.size() - index;
             int workspaceLimit = Math.max(1, remaining / workspacesRemaining);
-            List<ObjectDeletionTask> tasks = tenantQueueMapper.findDue(
-                workspaceId, current, workspaceLimit);
-            for (ObjectDeletionTask task : tasks) {
-                try {
-                    LocalDateTime attemptAt = now();
-                    transactionExecutor.retryTenant(task, attemptAt);
-                } catch (RuntimeException exception) {
-                    log.warn("Tenant object deletion task could not be finalized for workspace {}",
-                        task.workspaceId());
+            JobRunDetail detail = JobRunDetail.started(clock);
+            try {
+                List<ObjectDeletionTask> tasks = tenantQueueMapper.findDue(
+                    workspaceId, current, workspaceLimit);
+                int failedCount = 0;
+                for (ObjectDeletionTask task : tasks) {
+                    try {
+                        LocalDateTime attemptAt = now();
+                        transactionExecutor.retryTenant(task, attemptAt);
+                    } catch (RuntimeException exception) {
+                        failedCount++;
+                        log.warn("Tenant object deletion task could not be finalized for workspace {}",
+                            task.workspaceId());
+                    }
                 }
+                record(
+                    workspaceId,
+                    failedCount > 0 ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED,
+                    new JobRunDetail(detail.startedAt(), Map.of(
+                        "attemptedCount", tasks.size(),
+                        "failedCount", failedCount)));
+                remaining -= tasks.size();
+                tenantCatalogCursors.put(cursorKey, workspaceId);
+            } catch (RuntimeException exception) {
+                record(workspaceId, JobRunStatus.FAILED,
+                    new JobRunDetail(detail.startedAt(), Map.of("phase", "workspace_retry")));
+                log.warn(
+                    "Tenant object deletion workspace sweep failed for workspace {}",
+                    workspaceId);
             }
-            remaining -= tasks.size();
-            tenantCatalogCursors.put(cursorKey, workspaceId);
+        }
+    }
+
+    private void record(Integer workspaceId, JobRunStatus status, JobRunDetail detail) {
+        try {
+            jobRunRecorder.record(
+                JobRunRecorder.OBJECT_DELETION_RETRY,
+                workspaceId,
+                status,
+                detail);
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Job run recording failed jobName={} exceptionClass={}",
+                JobRunRecorder.OBJECT_DELETION_RETRY,
+                exception.getClass().getSimpleName());
         }
     }
 

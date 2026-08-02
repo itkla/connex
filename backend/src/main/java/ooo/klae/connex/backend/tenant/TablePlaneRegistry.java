@@ -121,6 +121,7 @@ public final class TablePlaneRegistry {
         "historical_notification_baseline",
         "identity_collision",
         "introduction",
+        "job_run",
         "managed_object_usage",
         "note",
         "notification",

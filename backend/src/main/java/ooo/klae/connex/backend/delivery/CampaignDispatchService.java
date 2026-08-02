@@ -54,28 +54,43 @@ public class CampaignDispatchService {
     private final CapabilityRegistry capabilityRegistry;
 
     /** Processes every queued send in the workspace. Never throws. */
-    public void processWorkspace(int workspaceId) {
+    public int processWorkspace(int workspaceId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
-            return;
+            return 0;
         }
+        int failed = 0;
         for (int sendId : campaignSendMapper.queuedSendIds(workspaceId)) {
             try {
-                processSend(workspaceId, sendId);
+                if (!processSend(workspaceId, sendId)) {
+                    failed++;
+                }
             } catch (Exception exception) {
+                failed++;
                 log.warn("Campaign send {} dispatch failed in workspace {}: {}",
                         sendId, workspaceId, exception.getMessage());
             }
         }
+        return failed;
     }
 
-    /** Dispatches the pending deliveries of one send, claim-first. Never throws. */
-    public void processSend(int workspaceId, int sendId) {
+    /**
+     * Dispatches the pending deliveries of one send, claim-first. Never throws.
+     *
+     * @param workspaceId owning workspace
+     * @param sendId send to dispatch
+     * @return {@code false} when the send could not be dispatched because of a fault the operator
+     *         should see — an unresolvable delivery provider or a missing message revision — and
+     *         {@code true} for both a successful dispatch and a legitimate no-op. Scheduler
+     *         diagnostics derive their run status from this, so a silently undeliverable send is
+     *         never reported as a healthy sweep.
+     */
+    public boolean processSend(int workspaceId, int sendId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
-            return;
+            return true;
         }
         CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
         if (send == null || !("queued".equals(send.getStatus()) || "running".equals(send.getStatus()))) {
-            return;
+            return true;
         }
         DeliveryChannel channel;
         ResolvedDeliveryProvider target;
@@ -86,19 +101,19 @@ public class CampaignDispatchService {
             dispatcher = deliveryProviderRouter.dispatcherFor(target.providerId());
         } catch (RuntimeException exception) {
             log.warn("Campaign send {} has no usable provider: {}", sendId, exception.getMessage());
-            return;
+            return false;
         }
         CampaignMessageRevision revision =
                 campaignMessageMapper.getRevision(workspaceId, send.getMessageId(), send.getMessageVersion());
         if (revision == null) {
             log.warn("Campaign send {} references a missing message revision", sendId);
-            return;
+            return false;
         }
         campaignSendMapper.assignProvider(workspaceId, sendId, target.providerId());
         campaignSendMapper.markRunning(workspaceId, sendId);
         CampaignSend running = campaignSendMapper.getSend(workspaceId, sendId);
         if (running == null || !"running".equals(running.getStatus())) {
-            return;
+            return true;
         }
         for (int deliveryId : campaignDeliveryMapper.pendingDeliveryIds(workspaceId, sendId)) {
             CampaignSend current = campaignSendMapper.getSend(workspaceId, sendId);
@@ -118,6 +133,7 @@ public class CampaignDispatchService {
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             campaignSendMapper.markCompleted(workspaceId, sendId);
         }
+        return true;
     }
 
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,

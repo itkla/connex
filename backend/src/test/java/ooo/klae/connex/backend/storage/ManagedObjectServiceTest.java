@@ -537,6 +537,23 @@ class ManagedObjectServiceTest {
     }
 
     @Test
+    void cachedReadinessNeverStartsAnExpiredStorageProbe() throws Exception {
+        properties.setReadinessCacheTtlMs(1);
+        when(objectStorage.isReady()).thenReturn(true);
+
+        service.run(null);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!service.isReadyCached() && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertTrue(service.isReadyCached());
+        Thread.sleep(5);
+
+        assertTrue(service.isReadyCached());
+        verify(objectStorage, times(1)).isReady();
+    }
+
+    @Test
     void maintenanceMigrationDoesNotStartStorageReadinessWork() {
         properties.getLegacyMigration().setMode(LegacyMigrationMode.MIGRATE);
 

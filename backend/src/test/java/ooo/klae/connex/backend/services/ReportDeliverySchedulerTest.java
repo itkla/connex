@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -26,6 +27,7 @@ import java.time.ZoneOffset;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +60,9 @@ import ooo.klae.connex.backend.mail.MailMessage;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
@@ -80,6 +85,7 @@ class ReportDeliverySchedulerTest {
     @Mock private AuditService auditService;
     @Mock private MailProperties mailProperties;
     @Mock private MailService mailService;
+    @Mock private JobRunRecorder jobRunRecorder;
 
     private final EmailTemplateRenderer templateRenderer = new EmailTemplateRenderer();
     private ReportDeliveryScheduler scheduler;
@@ -89,7 +95,7 @@ class ReportDeliverySchedulerTest {
         scheduler = new ReportDeliveryScheduler(
                 scheduleMapper, placementRegistry, tenantWorkScope, scheduleService,
                 automationExecutor, reportService, workspaceService, auditService,
-                templateRenderer, mailProperties, mailService, CLOCK);
+                templateRenderer, mailProperties, mailService, jobRunRecorder, CLOCK);
     }
 
     @Test
@@ -142,6 +148,15 @@ class ReportDeliverySchedulerTest {
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
                 WORKSPACE_ID, 77, "Quota-safe report",
                 "Queued scheduled report delivery", Map.of("recipientCount", 1, "snapshotId", SNAPSHOT_ID));
+        ArgumentCaptor<JobRunDetail> jobDetail = ArgumentCaptor.forClass(JobRunDetail.class);
+        verify(jobRunRecorder).record(
+                eq(JobRunRecorder.REPORT_DELIVERY),
+                eq(WORKSPACE_ID),
+                eq(JobRunStatus.SUCCEEDED),
+                jobDetail.capture());
+        assertEquals(SCHEDULE_ID, jobDetail.getValue().metadata().get("scheduleId"));
+        assertEquals(SNAPSHOT_ID, jobDetail.getValue().metadata().get("snapshotId"));
+        assertEquals(1, jobDetail.getValue().metadata().get("recipientCount"));
     }
 
     @Test
@@ -264,6 +279,107 @@ class ReportDeliverySchedulerTest {
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
                 WORKSPACE_ID, 77, null,
                 "Scheduled report delivery failed", "no eligible report recipients");
+        verify(jobRunRecorder).record(
+                eq(JobRunRecorder.REPORT_DELIVERY),
+                eq(WORKSPACE_ID),
+                eq(JobRunStatus.FAILED),
+                any(JobRunDetail.class));
+    }
+
+    @Test
+    void missingScheduleRecordsSkippedWithStablePhase() {
+        stubSweep();
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenReturn(null);
+
+        scheduler.deliverDue();
+
+        assertSkippedPhase("schedule_missing");
+    }
+
+    @Test
+    void jobRunKeepsTheScheduleRefEntryTimeAfterWorkAdvancesTheClock() {
+        AtomicReference<Instant> current = new AtomicReference<>(NOW);
+        Clock movingClock = mock(Clock.class);
+        when(movingClock.instant()).thenAnswer(invocation -> current.get());
+        scheduler = new ReportDeliveryScheduler(
+                scheduleMapper, placementRegistry, tenantWorkScope, scheduleService,
+                automationExecutor, reportService, workspaceService, auditService,
+                templateRenderer, mailProperties, mailService, jobRunRecorder, movingClock);
+        stubSweep();
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenAnswer(invocation -> {
+            current.set(NOW.plusSeconds(30));
+            return null;
+        });
+
+        scheduler.deliverDue();
+
+        ArgumentCaptor<JobRunDetail> detail = ArgumentCaptor.forClass(JobRunDetail.class);
+        verify(jobRunRecorder).record(
+                eq(JobRunRecorder.REPORT_DELIVERY),
+                eq(WORKSPACE_ID),
+                eq(JobRunStatus.SKIPPED),
+                detail.capture());
+        assertEquals(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC), detail.getValue().startedAt());
+    }
+
+    @Test
+    void deniedDeliveryAuditsAndRecordsSkipped() {
+        stubSweep();
+        stubAuditScope();
+        ReportSchedule schedule = schedule();
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenReturn(schedule);
+        when(scheduleService.deliveryAccess(schedule))
+                .thenReturn(ScheduleService.DeliveryAccess.denied("run-as access revoked"));
+        when(scheduleService.skipDue(
+                WORKSPACE_ID,
+                SCHEDULE_ID,
+                USER_ID,
+                LocalDateTime.ofInstant(NOW, ZoneOffset.UTC)))
+                .thenReturn(true);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        verify(auditService).recordFailureScoped(
+                "report.schedule.skip",
+                "report_schedule",
+                SCHEDULE_ID,
+                WORKSPACE_ID,
+                77,
+                null,
+                "Skipped scheduled report delivery",
+                "run-as access revoked");
+        ArgumentCaptor<JobRunDetail> detail = ArgumentCaptor.forClass(JobRunDetail.class);
+        verify(jobRunRecorder).record(
+                eq(JobRunRecorder.REPORT_DELIVERY),
+                eq(WORKSPACE_ID),
+                eq(JobRunStatus.SKIPPED),
+                detail.capture());
+        assertEquals("delivery_skipped", detail.getValue().metadata().get("phase"));
+    }
+
+    @Test
+    void changedScheduleRecordsSkippedWithStablePhase() {
+        ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID))
+                .thenReturn(schedule)
+                .thenReturn(null);
+
+        scheduler.deliverDue();
+
+        assertSkippedPhase("schedule_changed");
+    }
+
+    @Test
+    void lostClaimRecordsSkippedWithStablePhase() {
+        stubClaimedDelivery(List.of(user()));
+        when(scheduleService.claimDue(
+                eq(SCHEDULE_ID), eq(USER_ID), any(LocalDateTime.class)))
+                .thenReturn(null);
+
+        scheduler.deliverDue();
+
+        assertSkippedPhase("claim_lost");
     }
 
     @Test
@@ -345,9 +461,42 @@ class ReportDeliverySchedulerTest {
             Supplier<?> work = invocation.getArgument(3);
             return work.get();
         }).when(automationExecutor).runAs(eq(WORKSPACE_ID), same(runAs), eq("owner"), any());
-        when(scheduleService.claimDue(SCHEDULE_ID, USER_ID, now)).thenReturn(schedule);
-        when(scheduleService.activeReportReaders(schedule)).thenReturn(beforeGeneration);
+        org.mockito.Mockito.lenient()
+                .when(scheduleService.claimDue(SCHEDULE_ID, USER_ID, now))
+                .thenReturn(schedule);
+        org.mockito.Mockito.lenient()
+                .when(scheduleService.activeReportReaders(schedule))
+                .thenReturn(beforeGeneration);
         return schedule;
+    }
+
+    private void stubSweep() {
+        LocalDateTime now = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        ReportScheduleRef ref = new ReportScheduleRef(WORKSPACE_ID, SCHEDULE_ID);
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
+        when(tenantWorkScope.withCatalog(
+                isNull(), ArgumentMatchers.<Supplier<List<ReportScheduleRef>>>any()))
+                .thenAnswer(invocation -> {
+                    Supplier<List<ReportScheduleRef>> work = invocation.getArgument(1);
+                    return work.get();
+                });
+        when(scheduleMapper.dueScheduleRefs(now)).thenReturn(List.of(ref));
+        doAnswer(invocation -> {
+            Runnable work = invocation.getArgument(1);
+            work.run();
+            return null;
+        }).when(tenantWorkScope).inWorkspace(eq(WORKSPACE_ID), any(Runnable.class));
+    }
+
+    private void assertSkippedPhase(String phase) {
+        ArgumentCaptor<JobRunDetail> detail = ArgumentCaptor.forClass(JobRunDetail.class);
+        verify(jobRunRecorder).record(
+                eq(JobRunRecorder.REPORT_DELIVERY),
+                eq(WORKSPACE_ID),
+                eq(JobRunStatus.SKIPPED),
+                detail.capture());
+        assertEquals(phase, detail.getValue().metadata().get("phase"));
+        assertEquals(SCHEDULE_ID, detail.getValue().metadata().get("scheduleId"));
     }
 
     private void stubAuditScope() {

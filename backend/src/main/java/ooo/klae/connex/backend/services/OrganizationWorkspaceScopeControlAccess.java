@@ -9,6 +9,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -33,6 +34,20 @@ public class OrganizationWorkspaceScopeControlAccess {
         if (tenantContext.isResolved() && (tenantContext.getWorkspaceId().intValue() != workspaceId
                 || tenantContext.getOrgId().intValue() != scope.orgId())) {
             throw new IllegalStateException("Workspace scope does not match the resolved tenant context");
+        }
+        return scope;
+    }
+
+    /**
+     * Resolves the complete workspace allowlist for one organization.
+     *
+     * @param orgId organization to resolve
+     * @return sorted workspace IDs and their JSON representation
+     */
+    public WorkspaceScope getForOrg(int orgId) {
+        WorkspaceScope scope = execute(() -> controlOperations.getForOrg(orgId));
+        if (tenantContext.isResolved() && tenantContext.getOrgId().intValue() != orgId) {
+            throw new ResourceNotFoundException("Organization not found: " + orgId);
         }
         return scope;
     }

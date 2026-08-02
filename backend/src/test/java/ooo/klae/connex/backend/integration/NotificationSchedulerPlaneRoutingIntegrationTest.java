@@ -38,6 +38,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationScheduler;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -109,7 +110,10 @@ class NotificationSchedulerPlaneRoutingIntegrationTest {
             tenantContext, resolver, workspaceMapper);
         reconciliationService = mock(NotificationReconciliationService.class);
         scheduler = new NotificationScheduler(
-            workspaceMapper, tenantWorkScope, reconciliationService);
+            workspaceMapper,
+            tenantWorkScope,
+            reconciliationService,
+            mock(JobRunRecorder.class));
     }
 
     @AfterAll

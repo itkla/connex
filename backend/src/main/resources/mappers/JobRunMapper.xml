@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.JobRunMapper">
+
+  <resultMap id="JobRunResult" type="JobRun">
+    <id property="id" column="id"/>
+    <result property="jobName" column="job_name"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="status" column="status"/>
+    <result property="startedAt" column="started_at"/>
+    <result property="finishedAt" column="finished_at"/>
+    <result property="detail" column="detail"/>
+  </resultMap>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO job_run (
+      job_name, workspace_id, status, started_at, finished_at, detail
+    ) VALUES (
+      #{jobName}, #{workspaceId}, #{status}, #{startedAt}, #{finishedAt}, #{detail}
+    )
+  </insert>
+
+  <delete id="deleteBeyondRetention">
+    DELETE FROM job_run
+    WHERE job_name = #{jobName}
+      AND status = #{status}
+      <choose>
+        <when test="workspaceId == null">AND workspace_id IS NULL</when>
+        <otherwise>AND workspace_id = #{workspaceId}</otherwise>
+      </choose>
+      AND id NOT IN (
+        SELECT id FROM (
+          SELECT id
+          FROM job_run
+          WHERE job_name = #{jobName}
+            AND status = #{status}
+            <choose>
+              <when test="workspaceId == null">AND workspace_id IS NULL</when>
+              <otherwise>AND workspace_id = #{workspaceId}</otherwise>
+            </choose>
+          ORDER BY started_at DESC, id DESC
+          LIMIT #{keepCount}
+        ) AS keep_rows
+      )
+  </delete>
+
+  <select id="findLatestVisible" resultMap="JobRunResult">
+    SELECT id, job_name, workspace_id, status, started_at, finished_at, detail
+    FROM (
+      SELECT id, job_name, workspace_id, status, started_at, finished_at, detail,
+             ROW_NUMBER() OVER (
+               PARTITION BY job_name, workspace_id
+               ORDER BY started_at DESC, id DESC
+             ) AS run_rank
+      FROM job_run
+      WHERE (
+        workspace_id IS NULL
+        OR workspace_id IN (
+          SELECT org_workspace.id
+          FROM JSON_TABLE(
+            #{orgWorkspaceIdsJson},
+            '$[*]' COLUMNS(id INT PATH '$')
+          ) org_workspace
+        )
+      )
+      AND EXISTS (
+        SELECT 1
+        FROM JSON_TABLE(
+          #{orgWorkspaceIdsJson},
+          '$[*]' COLUMNS(id INT PATH '$')
+        ) anchor_workspace
+        WHERE anchor_workspace.id = #{workspaceId}
+      )
+      <if test="status != null">AND status = #{status}</if>
+    ) ranked
+    WHERE run_rank = 1
+    ORDER BY job_name
+  </select>
+</mapper>

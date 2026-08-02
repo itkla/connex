@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -28,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
@@ -42,6 +44,7 @@ class ObjectDeletionRetryQueueTest {
     @Mock PlacementRegistry placementRegistry;
     @Mock TenantCatalogResolver tenantCatalogResolver;
     @Mock WorkspaceMapper workspaceMapper;
+    @Mock JobRunRecorder jobRunRecorder;
 
     private final TenantContext tenantContext = new TenantContext();
     private ObjectStorageProperties properties;
@@ -61,12 +64,30 @@ class ObjectDeletionRetryQueueTest {
             transactionExecutor,
             placementRegistry,
             tenantWorkScope,
-            Clock.fixed(Instant.parse("2026-07-14T12:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-14T12:00:00Z"), ZoneOffset.UTC),
+            jobRunRecorder);
     }
 
     @AfterEach
     void clearContext() {
         tenantContext.clear();
+    }
+
+    @Test
+    void failedUserDeletionSweepRecordsAFailedRunSoErasureGapsAreVisible() {
+        ObjectDeletionTask task = new ObjectDeletionTask(1L, 7, "users/9/x.png", 0, 1);
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
+        when(userQueueMapper.findDue(any(), anyInt())).thenReturn(java.util.List.of(task));
+        doThrow(new IllegalStateException("storage unavailable"))
+            .when(transactionExecutor).retryUser(any(), any());
+
+        queue.retryPending();
+
+        verify(jobRunRecorder).record(
+            eq(JobRunRecorder.OBJECT_DELETION_RETRY),
+            eq(null),
+            eq(JobRunRecorder.JobRunStatus.FAILED),
+            any());
     }
 
     @Test
@@ -202,6 +223,30 @@ class ObjectDeletionRetryQueueTest {
 
         verify(transactionExecutor).retryTenant(
             org.mockito.ArgumentMatchers.eq(second), any());
+        verify(jobRunRecorder).record(
+            eq(JobRunRecorder.OBJECT_DELETION_RETRY),
+            eq(7),
+            eq(JobRunRecorder.JobRunStatus.FAILED),
+            any());
+    }
+
+    @Test
+    void tenantSweepWithNoFailuresRecordsSucceeded() {
+        ObjectDeletionTask only = new ObjectDeletionTask(
+            11, 7, "workspaces/7/attachments/only.pdf", 2, 1);
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
+        when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt(), anyInt())).thenReturn(List.of(7));
+        when(tenantQueueMapper.findDue(org.mockito.ArgumentMatchers.eq(7), any(), anyInt()))
+            .thenReturn(List.of(only));
+
+        queue.retryPending();
+
+        verify(jobRunRecorder).record(
+            eq(JobRunRecorder.OBJECT_DELETION_RETRY),
+            eq(7),
+            eq(JobRunRecorder.JobRunStatus.SUCCEEDED),
+            any());
     }
 
     @Test

@@ -162,6 +162,31 @@ export function toDatetimeLocalValue(value?: string | null): string {
 }
 
 /**
+ * Formats a UTC timestamp as an absolute localized date and time.
+ *
+ * Unlike {@link formatDateTime}, which hands the raw string to `new Date`, this parses through
+ * {@link parseMysqlDateTime} so an offset-less value is read as UTC rather than as browser-local
+ * time. Backend `LocalDateTime` fields serialize without an offset, so formatting them with the
+ * former shows an administrator outside UTC the UTC wall clock labelled as their own.
+ *
+ * @param value - the UTC timestamp to format
+ * @param locale - BCP-47 locale tag
+ * @param fallback - rendered when the value is missing or unparseable
+ */
+export function formatUtcDateTime(
+    value: string | undefined | null,
+    locale: string,
+    fallback = '—',
+): string {
+    const ms = parseMysqlDateTime(value);
+    if (Number.isNaN(ms)) return fallback;
+    return new Intl.DateTimeFormat(locale, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+    }).format(new Date(ms));
+}
+
+/**
  * Formats a UTC timestamp as a compact, localized relative time
  * (e.g. "just now", "5 min ago", "3 days ago"). Falls back to an absolute
  * short date once an event is older than ~30 days, since "47 days ago" reads

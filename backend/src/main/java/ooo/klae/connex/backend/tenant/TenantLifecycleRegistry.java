@@ -252,6 +252,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("pipeline_share", 180));
         raw.add(direct("pipeline", 190));
         raw.add(direct("rule_execution", 200));
+        raw.add(direct("job_run", 201));
         raw.add(direct("workflow_version", 210));
         raw.add(direct("workflow", 220, nullify("active_version_id")));
         raw.add(direct("rule", 230));

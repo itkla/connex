@@ -9,8 +9,13 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+
+import java.util.Map;
 
 /**
  * Periodically dispatches queued campaign sends. Mirrors the rule scheduler: it fans out over the
@@ -29,6 +34,7 @@ public class CampaignSendWorker {
     private final TenantWorkScope tenantWorkScope;
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignDispatchService campaignDispatchService;
+    private final JobRunRecorder jobRunRecorder;
 
     @Value("${connex.delivery.dispatch-enabled:false}")
     private boolean dispatchEnabled;
@@ -53,12 +59,42 @@ public class CampaignSendWorker {
     private void dispatchCatalog(String catalog) {
         for (int workspaceId : tenantWorkScope.withCatalog(
                 catalog, campaignSendMapper::workspaceIdsWithQueuedSends)) {
+            JobRunDetail detail = JobRunDetail.startedUtc();
             try {
-                tenantWorkScope.inWorkspace(workspaceId,
-                        () -> campaignDispatchService.processWorkspace(workspaceId));
+                tenantWorkScope.inWorkspace(workspaceId, () -> {
+                    try {
+                        int failed = campaignDispatchService.processWorkspace(workspaceId);
+                        if (failed > 0) {
+                            record(workspaceId, JobRunStatus.FAILED,
+                                new JobRunDetail(
+                                    detail.startedAt(),
+                                    Map.of("phase", "workspace_dispatch",
+                                        "failedCount", failed)));
+                        } else {
+                            record(workspaceId, JobRunStatus.SUCCEEDED, detail);
+                        }
+                    } catch (RuntimeException exception) {
+                        record(workspaceId, JobRunStatus.FAILED,
+                            new JobRunDetail(
+                                detail.startedAt(),
+                                Map.of("phase", "workspace_dispatch")));
+                        throw exception;
+                    }
+                });
             } catch (Exception exception) {
                 log.warn("Campaign dispatch skipped for workspace {}: {}", workspaceId, exception.getMessage());
             }
+        }
+    }
+
+    private void record(int workspaceId, JobRunStatus status, JobRunDetail detail) {
+        try {
+            jobRunRecorder.record(JobRunRecorder.CAMPAIGN_SEND, workspaceId, status, detail);
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Job run recording failed jobName={} exceptionClass={}",
+                JobRunRecorder.CAMPAIGN_SEND,
+                exception.getClass().getSimpleName());
         }
     }
 }
