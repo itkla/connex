@@ -235,6 +235,55 @@ export type ManifestEntry = {
 const MANIFEST_PATH = path.join(MATRIX_ARTIFACT_DIR, 'manifest.jsonl');
 
 /**
+ * Waits for the page to stop changing shape before a screenshot is taken.
+ *
+ * `networkidle` is not sufficient on chart-heavy surfaces: recharts paints after its data arrives,
+ * and entrance animations are frozen at their first frame by `animations: "disabled"`, so capturing
+ * immediately produces a blank content area that misrepresents a perfectly healthy page. Polling the
+ * rendered SVG count until it stops growing is cheap and targets exactly that failure.
+ * @param page the page about to be captured
+ */
+async function settleForCapture(page: Page): Promise<void> {
+    let previous = -1;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+        const current = await page.locator('main svg').count().catch(() => 0);
+        if (current === previous) break;
+        previous = current;
+        await page.waitForTimeout(400);
+    }
+    await page.waitForTimeout(300);
+    await expandScrollContainers(page);
+}
+
+/**
+ * Makes the app's inner scroll container capturable by a full-page screenshot.
+ *
+ * The shell is `h-dvh overflow-hidden` with `<main>` as the scrolling element, so the *document* is
+ * always exactly one viewport tall no matter how long the page is. `fullPage: true` therefore
+ * captures only the first screenful and silently crops everything below the fold — on a chart-heavy
+ * surface that reads as a blank page rather than as a page that scrolls.
+ *
+ * Releasing the fixed height just before capture lets the document grow to the real content height.
+ * This mutates layout and so runs only immediately before a screenshot, never before an assertion.
+ * @param page the page about to be captured
+ */
+async function expandScrollContainers(page: Page): Promise<void> {
+    await page
+        .evaluate(() => {
+            const shells = document.querySelectorAll<HTMLElement>('div.h-dvh, main');
+            shells.forEach((element) => {
+                element.style.height = 'auto';
+                element.style.maxHeight = 'none';
+                element.style.overflow = 'visible';
+            });
+            document.documentElement.style.height = 'auto';
+            document.body.style.height = 'auto';
+        })
+        .catch(() => undefined);
+    await page.waitForTimeout(250);
+}
+
+/**
  * Records one matrix cell as evidence: a full-page screenshot plus a manifest line binding it to its
  * route, state and axes. Written as JSON Lines so parallel workers append without clobbering, and so
  * a partial run still yields a readable manifest.
@@ -246,6 +295,7 @@ export async function record(
     const file = entry.screenshot ?? artifactName(entry.routeId, entry.state, entry.axes);
     const target = path.join(MATRIX_ARTIFACT_DIR, 'shots', file);
     mkdirSync(path.dirname(target), { recursive: true });
+    await settleForCapture(page);
     await page.screenshot({ path: target, fullPage: true, animations: 'disabled' });
     mkdirSync(MATRIX_ARTIFACT_DIR, { recursive: true });
     appendFileSync(MANIFEST_PATH, `${JSON.stringify({ ...entry, screenshot: `shots/${file}` })}\n`);
