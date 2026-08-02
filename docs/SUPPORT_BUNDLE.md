@@ -190,10 +190,20 @@ projection fails, the run fails.
 
 ## Operational notes
 
-Bundle assembly is bounded to a small number of concurrent operations **per JVM**, not
-cluster-wide: an N-instance deployment can assemble N times that many at once. Assembly is
-synchronous and holds a request thread for its duration, which is short because the bundle is
-bounded metadata rather than a data export.
+Assembly is **synchronous**: the bundle is built in full and returned as one response, rather than
+streamed. That is deliberate. A support bundle is a capped metadata snapshot, so it does not need
+the async writer, monotonic deadline, and cancellation machinery that the tenant export requires
+for unbounded workspace data — and an async writer would run on a thread where the tenant routing
+and security context the queries depend on are not installed.
+
+The size is bounded by construction. The audit slice dominates it and is capped at 10,000 rows of
+bounded columns — roughly 300 bytes each, so about 3 MB uncompressed before compression, with the
+other entries measured in kilobytes. Assembly refuses to exceed a 64 MB uncompressed ceiling and a
+30-second wall-clock budget; both fail closed rather than returning a bundle that looks complete
+but is not.
+
+Concurrent assembly is capped **per JVM**, not cluster-wide: an N-instance deployment can assemble
+N times that many at once. Saturation returns `429`.
 
 ## Integrity
 
