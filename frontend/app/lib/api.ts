@@ -3663,6 +3663,13 @@ export function getCustomFields(entityType?: Types.CustomFieldEntityType, init: 
     return getJson<Types.CustomFieldDefinition[]>(`/api/custom-fields${query}`, { cache: "no-store", ...init });
 }
 
+export function getCustomFieldSchema(entityType: Types.CustomFieldEntityType, init: RequestInit = {}) {
+    return getJson<Types.CustomFieldSchemaEntry[]>(
+        `/api/custom-fields/schema?entityType=${entityType}`,
+        { cache: "no-store", ...init },
+    );
+}
+
 export function createCustomField(payload: Types.CustomFieldInput) {
     return postJson<Types.CustomFieldDefinition>(`/api/custom-fields`, payload);
 }

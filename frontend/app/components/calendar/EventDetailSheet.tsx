@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { Contact, Deal, RelationshipTemperature } from '@/app/lib/types';
+import { useNow } from '@/app/hooks/useNow';
 import { addDays, dayKeyOf, startOfDay, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_ICON, KIND_LABEL_KEY } from './constants';
 import { WARMTH_CHIP_CLASS, WARMTH_DOT_CLASS, WARMTH_LABEL_KEY, WARMTH_TREND_KEY } from './warmth';
@@ -68,6 +69,7 @@ export default function EventDetailSheet({
     rescheduling?: boolean;
 }) {
     const t = useTranslations('Calendar');
+    const sharedNow = useNow();
 
     const whenLabel = useMemo(() => {
         if (!event) return '';
@@ -99,7 +101,7 @@ export default function EventDetailSheet({
         return t('goesColdIn', { count: temperature.daysUntilCold });
     })();
 
-    const now = startOfDay(new Date());
+    const now = startOfDay(new Date(sharedNow));
     const rescheduleChips = [
         { label: t('chipToday'), key: dayKeyOf(now) },
         { label: t('chipTomorrow'), key: dayKeyOf(addDays(now, 1)) },

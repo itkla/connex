@@ -18,6 +18,7 @@ import type { Rule, RuleListItem } from "@/app/lib/types";
 import { deleteRule, getRules, updateRule } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+import { useLiveNow } from "@/app/hooks/useNow";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ export default function WorkflowsPanel() {
     const t = useTranslations("WorkspaceRules");
     const tw = useTranslations("WorkspaceWorkflows");
     const locale = useLocale();
+    const now = useLiveNow();
     const router = useRouter();
     const { activeWorkspaceId, activeWorkspace, switching } = useWorkspace();
     const canRunAsSystem = activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
@@ -232,7 +234,7 @@ export default function WorkflowsPanel() {
                                                 )}
                                             >
                                                 {tw("runs.latest", {
-                                                    time: formatRelativeTime(rule.latestExecution.executedAt, locale),
+                                                    time: formatRelativeTime(rule.latestExecution.executedAt, locale, now),
                                                 })}
                                             </time>
                                         </>

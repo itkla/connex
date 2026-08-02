@@ -16,6 +16,7 @@ import type {
     CaptureStream,
     CaptureStreamState,
 } from '@/app/lib/types';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { formatRelativeTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -74,6 +75,7 @@ function StatusIcon({ status }: { status: CaptureHealthStatus }) {
 export default function CaptureHealth({ streams }: { streams: CaptureStreamState[] }) {
     const t = useTranslations('AccountCaptureHealth');
     const locale = useLocale();
+    const now = useLiveNow();
 
     if (streams.length === 0) {
         return <p className="text-xs text-muted-foreground">{t('empty')}</p>;
@@ -102,7 +104,7 @@ export default function CaptureHealth({ streams }: { streams: CaptureStreamState
                             {stream.lastSuccessAt ? (
                                 <span className="shrink-0 text-xs text-muted-foreground">
                                     {t('lastSuccess', {
-                                        time: formatRelativeTime(stream.lastSuccessAt, locale),
+                                        time: formatRelativeTime(stream.lastSuccessAt, locale, now),
                                     })}
                                 </span>
                             ) : null}
@@ -145,7 +147,7 @@ export default function CaptureHealth({ streams }: { streams: CaptureStreamState
                         {stream.nextAttemptAt ? (
                             <p className="mt-1 text-xs text-muted-foreground">
                                 {t('nextRetry', {
-                                    time: formatRelativeTime(stream.nextAttemptAt, locale),
+                                    time: formatRelativeTime(stream.nextAttemptAt, locale, now),
                                 })}
                             </p>
                         ) : null}

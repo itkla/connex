@@ -7,6 +7,7 @@ import { Loader2Icon } from "lucide-react";
 import type { AuditLogEntry } from "@/app/lib/types";
 import { ApiError, getOrgAudit } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
+import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { Button } from "@/components/ui/button";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
@@ -22,10 +23,10 @@ function humanizeAction(action: string) {
         .join(" · ");
 }
 
-function relativeTime(iso: string, locale: string) {
+function relativeTime(iso: string, locale: string, now: number) {
     const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").getTime();
     if (Number.isNaN(then)) return iso;
-    const mins = Math.round((Date.now() - then) / 60000);
+    const mins = Math.round((now - then) / 60000);
     const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
     if (mins < 1) return rtf.format(0, "second");
     if (mins < 60) return rtf.format(-mins, "minute");
@@ -37,6 +38,7 @@ function relativeTime(iso: string, locale: string) {
 export default function OrgAuditPanel() {
     const t = useTranslations("OrgAudit");
     const locale = useLocale();
+    const now = useLiveNow();
     const { activeWorkspace } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
 
@@ -125,7 +127,7 @@ export default function OrgAuditPanel() {
                                     dateTime={entry.createdAt}
                                     title={entry.createdAt}
                                 >
-                                    {relativeTime(entry.createdAt, locale)}
+                                    {relativeTime(entry.createdAt, locale, now)}
                                 </time>
                             </li>
                         ))}

@@ -12,6 +12,7 @@ import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTyp
 import { publishRecordMutation } from "@/app/lib/record-mutation-events";
 import { toastError, toastWarn } from "@/app/lib/toast";
 import { draftKey, getDraftKeyGeneration, subscribeDraftChanges } from "@/app/lib/formDrafts";
+import ImportDialog from "@/app/components/import/LazyImportDialog";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -19,7 +20,6 @@ const ActivityDialog = dynamic(() => import("@/app/components/activity/activitie
 const CompanyCreateContainer = dynamic(() => import("@/app/components/actions/create/CompanyCreateContainer"));
 const ContactCreateContainer = dynamic(() => import("@/app/components/actions/create/ContactCreateContainer"));
 const DealCreateContainer = dynamic(() => import("@/app/components/actions/create/DealCreateContainer"));
-const ImportDialog = dynamic(() => import("@/app/components/import/ImportDialog"));
 
 const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
     "create-task",

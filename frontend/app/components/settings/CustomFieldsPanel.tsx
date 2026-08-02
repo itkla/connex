@@ -17,6 +17,7 @@ import type {
     CustomFieldType,
 } from "@/app/lib/types";
 import { deleteCustomField, getCustomFields } from "@/app/lib/api";
+import { usePermission } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,8 @@ export default function CustomFieldsPanel() {
     const t = useTranslations("WorkspaceCustomFields");
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
+
+    const canManage = usePermission("CUSTOM_FIELD_MANAGE");
 
     const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
     const [loading, setLoading] = useState(true);
@@ -80,7 +83,7 @@ export default function CustomFieldsPanel() {
     };
 
     useEffect(() => {
-        if (!workspaceId) return;
+        if (!workspaceId || !canManage) return;
         let cancelled = false;
         (async () => {
             setLoading(true);
@@ -104,7 +107,7 @@ export default function CustomFieldsPanel() {
         return () => {
             cancelled = true;
         };
-    }, [workspaceId, t]);
+    }, [workspaceId, canManage, t]);
 
     const byEntity = useMemo(() => {
         const groups: Record<CustomFieldEntityType, CustomFieldDefinition[]> = {
@@ -154,7 +157,7 @@ export default function CustomFieldsPanel() {
         }
     };
 
-    if (accessDenied) {
+    if (!canManage || accessDenied) {
         return (
             <AccessDenied variant="inline" body={t("noAccess")} />
         );

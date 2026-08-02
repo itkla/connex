@@ -193,19 +193,25 @@ export function formatUtcDateTime(
  * worse than the date itself. Accepts MySQL datetimes (assumed UTC) or any
  * Date-parseable string.
  *
+ * `now` is required rather than defaulted, because the output is rendered on both sides of a
+ * hydration boundary. A `Date.now()` default is read once during the server render and again
+ * during hydration; any timestamp whose rounding bucket changes in that window produced
+ * different text on each side and React discarded the server-rendered subtree with hydration
+ * error #418. Pass the shared clock from `useNow` / `useLiveNow` so both renders agree.
+ *
  * @param value - the timestamp to format
  * @param locale - BCP-47 locale tag used for both relative and absolute output
- * @param now - reference time in ms (defaults to Date.now(); injectable for tests)
+ * @param now - the reference time in ms that both renders must share
  */
 export function formatRelativeTime(
     value: string | undefined | null,
     locale: string,
-    now: number = Date.now(),
+    now: number,
 ): string {
     const ms = parseMysqlDateTime(value);
     if (Number.isNaN(ms)) return '—';
 
-    const diff = ms - now; // negative for the past
+    const diff = ms - now;
     const absSec = Math.abs(diff) / 1000;
     const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' });
 

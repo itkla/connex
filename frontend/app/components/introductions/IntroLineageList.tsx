@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLongRightIcon, CheckIcon } from '@heroicons/react/24/outline';
 
+import { useLiveNow } from '@/app/hooks/useNow';
 import { formatRelativeTime } from '@/app/lib/utils';
 import type { IntroductionRecord } from '@/app/lib/types';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
@@ -18,6 +19,7 @@ import PartyAvatar from './PartyAvatar';
 export default function IntroLineageList({ items }: { items: IntroductionRecord[] }) {
     const t = useTranslations('Introductions');
     const locale = useLocale();
+    const now = useLiveNow();
 
     if (items.length === 0) {
         return (
@@ -73,7 +75,7 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                                     </Link>
                                 </span>
                                 <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-                                    {formatRelativeTime(item.introducedAt, locale)}
+                                    {formatRelativeTime(item.introducedAt, locale, now)}
                                 </span>
                             </div>
                             {byline ? (

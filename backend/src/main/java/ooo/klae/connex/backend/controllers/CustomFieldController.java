@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.dto.CustomFieldDefinitionDto;
+import ooo.klae.connex.backend.dto.CustomFieldSchemaDto;
 import ooo.klae.connex.backend.services.CustomFieldDefinitionService;
 
 import java.util.List;
@@ -22,7 +23,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * REST controller for the custom-field catalog. Every operation requires
  * {@code CUSTOM_FIELD_MANAGE} (enforced on the service) — this is the admin
- * management surface, not the member-facing record read path.
+ * management surface. The single exception is {@code GET /schema}, the narrow
+ * member-facing projection a list view needs to draw its columns.
  */
 @RestController
 @RequestMapping("/api/custom-fields")
@@ -39,6 +41,16 @@ public class CustomFieldController {
             ? definitionService.getAll()
             : definitionService.getByEntityType(entityType);
         return definitions.stream().map(this::toDto).toList();
+    }
+
+    /**
+     * The fields a member may see for one entity type, so a records list can render its custom
+     * columns. Carries no data classifications and no archived fields; the full catalog stays on
+     * the gated {@link #list(String)}.
+     */
+    @GetMapping("/schema")
+    public List<CustomFieldSchemaDto> schema(@RequestParam String entityType) {
+        return definitionService.getVisibleSchema(entityType);
     }
 
     /**
