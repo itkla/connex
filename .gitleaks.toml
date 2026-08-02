@@ -28,6 +28,6 @@ regexes = [
   '''API_KEY = "sms_api_key_123456"''',
   '''SMS_API_KEY = "sms_api_key_secret_1234"''',
   '''WEBHOOK_SECRET = "whsec_abcdef0123456789"''',
-  '''CorrelationIds\.MDC_KEY, "abcd1234efgh"''',
+  '''MDC_KEY, "abcd1234efgh"''',
   '''local token='ASNFZ4mrze8BI0VniavN7wEjRWeJq83v''''
 ]
