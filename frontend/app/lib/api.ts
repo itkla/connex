@@ -4268,6 +4268,27 @@ export function sendWorkspaceMailTest(workspaceId: number) {
     return postJson<Types.MailTestResult>(`/api/workspaces/${workspaceId}/mail-config/test`, {});
 }
 
+export function getWorkspaceDiagnostics(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.TenantDiagnostics>(`/api/workspaces/${workspaceId}/diagnostics`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function getOrgDiagnostics(orgId: number, init: RequestInit = {}) {
+    return getJson<Types.TenantDiagnostics>(`/api/orgs/${orgId}/diagnostics`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function sendWorkspaceMailDiagnosticTest(workspaceId: number) {
+    return postJson<Types.MailDiagnosticTest>(
+        `/api/workspaces/${workspaceId}/mail/diagnostics/test-send`,
+        {},
+    );
+}
+
 export function getDeliveryProviders(init: RequestInit = {}) {
     return getJson<Types.DeliveryProviderConfig[]>(`/api/delivery/providers`, { cache: "no-store", ...init });
 }

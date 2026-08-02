@@ -53,7 +53,8 @@
       "search": "検索",
       "docs": "ヘルプドキュメント",
       "savedView": "保存済みビュー",
-      "recentRecord": "最近のレコード"
+      "recentRecord": "最近のレコード",
+      "diagnostics": "診断"
     },
     "create": {
       "company": "新しい企業",

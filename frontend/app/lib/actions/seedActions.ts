@@ -122,6 +122,9 @@ export const SEED_ACTIONS: readonly AppAction[] = [
     navigateAction("navigate.calendar", "navigate.calendar", "/overview/calendar", CalendarIcon, 70),
     navigateAction("navigate.reports", "navigate.reports", "/overview/reports", PresentationChartLineIcon, 65),
     navigateAction("navigate.settings", "navigate.settings", "/settings/members", Cog6ToothIcon, 80),
+    navigateAction("navigate.diagnostics", "navigate.diagnostics", "/settings/diagnostics", Cog6ToothIcon, 81, {
+        isAvailable: (context) => context.can("WORKSPACE_MANAGE"),
+    }),
     navigateAction("navigate.products", "navigate.products", "/records/products", CubeIcon, 85),
     navigateAction("navigate.organization", "navigate.organization", "/organization/members", BuildingLibraryIcon, 90, {
         isAvailable: (context) => context.can("ORGANIZATION_VIEW"),

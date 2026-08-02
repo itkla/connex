@@ -3376,3 +3376,202 @@ export type ClientErrorReportPayload = {
     stack?: string | null;
     path?: string | null;
 };
+
+export type SecretStoreKeyDiagnostic = {
+    keyId: string | null;
+    status: string;
+    active: boolean;
+    configured: boolean;
+    disabled: boolean;
+    version: string | null;
+    algorithm: string | null;
+    owner: string | null;
+    scope: string | null;
+    createdAt: string | null;
+    rotatedAt: string | null;
+    disabledAt: string | null;
+    secretCount: number;
+    staleSecretCount: number;
+    mismatchedSecretCount: number;
+    unsupportedAlgorithmSecretCount: number;
+};
+
+export type SecretStoreSecretDiagnostic = {
+    secretId: number;
+    scopeType: string;
+    scopeId: number;
+    purpose: string | null;
+    keyId: string | null;
+    status: string;
+    reason: string | null;
+};
+
+export type SecretStoreDiagnostics = {
+    scopeType: string | null;
+    scopeId: number | null;
+    activeKeyId: string | null;
+    activeKeyConfigured: boolean;
+    activeKeyDisabled: boolean;
+    available: boolean;
+    healthy: boolean;
+    totalSecrets: number;
+    activeSecrets: number;
+    staleSecrets: number;
+    missingKeySecrets: number;
+    disabledKeySecrets: number;
+    mismatchedSecrets: number;
+    unsupportedAlgorithmSecrets: number;
+    keys: SecretStoreKeyDiagnostic[];
+    failures: SecretStoreSecretDiagnostic[];
+};
+
+export type DiagnosticsScopeType = "workspace" | "organization";
+
+export type DiagnosticsMailMode =
+    | "managed"
+    | "workspace_override"
+    | "instance_default"
+    | "unconfigured";
+
+export type JobRunStatus = "succeeded" | "failed" | "skipped";
+
+export type DiagnosticsFindingSeverity = "info" | "warning";
+
+export type DnsAdvisoryStatus = "present" | "missing" | "unknown" | "not_configured";
+
+export type MailTransportOutcome = "succeeded" | "failed" | "unconfigured";
+
+export type DiagnosticsScope = {
+    type: DiagnosticsScopeType;
+    id: number;
+};
+
+export type DiagnosticsCapability = {
+    capability: string;
+    profileAllowed: boolean;
+    available: boolean;
+};
+
+export type DiagnosticsDeployment = {
+    profile: string | null;
+    configured: boolean;
+    capabilities: DiagnosticsCapability[];
+};
+
+export type DiagnosticsAiReadiness = {
+    ready: boolean;
+    imageInputReady: boolean;
+};
+
+export type DiagnosticsOcrReadiness = {
+    scanningAvailable: boolean;
+    importAvailable: boolean;
+};
+
+export type DiagnosticsMailReadiness = {
+    mode: DiagnosticsMailMode;
+    configured: boolean;
+};
+
+export type DiagnosticsDeliveryReadiness = {
+    channel: string;
+    implemented: boolean;
+    ready: boolean;
+};
+
+export type DiagnosticsCaptureStream = {
+    provider: string;
+    stream: string;
+    status: string;
+    stateCount: number;
+    stableCursorCount: number;
+    pageCursorCount: number;
+    processedItems: number;
+    estimatedItems: number;
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    nextAttemptAt: string | null;
+    errorCodes: string[];
+};
+
+export type DiagnosticsWorkspaceProviders = {
+    workspaceId: number;
+    mail: DiagnosticsMailReadiness;
+    delivery: DiagnosticsDeliveryReadiness[];
+    capture: DiagnosticsCaptureStream[];
+};
+
+export type DiagnosticsProviders = {
+    ai: DiagnosticsAiReadiness;
+    ocr: DiagnosticsOcrReadiness;
+    workspaces: DiagnosticsWorkspaceProviders[];
+};
+
+export type DiagnosticsJobRun = {
+    id: number;
+    workspaceId: number | null;
+    status: JobRunStatus;
+    startedAt: string;
+    finishedAt: string;
+    detail: Record<string, string | number | boolean> | null;
+};
+
+export type DiagnosticsJob = {
+    jobName: string;
+    last: DiagnosticsJobRun | null;
+    lastSuccess: DiagnosticsJobRun | null;
+    lastFailure: DiagnosticsJobRun | null;
+};
+
+export type DiagnosticsFinding = {
+    code: string;
+    severity: DiagnosticsFindingSeverity;
+    workspaceId?: number | null;
+    capability?: string | null;
+    provider?: string | null;
+    channel?: string | null;
+    stream?: string | null;
+};
+
+export type TenantDiagnostics = {
+    scope: DiagnosticsScope;
+    deployment: DiagnosticsDeployment;
+    providers: DiagnosticsProviders;
+    jobs: DiagnosticsJob[];
+    findings: DiagnosticsFinding[];
+    secretStore: SecretStoreDiagnostics | null;
+};
+
+export type MailDnsAdvisoryRecord = {
+    queryName: string;
+    status: DnsAdvisoryStatus;
+    recordCount: number;
+};
+
+export type MailDnsAdvisory = {
+    advisory: boolean;
+    domain: string | null;
+    spf: MailDnsAdvisoryRecord;
+    dkim: MailDnsAdvisoryRecord;
+    dmarc: MailDnsAdvisoryRecord;
+};
+
+export type MailDiagnosticSender = {
+    address: string | null;
+    displayName: string | null;
+};
+
+export type MailDiagnosticTransport = {
+    mode: DiagnosticsMailMode;
+    host: string | null;
+    port: number | null;
+    outcome: MailTransportOutcome;
+    errorCode: string | null;
+};
+
+export type MailDiagnosticTest = {
+    correlationId: string | null;
+    sender: MailDiagnosticSender;
+    transport: MailDiagnosticTransport;
+    dns: MailDnsAdvisory;
+};

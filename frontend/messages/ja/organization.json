@@ -9,7 +9,8 @@
     "tabAudit": "監査ログ",
     "noAccessTitle": "組織管理者のみ",
     "noAccessBody": "これらの設定を管理するには、組織のオーナーまたは管理者の権限が必要です。",
-    "tabDataRequests": "開示等請求"
+    "tabDataRequests": "開示等請求",
+    "tabDiagnostics": "診断"
   },
   "OrgAi": {
     "title": "AIプロバイダー",

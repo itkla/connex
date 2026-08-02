@@ -14,6 +14,7 @@ const TABS = [
     { key: "tabAi", href: "/organization/ai" },
     { key: "tabDataRequests", href: "/organization/data-requests" },
     { key: "tabAudit", href: "/organization/audit" },
+    { key: "tabDiagnostics", href: "/organization/diagnostics" },
 ] as const;
 
 export default function OrgTabs({ ssoEnabled = false }: { ssoEnabled?: boolean }) {

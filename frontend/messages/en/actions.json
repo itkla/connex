@@ -53,7 +53,8 @@
       "search": "Search",
       "docs": "Documentation",
       "savedView": "Saved view",
-      "recentRecord": "Recent record"
+      "recentRecord": "Recent record",
+      "diagnostics": "Diagnostics"
     },
     "create": {
       "company": "New company",

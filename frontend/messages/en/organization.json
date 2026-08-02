@@ -9,7 +9,8 @@
     "tabAudit": "Audit log",
     "noAccessTitle": "Organization administrators only",
     "noAccessBody": "You need an organization owner or admin role to manage these settings.",
-    "tabDataRequests": "Data requests"
+    "tabDataRequests": "Data requests",
+    "tabDiagnostics": "Diagnostics"
   },
   "OrgAi": {
     "title": "AI provider",
