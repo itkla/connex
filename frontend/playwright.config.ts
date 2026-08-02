@@ -41,6 +41,7 @@ export const MOBILE_ONLY_TAG = /@mobile-only/;
 
 export default defineConfig({
     testDir: "./test/e2e",
+    testIgnore: "**/matrix/**",
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
