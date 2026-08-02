@@ -27,6 +27,7 @@ import type {
 
 import Rise from '@/app/components/motion/Rise';
 import { PageHeader } from '@/app/components/PageHeader';
+import { PageShell } from '@/app/components/PageShell';
 import IntroLineageList from './IntroLineageList';
 import IntroStats from './IntroStats';
 import { tierFor } from './IntroStrength';
@@ -324,7 +325,7 @@ export default function IntroductionsBoard({
               };
 
     return (
-        <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
+        <PageShell tier="wide">
             <Rise>
                 <PageHeader
                     title={t('pageTitle')}
@@ -504,6 +505,6 @@ export default function IntroductionsBoard({
                     )}
                 </section>
             </Rise>
-        </div>
+        </PageShell>
     );
 }

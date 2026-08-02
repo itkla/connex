@@ -25,7 +25,7 @@ export default function SearchResultsView({
     return (
         <PageShell tier="wide">
                 <Rise delay={0}>
-                    <PageHeader className="px-4 sm:px-6" title={t("resultsHeading", { query })} />
+                    <PageHeader className="px-4 sm:px-6" variant="compact" title={t("resultsHeading", { query })} />
                 </Rise>
 
                 {!hasResults ? (

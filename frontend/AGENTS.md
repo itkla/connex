@@ -57,8 +57,8 @@ The signed-off 1.0 interaction contract (issue #842). A working checklist, not p
 - `wide` (`max-w-[100rem]`) — list/browser, dashboard, overview, settings, admin.
 - `reading` (`max-w-5xl`) — record detail and long-form pages.
 - `form` (`max-w-3xl`) — focused single-column forms and narrow detail.
-- Full-bleed surfaces (the relationship map) and marketing/docs shells do not use `PageShell`.
-Section rhythm (`gap-10` between stacked children) and page gutter/padding come from the shell — do not re-declare them. A `loading.tsx` skeleton uses the same `PageShell` tier as the page it stands in for.
+- Full-bleed surfaces (the relationship map), marketing/docs shells, and **full-height editor shells** (the workflow editor, the document template builder, and their `loading.tsx`) do not use `PageShell` — they own their own height and vertical rhythm, and the shell's `gap-10` would fight it.
+Section rhythm (`gap-10` between stacked children) and page gutter/padding come from the shell — do not re-declare them, and do not override the gap per page: uniform rhythm is the point. A `loading.tsx` skeleton uses the same `PageShell` tier as the page it stands in for — a skeleton and its page must never disagree about the wrapper, or the page visibly jumps when data arrives.
 
 **Page header.** The page title is a `PageHeader` (`app/components/PageHeader.tsx`), never a bare `<h1>`. Canon: `text-4xl font-extrabold tracking-tight`; the `compact` variant only for a genuinely secondary page. Optional `description` sits under the title; `actions` is the right-aligned cluster (the caller composes primary + secondary). Domain identity headers (record detail with a dynamic name/avatar, the Me and report-document heroes) are §17 domain expression and keep their bespoke header — they still adopt `PageShell`.
 
@@ -81,7 +81,8 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 **Color (§15/§18).** Calm neutral canvas. Semantic palettes (`--warmth-*`, `--chart-*`, success/warning/destructive, `--rank-*`) carry unambiguous meaning — never a raw hex or px, never color alone.
 
 ### Review checklist (every new page / redesign / cross-surface pattern)
-- [ ] Content is inside `PageShell` at the correct `tier`; no hand-rolled wrapper, gutter, or `gap-*`.
+- [ ] Content is inside `PageShell` at the correct `tier`; no hand-rolled wrapper, gutter, or `gap-*` (full-bleed, marketing/docs, and full-height editor shells excepted).
+- [ ] Any `loading.tsx` uses the same wrapper and tier as its page.
 - [ ] Title is a `PageHeader` (canon size) with actions in the cluster slot; no bare `<h1>`.
 - [ ] Loading, empty, error, and permission states all present and use the shared components.
 - [ ] Cards only for genuine semantic units; open sections otherwise; no card-in-card.

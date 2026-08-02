@@ -616,6 +616,7 @@ export default function NotificationsInbox() {
                 <Rise>
                     <PageHeader
                         className="px-4 sm:px-6"
+                        variant="compact"
                         title={t("title")}
                         description={t("inboxDescription")}
                         actions={

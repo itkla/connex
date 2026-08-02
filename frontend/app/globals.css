@@ -37,9 +37,6 @@
   --color-warmth-warm: var(--warmth-warm);
   --color-warmth-cool: var(--warmth-cool);
   --color-warmth-cold: var(--warmth-cold);
-  --color-rank-gold: var(--rank-gold);
-  --color-rank-silver: var(--rank-silver);
-  --color-rank-bronze: var(--rank-bronze);
   --color-risk-high: var(--risk-high);
   --color-risk-medium: var(--risk-medium);
   --color-risk-low: var(--risk-low);

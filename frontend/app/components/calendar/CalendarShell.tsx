@@ -402,7 +402,7 @@ export default function CalendarShell({
                     <header className="flex flex-col gap-3">
                         <div className="flex items-end justify-between gap-3">
                             <div>
-                                <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
+                                <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
                                 {periodLabel && (
                                     <button
                                         type="button"

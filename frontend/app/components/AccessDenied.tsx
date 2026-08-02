@@ -21,23 +21,20 @@ const NO_ACTIONS: ReadonlyArray<PageStateAction> = [];
  *
  * Stays string-driven rather than reading a fixed message namespace so it can also be
  * used from client trees; `AccessDeniedPage` is the localized route-level wrapper.
- * @param title localized heading (optional for the inline variant)
+ * @param title localized heading; required for the full-page variant, which must never
+ * render a headingless state, and optional for the compact in-panel card
  * @param body localized explanation of why access was refused
  * @param actions destinations the caller can still reach; the first is emphasized
  * @param variant full-page route state, or the compact in-panel card
  */
-export default function AccessDenied({
-    title,
-    body,
-    actions = NO_ACTIONS,
-    variant = 'page',
-}: {
-    title?: string;
+export type AccessDeniedProps = {
     body: string;
     actions?: ReadonlyArray<PageStateAction>;
-    variant?: 'page' | 'inline';
-}) {
-    if (variant === 'inline') {
+} & ({ variant?: 'page'; title: string } | { variant: 'inline'; title?: string });
+
+export default function AccessDenied(props: AccessDeniedProps) {
+    const { title, body, actions = NO_ACTIONS } = props;
+    if (props.variant === 'inline') {
         return (
             <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-12 text-center">
                 <span aria-hidden className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">
@@ -63,5 +60,5 @@ export default function AccessDenied({
             </div>
         );
     }
-    return <PageState icon={LockClosedIcon} title={title ?? ''} body={body} actions={actions} />;
+    return <PageState icon={LockClosedIcon} title={props.title} body={body} actions={actions} />;
 }
