@@ -177,10 +177,11 @@ public class DealService {
      * @param workspaceId tenant scope
      * @param deal the deal whose outcome was just reconciled
      * @param previousOutcome the won flag before this transition
+     * @return whether this call owns the deal's realized value for this request
      */
-    private void deriveRealizedValueOnWin(int workspaceId, Deal deal, Boolean previousOutcome) {
+    private boolean deriveRealizedValueOnWin(int workspaceId, Deal deal, Boolean previousOutcome) {
         if (Boolean.TRUE.equals(previousOutcome) || !Boolean.TRUE.equals(deal.getWon())) {
-            return;
+            return false;
         }
         BigDecimal realized = dealValueService.resolveActualValueForClose(
             workspaceId, deal, Boolean.TRUE, null);
@@ -188,6 +189,21 @@ public class DealService {
             deal.setActualValue(realized);
             dealMapper.updateActualValue(workspaceId, deal.getId(), realized);
         }
+        return true;
+    }
+
+    /**
+     * Persists an operator's realized-value edit from a full deal update. The broad update statement
+     * no longer writes {@code actual_value}, so without this the edit would be accepted and silently
+     * discarded. A won deal whose value is derived from line items rejects a differing amount, the
+     * same rule the close dialog applies, rather than letting a form overwrite a derived figure.
+     * @param workspaceId tenant scope
+     * @param deal the updated deal, carrying its stored realized value
+     * @param requestedActualValue the realized value the caller submitted, or null when omitted
+     */
+    private void applyRealizedValueEdit(int workspaceId, Deal deal, BigDecimal requestedActualValue) {
+        deal.setActualValue(
+            dealValueService.setRealizedValue(workspaceId, deal, requestedActualValue));
     }
 
     /**
@@ -1007,6 +1023,7 @@ public class DealService {
             deal.setValue(dealValueService.setManualValue(workspaceId, before, deal.getValue()));
         }
         Boolean previousOutcome = before.getWon();
+        BigDecimal requestedActualValue = deal.getActualValue();
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(before.getOwnerId());
@@ -1022,7 +1039,10 @@ public class DealService {
         reconcileCloseState(deal);
         boolean reopened = previousOutcome != null && deal.getWon() == null;
         dealMapper.update(deal);
-        deriveRealizedValueOnWin(workspaceId, deal, previousOutcome);
+        boolean derivedOnWin = deriveRealizedValueOnWin(workspaceId, deal, previousOutcome);
+        if (!derivedOnWin) {
+            applyRealizedValueEdit(workspaceId, deal, requestedActualValue);
+        }
         if ((stageChanged || reopened) && newStage != null) {
             dealStageHistoryService.recordTransition(
                 workspaceId, id, newStage, previousOutcome, deal.getWon());

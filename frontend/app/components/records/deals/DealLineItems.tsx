@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 
@@ -41,6 +42,7 @@ const EMPTY_TOTALS = (currency: string): DealLineItemTotals => ({
  * never does money arithmetic.
  */
 export default function DealLineItems({ dealId, dealCurrency, initial }: Props) {
+    const router = useRouter();
     const t = useTranslations('DealsLineItems');
     const locale = useLocale();
     const [items, setItems] = useState<DealLineItem[]>(initial.items);
@@ -64,6 +66,7 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
         setBusy(true);
         try {
             apply(await op());
+            router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('saveFailed'));
         } finally {

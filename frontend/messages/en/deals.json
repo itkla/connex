@@ -376,7 +376,8 @@
         "closedReason": "Closed reason",
         "actualValue": "Actual value",
         "cancel": "Cancel",
-        "save": "Save"
+        "save": "Save",
+        "valueDerivedFromLineItems": "This value is derived from the deal's line items. Edit or remove the line items to change it."
     },
     "DealsStageRatio": {
         "open": "Open",

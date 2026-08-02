@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.ProductMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -40,6 +41,8 @@ public class DealLineItemService {
     private final ProductMapper productMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
+    private final RuleTriggerPublisher ruleTriggers;
+    private final NotificationChangePublisher notificationChanges;
 
     private static final int MONEY_SCALE = 2;
     private static final BigDecimal HUNDRED = new BigDecimal("100");
@@ -65,7 +68,8 @@ public class DealLineItemService {
         applyRequest(workspaceId, deal, item, request, true);
         compute(item);
         lineItemMapper.insert(item);
-        dealValueService.reconcileLineItems(workspaceId, deal);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        publishValueChange(workspaceId, deal, reconciled);
         auditService.record("deal.line_item.create", "deal", deal.getId(), deal.getName(),
             "Added line item " + item.getName() + " to " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
@@ -81,7 +85,8 @@ public class DealLineItemService {
         applyRequest(workspaceId, deal, item, request, false);
         compute(item);
         lineItemMapper.update(item);
-        dealValueService.reconcileLineItems(workspaceId, deal);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        publishValueChange(workspaceId, deal, reconciled);
         auditService.record("deal.line_item.update", "deal", deal.getId(), deal.getName(),
             "Updated line item " + item.getName() + " on " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
@@ -95,10 +100,31 @@ public class DealLineItemService {
         Deal deal = requireDealForUpdate(workspaceId, dealId);
         DealLineItem item = requireLineItem(workspaceId, deal.getId(), itemId);
         lineItemMapper.delete(workspaceId, itemId);
-        dealValueService.reconcileLineItems(workspaceId, deal);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        publishValueChange(workspaceId, deal, reconciled);
         auditService.record("deal.line_item.delete", "deal", deal.getId(), deal.getName(),
             "Removed line item " + item.getName() + " from " + deal.getName(), null);
         return responseFor(workspaceId, deal.getId());
+    }
+
+    /**
+     * Signals a line-item-driven change to the canonical deal value, matching the notification and
+     * rule-trigger signals the manual value-writing paths emit. Without this, workflows bound to
+     * {@code deal.value_changed} would never fire for line-item deals and deal-risk notification
+     * reconciliation would not see the new amount.
+     * @param workspaceId tenant scope
+     * @param deal the locked deal, carrying its value as of before reconciliation
+     * @param reconciled the canonical value after reconciliation
+     */
+    private void publishValueChange(int workspaceId, Deal deal, BigDecimal reconciled) {
+        BigDecimal previous = deal.getValue();
+        if (previous != null && reconciled != null && previous.compareTo(reconciled) == 0) {
+            return;
+        }
+        deal.setValue(reconciled);
+        notificationChanges.publish(workspaceId, "deal", deal.getId());
+        ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.updated");
+        ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.value_changed");
     }
 
     /**

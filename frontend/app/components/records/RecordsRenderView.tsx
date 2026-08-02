@@ -795,9 +795,13 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     >
                                                         <Tooltip>
                                                             <TooltipTrigger asChild>
-                                                                <span className="cursor-help decoration-border decoration-dotted underline-offset-4 hover:underline">
+                                                                <button
+                                                                    type="button"
+                                                                    aria-label={`${content} — ${editDisabledReason}`}
+                                                                    className="cursor-help rounded-sm text-left decoration-border decoration-dotted underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                                                                >
                                                                     {content}
-                                                                </span>
+                                                                </button>
                                                             </TooltipTrigger>
                                                             <TooltipContent>
                                                                 <p className="max-w-xs text-xs">{editDisabledReason}</p>
