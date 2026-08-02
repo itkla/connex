@@ -591,6 +591,14 @@ async function deleteJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
 }
 
+/**
+ * Reads a collection during SSR, degrading any failure to an empty list.
+ *
+ * **Reads only.** A mutation routed through this reports success for a write that never
+ * landed: the swallowed rejection is indistinguishable from a completed call, so the
+ * caller confirms a change the workspace never recorded. Mutations must use
+ * {@link resultWithCookie}, which lets the caller surface the failure.
+ */
 async function safeWithCookie<T>(
     fetcher: (init: RequestInit) => Promise<T[]>,
     cookie: string | null,
@@ -2420,24 +2428,66 @@ export function getContactTagsFromCookie(id: number, cookie: string | null) {
 }
 
 export function addContactTag(id: number, tagId: number, init: RequestInit = {}) {
-    return postJson<void[]>(`/api/persons/${id}/tags/${tagId}`, {}, init);
+    return postJson<void>(`/api/persons/${id}/tags/${tagId}`, {}, init);
 }
-export function addContactTagFromCookie(id: number, tagId: number, cookie: string | null) {
-    return safeWithCookie<void>((init) => addContactTag(id, tagId, init), cookie);
+/**
+ * Applies a tag to a contact during SSR, reporting whether the write actually landed.
+ *
+ * A write reports {@link CookieResult} rather than going through {@link safeWithCookie},
+ * so a rejected request — a permission denial, a tenant mismatch, an unreachable backend —
+ * cannot be mistaken for a completed one. A missing cookie reports `ok: false` for the same
+ * reason: with no session there is nothing to write under, and the tag was not applied.
+ * @param id the contact to tag
+ * @param tagId the tag to apply
+ * @param cookie the incoming request's cookie header, or null
+ * @returns whether the tag was applied
+ */
+export function addContactTagFromCookie(
+    id: number,
+    tagId: number,
+    cookie: string | null,
+): Promise<CookieResult<void>> {
+    return resultWithCookie<void>((init) => addContactTag(id, tagId, init), cookie);
 }
 
 export function removeContactTag(id: number, tagId: number, init: RequestInit = {}) {
-    return deleteJson<void[]>(`/api/persons/${id}/tags/${tagId}`, init);
+    return deleteJson<void>(`/api/persons/${id}/tags/${tagId}`, init);
 }
-export function removeContactTagFromCookie(id: number, tagId: number, cookie: string | null) {
-    return safeWithCookie<void>((init) => removeContactTag(id, tagId, init), cookie);
+/**
+ * Removes a tag from a contact during SSR, reporting whether the write actually landed.
+ * Failure-aware for the reasons given on {@link addContactTagFromCookie}.
+ * @param id the contact to untag
+ * @param tagId the tag to remove
+ * @param cookie the incoming request's cookie header, or null
+ * @returns whether the tag was removed
+ */
+export function removeContactTagFromCookie(
+    id: number,
+    tagId: number,
+    cookie: string | null,
+): Promise<CookieResult<void>> {
+    return resultWithCookie<void>((init) => removeContactTag(id, tagId, init), cookie);
 }
 
 export function replaceContactTags(id: number, tagIds: number[], init: RequestInit = {}) {
     return putJson<Types.Tag[]>(`/api/persons/${id}/tags`, tagIds, init);
 }
-export function replaceContactTagsFromCookie(id: number, tagIds: number[], cookie: string | null) {
-    return safeWithCookie<Types.Tag>((init) => replaceContactTags(id, tagIds, init), cookie);
+/**
+ * Replaces a contact's tag set during SSR, reporting whether the write actually landed.
+ * Failure-aware for the reasons given on {@link addContactTagFromCookie}; here the
+ * swallowed form was worse still, since an empty array also reads as "the server replaced
+ * the tag set with no tags".
+ * @param id the contact whose tags are replaced
+ * @param tagIds the tags the contact should end up with
+ * @param cookie the incoming request's cookie header, or null
+ * @returns the resulting tag set, or the fact that it could not be written
+ */
+export function replaceContactTagsFromCookie(
+    id: number,
+    tagIds: number[],
+    cookie: string | null,
+): Promise<CookieResult<Types.Tag[]>> {
+    return resultWithCookie<Types.Tag[]>((init) => replaceContactTags(id, tagIds, init), cookie);
 }
 
 export function getContactDeals(id: number, init: RequestInit = {}) {
