@@ -11,6 +11,8 @@
     "emptyBody": "条件に一致する監査イベントはまだありません。",
     "emptyAllTitle": "アクティビティの記録なし",
     "emptyAllBody": "変更が行われると、ここに表示されます。",
+    "deniedTitle": "監査ログの閲覧権限が必要です",
+    "deniedBody": "このワークスペースの監査ログを表示できるのは、監査権限を持つメンバーのみです。必要な場合はワークスペース管理者にご依頼ください。",
     "actionEntity": "<actor>{actorName}</actor>が<target>{targetName}</target>を{verb}",
     "actionPlain": "<actor>{actorName}</actor>が{verb}",
     "verbCreated": "作成しました",

@@ -3,7 +3,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getCurrentUserFromCookie, getAuditLogs } from "@/app/lib/api";
-import { type AuditLogEntry } from "@/app/lib/types";
+import { loadCollection } from "@/app/lib/recordAccess";
+import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import AuditLogBrowser from "@/app/components/admin/AuditLogBrowser";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -24,10 +25,17 @@ export default async function AuditLogPage() {
         redirect("/auth/login");
     }
 
-    const entries = await getAuditLogs(
-        { limit: PAGE_SIZE, offset: 0 },
-        { headers: { cookie: cookie ?? "" }, cache: "no-store" },
-    ).catch(() => [] as AuditLogEntry[]);
+    const access = await loadCollection(() =>
+        getAuditLogs(
+            { limit: PAGE_SIZE, offset: 0 },
+            { headers: { cookie: cookie ?? "" }, cache: "no-store" },
+        ),
+    );
 
-    return <AuditLogBrowser initialEntries={entries} pageSize={PAGE_SIZE} />;
+    if (access.kind === "forbidden") {
+        const t = await getTranslations("AdminAuditLog");
+        return <AccessDeniedPage title={t("deniedTitle")} body={t("deniedBody")} />;
+    }
+
+    return <AuditLogBrowser initialEntries={access.items} pageSize={PAGE_SIZE} />;
 }

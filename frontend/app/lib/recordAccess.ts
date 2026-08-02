@@ -26,6 +26,10 @@ export type RecordAccess<T> =
  * `forbidden`; a 404 or a `null`/`undefined` result reports `missing`; and **every
  * other failure is rethrown** so a genuine server fault still reaches the segment
  * `error.tsx` instead of masquerading as a tidy 404.
+ * A 401, or a bodyless 403 — which is how Spring Security answers a missing or expired
+ * session on a deployment without the OAuth entry point — redirects to sign-in rather
+ * than reporting a denial. In-memory sessions are dropped on every backend restart, and
+ * routing that to "you don't have access" would strand the caller on a dead end.
  * @param load fetches the record, resolving to `null` when the API models absence that way
  * @returns the record, or the reason it could not be shown
  */
@@ -36,17 +40,56 @@ export async function loadRecord<T>(
         const record = await load();
         return record == null ? { kind: 'missing' } : { kind: 'found', record };
     } catch (error) {
-        if (error instanceof ApiError) {
-            if (error.status === 401 || (error.status === 403 && error.emptyBody === true)) {
-                redirect('/auth/login');
-            }
-            if (error.status === 403) {
-                return { kind: 'forbidden' };
-            }
-            if (error.status === 404) {
-                return { kind: 'missing' };
-            }
+        if (deniedByPermissionRatherThanMissingSession(error)) {
+            return { kind: 'forbidden' };
+        }
+        if (error instanceof ApiError && error.status === 404) {
+            return { kind: 'missing' };
         }
         throw error;
     }
+}
+
+/**
+ * Outcome of loading a collection, keeping "this workspace holds no such records" and
+ * "you may not see these records" apart. Collapsing the two — which `.catch(() => [])`
+ * does — makes a positive claim about the tenant's history that is false, and hides
+ * the fact that the fix is a permission change. On an audit surface that claim is the
+ * worst of both: an empty security log reads as "nothing happened".
+ */
+export type CollectionAccess<T> =
+    | { kind: 'loaded'; items: T[] }
+    | { kind: 'forbidden' };
+
+/**
+ * Loads a collection and classifies a permission refusal, so the caller can render the
+ * denial grammar rather than an empty state it has no grounds to claim. A collection
+ * that genuinely came back empty still reports `loaded`, and so still reaches the
+ * honest empty state.
+ *
+ * Shares {@link loadRecord}'s treatment of an unauthenticated caller, and rethrows
+ * every other failure — including a 404, which for a collection endpoint is a fault
+ * rather than an empty workspace — so it reaches the segment `error.tsx`.
+ * @param load fetches the collection
+ * @returns the items, or the fact that the caller may not see them
+ */
+export async function loadCollection<T>(load: () => Promise<T[]>): Promise<CollectionAccess<T>> {
+    try {
+        return { kind: 'loaded', items: await load() };
+    } catch (error) {
+        if (deniedByPermissionRatherThanMissingSession(error)) {
+            return { kind: 'forbidden' };
+        }
+        throw error;
+    }
+}
+
+function deniedByPermissionRatherThanMissingSession(error: unknown): boolean {
+    if (!(error instanceof ApiError)) {
+        return false;
+    }
+    if (error.status === 401 || (error.status === 403 && error.emptyBody === true)) {
+        redirect('/auth/login');
+    }
+    return error.status === 403;
 }
