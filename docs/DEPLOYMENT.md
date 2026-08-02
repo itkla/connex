@@ -182,9 +182,11 @@ CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem outside dev/test
 ```
 
 Only the `dev`, `test`, and `seeder` profiles are exempt (seeder runs in fact require it unset).
-The bundled `deploy/*.env.example` templates already set it — an operator starting from one needs
-no action. **An existing deployment that relied on the old soft-launch behaviour must add the
-variable before taking this upgrade.**
+The deployment templates `deploy/silo.env.example` and `deploy/onprem.env.example` already set it —
+an operator starting from one needs no action. `deploy/eval.env.example` deliberately leaves it
+unset and relies on the `dev` exemption, so it cannot be mistaken for a deployment seed; production-
+shaping that file means choosing an edition first. **An existing deployment that relied on the old
+soft-launch behaviour must add the variable before taking this upgrade.**
 
 `saas` additionally forbids the internal-access opt-ins (bootstrap, private SSO issuer hosts,
 internal AI/SMTP hosts); `silo` and `on-prem` allow them. `on-prem` forbids instance-managed mail

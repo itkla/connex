@@ -40,25 +40,23 @@ Workspace creation is disabled on this instance            # allow-self-service-
 `AuthService.register` only auto-provisions a workspace when the self-service flag is on. When it is
 off, the frontend sees an empty workspace list and redirects the new account to `/onboarding`, which
 offers exactly two moves: create a workspace (which will `403` on this posture) or paste an invite
-link. **The invite is the real path — but do not tell anyone to paste a shareable link into that
-box.** It parses only the marker `/invite/` and then routes to `/invite/{token}`, so an emailed
-invite URL works while a **shareable link (`/invite-link/{token}`) does not**: the marker never
-matches, the parser keeps the first segment of the pasted URL, and the tester lands on
-`/invite/https:` and is told the invite does not exist. Pasting only the bare token of a shareable
-link fails the same way, on the wrong route. **Have them open the shareable URL directly instead**
-(that is exactly the URL Settings → Members copies). This mismatch is **tracked**; until it is
-fixed, the paste box is for emailed invites only.
+link. **The invite is the real path.** The paste box accepts either shape — an emailed invite URL
+(`/invite/{token}`), a shareable link (`/invite-link/{token}`, exactly what Settings → Members
+copies), or a bare token of either kind — and routes each to the page that can redeem it. Junk that
+cannot be a token — a bare word, a link to some other page — is refused in the box with a message
+rather than navigated somewhere that can only report the invite as missing. A token-shaped value
+that is not a live invite still lands on the redemption page and is reported there as unavailable.
 
 **This does not vary by deployment profile in code.** Neither flag appears in
 `FORBIDDEN_KEYS_BY_PROFILE`, so no profile forces either value. It varies only by **env template**:
 both [`deploy/silo.env.example`](../deploy/silo.env.example) and
 [`deploy/onprem.env.example`](../deploy/onprem.env.example) set
-`CONNEX_WORKSPACES_ALLOW_CREATION=false` — but
-[`deploy/eval.env.example`](../deploy/eval.env.example) declares
-`CONNEX_DEPLOYMENT_PROFILE=silo` and sets `CONNEX_WORKSPACES_ALLOW_CREATION=true` (it also activates
-the `dev` Spring profile), so "it is a silo template" is not evidence that self-service is off.
-An instance configured by hand rather than from a template gets whatever the operator set — check
-it, do not assume it.
+`CONNEX_WORKSPACES_ALLOW_CREATION=false` — while
+[`deploy/eval.env.example`](../deploy/eval.env.example) sets it `true`, because a local evaluation
+has no operator to issue the first invite. That template declares no deployment profile at all and
+says why in its own comments, so it can no longer be mistaken for a silo seed; a real deployment
+starts from one of the other two. An instance configured by hand rather than from a template gets
+whatever the operator set — check it, do not assume it.
 
 ### `invite` and `domain` signup modes are declared, not implemented
 
@@ -457,8 +455,8 @@ DELETE /api/workspaces/{workspaceId}/invite-links/{linkId}
 - The tester redeems at `/invite-link/{token}` — `GET /api/invite-links/{token}` previews,
   `POST /api/invite-links/{token}/accept` joins and sets the active-workspace cookie. Redemption
   makes them **`active` immediately**; there is no separate acceptance step to chase.
-  **Deliver the whole URL** (`https://<host>/invite-link/{token}`) and tell them to open it. It is
-  the one thing the `/onboarding` paste box cannot handle — see "Admin-only provisioning" above.
+  **Deliver the whole URL** (`https://<host>/invite-link/{token}`) and tell them to open it. A
+  tester who lands on `/onboarding` first can paste that same URL into its join box.
 - Emailed invites use the parallel `/invite/{token}` route and are built from
   `connex.mail.app-base-url`, **never** from a request header. If that base URL is wrong, every
   emailed invite link is wrong. Their expiry is **14 days, hardcoded in the mapper SQL** — no
@@ -943,7 +941,7 @@ enumerated set; the meaning of each variable is in [DEPLOYMENT.md](DEPLOYMENT.md
 | 5 | `CONNEX_DB_USERNAME` | `CONNEX_DB_USERNAME must be set outside dev/test` | `dev`, `test` |
 | 6 | `CONNEX_DB_PASSWORD` | `CONNEX_DB_PASSWORD must be set outside dev/test` | `dev`, `test` |
 | 7 | Verified DB TLS — `sslMode` ∈ {`VERIFY_CA`, `VERIFY_IDENTITY`} | driver/URL refusals, e.g. `… must use the jdbc:mysql driver outside dev/test`, `… must not be blank outside dev/test` | `dev`, `test`; plus a narrow localhost carve-out for the systemd staging checkout at `/opt/connex-staging/backend` |
-| 8 | Profile-forbidden posture keys | `connex.deployment.profile=<p> forbids: <key>=true` | `dev`, `test`, `seeder` |
+| 8 | Profile-forbidden posture keys | `connex.deployment.profile=<p> forbids: <key>=true` | none — `dev`/`test`/`seeder` exempt an **unset** profile from being required, but once a profile is set its forbidden keys are refused under every Spring profile |
 | 9 | Unknown profile value | `Unsupported connex.deployment.profile=<p>` | — |
 | 10 | Maintenance-mode coherence | `Legacy upload migration mode requires maintenance mode legacy-upload-migration` | — |
 | 11 | `connex.readiness-file`, when set | `connex.readiness-file must have an existing absolute parent directory` | only when configured |
