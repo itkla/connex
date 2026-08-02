@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 import { MATRIX_ROUTES, type MatrixRoute } from './routes';
+import type { PageFault } from './support/matrix';
 import {
     blockExternalRequests,
     captureFaults,
@@ -8,6 +9,7 @@ import {
     matrixContext,
     record,
     significantFaults,
+    unexpectedFaults,
     type Axes,
 } from './support/matrix';
 
@@ -45,7 +47,7 @@ async function sweepCell(
     browser: Parameters<typeof matrixContext>[0],
     route: MatrixRoute,
     axes: Axes,
-): Promise<{ faults: ReturnType<typeof significantFaults>; status: number | null; heading: string | null }> {
+): Promise<{ faults: PageFault[]; status: number | null; heading: string | null }> {
     const context = await matrixContext(browser, { ...axes, role: route.role });
     const blocked = blockExternalRequests(context);
     const page = await context.newPage();
@@ -65,7 +67,7 @@ async function sweepCell(
             httpStatus: status,
             notes: blocked.size > 0 ? `blocked off-origin hosts: ${[...blocked].sort().join(', ')}` : undefined,
         });
-        return { faults: significantFaults(faults), status, heading: heading?.trim() ?? null };
+        return { faults: unexpectedFaults(faults), status, heading: heading?.trim() ?? null };
     } finally {
         await context.close();
     }

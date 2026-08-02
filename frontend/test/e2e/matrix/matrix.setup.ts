@@ -30,7 +30,9 @@ const SEEDED_PASSWORD = process.env.MATRIX_PASSWORD ?? 'seeder-password';
  */
 setup('sign in each seeded role', async () => {
     setup.setTimeout(120_000);
-    rmSync(MATRIX_ARTIFACT_DIR, { recursive: true, force: true });
+    if (process.env.MATRIX_RESET === '1') {
+        rmSync(MATRIX_ARTIFACT_DIR, { recursive: true, force: true });
+    }
     mkdirSync(MATRIX_ARTIFACT_DIR, { recursive: true });
 
     const probe = await request.newContext({ baseURL: MATRIX_BASE_URL });

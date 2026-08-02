@@ -135,9 +135,40 @@ const IGNORED_FAULTS: readonly RegExp[] = [
     /net::ERR_(NAME_NOT_RESOLVED|BLOCKED_BY_CLIENT|FAILED|INTERNET_DISCONNECTED)/i,
 ];
 
-/** Filters environmental noise out of captured faults. */
+/**
+ * Faults that are real, already triaged, and filed — excluded from the pass/fail assertion so the
+ * sweep keeps finding *new* defects, but still written to the manifest for every cell that produced
+ * them. Suppressing these silently would be dishonest; leaving them un-suppressed would mean the
+ * sweep reports the same two known issues several hundred times and hides anything else.
+ *
+ * Each entry must name the filed issue. An entry without one does not belong here.
+ */
+const KNOWN_FILED_FAULTS: readonly { pattern: RegExp; issue: string }[] = [
+    {
+        pattern: /_next\/static\/chunks\/.*\.js/i,
+        issue: 'records browsers reference a lazy chunk the build never emitted',
+    },
+    {
+        pattern: /status of 403/i,
+        issue: 'records browsers probe admin-only /api/custom-fields as a member (403 used as a permission probe)',
+    },
+];
+
+/** Filters environmental noise out of captured faults, keeping everything a reviewer should see. */
 export function significantFaults(faults: readonly PageFault[]): PageFault[] {
     return faults.filter((fault) => !IGNORED_FAULTS.some((pattern) => pattern.test(fault.text)));
+}
+
+/**
+ * Faults that should fail a cell: significant, and not already filed.
+ *
+ * Kept separate from {@link significantFaults} so the manifest can record the known ones while the
+ * assertion stays sensitive to new regressions.
+ */
+export function unexpectedFaults(faults: readonly PageFault[]): PageFault[] {
+    return significantFaults(faults).filter(
+        (fault) => !KNOWN_FILED_FAULTS.some((known) => known.pattern.test(fault.text)),
+    );
 }
 
 export type ManifestEntry = {
