@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import AccessDenied from "@/app/components/AccessDenied";
 import { useTranslations } from "next-intl";
 import {
@@ -89,9 +90,18 @@ function PermissionSummary({
     );
 }
 
+/**
+ * Custom-role administration: the permission set each workspace role carries.
+ *
+ * Saving or deleting a role is refreshed from the server rather than only patched into local
+ * state. Editing a role rewrites the effective permissions of everyone holding it — the viewer
+ * included — and the app shell resolves those once per server render, so without the refresh
+ * the editor would keep the gates and navigation of the permissions they just changed.
+ */
 export default function RolesPanel() {
     const t = useTranslations("WorkspaceRoles");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const router = useRouter();
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
 
@@ -162,6 +172,7 @@ export default function RolesPanel() {
                 setRoles((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
                 toastSuccess(t("created"));
             }
+            router.refresh();
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
                 toastError(err instanceof Error ? err.message : t("saveFailed"));
@@ -176,6 +187,7 @@ export default function RolesPanel() {
         try {
             await deleteWorkspaceRole(workspaceId, removeTarget.id);
             setRoles((prev) => prev.filter((r) => r.id !== removeTarget.id));
+            router.refresh();
             toastSuccess(t("deleted"));
             setRemoveTarget(null);
         } catch (err) {

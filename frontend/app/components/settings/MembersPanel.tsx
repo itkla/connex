@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import {
@@ -114,9 +115,20 @@ function TabListHeading({ title, count }: { title: string; count?: number }) {
     );
 }
 
+/**
+ * Workspace membership administration: roles, invites, invite links and allowed domains.
+ *
+ * A role change is refreshed from the server rather than only patched into local state. An
+ * admin can change their own row here, and the app shell resolves the viewer's effective
+ * permissions once per server render — so without the refresh they would keep the gates and
+ * navigation of the role they just left until a full page load.
+ *
+ * @param currentUserId the viewer, so their own row can be handled differently
+ */
 export default function MembersPanel({ currentUserId }: { currentUserId: number | null }) {
     const t = useTranslations("WorkspaceMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const router = useRouter();
     const { activeWorkspaceId, activeWorkspace } = useWorkspace();
     const workspaceId = activeWorkspaceId;
     const role = activeWorkspace?.role;
@@ -196,6 +208,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
         try {
             const updated = await updateMemberRole(workspaceId, userId, next);
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -212,6 +225,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
         try {
             const updated = await assignMemberCustomRole(workspaceId, userId, roleId);
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
