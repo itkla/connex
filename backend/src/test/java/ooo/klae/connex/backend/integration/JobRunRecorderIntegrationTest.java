@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
@@ -38,6 +39,7 @@ class JobRunRecorderIntegrationTest {
     @BeforeEach
     @AfterEach
     void cleanPartitions() {
+        RequestContextHolder.resetRequestAttributes();
         jdbcTemplate.update(
                 "DELETE FROM job_run WHERE job_name = ? AND (workspace_id IN (?, ?) OR workspace_id IS NULL)",
                 JOB_NAME,
@@ -48,6 +50,13 @@ class JobRunRecorderIntegrationTest {
     @Test
     void retentionIsPerWorkspaceWithIndependentNullPartitionAndIdTieBreak() {
         record(WORKSPACE_ONE, 0);
+        assertFalse(ids(WORKSPACE_ONE).isEmpty(),
+                "The first recorded run did not persist. JobRunRecorder swallows runtime failures, "
+                        + "so check the 'Job run recording failed' WARN line for the cause. "
+                        + "Total job_run rows for this job: "
+                        + jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM job_run WHERE job_name = ?",
+                                Integer.class, JOB_NAME));
         int oldestWorkspaceOneId = newestId(WORKSPACE_ONE);
         for (int index = 1; index < 51; index++) {
             record(WORKSPACE_ONE, index);

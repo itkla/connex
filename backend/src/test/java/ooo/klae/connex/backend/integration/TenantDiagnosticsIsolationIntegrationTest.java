@@ -22,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -42,7 +43,7 @@ import ooo.klae.connex.backend.secrets.StoredSecret;
  * Full-stack diagnostics authorization, active-workspace routing, and redaction backstop.
  */
 @SpringBootTest(properties = "spring.task.scheduling.enabled=false")
-@Transactional
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TenantDiagnosticsIsolationIntegrationTest {
     private static final String PASSWORD = "Diagnostics-Test-Pw1!";
     private static final String PLAINTEXT_SENTINEL = "plaintext-credential-sentinel";
@@ -81,22 +82,16 @@ class TenantDiagnosticsIsolationIntegrationTest {
         seedCredentialSentinels(workspace);
 
         MockHttpSession session = login(actor.getUsername());
-        String workspaceResponse = mockMvc.perform(get(
+        String workspaceResponse = okBody(mockMvc.perform(get(
                         "/api/workspaces/" + workspace.getId() + "/diagnostics")
                         .header("X-Workspace-Id", workspace.getId())
                         .session(session))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        String organizationResponse = mockMvc.perform(get(
+                .andReturn(), "workspace diagnostics");
+        String organizationResponse = okBody(mockMvc.perform(get(
                         "/api/orgs/" + organization.getId() + "/diagnostics")
                         .header("X-Workspace-Id", workspace.getId())
                         .session(session))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+                .andReturn(), "organization diagnostics");
 
         assertRedacted(workspaceResponse);
         assertRedacted(organizationResponse);
@@ -115,6 +110,20 @@ class TenantDiagnosticsIsolationIntegrationTest {
                         .header("X-Workspace-Id", foreignWorkspace.getId())
                         .session(session))
                 .andExpect(status().isNotFound());
+    }
+
+    private static String okBody(MvcResult result, String label) throws Exception {
+        int status = result.getResponse().getStatus();
+        String body = result.getResponse().getContentAsString();
+        if (status != 200) {
+            Exception resolved = result.getResolvedException();
+            throw new AssertionError(label + " returned HTTP " + status
+                    + " body=" + body
+                    + " resolvedException="
+                    + (resolved == null ? "none" : resolved.getClass().getName()
+                            + ": " + resolved.getMessage()));
+        }
+        return body;
     }
 
     private void assertRedacted(String response) {
