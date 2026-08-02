@@ -406,13 +406,12 @@ main() {
 
     SUPPORT_BUNDLE_PHASE=publishing
     chmod 0600 "$WORK_DIR/bundle.partial"
-    # `mv -n` exits 0 without moving anything when the destination exists, so it cannot be used as
-    # a guard; a hardlink fails atomically instead, which also closes the window between the
-    # earlier existence check and this publish.
-    if ! ln "$WORK_DIR/bundle.partial" "$OUTPUT" 2>/dev/null; then
-        support_bundle_finish "$EXIT_USAGE" support_bundle_collect_summary org_id "$ORG_ID" \
-            reason publish_refused output "$OUTPUT"
-        exit "$EXIT_USAGE"
+    exit_code=0
+    support_bundle_publish "$WORK_DIR/bundle.partial" "$OUTPUT" || exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+        support_bundle_finish "$exit_code" support_bundle_collect_summary org_id "$ORG_ID" \
+            output "$OUTPUT"
+        exit "$exit_code"
     fi
     rm -f "$WORK_DIR/bundle.partial"
 

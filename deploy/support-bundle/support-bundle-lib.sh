@@ -30,7 +30,9 @@ if [ -n "${EXIT_INTEGRITY:-}" ] && [ "${EXIT_INTEGRITY}" != 67 ]; then
         "$EXIT_INTEGRITY" >&2
     return 64
 fi
-declare -rx SUPPORT_BUNDLE_LIB_LOADED=1
+# Deliberately not exported: an exported flag would make a child process that sources
+# this library return early without defining any of its functions.
+declare -r SUPPORT_BUNDLE_LIB_LOADED=1
 
 declare -rx EXIT_USAGE=64
 declare -rx EXIT_AUTH=65
@@ -64,7 +66,12 @@ support_bundle_escape_log_value() {
     value="${value//$'\t'/'%09'}"
     value="${value//' '/'%20'}"
     value="${value//'='/'%3D'}"
-    printf '%s' "$value"
+    # Percent-escaping the field separators is not enough. Log values carry attacker-controlled
+    # strings — a rejected ZIP entry name and a rejected manifest path are both logged precisely
+    # BECAUSE they failed a charset check — and a raw ESC lets the archive drive the operator's
+    # terminal: ESC[2K with ESC[1A erases the failure lines just written, and ESC[8m conceals
+    # everything after it including the failure summary. Drop every remaining control byte.
+    printf '%s' "$value" | LC_ALL=C tr -d '\000-\010\013-\037\177'
 }
 
 support_bundle_log_line() {
@@ -448,6 +455,44 @@ support_bundle_verify_inventory() {
     present="$(find "$directory" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | grep -vx 'manifest.json' | sort)"
     if [ "$listed" != "$present" ]; then
         support_bundle_log error integrity_failure reason inventory_mismatch
+        return "$EXIT_INTEGRITY"
+    fi
+}
+
+# Publishes the verified archive, refusing to overwrite an existing file.
+#
+# `ln` is preferred because its EEXIST failure is atomic, closing the window between an earlier
+# existence check and the publish. But a hardlink cannot cross a filesystem boundary, and the
+# default output path routinely does: the work directory lives under TMPDIR, which is tmpfs on
+# most current distributions, while the output lands on the operator's disk. So EXDEV falls back
+# to an exclusive create — `set -C` makes that atomic too — followed by a copy. Every other ln
+# failure is reported rather than being silently treated as "already exists".
+support_bundle_publish() {
+    local source="$1"
+    local destination="$2"
+    local ln_error
+    ln_error="$(ln "$source" "$destination" 2>&1)" && return 0
+    if [ -e "$destination" ] || [ -L "$destination" ]; then
+        support_bundle_log error publish_refused reason output_exists path "$destination"
+        return "$EXIT_USAGE"
+    fi
+    case "$ln_error" in
+        *[Cc]ross-device*|*EXDEV*|*"Invalid cross-device link"*)
+            support_bundle_log info publish_fallback reason cross_device path "$destination"
+            ;;
+        *)
+            support_bundle_log error publish_failed reason link_failed detail "$ln_error"
+            return "$EXIT_INTEGRITY"
+            ;;
+    esac
+    if ! (set -C; : > "$destination") 2>/dev/null; then
+        support_bundle_log error publish_refused reason output_exists path "$destination"
+        return "$EXIT_USAGE"
+    fi
+    chmod 0600 "$destination"
+    if ! cp "$source" "$destination"; then
+        rm -f "$destination"
+        support_bundle_log error publish_failed reason copy_failed path "$destination"
         return "$EXIT_INTEGRITY"
     fi
 }

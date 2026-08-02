@@ -614,19 +614,90 @@ case_read_refuses_symlink_bundle_without_rendering() (
     assert_absent symlink_no_verified_claim 'integrity_verified' <(printf '%s\n' "$output") || return 1
 )
 
-# Regression: GNU `mv -n` exits 0 without moving anything when the destination exists, so the
-# publish guard never fired: the verified bundle was deleted by the EXIT trap while the summary
-# reported success.
-case_publish_refuses_existing_output() (
-    local work="$SANDBOX/publish"
-    mkdir -p "$work"
-    printf 'PRE_EXISTING_DECOY\n' > "$work/out.zip"
-    printf 'verified-bundle-bytes\n' > "$work/src.bin"
-    if ln "$work/src.bin" "$work/out.zip" 2>/dev/null; then
-        printf 'hardlink overwrote an existing destination\n'
-        return 1
+# Drives the REAL collect.sh end to end with curl stubbed, so publish runs as shipped. The
+# previous version of this test re-implemented `ln` inline and therefore tested coreutils rather
+# than the script.
+run_collect() {
+    local output="$1"
+    shift
+    local cookie="$SANDBOX/collect-cookies"
+    printf 'x\n' > "$cookie"
+    chmod 0600 "$cookie"
+    local stub="$SANDBOX/curl-stub"
+    mkdir -p "$stub"
+    cat > "$stub/curl" <<STUB
+#!/bin/bash
+out=""
+headers=""
+while [ "\$#" -gt 0 ]; do
+    case "\$1" in
+        --output) out="\$2"; shift 2 ;;
+        --dump-header) headers="\$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+cp "$SANDBOX/publish-src/bundle.zip" "\$out"
+printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "\$headers"
+printf '200'
+STUB
+    chmod +x "$stub/curl"
+    PATH="$stub:$PATH" bash "$BUNDLE_DIR/collect.sh" \
+        --base-url https://connex.example.com \
+        --org-id 3 \
+        --cookie-file "$cookie" \
+        --output "$output" "$@" 2>&1
+}
+
+# Regression: publish used a bare hardlink, which cannot cross a filesystem boundary. TMPDIR is
+# tmpfs on current distributions while the default --output lands on the operator's disk, so the
+# shipped default layout failed at publish, reported a reason that reads as "output exists", and
+# the verified bundle was then destroyed by the EXIT trap.
+case_collect_publishes_across_a_mount_boundary() (
+    make_bundle "$SANDBOX/publish-src" "$SANDBOX/publish-src/bundle.zip"
+    local tmpfs_dir="/dev/shm/connex-support-bundle-test.$$"
+    if [ ! -d /dev/shm ]; then
+        printf 'skip: /dev/shm unavailable\n'
+        return 0
     fi
-    assert_equals publish_decoy_intact 'PRE_EXISTING_DECOY' "$(cat "$work/out.zip")" || return 1
+    mkdir -p "$tmpfs_dir"
+    local disk_output="$SANDBOX/published-across-devices.zip"
+    rm -f "$disk_output"
+    if [ "$(stat -c '%d' /dev/shm)" = "$(stat -c '%d' "$SANDBOX")" ]; then
+        rm -rf "$tmpfs_dir"
+        printf 'skip: /dev/shm and the sandbox share a device\n'
+        return 0
+    fi
+    local output status
+    output="$(TMPDIR="$tmpfs_dir" run_collect "$disk_output")"
+    status=$?
+    rm -rf "$tmpfs_dir"
+    assert_status collect_cross_device 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_contains collect_cross_device_summary 'event=support_bundle_collect_summary status=success' <(printf '%s\n' "$output") || return 1
+    assert_contains collect_cross_device_fallback 'event=publish_fallback reason=cross_device' <(printf '%s\n' "$output") || return 1
+    [ -s "$disk_output" ] || { printf 'published bundle missing or empty\n'; return 1; }
+    assert_equals collect_cross_device_mode 600 "$(stat -c '%a' "$disk_output")" || return 1
+)
+
+case_collect_publishes_within_one_filesystem() (
+    make_bundle "$SANDBOX/publish-src" "$SANDBOX/publish-src/bundle.zip"
+    local disk_output="$SANDBOX/published-same-device.zip"
+    rm -f "$disk_output"
+    local output status
+    output="$(TMPDIR="$SANDBOX" run_collect "$disk_output")"
+    status=$?
+    assert_status collect_same_device 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    [ -s "$disk_output" ] || { printf 'published bundle missing\n'; return 1; }
+)
+
+case_collect_refuses_an_existing_output() (
+    make_bundle "$SANDBOX/publish-src" "$SANDBOX/publish-src/bundle.zip"
+    local disk_output="$SANDBOX/pre-existing.zip"
+    printf 'PRE_EXISTING_DECOY\n' > "$disk_output"
+    local output status
+    output="$(run_collect "$disk_output")"
+    status=$?
+    assert_status collect_existing_output 64 "$status" || return 1
+    assert_equals collect_decoy_intact 'PRE_EXISTING_DECOY' "$(cat "$disk_output")" || return 1
 )
 
 # Regression: a mutation to the byteLength comparison survived the suite, so the length check was
@@ -849,6 +920,45 @@ case_redactor_handles_embedded_newlines() (
     esac
 )
 
+# Regression: percent-escaping the field separators left ESC untouched, and log output does not
+# pass through the renderer's sanitizer. A rejected ZIP entry name is logged precisely BECAUSE it
+# failed the charset check, handing the archive control of the operator's terminal.
+case_log_escaper_strips_terminal_control_bytes() (
+    source "$SANDBOX/support-bundle-lib.sh"
+    local hostile line
+    hostile="$(printf 'evil\033[2K\033[1A\033[8mhidden')"
+    line="$(support_bundle_log error archive_invalid reason unsafe_entry_name entry "$hostile")"
+    if printf '%s' "$line" | grep -q $'\033'; then
+        printf 'ESC survived the log escaper: %s\n' "$(printf '%s' "$line" | cat -v)"
+        return 1
+    fi
+    # Stripping ESC leaves the bracket sequence as inert literal text, which is the point: the
+    # value stays legible for triage but can no longer drive the terminal.
+    assert_contains escaped_keeps_text 'evil' <(printf '%s\n' "$line") || return 1
+    assert_contains escaped_keeps_tail 'hidden' <(printf '%s\n' "$line") || return 1
+)
+
+case_hostile_entry_name_cannot_repaint_the_terminal() (
+    local work="$SANDBOX/ansi-entry"
+    make_bundle "$work/src" ""
+    local hostile
+    hostile="$(printf 'a\033[2K\033[1A\033[8m.json')"
+    cp "$work/src/config.json" "$work/src/$hostile" 2>/dev/null || true
+    rm -f "$work/bundle.zip"
+    ( cd "$work/src" && zip --quiet --no-dir-entries -X "$work/bundle.zip" ./* )
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" 2>&1)"
+    local status=$?
+    assert_status hostile_entry_rejected 67 "$status" || return 1
+    if printf '%s' "$output" | grep -q $'\033'; then
+        printf 'ESC reached the terminal from a rejected entry name\n'
+        return 1
+    fi
+    assert_contains hostile_entry_summary 'status=failure' <(printf '%s\n' "$output") || return 1
+)
+
+run_case log_escaper_strips_terminal_control_bytes case_log_escaper_strips_terminal_control_bytes
+run_case hostile_entry_name_cannot_repaint_the_terminal case_hostile_entry_name_cannot_repaint_the_terminal
 run_case download_accepts_a_real_zip_response case_download_accepts_a_real_zip_response
 run_case download_rejects_a_non_zip_response case_download_rejects_a_non_zip_response
 run_case download_maps_auth_failures case_download_maps_auth_failures
@@ -863,7 +973,9 @@ run_case read_strips_terminal_control_sequences case_read_strips_terminal_contro
 run_case download_accepts_real_content_type_headers case_download_accepts_real_content_type_headers
 run_case verify_rejects_symlink_entry case_verify_rejects_symlink_entry
 run_case read_refuses_symlink_bundle_without_rendering case_read_refuses_symlink_bundle_without_rendering
-run_case publish_refuses_existing_output case_publish_refuses_existing_output
+run_case collect_publishes_across_a_mount_boundary case_collect_publishes_across_a_mount_boundary
+run_case collect_publishes_within_one_filesystem case_collect_publishes_within_one_filesystem
+run_case collect_refuses_an_existing_output case_collect_refuses_an_existing_output
 run_case verify_detects_length_mismatch case_verify_detects_length_mismatch
 run_case log_format case_log_format
 run_case summary_lines case_summary_lines
