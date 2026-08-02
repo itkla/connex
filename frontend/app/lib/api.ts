@@ -1049,6 +1049,26 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
     }
 }
 
+/**
+ * Resolves the authenticated user for a **public** page — documentation, marketing, legal —
+ * where the session only selects which call to action the header shows.
+ *
+ * Unlike {@link getCurrentUserFromCookie}, a transport failure resolves to `null` instead of
+ * propagating. That rethrow exists so an unreachable backend cannot masquerade as a logged-out
+ * session on an authenticated surface, but a page carrying no authenticated content has nothing
+ * to protect: applying it there turns any cookie — `NEXT_LOCALE` alone is enough — into a 500 on
+ * the pages most likely to be read during an outage. Degrading to the signed-out call to action
+ * costs a signed-in visitor one extra click and keeps the page readable.
+ *
+ * Authenticated surfaces must keep using {@link getCurrentUserFromCookie}.
+ * @param cookie the incoming request's cookie header, or null
+ * @returns the authenticated user, or null when unauthenticated or the backend is unreachable
+ */
+export async function getPublicPageUserFromCookie(cookie: string | null): Promise<Types.User | null> {
+    const user = await toResult(getCurrentUserFromCookie(cookie));
+    return user.ok ? user.data : null;
+}
+
 export function logout() {
     clearAllDrafts();
     return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"), "logout");
