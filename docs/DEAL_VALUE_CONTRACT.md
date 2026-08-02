@@ -34,18 +34,40 @@ before touching a line. After every line write the deal value is recomputed and 
 Deleting the **last** line reverts `value_source` to `manual` and **retains the last derived
 total** — the number does not reset to zero, it simply becomes editable again.
 
-### Closing a deal
+### Winning or losing a deal — every path
 
-- **Won deals with line items:** `actualValue` defaults to the derived total. Supplying a value
-  that differs from the derived total is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409).
-- **Lost deals:** `actualValue` is **never derived**. Omitted means zero; an explicit value is
-  honoured and is never rejected.
+Realized value (`actual_value`) is resolved the same way on **every** win transition, not just the
+close dialog. A deal wins through three paths, and all three agree:
+
+1. The close dialog (`POST /api/deals/{id}/close`).
+2. A Kanban drag onto a "Closed Won" stage (`move`).
+3. A form edit that sets a won-outcome stage (`update`).
+
+- **Won deals with line items:** `actual_value` is derived from the line-item total on whichever
+  path wins the deal. Through the close dialog, supplying a value that differs from the derived
+  total is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409); the drag and edit paths carry no value
+  input and simply take the derived total. So the same ¥5M line-item deal reports ¥5M realized
+  whether it is won by dialog, drag, or edit — the figure never depends on how it was won.
+- **Won deals without line items:** realized value keeps the amount entered in the close dialog, or
+  the deal's existing `actual_value` (zero for a deal that was open) when no amount is supplied.
+- **Lost deals:** `actual_value` is **always zero**, on every path. A client-supplied value on a
+  lost close is ignored, and `CloseDealRequest.actualValue` rejects negatives.
 
 The lost-deal rule exists because the deal-browser `closed_revenue` figure sums `actual_value`
 across **all** closed deals, not just won ones. Deriving the booking value into a lost deal would
 inflate reported revenue by the full value of every deal the business failed to win. A lost deal
 records zero realized revenue; its booking value remains visible through `deal.value` and its line
 items.
+
+### Realized value is frozen at the win
+
+`actual_value` is derived **once**, at the moment the deal transitions to won. Editing line items
+**after** the win moves the canonical `value` (still `line_items`-sourced) but deliberately does
+**not** re-derive `actual_value`. This is intentional: realized revenue is a booking snapshot taken
+when the deal closed, so `value` and `actual_value` can legitimately differ on a won deal. Reports
+that need the current book value read `value`; reports of realized revenue read the frozen
+`actual_value`. Re-deriving on post-win edits would let a later price change silently rewrite a
+figure that was already reported.
 
 ### Recurring line items — the bookings view
 

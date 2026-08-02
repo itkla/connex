@@ -4,6 +4,10 @@ ALTER TABLE deal
     ADD CONSTRAINT chk_deal_value_source
         CHECK (value_source IN ('manual', 'line_items'));
 
+-- Assumes the single-currency-per-deal invariant the application enforces: every deal_line_item
+-- is forced to its deal's currency, so SUM(line_total) is a same-currency total and never a mixed
+-- one. Operators must reject any cross-currency line rows before applying this migration (see
+-- docs/DEAL_VALUE_CONTRACT.md); this backfill performs no FX conversion.
 UPDATE deal d
 SET d.value = (
         SELECT COALESCE(SUM(li.line_total), 0)
