@@ -1,11 +1,27 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 
-const PermissionsContext = createContext<ReadonlySet<string> | null>(null);
+import { getEffectivePermissions } from "@/app/lib/api";
+import {
+    checkPermission,
+    permissionsDrifted,
+    type PermissionCheck,
+    type PermissionsStatus,
+} from "@/app/lib/permissionState";
+
+type PermissionsContextValue = {
+    status: PermissionsStatus;
+    granted: ReadonlySet<string>;
+    refresh: () => Promise<boolean>;
+};
+
+const PermissionsContext = createContext<PermissionsContextValue | null>(null);
 
 /**
- * Publishes the viewer's effective workspace permissions to client components.
+ * Publishes the viewer's effective workspace permissions, and the outcome of looking them up, to
+ * client components.
  *
  * The app shell already resolves these server-side to gate navigation, so sharing them costs no
  * extra request and no loading state. The point is that a client component can ask whether it
@@ -14,32 +30,113 @@ const PermissionsContext = createContext<ReadonlySet<string> | null>(null);
  * "you may not" apart from "the request failed".
  *
  * This is a UX-availability hint only — the backend remains authoritative on every call. It is
- * fail-closed: when the lookup fails the shell passes an empty list, so a privileged affordance
- * is hidden rather than shown and then rejected.
+ * fail-closed: when the lookup fails the shell passes an empty list and an {@code unavailable}
+ * status, so a privileged affordance is hidden rather than shown and then rejected, while a
+ * route-level refusal can still say the check failed instead of inventing a verdict.
+ *
+ * The published snapshot is kept live rather than treated as session-long state. Next preserves
+ * this layout across client-side navigation, so without revalidation a role change would not
+ * reach the viewer until a full page load: a newly granted user would keep being refused, and a
+ * revoked one would keep being offered controls whose mutations the backend then rejects. On
+ * regaining focus the provider re-reads the permission list — cheap, and never throttled, so
+ * detection is not delayed — and asks Next to re-render the server tree only when the answer
+ * actually changed. Refreshing the whole tree rather than patching local state is deliberate:
+ * the sidebar, the command palette and the server-gated routes are derived from the same shell
+ * lookup, so re-seeding all of them together keeps client and server gates from disagreeing.
+ *
+ * A failed probe changes nothing. {@code unavailable} means "we never managed to check", and a
+ * momentary network blip is no reason to demote a session that already has a good answer.
  *
  * @param permissions - the viewer's effective permission keys in the active workspace
+ * @param status - whether the shell's lookup succeeded
  * @param children - the tree that reads them
  */
 export function PermissionsProvider({
     permissions,
+    status,
     children,
 }: {
     permissions: readonly string[];
+    status: PermissionsStatus;
     children: ReactNode;
 }) {
+    const router = useRouter();
     const granted = useMemo(() => new Set(permissions), [permissions]);
-    return <PermissionsContext.Provider value={granted}>{children}</PermissionsContext.Provider>;
+    const probing = useRef(false);
+
+    const refresh = useCallback(async () => {
+        if (probing.current) return true;
+        probing.current = true;
+        try {
+            const probed = await getEffectivePermissions();
+            if (permissionsDrifted(status, granted, probed)) router.refresh();
+            return true;
+        } catch {
+            return false;
+        } finally {
+            probing.current = false;
+        }
+    }, [granted, router, status]);
+
+    useEffect(() => {
+        const refreshWhenVisible = () => {
+            if (document.hidden) return;
+            void refresh();
+        };
+        window.addEventListener("focus", refreshWhenVisible);
+        document.addEventListener("visibilitychange", refreshWhenVisible);
+        return () => {
+            window.removeEventListener("focus", refreshWhenVisible);
+            document.removeEventListener("visibilitychange", refreshWhenVisible);
+        };
+    }, [refresh]);
+
+    const value = useMemo(() => ({ status, granted, refresh }), [status, granted, refresh]);
+    return <PermissionsContext.Provider value={value}>{children}</PermissionsContext.Provider>;
+}
+
+function usePermissionsContext(): PermissionsContextValue {
+    const value = useContext(PermissionsContext);
+    if (value === null) throw new Error("Permission hooks must be used within PermissionsProvider");
+    return value;
 }
 
 /**
  * Whether the viewer holds one effective permission in the active workspace.
+ *
+ * Fail-closed: an unresolved lookup answers false, so an affordance stays hidden rather than
+ * being offered and then refused. Use {@link usePermissionCheck} where the difference between
+ * "you may not" and "we could not check" is worth telling the user about.
  *
  * @param permission - the backend permission key, e.g. `CUSTOM_FIELD_MANAGE`
  * @returns true when the viewer holds it
  * @throws when called outside a {@link PermissionsProvider}
  */
 export function usePermission(permission: string): boolean {
-    const granted = useContext(PermissionsContext);
-    if (granted === null) throw new Error("usePermission must be used within PermissionsProvider");
-    return granted.has(permission);
+    return usePermissionCheck(permission) === "granted";
+}
+
+/**
+ * The viewer's standing on one effective permission, keeping a denial apart from a failed check.
+ *
+ * @param permission - the backend permission key, e.g. `CUSTOM_FIELD_MANAGE`
+ * @returns whether the viewer holds it, does not hold it, or could not be checked
+ * @throws when called outside a {@link PermissionsProvider}
+ */
+export function usePermissionCheck(permission: string): PermissionCheck {
+    const { status, granted } = usePermissionsContext();
+    return checkPermission(status, granted, permission);
+}
+
+/**
+ * Re-reads the viewer's effective permissions and re-renders the server tree if they changed.
+ *
+ * For a surface that just changed someone's role, or that is offering the viewer a way out of a
+ * failed permission lookup, rather than waiting for the next focus revalidation.
+ *
+ * @returns a function resolving to whether the lookup reached the server
+ * @throws when called outside a {@link PermissionsProvider}
+ */
+export function usePermissionsRefresh(): () => Promise<boolean> {
+    return usePermissionsContext().refresh;
 }

@@ -46,7 +46,11 @@
   "PermissionsUnavailable": {
     "title": "We couldn't confirm your permissions",
     "body": "This page stays hidden until we can check what you're allowed to see. The issue is usually temporary — try again in a moment.",
-    "home": "Go to dashboard"
+    "sectionBody": "This section stays hidden until we can check what you're allowed to see. The issue is usually temporary.",
+    "home": "Go to dashboard",
+    "retry": "Try again",
+    "retrying": "Checking",
+    "retryFailed": "We still couldn't check your permissions."
   },
   "SectionUnavailable": {
     "title": "Couldn't load this",

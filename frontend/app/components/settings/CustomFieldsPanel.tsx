@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import AccessDenied from "@/app/components/AccessDenied";
+import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import { useTranslations } from "next-intl";
 import {
+    ArrowPathIcon,
     EllipsisHorizontalIcon,
     PencilSquareIcon,
     PlusIcon,
@@ -17,7 +19,7 @@ import type {
     CustomFieldType,
 } from "@/app/lib/types";
 import { deleteCustomField, getCustomFields } from "@/app/lib/api";
-import { usePermission } from "@/app/hooks/usePermissions";
+import { usePermissionCheck, usePermissionsRefresh } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +46,8 @@ export default function CustomFieldsPanel() {
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
 
-    const canManage = usePermission("CUSTOM_FIELD_MANAGE");
+    const manageCheck = usePermissionCheck("CUSTOM_FIELD_MANAGE");
+    const canManage = manageCheck === "granted";
 
     const [fields, setFields] = useState<CustomFieldDefinition[]>([]);
     const [loading, setLoading] = useState(true);
@@ -156,6 +159,10 @@ export default function CustomFieldsPanel() {
             setIsRemoving(false);
         }
     };
+
+    if (manageCheck === "unavailable") {
+        return <PermissionsUnavailableSection />;
+    }
 
     if (!canManage || accessDenied) {
         return (
@@ -274,6 +281,35 @@ export default function CustomFieldsPanel() {
                 confirmDelete={confirmRemove}
             />
         </div>
+    );
+}
+
+function PermissionsUnavailableSection() {
+    const t = useTranslations("PermissionsUnavailable");
+    const refreshPermissions = usePermissionsRefresh();
+    const [isRetrying, startTransition] = useTransition();
+
+    const retry = () => {
+        startTransition(async () => {
+            if (!(await refreshPermissions())) toastError(t("retryFailed"));
+        });
+    };
+
+    return (
+        <PermissionsUnavailable
+            variant="inline"
+            title={t("title")}
+            body={t("sectionBody")}
+            action={
+                <Button variant="outline" size="sm" onClick={retry} disabled={isRetrying}>
+                    <ArrowPathIcon
+                        data-icon="inline-start"
+                        className={isRetrying ? "animate-spin motion-reduce:animate-none" : undefined}
+                    />
+                    {isRetrying ? t("retrying") : t("retry")}
+                </Button>
+            }
+        />
     );
 }
 
