@@ -138,6 +138,10 @@ export const ILLUSTRATION_NAMES = [
     "warm-intro-path",
     "notification-inbox",
     "global-search",
+    "deal-line-items",
+    "document-approval",
+    "campaign-flow",
+    "deployment-profiles",
 ] as const;
 
 /** A renderable illustration identifier. */
