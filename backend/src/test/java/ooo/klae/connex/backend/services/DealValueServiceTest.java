@@ -113,43 +113,93 @@ class DealValueServiceTest {
     }
 
     @Test
-    void wonCloseWithLinesDerivesOrAcceptsEqualActualValue() {
+    void freshWinWithLinesDerivesOrAcceptsEqualActualValue() {
         Deal deal = deal("line_items", "75.56", "4.00");
+        deal.setWon(Boolean.TRUE);
         when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(2);
         when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID))
             .thenReturn(new BigDecimal("75.555"));
 
         assertMoney("75.56",
-            service.resolveActualValueForClose(WORKSPACE_ID, deal, true, null));
-        assertMoney("75.56", service.resolveActualValueForClose(
-            WORKSPACE_ID, deal, true, new BigDecimal("75.560")));
-        assertThrows(ConflictException.class, () -> service.resolveActualValueForClose(
-            WORKSPACE_ID, deal, true, new BigDecimal("75.55")));
+            service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null));
+        assertMoney("75.56", service.reconcileRealizedValue(
+            WORKSPACE_ID, deal, null, new BigDecimal("75.560")));
+        assertThrows(ConflictException.class, () -> service.reconcileRealizedValue(
+            WORKSPACE_ID, deal, null, new BigDecimal("75.55")));
     }
 
     @Test
-    void lostCloseAlwaysResolvesToZeroRegardlessOfRequestedActualValue() {
+    void lostTransitionAlwaysResolvesToZeroRegardlessOfRequestedActualValue() {
         Deal deal = deal("line_items", "75.56", "4.00");
+        deal.setWon(Boolean.FALSE);
 
         assertMoney("0.00",
-            service.resolveActualValueForClose(WORKSPACE_ID, deal, false, null));
-        assertMoney("0.00", service.resolveActualValueForClose(
-            WORKSPACE_ID, deal, false, new BigDecimal("500.00")));
-        assertMoney("0.00", service.resolveActualValueForClose(
-            WORKSPACE_ID, deal, null, new BigDecimal("500.00")));
+            service.reconcileRealizedValue(WORKSPACE_ID, deal, Boolean.TRUE, null));
+        assertMoney("0.00", service.reconcileRealizedValue(
+            WORKSPACE_ID, deal, Boolean.TRUE, new BigDecimal("500.00")));
         verify(dealLineItemMapper, never()).countByDealId(WORKSPACE_ID, DEAL_ID);
         verify(dealLineItemMapper, never()).sumLineTotals(WORKSPACE_ID, DEAL_ID);
     }
 
     @Test
-    void closeWithoutLinesNormalizesRequestedOrRetainsExistingActualValue() {
+    void freshWinWithoutLinesRecordsOnlyWhatWasSubmitted() {
         Deal deal = deal("manual", "75.56", "4.126");
+        deal.setWon(Boolean.TRUE);
         when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(0);
 
-        assertMoney("4.13",
-            service.resolveActualValueForClose(WORKSPACE_ID, deal, true, null));
-        assertMoney("9.88", service.resolveActualValueForClose(
-            WORKSPACE_ID, deal, true, new BigDecimal("9.876")));
+        assertMoney("0.00",
+            service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null));
+        assertMoney("9.88", service.reconcileRealizedValue(
+            WORKSPACE_ID, deal, null, new BigDecimal("9.876")));
+    }
+
+    @Test
+    void reconcileZeroesALostDealAndIgnoresARequestedAmount() {
+        Deal deal = deal("line_items", "5000000.00", "5000000.00");
+        deal.setWon(Boolean.FALSE);
+
+        assertMoney("0.00", service.reconcileRealizedValue(
+            WORKSPACE_ID, deal, Boolean.TRUE, new BigDecimal("999999.00")));
+
+        assertMoney("0.00", deal.getActualValue());
+        verify(dealMapper).updateActualValue(WORKSPACE_ID, DEAL_ID, new BigDecimal("0.00"));
+        verifyNoInteractions(dealLineItemMapper);
+    }
+
+    @Test
+    void reconcileDerivesTheLineItemTotalOnAFreshWin() {
+        Deal deal = deal("line_items", "5000000.00", "0.00");
+        deal.setWon(Boolean.TRUE);
+        when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(1);
+        when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID))
+            .thenReturn(new BigDecimal("5000000.00"));
+
+        assertMoney("5000000.00",
+            service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null));
+
+        assertMoney("5000000.00", deal.getActualValue());
+        verify(dealMapper).updateActualValue(WORKSPACE_ID, DEAL_ID, new BigDecimal("5000000.00"));
+    }
+
+    @Test
+    void reconcileLeavesAnAlreadyWonDealsRealizedValueFrozen() {
+        Deal deal = deal("line_items", "7000000.00", "5000000.00");
+        deal.setWon(Boolean.TRUE);
+
+        assertMoney("5000000.00",
+            service.reconcileRealizedValue(WORKSPACE_ID, deal, Boolean.TRUE, null));
+
+        verifyNoInteractions(dealMapper);
+    }
+
+    @Test
+    void newDealsOnlyCarryRealizedValueWhenCreatedWon() {
+        assertMoney("999999.00", service.resolveRealizedValueForNewDeal(
+            Boolean.TRUE, new BigDecimal("999999.00")));
+        assertMoney("0.00", service.resolveRealizedValueForNewDeal(
+            Boolean.FALSE, new BigDecimal("999999.00")));
+        assertMoney("0.00", service.resolveRealizedValueForNewDeal(
+            null, new BigDecimal("999999.00")));
     }
 
     @Test
@@ -163,7 +213,7 @@ class DealValueServiceTest {
             () -> assertThrows(IllegalTransactionStateException.class,
                 () -> service.reconcileLineItems(WORKSPACE_ID, deal)),
             () -> assertThrows(IllegalTransactionStateException.class,
-                () -> service.resolveActualValueForClose(WORKSPACE_ID, deal, true, null)));
+                () -> service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null)));
     }
 
     private static Deal deal(String source, String value, String actualValue) {

@@ -49,7 +49,15 @@ class DealValueContractArchTest {
     private static final Pattern DOCTYPE = Pattern.compile("(?s)<!DOCTYPE.*?>");
     private static final Pattern MONEY_ASSIGNMENT = Pattern.compile(
         "\\b(?:value|actual_value|value_source)\\s*=", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DEAL_MAPPER_REFERENCE =
+        Pattern.compile("\\bDealMapper\\s+(\\w+)\\b");
+    private static final Pattern DEAL_MAPPER_LOOKUP =
+        Pattern.compile("getMapper\\s*\\(\\s*DealMapper\\.class\\s*\\)");
+    private static final List<String> DEAL_ROW_WRITE_CALLS =
+        List.of(".update(", ".insert(", ".insertBatch(");
     private static final Set<String> STATEMENT_TAGS = Set.of("select", "insert", "update", "delete");
+    private static final Set<String> DEAL_ROW_WRITERS =
+        Set.of("DealMapper.java", "DealOutcomeWriter.java", "SeederBatchWriter.java");
 
     @Test
     void dealMoneyCarriersNeverUseFloatingPointTypes() throws Exception {
@@ -80,13 +88,66 @@ class DealValueContractArchTest {
                 }
                 String source = Files.readString(file);
                 if (source.contains("updateValueAndSource(")
-                        || source.contains("updateValueSource(")) {
+                        || source.contains("updateValueSource(")
+                        || source.contains("updateActualValue(")) {
                     violations.add(sourceRoot.relativize(file).toString());
                 }
             }
         }
         assertTrue(violations.isEmpty(),
             "Canonical deal-value writes escaped DealValueService: " + violations);
+    }
+
+    /**
+     * Deal rows may only be written through {@code DealOutcomeWriter}, which reconciles realized
+     * value in the same step. A file-level "also calls reconcile" rule would not do: it can never
+     * fire inside {@code DealService} or {@code ImportService}, the only two files that write deal
+     * outcomes, because each already reconciles somewhere else in the file. Containment is checked
+     * instead, so adding an unreconciled route anywhere fails the build.
+     *
+     * <p>The reference is resolved from each file's own {@code DealMapper} declarations rather than
+     * from the conventional {@code dealMapper} name, because a rule keyed to one spelling holds only
+     * while every author picks that spelling: injecting the same mapper as {@code deals} would write
+     * deal rows unreconciled and still pass.
+     */
+    @Test
+    void onlyDealOutcomeWriterWritesDealRows() throws Exception {
+        Path sourceRoot = repoRoot().resolve("backend/src/main/java");
+        List<String> violations = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(sourceRoot)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String name = file.getFileName().toString();
+                if (DEAL_ROW_WRITERS.contains(name)) {
+                    continue;
+                }
+                String source = Files.readString(file);
+                if (writesDealRows(source)) {
+                    violations.add(sourceRoot.relativize(file).toString());
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(),
+            "Deal rows must be written through DealOutcomeWriter so realized value is reconciled in"
+                + " the same step; a won-to-lost transition that skipped it would keep the won"
+                + " figure and inflate closed revenue: " + violations);
+    }
+
+    /**
+     * The generated demo deal is the one deal row not written through {@code DealOutcomeWriter}, so
+     * its compliance is asserted directly rather than assumed: a seeded deal that is not won must
+     * carry zero realized value.
+     */
+    @Test
+    void seededDealsNeverGiveAnUnwonDealRealizedValue() throws Exception {
+        Path generator = repoRoot().resolve(
+            "backend/src/main/java/ooo/klae/connex/backend/seeder/SeedDataGenerator.java");
+        String source = Files.readString(generator);
+
+        assertTrue(source.contains("deal.setWon(outcome < 2);"),
+            "SeedDataGenerator no longer decides won from 'outcome < 2'; re-verify the pairing");
+        assertTrue(source.contains("deal.setActualValue(outcome < 2"),
+            "SeedDataGenerator must gate realized value on the same predicate as won, so a seeded"
+                + " lost deal records zero");
     }
 
     @Test
@@ -115,6 +176,27 @@ class DealValueContractArchTest {
         }
         assertTrue(violations.isEmpty(),
             "Revenue SQL must read canonical deal values, not deal_line_item: " + violations);
+    }
+
+    /**
+     * Whether a source file writes deal rows through any name it binds {@code DealMapper} to. A
+     * runtime lookup counts on its own: code that resolves the mapper from a session names nothing
+     * this scan could follow, so obtaining it at all outside the writer is treated as the write.
+     */
+    private static boolean writesDealRows(String source) {
+        if (DEAL_MAPPER_LOOKUP.matcher(source).find()) {
+            return true;
+        }
+        Matcher declaration = DEAL_MAPPER_REFERENCE.matcher(source);
+        while (declaration.find()) {
+            String reference = declaration.group(1);
+            for (String call : DEAL_ROW_WRITE_CALLS) {
+                if (source.contains(reference + call)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void assertMoneyField(Class<?> type, String name) throws Exception {

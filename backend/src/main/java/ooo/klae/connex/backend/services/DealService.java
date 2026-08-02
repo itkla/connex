@@ -121,6 +121,7 @@ public class DealService {
     private final DealRiskService dealRiskService;
     private final SegmentService segmentService;
     private final DealValueService dealValueService;
+    private final DealOutcomeWriter dealOutcomeWriter;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -140,71 +141,6 @@ public class DealService {
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "value", "actualValue", "currency", "pipelineId", "stageId",
                "companyId", "expectedCloseDate", "closedAt", "closedReason", "won");
-
-    /**
-     * Reconciles a deal's close fields so {@code won} and {@code closedAt} always agree.
-     * The outcome is explicit and stage-independent: {@code won} (TRUE=won, FALSE=lost,
-     * NULL=open) is set by the client and may be set at ANY stage — a deal can win or lose
-     * mid-pipeline. {@code closedAt} follows {@code won} (stamped when an outcome exists,
-     * cleared when open). As a convenience, a deal sitting on a terminal (success/failure)
-     * stage is forced to that outcome — moving a deal onto "Closed Won" still wins it.
-     * @param deal
-     */
-    private void reconcileCloseState(Deal deal) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Integer stageId = deal.getStageId();
-        String stageOutcome = stageId != null ? dealMapper.getStageOutcome(workspaceId, stageId) : "normal";
-        if ("won".equals(stageOutcome)) {
-            deal.setWon(true);
-        } else if ("lost".equals(stageOutcome)) {
-            deal.setWon(false);
-        }
-        if (deal.getWon() == null) {
-            deal.setClosedAt(null);
-            deal.setClosedReason(null);
-        } else if (deal.getClosedAt() == null || deal.getClosedAt().isBlank()) {
-            deal.setClosedAt(LocalDateTime.now(ZoneOffset.UTC).format(MYSQL_DATETIME));
-        }
-    }
-
-    /**
-     * Persists realized value when a deal first transitions to won outside the close dialog — a
-     * Kanban drag onto a won stage or a stage edit. Won deals with line items derive
-     * {@code actual_value} from the line-item total, the same rule {@link #close} applies, so every
-     * win path reports one realized figure. Realized value is frozen at the win: later line-item
-     * edits move {@code value} but never re-derive {@code actual_value}. Must run inside the
-     * caller's transaction, after the broad update that no longer writes {@code actual_value}.
-     * @param workspaceId tenant scope
-     * @param deal the deal whose outcome was just reconciled
-     * @param previousOutcome the won flag before this transition
-     * @return whether this call owns the deal's realized value for this request
-     */
-    private boolean deriveRealizedValueOnWin(int workspaceId, Deal deal, Boolean previousOutcome) {
-        if (Boolean.TRUE.equals(previousOutcome) || !Boolean.TRUE.equals(deal.getWon())) {
-            return false;
-        }
-        BigDecimal realized = dealValueService.resolveActualValueForClose(
-            workspaceId, deal, Boolean.TRUE, null);
-        if (realized.compareTo(deal.getActualValue()) != 0) {
-            deal.setActualValue(realized);
-            dealMapper.updateActualValue(workspaceId, deal.getId(), realized);
-        }
-        return true;
-    }
-
-    /**
-     * Persists an operator's realized-value edit from a full deal update. The broad update statement
-     * no longer writes {@code actual_value}, so without this the edit would be accepted and silently
-     * discarded. A won deal whose value is derived from line items rejects a differing amount, the
-     * same rule the close dialog applies, rather than letting a form overwrite a derived figure.
-     * @param workspaceId tenant scope
-     * @param deal the updated deal, carrying its stored realized value
-     * @param requestedActualValue the realized value the caller submitted, or null when omitted
-     */
-    private void applyRealizedValueEdit(int workspaceId, Deal deal, BigDecimal requestedActualValue) {
-        deal.setActualValue(
-            dealValueService.setRealizedValue(workspaceId, deal, requestedActualValue));
-    }
 
     /**
      * Re-derives the deal's {@code closedReason} @/# references and notifies newly-mentioned members.
@@ -982,12 +918,13 @@ public class DealService {
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
         requireVisibleRelations(workspaceId, deal);
-        reconcileCloseState(deal);
+        BigDecimal requestedActualValue = deal.getActualValue();
+        String stageOutcome = dealOutcomeWriter.stageOutcome(workspaceId, deal.getStageId());
         if (deal.getStageId() != null) {
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, deal.getStageId()));
         }
         deal.setCreatedAt(null);
-        dealMapper.insert(deal);
+        dealOutcomeWriter.create(deal, requestedActualValue, stageOutcome);
         if (deal.getStageId() != null) {
             dealStageHistoryService.recordInitial(
                 workspaceId, deal.getId(), deal.getStageId(), deal.getWon());
@@ -1036,13 +973,8 @@ public class DealService {
         deal.setPosition(stageChanged
             ? dealMapper.nextDealPosition(workspaceId, newStage)
             : before.getPosition());
-        reconcileCloseState(deal);
+        dealOutcomeWriter.write(workspaceId, deal, previousOutcome, requestedActualValue);
         boolean reopened = previousOutcome != null && deal.getWon() == null;
-        dealMapper.update(deal);
-        boolean derivedOnWin = deriveRealizedValueOnWin(workspaceId, deal, previousOutcome);
-        if (!derivedOnWin) {
-            applyRealizedValueEdit(workspaceId, deal, requestedActualValue);
-        }
         if ((stageChanged || reopened) && newStage != null) {
             dealStageHistoryService.recordTransition(
                 workspaceId, id, newStage, previousOutcome, deal.getWon());
@@ -1177,11 +1109,7 @@ public class DealService {
         Deal deal = mutableCopy(before);
         deal.setWon(won != null ? won : Boolean.FALSE);
         if (reason != null && !reason.isBlank()) deal.setClosedReason(reason);
-        reconcileCloseState(deal);
-        deal.setActualValue(dealValueService.resolveActualValueForClose(
-            workspaceId, before, deal.getWon(), actualValue));
-        dealMapper.update(deal);
-        dealMapper.updateActualValue(workspaceId, id, deal.getActualValue());
+        dealOutcomeWriter.write(workspaceId, deal, before.getWon(), actualValue);
         auditService.record("deal.close", "deal", id, deal.getName(),
             (Boolean.TRUE.equals(deal.getWon()) ? "Won deal " : "Lost deal ") + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
@@ -1219,8 +1147,7 @@ public class DealService {
             deal.setStageId(normalStage);
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, normalStage));
         }
-        reconcileCloseState(deal);
-        dealMapper.update(deal);
+        dealOutcomeWriter.write(workspaceId, deal, previousOutcome, null);
         if (wasClosed && deal.getStageId() != null) {
             dealStageHistoryService.recordTransition(
                 workspaceId, id, deal.getStageId(), previousOutcome, deal.getWon());
@@ -1608,9 +1535,7 @@ public class DealService {
         Deal deal = mutableCopy(before);
         deal.setStageId(stageId);
         deal.setPosition(index);
-        reconcileCloseState(deal);
-        dealMapper.update(deal);
-        deriveRealizedValueOnWin(workspaceId, deal, previousOutcome);
+        dealOutcomeWriter.write(workspaceId, deal, previousOutcome, null);
         if (stageChanged) {
             dealStageHistoryService.recordTransition(
                 workspaceId, dealId, stageId, previousOutcome, deal.getWon());

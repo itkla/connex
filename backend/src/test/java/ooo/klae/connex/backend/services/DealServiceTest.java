@@ -58,6 +58,7 @@ import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -73,6 +74,8 @@ class DealServiceTest extends AbstractServiceTest {
 
     @Autowired DealService dealService;
     @Autowired DealLineItemService dealLineItemService;
+    @Autowired BulkOperationService bulkOperationService;
+    @Autowired RuleActionExecutor ruleActionExecutor;
     @Autowired AuditService auditService;
     @Autowired ApplicationEvents applicationEvents;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -1435,6 +1438,215 @@ class DealServiceTest extends AbstractServiceTest {
         Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals(Boolean.FALSE, after.getWon());
         assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void losingAWonDealByDragRecordsZeroRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+
+        dealService.move(deal.getId(), lost.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.FALSE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void losingAWonDealByEditIgnoresTheSubmittedRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+
+        Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+        edit.setStageId(lost.getId());
+        edit.setActualValue(new BigDecimal("999999.00"));
+        dealService.update(deal.getId(), edit);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.FALSE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void losingADealThroughTheCloseDialogIgnoresTheSubmittedRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+
+        dealService.close(deal.getId(), false, "Lost to a competitor", new BigDecimal("999999.00"));
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.FALSE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void losingAWonDealByBulkStageChangeRecordsZeroRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+
+        bulkOperationService.changeStageForDeals(List.of(deal.getId()), lost.getId());
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.FALSE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void losingAWonDealByRuleActionRecordsZeroRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+
+        ruleActionExecutor.execute(changeStageAction(lost.getId()), ruleFire(deal.getId()));
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.FALSE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void everyLosePathRecordsZeroRealizedValueForAPreviouslyWonDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Company company = newCompany();
+
+        Deal viaClose = wonLineItemDeal(pipeline, open, company);
+        Deal viaMove = wonLineItemDeal(pipeline, open, company);
+        Deal viaEdit = wonLineItemDeal(pipeline, open, company);
+        Deal viaBulk = wonLineItemDeal(pipeline, open, company);
+        Deal viaRule = wonLineItemDeal(pipeline, open, company);
+
+        dealService.close(viaClose.getId(), false, "Lost to a competitor", null);
+        dealService.move(viaMove.getId(), lost.getId(), 0);
+        Deal edit = dealMapper.getDealById(workspace.getId(), viaEdit.getId());
+        edit.setStageId(lost.getId());
+        dealService.update(viaEdit.getId(), edit);
+        bulkOperationService.changeStageForDeals(List.of(viaBulk.getId()), lost.getId());
+        ruleActionExecutor.execute(changeStageAction(lost.getId()), ruleFire(viaRule.getId()));
+
+        for (Deal deal : List.of(viaClose, viaMove, viaEdit, viaBulk, viaRule)) {
+            Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+            assertEquals(Boolean.FALSE, after.getWon(), "deal " + deal.getId() + " is not lost");
+            assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()),
+                "deal " + deal.getId() + " kept realized value " + after.getActualValue());
+        }
+    }
+
+    @Test
+    void creatingADealOnALostStageRecordsZeroRealizedValue() {
+        Pipeline pipeline = newPipeline();
+        Stage lost = newFailureStage(pipeline, 0);
+        Deal draft = dealDraft(pipeline, lost, newCompany());
+        draft.setActualValue(new BigDecimal("999999.00"));
+
+        Deal created = dealService.create(draft);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), created.getId());
+        assertEquals(Boolean.FALSE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void reWinningAfterALossDerivesTheSameRealizedValueAsTheFirstWin() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Stage won = newSuccessStage(pipeline, 2);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+        BigDecimal firstWin = storedActualValue(deal.getId());
+
+        dealService.move(deal.getId(), lost.getId(), 0);
+        assertEquals(0, BigDecimal.ZERO.compareTo(storedActualValue(deal.getId())));
+        dealService.move(deal.getId(), won.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(firstWin));
+        assertEquals(0, firstWin.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void reWinningAfterAReopenDerivesTheSameRealizedValueAsTheFirstWin() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage won = newSuccessStage(pipeline, 1);
+        Deal deal = wonLineItemDeal(pipeline, open, newCompany());
+        BigDecimal firstWin = storedActualValue(deal.getId());
+
+        dealService.reopen(deal.getId());
+        dealService.move(deal.getId(), won.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, firstWin.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void reWinningAManualDealAfterALossDoesNotResurrectTheOldFigure() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Stage won = newSuccessStage(pipeline, 2);
+        Deal deal = newDeal(pipeline, open, newCompany());
+        dealService.close(deal.getId(), true, "Signed", new BigDecimal("5000000.00"));
+        assertEquals(0, new BigDecimal("5000000.00").compareTo(storedActualValue(deal.getId())));
+
+        dealService.move(deal.getId(), lost.getId(), 0);
+        dealService.move(deal.getId(), won.getId(), 0);
+
+        Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+    }
+
+    @Test
+    void reWinningAgreesWhicheverWayTheDealWasUnwon() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage lost = newFailureStage(pipeline, 1);
+        Stage won = newSuccessStage(pipeline, 2);
+        Company company = newCompany();
+
+        Deal viaLost = newDeal(pipeline, open, company);
+        dealService.close(viaLost.getId(), true, "Signed", new BigDecimal("5000000.00"));
+        dealService.move(viaLost.getId(), lost.getId(), 0);
+        dealService.move(viaLost.getId(), won.getId(), 0);
+
+        Deal viaReopen = newDeal(pipeline, open, company);
+        dealService.close(viaReopen.getId(), true, "Signed", new BigDecimal("5000000.00"));
+        dealService.reopen(viaReopen.getId());
+        dealService.move(viaReopen.getId(), won.getId(), 0);
+
+        assertEquals(0, storedActualValue(viaLost.getId())
+            .compareTo(storedActualValue(viaReopen.getId())));
+    }
+
+    private Deal wonLineItemDeal(Pipeline pipeline, Stage stage, Company company) {
+        Deal deal = newDeal(pipeline, stage, company);
+        addLineItem(deal, "5000000.00");
+        dealService.close(deal.getId(), true, "Signed", null);
+        return deal;
+    }
+
+    private static RuleAction changeStageAction(int stageId) {
+        RuleAction action = new RuleAction();
+        action.setType("change_stage");
+        action.setTargetStageId(stageId);
+        return action;
+    }
+
+    private RuleFireContext ruleFire(int dealId) {
+        return new RuleFireContext(
+            workspace.getId(), 0, "deal", dealId, currentUser.getId(), "lose-path");
     }
 
     private Stage newSuccessStage(Pipeline pipeline, int position) {
