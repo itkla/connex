@@ -5325,17 +5325,17 @@
                         ],
                         "rows": [
                             [
-                                "Cloud",
+                                "Cloud (saas)",
                                 "Connex",
                                 "A shared, hardened environment run by Connex. The internal escape hatches an operator might use in their own network are refused outright."
                             ],
                             [
-                                "Dedicated",
+                                "Dedicated (silo)",
                                 "Connex",
                                 "Your own environment with its own database, still operated by Connex on your behalf."
                             ],
                             [
-                                "Self-hosted",
+                                "Self-hosted (on-prem)",
                                 "You",
                                 "Connex runs entirely inside your infrastructure. You control the network, you generate and hold the keys, and Connex operates nothing."
                             ]
