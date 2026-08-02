@@ -23,6 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -31,6 +32,7 @@ class BusinessCardImportCleanupTest {
     @Mock BusinessCardImportRequestMapper mapper;
     @Mock PlacementRegistry placementRegistry;
     @Mock TenantWorkScope tenantWorkScope;
+    @Mock JobRunRecorder jobRunRecorder;
 
     private BusinessCardProperties properties;
     private BusinessCardImportCleanup cleanup;
@@ -44,7 +46,8 @@ class BusinessCardImportCleanupTest {
             mapper,
             placementRegistry,
             tenantWorkScope,
-            Clock.fixed(Instant.parse("2026-07-15T12:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-15T12:00:00Z"), ZoneOffset.UTC),
+            jobRunRecorder);
         org.mockito.Mockito.lenient()
             .when(tenantWorkScope.withCatalog(any(), any())).thenAnswer(invocation -> {
             Supplier<?> work = invocation.getArgument(1);

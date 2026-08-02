@@ -62,6 +62,14 @@
           ) org_workspace
         )
       )
+      AND EXISTS (
+        SELECT 1
+        FROM JSON_TABLE(
+          #{orgWorkspaceIdsJson},
+          '$[*]' COLUMNS(id INT PATH '$')
+        ) anchor_workspace
+        WHERE anchor_workspace.id = #{workspaceId}
+      )
       <if test="status != null">AND status = #{status}</if>
     ) ranked
     WHERE run_rank = 1

@@ -66,6 +66,38 @@
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
+  <select id="findDiagnosticsAggregates"
+          resultType="ooo.klae.connex.backend.dto.ProviderCaptureDiagnosticsRow">
+    SELECT state.workspace_id AS workspaceId,
+           state.provider,
+           state.stream,
+           state.status,
+           state.error_code AS errorCode,
+           COUNT(*) AS stateCount,
+           SUM(state.stable_cursor IS NOT NULL) AS stableCursorCount,
+           SUM(state.page_cursor IS NOT NULL) AS pageCursorCount,
+           COALESCE(SUM(state.processed_items), 0) AS processedItems,
+           COALESCE(SUM(state.estimated_items), 0) AS estimatedItems,
+           MAX(state.last_attempt_at) AS lastAttemptAt,
+           MAX(state.last_success_at) AS lastSuccessAt,
+           MAX(state.next_attempt_at) AS nextAttemptAt
+    FROM provider_capture_sync_state state
+    JOIN JSON_TABLE(
+      #{orgWorkspaceIdsJson},
+      '$[*]' COLUMNS(id INT PATH '$')
+    ) org_workspace ON org_workspace.id = state.workspace_id
+    WHERE EXISTS (
+      SELECT 1
+      FROM JSON_TABLE(
+        #{orgWorkspaceIdsJson},
+        '$[*]' COLUMNS(id INT PATH '$')
+      ) anchor_workspace
+      WHERE anchor_workspace.id = #{workspaceId}
+    )
+    GROUP BY state.workspace_id, state.provider, state.stream, state.status, state.error_code
+    ORDER BY state.workspace_id, state.provider, state.stream, state.status, state.error_code
+  </select>
+
   <resultMap id="InteractionResult" type="ProviderCapturedInteraction">
     <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>

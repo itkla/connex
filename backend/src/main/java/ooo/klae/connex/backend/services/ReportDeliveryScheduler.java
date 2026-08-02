@@ -32,6 +32,9 @@ import ooo.klae.connex.backend.mail.MailMessage;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
@@ -66,6 +69,7 @@ public class ReportDeliveryScheduler {
     private final EmailTemplateRenderer templateRenderer;
     private final MailProperties mailProperties;
     private final MailService mailService;
+    private final JobRunRecorder jobRunRecorder;
     private final Clock clock;
 
     @Value("${connex.reports.scheduling-enabled:true}")
@@ -94,12 +98,17 @@ public class ReportDeliveryScheduler {
                 List<ReportScheduleRef> refs = tenantWorkScope.withCatalog(
                         catalog, () -> scheduleMapper.dueScheduleRefs(now));
                 for (ReportScheduleRef ref : refs) {
+                    JobRunDetail runDetail = JobRunDetail.started(clock);
                     try {
-                        tenantWorkScope.inWorkspace(ref.workspaceId(), () -> process(ref, now));
+                        tenantWorkScope.inWorkspace(
+                                ref.workspaceId(), () -> process(ref, now, runDetail));
                     } catch (Exception exception) {
                         log.warn("Report schedule {} failed in workspace {}: {}",
                                 ref.scheduleId(), ref.workspaceId(), exception.getMessage());
-                        auditFailure(ref, "scheduled report delivery failed");
+                        tenantWorkScope.inWorkspace(
+                                ref.workspaceId(),
+                                () -> auditFailure(
+                                        ref, "scheduled report delivery failed", runDetail));
                     }
                 }
             } catch (Exception exception) {
@@ -109,40 +118,47 @@ public class ReportDeliveryScheduler {
         }
     }
 
-    private void process(ReportScheduleRef ref, LocalDateTime now) {
+    private void process(ReportScheduleRef ref, LocalDateTime now, JobRunDetail runDetail) {
         ReportSchedule schedule = scheduleService.loadForDelivery(ref.workspaceId(), ref.scheduleId());
         if (schedule == null) {
+            recordSkipped(ref, "schedule_missing", runDetail);
             return;
         }
         ScheduleService.DeliveryAccess access = scheduleService.deliveryAccess(schedule);
         if (!access.allowed()) {
-            skip(ref, schedule.getRunAsUserId(), now, access.denialReason());
+            skip(ref, schedule.getRunAsUserId(), now, access.denialReason(), runDetail);
             return;
         }
         automationExecutor.runAs(ref.workspaceId(), access.user(), access.role(), () -> {
-            deliver(ref, schedule.getRunAsUserId(), now);
+            deliver(ref, schedule.getRunAsUserId(), now, runDetail);
             return null;
         });
     }
 
-    private void deliver(ReportScheduleRef ref, int expectedRunAsUserId, LocalDateTime now) {
+    private void deliver(
+            ReportScheduleRef ref,
+            int expectedRunAsUserId,
+            LocalDateTime now,
+            JobRunDetail runDetail) {
         ReportSchedule current = scheduleService.loadForDelivery(ref.workspaceId(), ref.scheduleId());
         if (current == null || current.getRunAsUserId() != expectedRunAsUserId) {
+            recordSkipped(ref, "schedule_changed", runDetail);
             return;
         }
         ScheduleService.DeliveryAccess access = scheduleService.deliveryAccess(current);
         if (!access.allowed() || access.user().getId() != expectedRunAsUserId) {
-            skip(ref, expectedRunAsUserId, now, access.denialReason());
+            skip(ref, expectedRunAsUserId, now, access.denialReason(), runDetail);
             return;
         }
         ReportSchedule claimed = scheduleService.claimDue(ref.scheduleId(), expectedRunAsUserId, now);
         if (claimed == null) {
+            recordSkipped(ref, "claim_lost", runDetail);
             return;
         }
         List<User> recipients = scheduleService.activeReportReaders(claimed);
         if (recipients.isEmpty()) {
             if (scheduleService.isCurrentDeliverySchedule(claimed)) {
-                auditFailure(ref, "no eligible report recipients");
+                auditFailure(ref, "no eligible report recipients", runDetail);
             }
             return;
         }
@@ -153,20 +169,20 @@ public class ReportDeliveryScheduler {
         } catch (RuntimeException exception) {
             log.warn("Report snapshot could not be frozen for schedule {} in workspace {}: {}",
                     ref.scheduleId(), ref.workspaceId(), exception.getMessage());
-            auditFailure(ref, "report snapshot persistence failed");
+            auditFailure(ref, "report snapshot persistence failed", runDetail);
             return;
         }
         recipients = scheduleService.activeRecipientsForDocument(claimed, snapshot.computedResult());
         if (recipients.isEmpty()) {
             if (scheduleService.isCurrentDeliverySchedule(claimed)) {
-                auditFailure(ref, "no eligible report recipients");
+                auditFailure(ref, "no eligible report recipients", runDetail);
             }
             return;
         }
         for (User recipient : recipients) {
             send(recipient, claimed, snapshot);
         }
-        auditQueued(ref, snapshot, recipients.size());
+        auditQueued(ref, snapshot, recipients.size(), runDetail);
     }
 
     private void send(User recipient, ReportSchedule schedule, ReportSnapshotDto snapshot) {
@@ -266,17 +282,18 @@ public class ReportDeliveryScheduler {
             ReportScheduleRef ref,
             int expectedRunAsUserId,
             LocalDateTime now,
-            String reason) {
+            String reason,
+            JobRunDetail runDetail) {
         if (scheduleService.skipDue(
                 ref.workspaceId(), ref.scheduleId(), expectedRunAsUserId, now)) {
             String stableReason = reason == null ? "run-as validation failed" : reason;
             log.warn("Report schedule {} skipped in workspace {}: {}",
                     ref.scheduleId(), ref.workspaceId(), stableReason);
-            auditSkip(ref, stableReason);
+            auditSkip(ref, stableReason, runDetail);
         }
     }
 
-    private void auditSkip(ReportScheduleRef ref, String reason) {
+    private void auditSkip(ReportScheduleRef ref, String reason, JobRunDetail runDetail) {
         tenantWorkScope.unrouted(() -> {
             auditService.recordFailureScoped(
                     "report.schedule.skip", "report_schedule", ref.scheduleId(),
@@ -284,9 +301,16 @@ public class ReportDeliveryScheduler {
                     "Skipped scheduled report delivery", reason);
             return null;
         });
+        record(ref, JobRunStatus.SKIPPED, runDetail, Map.of(
+                "phase", "delivery_skipped",
+                "scheduleId", ref.scheduleId()));
     }
 
-    private void auditQueued(ReportScheduleRef ref, ReportSnapshotDto snapshot, int recipientCount) {
+    private void auditQueued(
+            ReportScheduleRef ref,
+            ReportSnapshotDto snapshot,
+            int recipientCount,
+            JobRunDetail runDetail) {
         tenantWorkScope.unrouted(() -> {
             auditService.recordScoped(
                     "report.schedule.delivery", "report_schedule", ref.scheduleId(),
@@ -296,9 +320,13 @@ public class ReportDeliveryScheduler {
                     Map.of("recipientCount", recipientCount, "snapshotId", snapshot.id()));
             return null;
         });
+        record(ref, JobRunStatus.SUCCEEDED, runDetail, Map.of(
+                "scheduleId", ref.scheduleId(),
+                "snapshotId", snapshot.id(),
+                "recipientCount", recipientCount));
     }
 
-    private void auditFailure(ReportScheduleRef ref, String reason) {
+    private void auditFailure(ReportScheduleRef ref, String reason, JobRunDetail runDetail) {
         tenantWorkScope.unrouted(() -> {
             auditService.recordFailureScoped(
                     "report.schedule.delivery", "report_schedule", ref.scheduleId(),
@@ -306,6 +334,34 @@ public class ReportDeliveryScheduler {
                     "Scheduled report delivery failed", reason);
             return null;
         });
+        record(ref, JobRunStatus.FAILED, runDetail, Map.of(
+                "phase", "delivery_failed",
+                "scheduleId", ref.scheduleId()));
+    }
+
+    private void recordSkipped(ReportScheduleRef ref, String phase, JobRunDetail runDetail) {
+        record(ref, JobRunStatus.SKIPPED, runDetail, Map.of(
+                "phase", phase,
+                "scheduleId", ref.scheduleId()));
+    }
+
+    private void record(
+            ReportScheduleRef ref,
+            JobRunStatus status,
+            JobRunDetail runDetail,
+            Map<String, ?> metadata) {
+        try {
+            jobRunRecorder.record(
+                    JobRunRecorder.REPORT_DELIVERY,
+                    ref.workspaceId(),
+                    status,
+                    new JobRunDetail(runDetail.startedAt(), metadata));
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "Job run recording failed jobName={} exceptionClass={}",
+                    JobRunRecorder.REPORT_DELIVERY,
+                    exception.getClass().getSimpleName());
+        }
     }
 
     private record Headline(String label, String value) {

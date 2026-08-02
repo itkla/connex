@@ -26,6 +26,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -34,13 +35,14 @@ class NotificationSchedulerTest {
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private TenantWorkScope tenantWorkScope;
     @Mock private NotificationReconciliationService reconciliationService;
+    @Mock private JobRunRecorder jobRunRecorder;
 
     private NotificationScheduler scheduler;
 
     @BeforeEach
     void setUp() {
         scheduler = new NotificationScheduler(
-            workspaceMapper, tenantWorkScope, reconciliationService);
+            workspaceMapper, tenantWorkScope, reconciliationService, jobRunRecorder);
     }
 
     @Test

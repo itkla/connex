@@ -19,6 +19,11 @@ public class ManagedBusinessCardBinaryStore implements BusinessCardBinaryStore {
     }
 
     @Override
+    public boolean isReadyCached() {
+        return managedObjectService.isReadyCached();
+    }
+
+    @Override
     public StoredBusinessCard store(
             int workspaceId,
             String fileName,

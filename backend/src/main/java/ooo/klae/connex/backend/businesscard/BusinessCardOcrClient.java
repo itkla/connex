@@ -120,6 +120,15 @@ public class BusinessCardOcrClient {
     }
 
     /**
+     * Returns last-known sidecar readiness without starting a sidecar request.
+     *
+     * @return {@code true} when the latest completed health observation was ready
+     */
+    public boolean isReadyCached() {
+        return isConfigured() && cachedReady;
+    }
+
+    /**
      * Resolves an expired or unknown local readiness state before an external fallback decision.
      * The wait is bounded by the configured local-first interval.
      *

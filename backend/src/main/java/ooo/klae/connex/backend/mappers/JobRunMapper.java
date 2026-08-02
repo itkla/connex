@@ -18,6 +18,7 @@ public interface JobRunMapper {
         @Param("keepCount") int keepCount);
 
     List<JobRun> findLatestVisible(
+        @Param("workspaceId") int workspaceId,
         @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("status") String status);
 }

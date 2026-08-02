@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
@@ -56,6 +57,21 @@ class BusinessCardOcrClientTest {
 
         assertFalse(client.isReady());
         assertFalse(client.isReadyForScan());
+        server.verify();
+    }
+
+    @Test
+    void cachedReadinessRemainsLastKnownAfterItsRefreshDeadline() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BusinessCardProperties properties = properties(Duration.ofMillis(1));
+        BusinessCardOcrClient client = new BusinessCardOcrClient(
+                builder.build(), new ObjectMapper(), properties, BASE, false);
+        ReflectionTestUtils.setField(client, "cachedReady", true);
+        ReflectionTestUtils.setField(client, "readinessExpiresAtNanos", 0L);
+
+        assertTrue(client.isReadyCached());
+
         server.verify();
     }
 

@@ -10,11 +10,15 @@ import ooo.klae.connex.backend.beans.ProviderCaptureWorkspacePolicy;
 import ooo.klae.connex.backend.beans.ProviderCapturedInteraction;
 import ooo.klae.connex.backend.beans.ProviderCapturedParticipant;
 import ooo.klae.connex.backend.dto.ProviderCaptureSyncRef;
+import ooo.klae.connex.backend.dto.ProviderCaptureDiagnosticsRow;
 
 /**
  * Tenant-scoped persistence for connected capture policy, source, review, and sync state.
  */
 public interface ProviderCaptureMapper {
+    List<ProviderCaptureDiagnosticsRow> findDiagnosticsAggregates(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     ProviderCaptureWorkspacePolicy getWorkspacePolicy(
         @Param("workspaceId") int workspaceId, @Param("provider") String provider);
     int insertWorkspacePolicy(ProviderCaptureWorkspacePolicy policy);

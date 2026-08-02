@@ -12,6 +12,13 @@ public interface BusinessCardBinaryStore {
     boolean isReady();
 
     /**
+     * Returns last-known durable-storage readiness without starting a storage probe.
+     *
+     * @return {@code true} when the latest completed readiness observation succeeded
+     */
+    boolean isReadyCached();
+
+    /**
      * Stores a validated business-card image under an opaque, workspace-bound key.
      * Implementations must compensate the object write if the surrounding transaction rolls back.
      *

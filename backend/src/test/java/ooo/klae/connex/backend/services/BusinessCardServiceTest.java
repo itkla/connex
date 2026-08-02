@@ -138,6 +138,8 @@ class BusinessCardServiceTest {
         validated = new ValidatedBusinessCardImage(
                 image.getBytes(), "image/jpeg", "jpg", 120, 70);
         lenient().when(binaryStore.isReady()).thenReturn(true);
+        lenient().when(binaryStore.isReadyCached()).thenReturn(true);
+        lenient().when(ocrClient.isReadyCached()).thenReturn(true);
         lenient().when(ocrClient.isReady()).thenReturn(true);
         lenient().when(ocrClient.isReadyForScan()).thenReturn(true);
         User currentUser = new User();
@@ -152,6 +154,25 @@ class BusinessCardServiceTest {
                 eq(5), eq(9), eq(IDEMPOTENCY_KEY), any(), any(), any())).thenReturn(1);
         lenient().when(importRequestMapper.complete(anyInt(), anyString(), anyInt(), anyInt(), any()))
                 .thenReturn(1);
+    }
+
+    @Test
+    void cachedInstanceAvailabilityReadsLastKnownReadinessWithoutProbing() {
+        assertTrue(service.isAvailableCached());
+
+        verify(binaryStore).isReadyCached();
+        verify(binaryStore, never()).isReady();
+        verify(ocrClient).isReadyCached();
+        verify(ocrClient, never()).isReady();
+        verify(ocrClient, never()).isReadyForScan();
+    }
+
+    @Test
+    void instanceAvailabilityStillResolvesLiveReadinessForCapabilityGating() {
+        assertTrue(service.isAvailable());
+
+        verify(binaryStore).isReady();
+        verify(ocrClient).isReady();
     }
 
     @Test

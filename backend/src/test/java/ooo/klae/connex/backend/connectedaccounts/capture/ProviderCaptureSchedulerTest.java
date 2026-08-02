@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.connectedaccounts.ConnectedCaptureProperties;
 import ooo.klae.connex.backend.dto.ProviderCaptureSyncRef;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class ProviderCaptureSchedulerTest {
@@ -56,7 +57,8 @@ class ProviderCaptureSchedulerTest {
             captureMapper,
             worker,
             tenantWorkScope,
-            properties);
+            properties,
+            mock(JobRunRecorder.class));
 
         scheduler.poll();
         scheduler.poll();

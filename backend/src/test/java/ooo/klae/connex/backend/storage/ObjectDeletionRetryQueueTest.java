@@ -28,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
@@ -42,6 +43,7 @@ class ObjectDeletionRetryQueueTest {
     @Mock PlacementRegistry placementRegistry;
     @Mock TenantCatalogResolver tenantCatalogResolver;
     @Mock WorkspaceMapper workspaceMapper;
+    @Mock JobRunRecorder jobRunRecorder;
 
     private final TenantContext tenantContext = new TenantContext();
     private ObjectStorageProperties properties;
@@ -61,7 +63,8 @@ class ObjectDeletionRetryQueueTest {
             transactionExecutor,
             placementRegistry,
             tenantWorkScope,
-            Clock.fixed(Instant.parse("2026-07-14T12:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-14T12:00:00Z"), ZoneOffset.UTC),
+            jobRunRecorder);
     }
 
     @AfterEach

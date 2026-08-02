@@ -55,7 +55,10 @@ public class JobRunRecorder {
         "deletedCount",
         "dueCount",
         "attemptedCount",
-        "failedCount");
+        "failedCount",
+        "scheduleId",
+        "snapshotId",
+        "recipientCount");
 
     private final JobRunMapper mapper;
     private final ObjectMapper objectMapper;
