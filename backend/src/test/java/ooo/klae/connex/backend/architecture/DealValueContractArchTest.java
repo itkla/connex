@@ -49,6 +49,12 @@ class DealValueContractArchTest {
     private static final Pattern DOCTYPE = Pattern.compile("(?s)<!DOCTYPE.*?>");
     private static final Pattern MONEY_ASSIGNMENT = Pattern.compile(
         "\\b(?:value|actual_value|value_source)\\s*=", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DEAL_MAPPER_REFERENCE =
+        Pattern.compile("\\bDealMapper\\s+(\\w+)\\b");
+    private static final Pattern DEAL_MAPPER_LOOKUP =
+        Pattern.compile("getMapper\\s*\\(\\s*DealMapper\\.class\\s*\\)");
+    private static final List<String> DEAL_ROW_WRITE_CALLS =
+        List.of(".update(", ".insert(", ".insertBatch(");
     private static final Set<String> STATEMENT_TAGS = Set.of("select", "insert", "update", "delete");
     private static final Set<String> DEAL_ROW_WRITERS =
         Set.of("DealMapper.java", "DealOutcomeWriter.java", "SeederBatchWriter.java");
@@ -98,6 +104,11 @@ class DealValueContractArchTest {
      * fire inside {@code DealService} or {@code ImportService}, the only two files that write deal
      * outcomes, because each already reconciles somewhere else in the file. Containment is checked
      * instead, so adding an unreconciled route anywhere fails the build.
+     *
+     * <p>The reference is resolved from each file's own {@code DealMapper} declarations rather than
+     * from the conventional {@code dealMapper} name, because a rule keyed to one spelling holds only
+     * while every author picks that spelling: injecting the same mapper as {@code deals} would write
+     * deal rows unreconciled and still pass.
      */
     @Test
     void onlyDealOutcomeWriterWritesDealRows() throws Exception {
@@ -110,9 +121,7 @@ class DealValueContractArchTest {
                     continue;
                 }
                 String source = Files.readString(file);
-                if (source.contains("dealMapper.update(")
-                        || source.contains("dealMapper.insert(")
-                        || source.contains("dealMapper.insertBatch(")) {
+                if (writesDealRows(source)) {
                     violations.add(sourceRoot.relativize(file).toString());
                 }
             }
@@ -167,6 +176,27 @@ class DealValueContractArchTest {
         }
         assertTrue(violations.isEmpty(),
             "Revenue SQL must read canonical deal values, not deal_line_item: " + violations);
+    }
+
+    /**
+     * Whether a source file writes deal rows through any name it binds {@code DealMapper} to. A
+     * runtime lookup counts on its own: code that resolves the mapper from a session names nothing
+     * this scan could follow, so obtaining it at all outside the writer is treated as the write.
+     */
+    private static boolean writesDealRows(String source) {
+        if (DEAL_MAPPER_LOOKUP.matcher(source).find()) {
+            return true;
+        }
+        Matcher declaration = DEAL_MAPPER_REFERENCE.matcher(source);
+        while (declaration.find()) {
+            String reference = declaration.group(1);
+            for (String call : DEAL_ROW_WRITE_CALLS) {
+                if (source.contains(reference + call)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void assertMoneyField(Class<?> type, String name) throws Exception {
