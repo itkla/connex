@@ -13,14 +13,14 @@ import {
 import CustomFieldDialog from "@/app/components/settings/CustomFieldDialog";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import { CustomFieldValueCell, type CustomFieldCellField } from "./CustomFieldValueCell";
-import { deleteCustomField, getCustomFields, getEntityCustomFields, getEntityCustomFieldValues } from "@/app/lib/api";
+import { deleteCustomField, getCustomFields, getEntityCustomFieldValues } from "@/app/lib/api";
+import { usePermission } from "@/app/hooks/usePermissions";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type { ColumnDef } from "@/app/components/records/types";
 import type {
     CustomFieldCellValue,
     CustomFieldDefinition,
     CustomFieldEntityType,
-    CustomFieldEntry,
     EntityCustomFieldValues,
 } from "@/app/lib/types";
 
@@ -28,62 +28,44 @@ function definitionField(def: CustomFieldDefinition): CustomFieldCellField {
     return { definitionId: def.id, fieldType: def.fieldType, options: def.options ?? null, required: def.required, label: def.label };
 }
 
-function entryField(entry: CustomFieldEntry): CustomFieldCellField {
-    return { definitionId: entry.definitionId, fieldType: entry.fieldType, options: entry.options, required: entry.required, label: entry.label };
-}
-
 /**
  * Builds the dynamic custom-field columns for a records table: one editable column per
  * non-archived definition (cells save per-field and update optimistically), plus an
- * "add field" affordance for admins. Admins read the schema from the (gated) catalog;
- * members derive it from a visible record, so everyone sees and edits values.
+ * "add field" affordance for admins.
+ *
+ * Everyone reads the same catalog, because a definition describes the shape of records the
+ * viewer can already see; only the manage affordances are gated. That gate comes from the
+ * viewer's effective permissions rather than from whether the catalog request succeeded — a
+ * failed request means the columns could not be loaded, which is not the same claim as "you may
+ * not manage fields", and reading a 403 as the latter both logged an error on ordinary loads
+ * and left members without the columns they are entitled to.
  */
 export function useCustomFieldColumns<T extends { id: number }>(
     entityType: CustomFieldEntityType,
     rows: T[],
 ): { columns: ColumnDef<T>[]; addColumnSlot: ReactNode } {
-    const [fields, setFields] = useState<CustomFieldCellField[]>([]);
     const [definitions, setDefinitions] = useState<CustomFieldDefinition[]>([]);
-    const [canManage, setCanManage] = useState(false);
+    const canManage = usePermission("CUSTOM_FIELD_MANAGE");
     const [values, setValues] = useState<EntityCustomFieldValues>({});
     const [schemaToken, setSchemaToken] = useState(0);
 
-    const firstId = rows.length > 0 ? rows[0].id : null;
     const refreshSchema = useCallback(() => setSchemaToken((token) => token + 1), []);
 
     useEffect(() => {
         let cancelled = false;
         getCustomFields(entityType)
             .then((defs) => {
-                if (cancelled) return;
-                const active = defs.filter((def) => !def.archived);
-                setCanManage(true);
-                setDefinitions(active);
-                setFields(active.map(definitionField));
+                if (!cancelled) setDefinitions(defs.filter((def) => !def.archived));
             })
             .catch(() => {
-                if (!cancelled) {
-                    setCanManage(false);
-                    setDefinitions([]);
-                }
+                if (!cancelled) setDefinitions([]);
             });
         return () => {
             cancelled = true;
         };
     }, [entityType, schemaToken]);
 
-    useEffect(() => {
-        if (canManage || firstId == null) return;
-        let cancelled = false;
-        getEntityCustomFields(entityType, firstId)
-            .then((entries) => {
-                if (!cancelled) setFields(entries.map(entryField));
-            })
-            .catch(() => {});
-        return () => {
-            cancelled = true;
-        };
-    }, [entityType, firstId, canManage]);
+    const fields = useMemo(() => definitions.map(definitionField), [definitions]);
 
     const rowIdsKey = useMemo(() => rows.map((row) => row.id).sort((a, b) => a - b).join(","), [rows]);
     useEffect(() => {
