@@ -3520,6 +3520,7 @@ export type DiagnosticsJob = {
     last: DiagnosticsJobRun | null;
     lastSuccess: DiagnosticsJobRun | null;
     lastFailure: DiagnosticsJobRun | null;
+    workspacesFailingLatest: number;
 };
 
 export type DiagnosticsFinding = {

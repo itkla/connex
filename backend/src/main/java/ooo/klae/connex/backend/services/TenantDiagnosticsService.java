@@ -303,20 +303,36 @@ public class TenantDiagnosticsService {
         Map<String, JobRun> lastByName = byJobName(last);
         Map<String, JobRun> successByName = byJobName(lastSuccess);
         Map<String, JobRun> failureByName = byJobName(lastFailure);
+        Map<String, Integer> failingByName = failingScopesByJobName(last);
         List<Job> jobs = new ArrayList<>();
         for (String jobName : JOB_NAMES) {
             jobs.add(new Job(
                     jobName,
                     jobRun(lastByName.get(jobName)),
                     jobRun(successByName.get(jobName)),
-                    jobRun(failureByName.get(jobName))));
+                    jobRun(failureByName.get(jobName)),
+                    failingByName.getOrDefault(jobName, 0)));
         }
         return jobs;
+    }
+
+    private static Map<String, Integer> failingScopesByJobName(List<JobRun> latestPerScope) {
+        Map<String, Integer> failing = new LinkedHashMap<>();
+        for (JobRun run : latestPerScope) {
+            if ("failed".equals(run.getStatus())) {
+                failing.merge(run.getJobName(), 1, Integer::sum);
+            }
+        }
+        return failing;
     }
 
     private static Map<String, JobRun> byJobName(List<JobRun> runs) {
         Map<String, JobRun> byName = new LinkedHashMap<>();
         for (JobRun run : runs) {
+            JobRun current = byName.get(run.getJobName());
+            if (current != null && !run.getStartedAt().isAfter(current.getStartedAt())) {
+                continue;
+            }
             byName.put(run.getJobName(), run);
         }
         return byName;

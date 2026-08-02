@@ -253,6 +253,7 @@ public class ObjectDeletionRetryQueue {
 
     private void retryUserCatalog() {
         JobRunDetail detail = JobRunDetail.started(clock);
+        JobRunStatus[] outcome = {null};
         tenantWorkScope.unrouted(() -> {
             try {
                 List<ObjectDeletionTask> tasks = userQueueMapper.findDue(
@@ -268,19 +269,45 @@ public class ObjectDeletionRetryQueue {
                     }
                 }
                 if (anyTaskFailed) {
-                    record(null, JobRunStatus.FAILED,
-                        new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
+                    outcome[0] = JobRunStatus.FAILED;
                 } else if (!tasks.isEmpty()) {
-                    record(null, JobRunStatus.SUCCEEDED,
-                        new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
+                    outcome[0] = JobRunStatus.SUCCEEDED;
                 }
             } catch (RuntimeException exception) {
-                record(null, JobRunStatus.FAILED,
-                    new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
+                outcome[0] = JobRunStatus.FAILED;
                 log.warn("Private user object deletion sweep failed");
             }
             return null;
         });
+        recordInstanceSweep(outcome[0], detail);
+    }
+
+    /**
+     * Publishes one control-plane sweep outcome into every active tenant catalog.
+     *
+     * <p>{@code job_run} belongs to the tenant lineage, so a row written from the unrouted
+     * control-plane scope is not readable by diagnostics, which reads under each organization's
+     * placement. Writing the instance row once per active catalog keeps the erasure signal visible
+     * in every mode; under {@code single-database} that is exactly one write.
+     *
+     * @param status sweep outcome, or {@code null} when there was nothing due
+     * @param detail sweep start time
+     */
+    private void recordInstanceSweep(JobRunStatus status, JobRunDetail detail) {
+        if (status == null) {
+            return;
+        }
+        for (String catalog : placementRegistry.activeCatalogs()) {
+            try {
+                tenantWorkScope.withCatalog(catalog, () -> {
+                    record(null, status,
+                        new JobRunDetail(detail.startedAt(), Map.of("phase", "user_catalog")));
+                    return null;
+                });
+            } catch (RuntimeException exception) {
+                log.warn("Instance sweep diagnostics could not be recorded for a tenant catalog");
+            }
+        }
     }
 
     private void retryTenantCatalogRaw(String catalog) {

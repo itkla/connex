@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.MailDiagnosticTestDto;
 import ooo.klae.connex.backend.dto.MailDiagnosticTestDto.Dns;
@@ -27,6 +28,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MailDiagnosticsService {
     private static final String ENGLISH_TEST_SUBJECT = "Connex email test";
     private static final String JAPANESE_TEST_SUBJECT = "Connex テストメール";
@@ -114,15 +116,8 @@ public class MailDiagnosticsService {
             mailService.sendNow(
                     config,
                     MailMessage.html(actor.getEmail(), subject, body));
-            auditService.record(
-                    "workspace.mail_config.test",
-                    "workspace",
-                    workspaceId,
-                    actor.getEmail(),
-                    "Sent a diagnostic test email",
-                    null);
             transport = new Transport(
-                    mode, visibleHost, visiblePort, "succeeded", null);
+                    mode, visibleHost, visiblePort, "succeeded", recordTestAudit(workspaceId, actor));
         } catch (BadRequestException exception) {
             transport = new Transport(
                     mode,
@@ -141,6 +136,22 @@ public class MailDiagnosticsService {
         Dns dns = mailDnsDiagnosticsService.diagnose(
                 config.workspaceSupplied() ? config.fromAddress() : null);
         return new MailDiagnosticTestDto(correlationId, sender, transport, dns);
+    }
+
+    private String recordTestAudit(int workspaceId, User actor) {
+        try {
+            auditService.record(
+                    "workspace.mail_config.test",
+                    "workspace",
+                    workspaceId,
+                    actor.getEmail(),
+                    "Sent a diagnostic test email",
+                    null);
+            return null;
+        } catch (RuntimeException exception) {
+            log.warn("Diagnostic test email audit could not be written for workspace {}", workspaceId);
+            return "audit_not_recorded";
+        }
     }
 
     private static String tenantVisibleHost(ResolvedMailConfig config) {

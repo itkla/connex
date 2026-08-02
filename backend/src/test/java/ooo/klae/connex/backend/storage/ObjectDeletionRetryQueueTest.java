@@ -76,6 +76,7 @@ class ObjectDeletionRetryQueueTest {
     @Test
     void failedUserDeletionSweepRecordsAFailedRunSoErasureGapsAreVisible() {
         ObjectDeletionTask task = new ObjectDeletionTask(1L, 7, "users/9/x.png", 0, 1);
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
         when(userQueueMapper.findDue(any(), anyInt())).thenReturn(java.util.List.of(task));
         doThrow(new IllegalStateException("storage unavailable"))
             .when(transactionExecutor).retryUser(any(), any());

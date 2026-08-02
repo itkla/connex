@@ -62,11 +62,24 @@ function JobRow({ job }: { job: DiagnosticsJob }) {
         <li className="px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono text-xs text-foreground">{job.jobName}</span>
-                {last ? (
-                    <StatusPill tone={STATUS_TONE[last.status]} label={t(`jobStatus.${last.status}`)} />
-                ) : (
-                    <StatusPill tone="neutral" label={t("jobNeverRun")} />
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                    {job.workspacesFailingLatest > 0 ? (
+                        <StatusPill
+                            tone="bad"
+                            label={t("jobWorkspacesFailing", {
+                                count: job.workspacesFailingLatest,
+                            })}
+                        />
+                    ) : null}
+                    {last ? (
+                        <StatusPill
+                            tone={STATUS_TONE[last.status]}
+                            label={t(`jobStatus.${last.status}`)}
+                        />
+                    ) : (
+                        <StatusPill tone="neutral" label={t("jobNeverRun")} />
+                    )}
+                </div>
             </div>
             {last ? (
                 <dl className="mt-1.5 grid gap-x-6 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-3">

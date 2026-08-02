@@ -94,8 +94,20 @@ public record TenantDiagnosticsDto(
         }
     }
 
-    /** Latest visible outcomes for one stable scheduler name. */
-    public record Job(String jobName, JobRun last, JobRun lastSuccess, JobRun lastFailure) {
+    /**
+     * Latest visible outcomes for one stable scheduler name.
+     *
+     * <p>{@code last} is the most recent run anywhere in the requested scope, so on an
+     * organization it can be a success from one workspace while another is failing.
+     * {@code workspacesFailingLatest} counts the scopes whose own most recent run failed, so a
+     * degraded workspace is never hidden behind a healthier sibling.
+     */
+    public record Job(
+            String jobName,
+            JobRun last,
+            JobRun lastSuccess,
+            JobRun lastFailure,
+            int workspacesFailingLatest) {
     }
 
     /** One metadata-only scheduler outcome. */

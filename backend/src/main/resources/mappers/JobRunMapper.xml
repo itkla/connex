@@ -50,7 +50,7 @@
     FROM (
       SELECT id, job_name, workspace_id, status, started_at, finished_at, detail,
              ROW_NUMBER() OVER (
-               PARTITION BY job_name
+               PARTITION BY job_name, workspace_id
                ORDER BY started_at DESC, id DESC
              ) AS run_rank
       FROM job_run

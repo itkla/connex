@@ -35,6 +35,16 @@ public class JobRunRecorder {
     public static final String OBJECT_DELETION_RETRY = "object_deletion_retry";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
+    /**
+     * Rows retained per {@code (job_name, workspace_id, status)} partition.
+     *
+     * <p>The partition deliberately includes {@code status}. Retaining the newest rows per
+     * job and workspace alone lets a high-frequency job — {@code provider_capture} polls every
+     * five seconds — evict its own last failure within minutes, which makes the last-failure
+     * readout structurally useless and reports a broken job as healthy. Including {@code status}
+     * bounds the table at {@code KEEP_COUNT} x 3 statuses per job per workspace and keeps
+     * last-success and last-failure independent of run volume. Do not simplify this back.
+     */
     private static final int KEEP_COUNT = 50;
     private static final int MAX_METADATA_KEYS = 8;
     private static final int MAX_DETAIL_LENGTH = 1024;
