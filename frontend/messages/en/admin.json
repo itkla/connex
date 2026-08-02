@@ -11,6 +11,8 @@
     "emptyBody": "No audit events match your filters yet.",
     "emptyAllTitle": "No activity recorded",
     "emptyAllBody": "Once people start making changes, they'll appear here.",
+    "deniedTitle": "Audit access required",
+    "deniedBody": "Only members with audit access can view this workspace's activity log. Ask a workspace admin if you need it.",
     "actionEntity": "<actor>{actorName}</actor> {verb} <target>{targetName}</target>",
     "actionPlain": "<actor>{actorName}</actor> {verb}",
     "verbCreated": "created",
