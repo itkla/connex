@@ -4,11 +4,13 @@
 # need no network, backend, Docker, root, or systemd: each case sources the real
 # scripts with `main "$@"` stripped and stubs curl and journalctl.
 #
-# The redaction fixtures are ported verbatim from
+# The redaction fixtures mirror
 # backend/src/test/java/ooo/klae/connex/backend/observability/RequestPathRedactorTest.java.
-# If the Java rules change, both that test and these fixtures must change
-# together, or the operator-side journal projection will silently diverge from
-# the redaction the backend guarantees.
+# They cover its fixed vectors; the Java test's randomised vectors (a random 43-character
+# base64url token and a random hex webhook token) are represented by fixed equivalents of the same
+# shape rather than reproduced verbatim. If the Java rules change, both that test and these
+# fixtures must change together, or the operator-side journal projection will silently diverge
+# from the redaction the backend guarantees.
 #
 # Usage: deploy/support-bundle/tests/run-tests.sh
 

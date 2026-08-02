@@ -23,13 +23,13 @@ order, under what deployment posture*. It never answers *what the record said*.
 | `config.json` | Values for an explicit allowlist of configuration keys — nothing else. |
 | `migrations.json` | Flyway history: version, description, success, installed-on. |
 | `audit-slice.csv` | The audit events for the requested window, organization-plane always, workspace record events only under an entity filter. |
-| `job-runs.json` | Scheduler run outcomes, when the deployment has the job-run table. |
+| `job-runs.json` | Not produced in this release — see [Declared omissions](#declared-omissions). |
 
 ### Filters
 
 | Parameter | Contract |
 |---|---|
-| `correlationId` | Matches the request correlation id recorded on audit rows. |
+| `correlationId` | Matches the **server-minted** request id on audit rows — see [Request ids](#request-ids). |
 | `entityType` + `entityId` | Legal only together. Unlocks workspace record events for that one record. |
 | `since` | Defaults to 7 days before generation; 30 days is the maximum. Older or future values are rejected. |
 
@@ -129,18 +129,32 @@ metadata-only projection (correlation id, redacted page path, digest, timestamp)
 is tracked as follow-up work; until it exists, correlate client errors through
 the correlation id in the journal slice instead.
 
-### Correlation ids
+### Request ids
 
-Audit rows record the request's correlation id, which is the same value returned
-to the client as `X-Correlation-Id`. A user who reports "it failed and the page
-showed this id" can therefore be traced directly to the audit rows for that
-request.
+`audit-slice.csv` carries a **server-minted** `requestId`, and the `correlationId` filter matches
+that value.
 
-**Pre-cutoff blind spot:** audit rows written before this alignment shipped
-carry a separately generated request id that was never surfaced to any client.
-Those rows are findable by entity, actor, and window, but not by a correlation
-id a user could have seen. When investigating older activity, filter by
-`entityType`/`entityId` and `since` instead.
+This is deliberately **not** the `X-Correlation-Id` a user reads off an error screen. That header
+is client-settable and is preserved as sent, because its legitimate job is correlating a user's
+report with log lines. Adopting it as the audit identifier would let any authenticated caller make
+unrelated requests share one id, or inject rows into an investigator's filtered slice — so the
+audit field is minted server-side and cannot be influenced by the caller.
+
+**The practical consequence:** a user-quoted correlation id will *not* find audit rows. Investigate
+by `entityType`/`entityId` and `since` instead, and use the user-quoted id against logs and the
+optional journal slice. Linking the two properly needs a schema change and is tracked as follow-up
+work.
+
+Audit rows written on scheduler and other non-request threads have no request id at all; this is
+long-standing behaviour, not a gap introduced here. Rows written on async or error-dispatch threads
+would likewise carry none, so the journal-correlation story above applies to request threads only.
+
+### Truncation
+
+The audit slice is capped, and a saturated window is never silently indistinguishable from a
+complete one. The query asks for one row beyond the cap, the extra row is never emitted, and the
+manifest records `auditSliceRowCount`, `auditSliceTruncated`, and `auditSliceLimit`. When
+truncation is reported, narrow `since` or add an entity filter and collect again.
 
 ### Journal slice
 
@@ -164,8 +178,22 @@ projection fails, the run fails.
   Organization administration alone does not unlock them.
 - Every download is itself audited as an organization-plane event carrying only
   the filter metadata.
-- Bundles are streamed with `no-store`, `nosniff`, and a sandboxed CSP, and are
-  never written to disk server-side.
+- Bundles are served with `no-store`, `nosniff`, a sandboxed CSP, and an attachment
+  disposition, and are never written to disk server-side.
+- **`CONNEX_RECENT_AUTHENTICATION_WINDOW` must never be `0` in production.** Zero disables the
+  step-up requirement globally, which would leave this organization-wide export behind an ordinary
+  session.
+- The endpoint is a `GET`, so a malicious page could cause a signed-in administrator's browser to
+  request bundles. It cannot read the response — CORS, CORP, and the attachment disposition all
+  hold — but it can consume the concurrency limit and write audit rows attributing downloads to
+  that administrator. The terminal-outcome audit event makes such activity legible.
+
+## Operational notes
+
+Bundle assembly is bounded to a small number of concurrent operations **per JVM**, not
+cluster-wide: an N-instance deployment can assemble N times that many at once. Assembly is
+synchronous and holds a request thread for its duration, which is short because the bundle is
+bounded metadata rather than a data export.
 
 ## Integrity
 
@@ -225,8 +253,27 @@ and no SSH.
    lost), *when*, *by which account*, and *that no platform fault was involved* —
    established entirely from the bundle, with no database and no SSH.
 
-If the user quoted an error id, passing `--correlation-id` to both commands
-narrows every section to that one request.
+If the user quoted an error id from the UI, note that it will **not** match the audit slice — see
+[Request ids](#request-ids). Narrow with `--entity-type`/`--entity-id` and `--since`, and use the
+quoted id against logs or the optional journal slice.
+
+### Exit codes
+
+`collect.sh` and `read.sh` share one catalog:
+
+| Code | Meaning |
+|---:|---|
+| 0 | Success; a `*_summary status=success` line is emitted. |
+| 64 | Usage, configuration, dependency, unsafe path, unsafe cookie-file permissions, or a refused publish because the output already exists. |
+| 65 | Authentication, organization authorization, step-up failure, or a `404` from the endpoint. |
+| 66 | API transport failure, including `400`, `429`, other `5xx`, and any non-2xx that is not an authorization outcome. |
+| 67 | Bundle integrity: unreadable or missing archive, ZIP structure, manifest schema, inventory coverage, byte length, or SHA-256 mismatch. |
+| 68 | Journal collection, redaction, or manifest repack failure. |
+| 69 | Reader rendering or filtering failure. |
+
+Note that `EXIT_INTEGRITY` is `67` here while `deploy/backup` uses `69` for its own integrity
+class; the two catalogs are independent and both export their constants, so do not source the two
+libraries into one shell.
 
 ## Reproducing locally
 
