@@ -1,19 +1,18 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import Rise from '@/app/components/motion/Rise';
-import { useLiveNow } from '@/app/hooks/useNow';
 import { addDays, dayKeyOf, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_CHIP_CLASS, KIND_ICON } from './constants';
 
 /**
  * Answer-forward "up next" strip: the soonest event from now onward, with a live relative
- * time. Reads the shared clock so the server render and hydration agree, then ticks each
- * minute. Renders nothing when there is nothing upcoming. Tapping it opens the event.
+ * time. Client-only (seeds `now` after mount and ticks each minute) so it never mismatches
+ * SSR. Renders nothing when there is nothing upcoming. Tapping it opens the event.
  */
 export default function UpNext({
     events,
@@ -25,7 +24,16 @@ export default function UpNext({
     onOpenEvent: (event: CalendarEvent) => void;
 }) {
     const t = useTranslations('Calendar');
-    const now = useLiveNow();
+    const [now, setNow] = useState<number | null>(null);
+
+    useEffect(() => {
+        const raf = window.requestAnimationFrame(() => setNow(Date.now()));
+        const id = window.setInterval(() => setNow(Date.now()), 60_000);
+        return () => {
+            window.cancelAnimationFrame(raf);
+            window.clearInterval(id);
+        };
+    }, []);
 
     const rtf = useMemo(() => new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }), [locale]);
     const dayTimeFmt = useMemo(
@@ -35,6 +43,7 @@ export default function UpNext({
     const dayFmt = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric' }), [locale]);
 
     const next = useMemo(() => {
+        if (now == null) return null;
         let best: CalendarEvent | null = null;
         let bestEff = Infinity;
         for (const e of events) {
@@ -48,7 +57,7 @@ export default function UpNext({
         return best;
     }, [events, now]);
 
-    if (!next) return null;
+    if (now == null || !next) return null;
 
     const label = (() => {
         const diffMin = Math.round((next.startMs - now) / 60_000);
