@@ -20,7 +20,10 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>{@link #FORBIDDEN_KEY_SEGMENTS} is a defensive backstop asserted by
  * {@code SupportBundleConfigServiceTest}, so a future key whose name looks credential- or
- * location-bearing cannot be added to the allowlist without the test failing.
+ * location-bearing cannot be added to the allowlist without the test failing. The match is a
+ * plain substring, which occasionally rejects an innocent key whose name merely contains a
+ * forbidden fragment. That is the intended direction of failure: a key excluded in error costs a
+ * support engineer one datum, while a key admitted in error leaves the deployment.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,7 +45,6 @@ public class SupportBundleConfigService {
         "connex.maintenance.mode",
         "connex.workspaces.allow-self-service-creation",
         "connex.signup.mode",
-        "connex.security.csrf-enabled",
         "connex.sso.enabled",
         "connex.social-login.google.enabled",
         "connex.social-login.microsoft.enabled",
