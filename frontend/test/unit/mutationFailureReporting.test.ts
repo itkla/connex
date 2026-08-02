@@ -66,7 +66,7 @@ function fetchersRoutedThroughSafeWithCookie(): { names: string[]; unresolved: n
 
 function bodyOf(fetcherName: string): string {
     const declaration = new RegExp(`function ${fetcherName}\\s*\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`);
-    const match = declaration.exec(API_SOURCE);
+    const match = declaration.exec(API_CODE);
     if (!match) {
         throw new Error(`could not locate the definition of ${fetcherName} in app/lib/api.ts`);
     }
