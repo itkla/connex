@@ -1,8 +1,39 @@
+/**
+ * Shared machinery for the Wave 4 (#856) route/state matrix.
+ *
+ * Three behaviours here are load-bearing for whether a run is evidence or theatre, and each is
+ * subtle enough to be worth stating once at the top of the file rather than re-deriving:
+ *
+ * **Landing verification.** A cell may only be recorded as a success if the browser is still on the
+ * route that was requested *and* inside the authenticated app shell. Without that check a redirect to
+ * `/auth/login` is indistinguishable from a healthy render: the final response is 200 and the login
+ * page carries its own `<h1>`, so a protected route whose session had expired would be recorded as a
+ * passing cell — the harness would manufacture the very claim it exists to test.
+ *
+ * **Failure allowlists are narrow on purpose.** A known failure is suppressed only when the exact
+ * resource, the exact status, and (where it matters) the role all match. Suppressing an endpoint by
+ * URL alone would mean a new 500 from that endpoint rides in under an old issue number. Suppressed
+ * failures are annotated rather than dropped, so the manifest still shows them.
+ *
+ * **Capture settles before it shoots.** `networkidle` is not enough on chart-heavy surfaces —
+ * recharts paints after its data arrives and entrance animations are frozen at their first frame by
+ * `animations: "disabled"`, so an immediate capture yields a blank content area that misrepresents a
+ * healthy page. The app shell is also `h-dvh overflow-hidden` with `<main>` as the scrolling element,
+ * so the document is always exactly one viewport tall and `fullPage` would silently crop everything
+ * below the fold; the fixed height is released immediately before the screenshot, never before an
+ * assertion.
+ */
+
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 
-import { MATRIX_ARTIFACT_DIR, MATRIX_FIXTURE_PATH, storageStateFor } from '../../../../playwright.matrix.config';
+import {
+    MATRIX_ARTIFACT_DIR,
+    MATRIX_BASE_URL,
+    MATRIX_FIXTURE_PATH,
+    storageStateFor,
+} from '../../../../playwright.matrix.config';
 import type { RouteRole } from '../routes';
 
 /** Viewports the matrix renders: desktop, tablet, and the reference mobile handset. */
@@ -26,11 +57,10 @@ export type Axes = {
     role?: RouteRole;
 };
 
-/** The tenant/record facts the seeder produced, resolved once by the setup project. */
+/** The tenant facts the seeder produced, resolved once by the setup project. */
 export type MatrixFixture = {
     workspaceId: number;
     users: Record<RouteRole, string>;
-    password: string;
 };
 
 /** Reads the fixture the setup project wrote. */
@@ -69,7 +99,7 @@ export async function matrixContext(browser: Browser, axes: Axes): Promise<Brows
         reducedMotion: axes.motion ?? 'reduce',
     });
     await context.addCookies([
-        { name: 'NEXT_LOCALE', value: axes.locale, domain: 'localhost', path: '/' },
+        { name: 'NEXT_LOCALE', value: axes.locale, url: MATRIX_BASE_URL, sameSite: 'Lax' },
     ]);
     await context.addInitScript((theme: string) => {
         window.localStorage.setItem('theme', theme);
@@ -101,6 +131,73 @@ export function blockExternalRequests(context: BrowserContext): Set<string> {
     });
     return blocked;
 }
+
+/**
+ * Selects the authenticated app shell.
+ *
+ * `ContentShell` is rendered from exactly one place — the `(app)` layout — so its presence is proof
+ * the page rendered as an authenticated surface. The login and onboarding pages use the root layout
+ * and emit no `<main>` at all. The attribute is locale-independent, unlike the sidebar's `aria-label`.
+ */
+export const AUTHENTICATED_SHELL_SELECTOR = '[data-app-main]';
+
+/** Where a navigation actually ended up, relative to where it was aimed. */
+export type Landing = {
+    requestedPath: string;
+    finalPath: string;
+    acceptedPaths: readonly string[];
+    inAuthenticatedShell: boolean;
+    /** True only when the browser is on an accepted path *and* inside the authenticated shell. */
+    ok: boolean;
+};
+
+/** Extracts the pathname of a matrix target, which may be relative and may carry a query. */
+export function pathnameOf(target: string): string {
+    try {
+        return new URL(target, MATRIX_BASE_URL).pathname;
+    } catch {
+        return target;
+    }
+}
+
+/**
+ * Resolves where a navigation landed and whether that is acceptable.
+ *
+ * Must be consulted before a cell is recorded as a success. `acceptedPaths` defaults to the requested
+ * path; a route that legitimately redirects declares its destinations in the inventory, which turns a
+ * redirect from an invisible fact into a reviewable one.
+ * @param page the page that has finished navigating
+ * @param requestedPath the path the navigation aimed at
+ * @param landsOn pathnames the route may legitimately settle on instead
+ */
+export async function landingOf(
+    page: Page,
+    requestedPath: string,
+    landsOn?: readonly string[],
+): Promise<Landing> {
+    const acceptedPaths = (landsOn ?? [requestedPath]).map(pathnameOf);
+    const finalPath = pathnameOf(page.url());
+    const inAuthenticatedShell = (await page.locator(AUTHENTICATED_SHELL_SELECTOR).count()) > 0;
+    return {
+        requestedPath: pathnameOf(requestedPath),
+        finalPath,
+        acceptedPaths,
+        inAuthenticatedShell,
+        ok: acceptedPaths.includes(finalPath) && inAuthenticatedShell,
+    };
+}
+
+/** Renders a landing as a failure message a reviewer can act on without opening the trace. */
+export function describeLanding(landing: Landing): string {
+    const shell = landing.inAuthenticatedShell
+        ? 'inside the authenticated shell'
+        : `outside the authenticated shell (no ${AUTHENTICATED_SHELL_SELECTOR})`;
+    return `requested ${landing.requestedPath}, landed on ${landing.finalPath} ${shell}; `
+        + `accepted: ${landing.acceptedPaths.join(', ')}`;
+}
+
+/** The state a cell is recorded under when it did not land where it was aimed. */
+export const UNEXPECTED_LANDING_STATE = 'unexpected-landing';
 
 /**
  * Locates the failed-section states on a page.
@@ -135,12 +232,6 @@ export function captureFaults(page: Page): PageFault[] {
     return faults;
 }
 
-/**
- * Faults that are environmental rather than product defects.
- *
- * Kept deliberately short and specific: a broad filter here would silently swallow the very class of
- * defect the sweep exists to find, so each entry names a cause that cannot be a product bug.
- */
 const IGNORED_FAULTS: readonly RegExp[] = [
     /favicon\.ico/i,
     /Download the React DevTools/i,
@@ -148,38 +239,59 @@ const IGNORED_FAULTS: readonly RegExp[] = [
     /Failed to load resource/i,
 ];
 
-/**
- * Faults that are real, already triaged, and filed — excluded from the pass/fail assertion so the
- * sweep keeps finding *new* defects, but still written to the manifest for every cell that produced
- * them. Suppressing these silently would be dishonest; leaving them un-suppressed would mean the
- * sweep reports the same two known issues several hundred times and hides anything else.
- *
- * Each entry must name the filed issue. An entry without one does not belong here.
- */
 const KNOWN_FILED_FAULTS: readonly { pattern: RegExp; issue: string }[] = [];
 
 /** A response the page requested that came back at or above 400. */
-export type ResponseFailure = { status: number; url: string };
+export type ResponseFailure = {
+    status: number;
+    url: string;
+    /** Set when the failure matches a filed, already-triaged suppression. */
+    knownIssue?: string;
+};
+
+/** The cell context a suppression may be scoped to. */
+export type ResponseContext = { role: RouteRole };
 
 /**
- * Failing responses that are real, already filed, and expected on every load.
+ * One filed, already-triaged failing response.
  *
- * Matched on URL rather than on console text: Chromium's console message for a failed subresource is
- * generic ("Failed to load resource: the server responded with a status of 404") and carries no URL,
- * so allowlisting by console text would mean suppressing *every* 404 — exactly the over-broad
- * suppression that would hide the next real defect.
+ * Every field narrows the suppression. `pattern` is anchored at the origin so a query string cannot
+ * smuggle an unrelated URL past it, `statuses` pins the exact failure that was triaged, and `roles`
+ * scopes it to the cells where it is expected. A suppression without an `issue` does not belong here.
  */
-const KNOWN_FILED_RESPONSES: readonly { pattern: RegExp; issue: string }[] = [
-    { pattern: /\/_next\/static\/chunks\/.*\.js$/i, issue: '#972 lazy chunk never emitted by the build' },
-    { pattern: /\/api\/custom-fields(\?|$)/i, issue: '#973 admin-only catalog probed as a member' },
-    { pattern: /\/api\/auth\/(me|csrf)(\?|$)/i, issue: 'unauthenticated bootstrap probe before session attaches' },
+export type KnownResponseFailure = {
+    pattern: RegExp;
+    statuses: readonly number[];
+    roles?: readonly RouteRole[];
+    issue: string;
+};
+
+const KNOWN_FILED_RESPONSES: readonly KnownResponseFailure[] = [
+    {
+        pattern: /^https?:\/\/[^/]+\/_next\/static\/chunks\/[^?#]*\.js(\?|#|$)/i,
+        statuses: [404],
+        issue: '#972 lazy chunk never emitted by the build',
+    },
+    {
+        pattern: /^https?:\/\/[^/]+\/api\/custom-fields(\?|#|$)/i,
+        statuses: [403],
+        roles: ['member'],
+        issue: '#973 admin-only catalog probed as a member',
+    },
+    {
+        pattern: /^https?:\/\/[^/]+\/api\/auth\/(me|csrf)(\?|#|$)/i,
+        statuses: [401],
+        issue: 'bootstrap probe before the session attaches; a genuinely dead session now fails the '
+            + 'landing assertion instead, so this suppression can no longer hide one',
+    },
 ];
 
 /**
  * Records every response at or above 400, with its URL.
  *
- * The console stream alone cannot support precise triage here, so the sweep watches responses
- * directly and keeps the URL, which is what makes the allowlist above narrow enough to be safe.
+ * The console stream alone cannot support precise triage here — Chromium's message for a failed
+ * subresource is generic and carries no URL — so the sweep watches responses directly and keeps the
+ * URL and status, which is what makes the allowlist narrow enough to be safe.
  * @param page the page to observe
  * @returns a live array of failing responses
  */
@@ -191,16 +303,38 @@ export function captureResponseFailures(page: Page): ResponseFailure[] {
     return failures;
 }
 
-/** Failing responses that are not already filed, de-duplicated by status and URL. */
-export function unexpectedResponseFailures(failures: readonly ResponseFailure[]): ResponseFailure[] {
+/**
+ * De-duplicates failing responses and annotates the ones covered by a filed suppression.
+ *
+ * Annotating rather than dropping keeps the manifest honest: a reviewer sees every failure the run
+ * produced, and sees which of them were already triaged and under which issue.
+ * @param failures the raw captures
+ * @param context the role the cell rendered as, which some suppressions are scoped to
+ */
+export function classifyResponseFailures(
+    failures: readonly ResponseFailure[],
+    context: ResponseContext,
+): ResponseFailure[] {
     const seen = new Set<string>();
-    return failures.filter((failure) => {
-        if (KNOWN_FILED_RESPONSES.some((known) => known.pattern.test(failure.url))) return false;
+    const classified: ResponseFailure[] = [];
+    for (const failure of failures) {
         const key = `${failure.status} ${failure.url}`;
-        if (seen.has(key)) return false;
+        if (seen.has(key)) continue;
         seen.add(key);
-        return true;
-    });
+        const known = KNOWN_FILED_RESPONSES.find(
+            (candidate) =>
+                candidate.statuses.includes(failure.status)
+                && (candidate.roles === undefined || candidate.roles.includes(context.role))
+                && candidate.pattern.test(failure.url),
+        );
+        classified.push(known === undefined ? failure : { ...failure, knownIssue: known.issue });
+    }
+    return classified;
+}
+
+/** The classified failures that no filed suppression covers — the ones that must fail a cell. */
+export function unexpectedResponseFailures(classified: readonly ResponseFailure[]): ResponseFailure[] {
+    return classified.filter((failure) => failure.knownIssue === undefined);
 }
 
 /** Filters environmental noise out of captured faults, keeping everything a reviewer should see. */
@@ -229,20 +363,13 @@ export type ManifestEntry = {
     faults: PageFault[];
     responseFailures?: ResponseFailure[];
     httpStatus: number | null;
+    /** The pathname the browser was actually on when the cell was captured. */
+    finalPath: string;
     notes?: string;
 };
 
 const MANIFEST_PATH = path.join(MATRIX_ARTIFACT_DIR, 'manifest.jsonl');
 
-/**
- * Waits for the page to stop changing shape before a screenshot is taken.
- *
- * `networkidle` is not sufficient on chart-heavy surfaces: recharts paints after its data arrives,
- * and entrance animations are frozen at their first frame by `animations: "disabled"`, so capturing
- * immediately produces a blank content area that misrepresents a perfectly healthy page. Polling the
- * rendered SVG count until it stops growing is cheap and targets exactly that failure.
- * @param page the page about to be captured
- */
 async function settleForCapture(page: Page): Promise<void> {
     let previous = -1;
     for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -255,18 +382,6 @@ async function settleForCapture(page: Page): Promise<void> {
     await expandScrollContainers(page);
 }
 
-/**
- * Makes the app's inner scroll container capturable by a full-page screenshot.
- *
- * The shell is `h-dvh overflow-hidden` with `<main>` as the scrolling element, so the *document* is
- * always exactly one viewport tall no matter how long the page is. `fullPage: true` therefore
- * captures only the first screenful and silently crops everything below the fold — on a chart-heavy
- * surface that reads as a blank page rather than as a page that scrolls.
- *
- * Releasing the fixed height just before capture lets the document grow to the real content height.
- * This mutates layout and so runs only immediately before a screenshot, never before an assertion.
- * @param page the page about to be captured
- */
 async function expandScrollContainers(page: Page): Promise<void> {
     await page
         .evaluate(() => {
@@ -277,6 +392,7 @@ async function expandScrollContainers(page: Page): Promise<void> {
                 element.style.overflow = 'visible';
             });
             document.documentElement.style.height = 'auto';
+            document.documentElement.style.overflow = 'visible';
             document.body.style.height = 'auto';
         })
         .catch(() => undefined);
@@ -285,8 +401,8 @@ async function expandScrollContainers(page: Page): Promise<void> {
 
 /**
  * Records one matrix cell as evidence: a full-page screenshot plus a manifest line binding it to its
- * route, state and axes. Written as JSON Lines so parallel workers append without clobbering, and so
- * a partial run still yields a readable manifest.
+ * route, state, axes and the path the browser was actually on. Written as JSON Lines so parallel
+ * workers append without clobbering, and so a partial run still yields a readable manifest.
  */
 export async function record(
     page: Page,
