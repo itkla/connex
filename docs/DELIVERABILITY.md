@@ -23,14 +23,21 @@ to the host you configured, and sends. That is the whole of its involvement in d
   for a private key. If your mail is DKIM-signed, your relay signed it after Connex handed it over.
 - **Evaluate or publish SPF, DKIM, or DMARC.** No part of the backend reads these records, warns
   about them, or reports on them.
-- **Resolve DNS for policy purposes.** The only DNS the mail path performs is resolving the SMTP
-  host so `SmtpDestinationGuard` can pin the connection to a single verified address (an
-  SSRF/DNS-rebinding defence, see [§2.4](#24-the-smtp-destination-is-pinned)).
+- **Resolve DNS for policy purposes.** The only DNS the mail path performs *itself* is resolving a
+  **workspace-supplied** SMTP host so `SmtpDestinationGuard` can pin the connection to a single
+  verified address (an SSRF/DNS-rebinding defence, see
+  [§2.4](#24-the-smtp-destination-is-pinned)). The instance transport is exempt: it is not
+  workspace-supplied, so the guard returns immediately and JavaMail resolves `connex.mail.host`
+  itself, unpinned, at connect time.
 - **Set a separate envelope sender.** `mail.smtp.from` is never set, so the SMTP `MAIL FROM` is
   derived from the header `From`. See [§5](#5-aligning-the-from-address).
 - **Set `Reply-To`.** Replies go to the `From` address.
 - **Emit `List-Unsubscribe` or `List-Unsubscribe-Post` headers.** Campaign unsubscribe is a body
   link only ([§8](#8-campaign-mail-versus-transactional-mail)).
+- **Send a `text/plain` alternative.** Every message is single-part `text/html`. `MailMessage.html(…)`
+  is the only constructor any sender uses, so the plain-text half is always null and
+  `MimeMessageHelper` is built non-multipart. A missing plain-text part is a mild spam signal with
+  some filters, and there is no setting that adds one.
 
 **Therefore: DMARC alignment is entirely your relay's responsibility.** Choosing a relay that will
 sign as your domain, and publishing the records that authorize it, is the deliverability work. There
@@ -41,7 +48,8 @@ Richer in-product mail diagnostics are tracked separately; nothing beyond the SM
 
 ## 2. Choosing a mail shape
 
-Two shapes exist. They differ in **who owns the transport and the sending identity**.
+Two **SMTP transport** shapes exist. They differ in **who owns the transport and the sending
+identity**.
 
 | | Instance / managed mail | Per-workspace SMTP override |
 |---|---|---|
@@ -50,7 +58,11 @@ Two shapes exist. They differ in **who owns the transport and the sending identi
 | Password storage | Environment / `.env` | Central secret store, encrypted per workspace |
 | Turned on by | `connex.mail.enabled=true` | Saving an enabled config in the UI |
 | Locked to instance-only by | `connex.mail.managed=true` | — |
-| Allowed on `on-prem` | **No** — see below | Yes |
+| Allowed on `on-prem` | **Yes** — only `connex.mail.managed` is forbidden, see below | Yes |
+
+**A third sending identity exists outside both**, reachable only by campaigns dispatched through an
+ESP delivery provider. It is not an SMTP transport and `MailConfigResolver` never sees it — see
+[§2.2](#22-which-from-address-is-used) before you publish any DNS.
 
 `connex.mail.managed=true` means the instance transport is authoritative for **all** workspace mail
 and per-workspace overrides are refused outright (`403 Workspace SMTP overrides are disabled on this
@@ -78,19 +90,45 @@ mail uses tells you which identity it will leave under.
   nothing in managed mode. Only the send-test uses it, deliberately, so the test validates exactly
   what the workspace configured rather than silently proving the instance relay works.
 
-**The fallback in step 3 is silent to the user.** A workspace admin who saves a broken configuration
-may keep receiving mail — sent as the *instance* identity, from a domain they do not control. This is
-the single most common source of surprise DMARC failures on this system. The log line to grep for is
-in [§7](#7-common-failure-modes).
+**The fallback in step 3 is silent to the user — and effectively unreachable through the UI.** When it
+does fire, a workspace keeps receiving mail sent as the *instance* identity, from a domain it does not
+control. But `saveConfig` refuses to enable a config with a blank host (*"SMTP host is required to
+enable workspace email"*) or a blank from-address (*"A from address is required to enable workspace
+email"*) **before writing the row**, and those two fields are exactly what `usable()` tests. **Saving
+through the UI can no longer produce a config that falls back.** The warn branch survives only for a
+legacy row or one written straight to the database.
+
+Treat the log line ([§6.2](#62-what-to-check-in-logs)) as confirmation when you already suspect such a
+row — not as the first thing to grep. A workspace mailing under an unexpected identity is far more
+likely to be managed mode, or an ESP `From` ([§2.2](#22-which-from-address-is-used)).
 
 ### 2.2 Which `From` address is used
 
-| Shape | `From` address | `From` display name |
-|---|---|---|
-| Instance | `connex.mail.from`, or `connex.mail.username` when blank | `connex.mail.from-name` (default `Connex`) |
-| Workspace | the workspace's *From address*, or its *username* when blank | the workspace's, falling back to the instance name |
+**There are three sending identities, not two.** The two SMTP shapes above are joined by a third that
+never touches `MailConfigResolver`: when a campaign is delivered through an **ESP delivery provider**,
+the `From` address and display name come from that workspace's **delivery provider configuration**
+row (**Settings → Delivery**) — not from `connex.mail.*`, and not from the workspace SMTP override.
+
+| Identity | Used by | `From` address | `From` display name |
+|---|---|---|---|
+| Instance | account mail always; workspace mail in managed mode, or as the fallback | `connex.mail.from`, or `connex.mail.username` when blank | `connex.mail.from-name` (default `Connex`) |
+| Workspace SMTP override | workspace mail, and campaigns on the built-in `smtp` provider | the workspace's *From address*, or its *username* when blank | the workspace's, falling back to the instance name |
+| **ESP delivery provider** | **campaigns dispatched through the ESP provider — nothing else** | **the provider config's *From address*** (Settings → Delivery) | **the provider config's *From name***, omitted from the payload when blank |
 
 The workspace's port also falls back to `connex.mail.port` (default `587`) when unset.
+
+**The ESP identity takes part in no precedence at all.** `HttpEspDeliveryProvider` builds its send
+payload directly from the resolved provider config's `fromAddress` and `fromName`; there is no
+fallback to `connex.mail.*` and no fallback to the workspace SMTP override, in either direction. Only
+the built-in `smtp` delivery provider re-resolves the transport through `MailConfigResolver`, and only
+that path inherits the two-tier fallback in [§2.1](#21-how-a-sender-is-resolved).
+
+**So an ESP `From` domain is a separate domain you must publish DNS for**
+([§4](#4-dns-records-per-deployment-shape)). This is the single easiest way to get deliverability
+wrong on this system, because [§8](#8-campaign-mail-versus-transactional-mail) actively steers bulk
+senders onto an ESP: configure the instance and workspace domains perfectly, terminate campaigns at an
+ESP, and **every campaign then sends from a domain with no SPF, DKIM, or DMARC at all** — while every
+check in this document still looks green.
 
 ### 2.3 What counts as a "usable" configuration
 
@@ -102,15 +140,41 @@ password, TLS misconfiguration, or a host that refuses the connection all produc
 configuration. Such a config is selected and used — it does *not* trigger the fallback-to-instance
 warning. It fails later, at transport time, where most senders swallow the error
 ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)). Only a blank host or a blank From
-address makes a workspace configuration fall back.
+address makes a workspace configuration fall back — and saving now blocks both of those
+([§2.1](#21-how-a-sender-is-resolved)), so in practice a saved config is always "usable" and the floor
+never rejects anything.
 
 ### 2.4 The SMTP destination is pinned
 
 `SmtpDestinationGuard` resolves the SMTP host and `PinnedSocketFactory` connects to that exact
 address, so the name cannot be re-resolved to a different host between check and connect.
+
+**The guard governs workspace-supplied hosts only.** `resolveForSend` returns `null` immediately when
+`config.workspaceSupplied()` is false, so **the instance relay is trusted and never checked** — not at
+startup, not at send time, ever. A workspace host is checked twice: once at save time, and again at
+send time.
+
 `connex.mail.allow-internal-hosts` (default **false**) is what permits a private-network relay; it is
-**forbidden on the `saas` profile** and allowed on `silo` and `on-prem`. An internal relay on a
-hardened profile will be refused, at save time for a workspace config and at send time otherwise.
+**forbidden on the `saas` profile** and allowed on `silo` and `on-prem`. A workspace override pointing
+at an internal host is refused at save time on a hardened profile. Two consequences follow:
+
+- **A private-network *instance* relay needs no flag.** It is never validated, so setting
+  `allow-internal-hosts=true` on its behalf achieves nothing — and on `saas` that setting is a **hard
+  startup failure**, so reaching for it turns a working instance into a crash loop. Set it only to let
+  a *workspace override* reach an internal host.
+- **The flag is checked first and returns early**, so enabling it also switches off the port allowlist
+  below, not just the private-address check.
+
+### 2.5 The SMTP port allowlist
+
+`SmtpDestinationGuard` additionally enforces a fixed port allowlist — **25, 465, 587, and 2525**. Any
+other port is refused with *"SMTP port must be one of 25, 465, 587, or 2525"*, at save time and again
+at send time, for workspace-supplied hosts. A relay listening on a non-standard submission port cannot
+be configured as a workspace override, and no setting extends the list.
+
+**`connex.mail.allow-internal-hosts=true` returns before the port check**, so it disables the port
+allowlist as well — a wider grant than the name suggests. The instance transport, being unchecked, has
+no port restriction at all.
 
 ## 3. What mail Connex sends
 
@@ -119,16 +183,16 @@ Eight senders exist. `sendForWorkspace` uses the workspace identity (with instan
 
 | Mail | Transport call | Identity | Enabled by |
 |---|---|---|---|
-| Workspace invite | `sendForWorkspace` | workspace → instance | `connex.mail.enabled`; link built from `connex.mail.app-base-url` |
+| Workspace invite | `sendForWorkspace` | workspace → instance | `connex.mail.enabled`, **or** any enabled workspace override; link built from `connex.mail.app-base-url` |
 | Notification email channel | `sendForWorkspace` | workspace → instance | the recipient's per-user `email` notification preference |
 | Scheduled report delivery | `sendForWorkspace` | workspace → instance | `connex.reports.scheduling-enabled` (default **true**) |
 | Password reset | `sendInstance` | **instance only** | `connex.password-reset.email-enabled` (default **false**) |
 | Email-change verification | `sendInstance` | **instance only** | `connex.email-change.email-enabled` (default **false**) |
 | Registration verification | `sendInstance` | **instance only** | `connex.registration-verification.enabled` **and** `.email-enabled` (both default **false**) |
 | Mail settings test email | `sendNow` (synchronous) | **workspace only**, no fallback | on demand, from Settings → Email |
-| Campaign delivery | own dispatcher, never async | workspace → instance | `connex.delivery.enabled` **and** `connex.delivery.dispatch-enabled` (both default **false**) |
+| Campaign delivery | own dispatcher, never async | **built-in `smtp` provider:** workspace → instance. **ESP provider:** the provider config's own `From`, no fallback ([§2.2](#22-which-from-address-is-used)) | `connex.delivery.enabled` **and** `connex.delivery.dispatch-enabled` (both default **false**) |
 
-Three consequences worth planning around:
+Five consequences worth planning around:
 
 **`connex.mail.enabled=true` alone does not start sending account mail.** It wires the default sender
 and lets invites be emailed. Password reset, email-change verification, and registration
@@ -141,9 +205,25 @@ workspace overrides entirely. If `connex.mail.*` is unconfigured, they have no s
 matter how many workspaces have working SMTP. Plan the instance identity's DNS even on an instance
 where every workspace brings its own relay.
 
-**Invite and notification templates render with a hard-coded `en` locale.** Only the test email
-follows the actor's locale. This is a content matter, not an authentication one, but it surprises
-Japanese-language deployments.
+**`connex.mail.enabled=false` is not an instance-wide kill switch.** `resolveForWorkspace` never
+consults it on the workspace-override branch: it checks `managed`, then the workspace's own enabled,
+usable config, and reaches `resolveInstance()` — the only place the flag is read — solely as a
+fallback. So with the flag off, every workspace holding its own enabled SMTP config keeps sending
+invites, notifications, scheduled reports, and campaigns; only the three `sendInstance` flows stop.
+**Stopping all outbound mail takes `connex.mail.managed=true` *and* `connex.mail.enabled=false`** —
+managed mode routes workspace mail into `resolveInstance()`, which then returns nothing. Clearing the
+flag alone during an incident stops far less than it looks like, and the operator will believe
+outbound has halted when it has not.
+
+**Campaign mail on an ESP leaves under a third identity.** The `workspace → instance` resolution above
+holds for the built-in `smtp` provider only. On an ESP provider the `From` is the delivery provider
+config's own, with no fallback to either — a distinct domain with its own DNS obligations
+([§2.2](#22-which-from-address-is-used), [§4](#4-dns-records-per-deployment-shape)).
+
+**Three templates render with a hard-coded `en` locale: invite, notification, and registration
+verification.** Password reset, email-change verification, scheduled report delivery, and the
+send-test all render in the recipient's or actor's locale. This is a content matter, not an
+authentication one, but the three hard-coded ones surprise Japanese-language deployments.
 
 Neither `connex.delivery.enabled` nor `connex.delivery.dispatch-enabled` appears in
 `application.yml`; both are bound from the environment only, and campaign mail sends only when
@@ -153,7 +233,8 @@ Neither `connex.delivery.enabled` nor `connex.delivery.dispatch-enabled` appears
 
 `sendInstance` and `sendForWorkspace` are `@Async` and **swallow every failure**. The delivery helper
 logs and returns; nothing propagates to the request that triggered it, and no user-visible error is
-produced. Only `sendNow` — the send-test — throws.
+produced. Only `sendNow` — the send-test — throws, and even there the calling service catches the
+throw and returns a generic message ([§6.1](#61-the-send-test)).
 
 The operational consequence is sharper than it first looks. Scheduled report delivery freezes its
 report snapshot and then records the audit event `report.schedule.delivery` (*"Queued scheduled
@@ -174,8 +255,15 @@ Which domain that is depends on the shape:
 - **Per-workspace overrides** — **each workspace's own From domain needs its own complete set.** A
   correctly configured instance domain does nothing for a workspace sending as a different domain.
   This is the part operators most often miss when turning overrides on.
+- **Campaigns on an ESP delivery provider** — **a third domain that neither of the above covers.** The
+  ESP `From` is set per workspace in **Settings → Delivery** and is used verbatim in the ESP send
+  payload; nothing in `connex.mail.*` or the workspace SMTP override touches it. If you followed
+  [§8](#8-campaign-mail-versus-transactional-mail) and terminated bulk mail at an ESP, **this is the
+  domain your campaigns actually send from.** Publish its full set, or every campaign fails DMARC
+  while your instance and workspace domains stay green.
 - **Both** — do both, and remember the account-mail carve-out above: the instance domain still needs
-  records even when every workspace overrides.
+  records even when every workspace overrides. If campaigns run through an ESP, that is a third set on
+  top.
 
 ### 4.1 SPF
 
@@ -275,9 +363,11 @@ authorized are two different facts, and only the second one signs.
 
 ## 5. Aligning the `From` address
 
-Connex sets the header `From` and nothing else. `mail.smtp.from` is never set, so **the envelope
-sender is derived from the header `From`: they are the same address, and there is no separate
-Return-Path or bounce address to configure.**
+Connex sets the header `From` and **no other address or authentication header** — no `Reply-To`, no
+`Sender`, no `Return-Path`, no `List-Unsubscribe`, no DKIM signature. (The message naturally still
+carries `To`, `Subject`, `Content-Type`, and the `Message-ID`, `Date`, and `MIME-Version` JavaMail
+adds.) `mail.smtp.from` is never set, so **the envelope sender is derived from the header `From`: they
+are the same address, and there is no separate Return-Path or bounce address to configure.**
 
 That single design fact drives everything below.
 
@@ -317,8 +407,12 @@ Settings → Email has a **send test** action, backed by
 - Resolves via `resolveWorkspaceOnly`, so it exercises **exactly what the workspace saved**, with no
   instance fallback to make a broken config look healthy.
 - Re-checks the destination through `SmtpDestinationGuard` before connecting.
-- Sends **synchronously** via `sendNow`, so the transport error surfaces in the response instead of
-  being swallowed.
+- Sends **synchronously** via `sendNow`, so the outcome is known before the response returns rather
+  than swallowed on an async thread. **The response does not carry the real error, though.** A
+  transport failure is caught and returned as the fixed string *"Could not send the test email. Check
+  the host, port, and credentials."*; the underlying cause appears only in the WARN log
+  ([§6.2](#62-what-to-check-in-logs)). Only the destination guard's own refusals — a private address,
+  a port outside the allowlist — come back verbatim.
 - Sends **only to the requesting user's own account email**. It is not a way to mail an arbitrary
   address. If the account has no email, the test refuses rather than sending.
 - Refused with `403` in managed mode, because workspace overrides do not exist there.
@@ -342,7 +436,7 @@ distinct lines:
 
 | Log line | Level | Means |
 |---|---|---|
-| `Workspace {} has SMTP enabled but its config is unusable; falling back to the instance default sender` | WARN | The workspace's saved config has a blank host or blank From address. Mail is going out as the **instance** identity. |
+| `Workspace {} has SMTP enabled but its config is unusable; falling back to the instance default sender` | WARN | The workspace's saved config has a blank host or blank From address. Mail is going out as the **instance** identity. Save-time validation blocks this, so expect it only for a legacy or hand-written row ([§2.1](#21-how-a-sender-is-resolved)). |
 | `Email to {} not sent: no usable SMTP configuration ({})` | WARN | Nothing usable resolved at all. The message was **dropped**, not queued or retried. |
 | `Failed to send email to {} ({}): {}` | ERROR | The relay was reached and the send failed. The relay's own message is the tail of the line. This is the async swallow path — the user saw no error. |
 
@@ -350,14 +444,24 @@ The parenthesized source is `instance` or `workspace <id>`, which tells you whic
 attempted. The send-test additionally logs `Test email for workspace {} failed: {}` at WARN with the
 underlying cause, while returning a generic message to the browser.
 
+**A fourth failure path emits none of these three.** Resolution runs *outside* `deliverQuietly`'s
+try/catch — `sendForWorkspace` calls `resolveForWorkspace` first and only then enters the guarded
+helper. If resolution itself throws (a failure decrypting the workspace SMTP password in the secret
+store, say), the exception escapes the `@Async` method entirely and surfaces through Spring's
+uncaught-async-exception handler, not through any line in the table. Make sure that handler's output
+is collected too.
+
 **There is no retry and no outbound queue.** A swallowed failure is a permanently lost message.
-Alerting on that ERROR line is the only way to learn about it.
+Alerting on that ERROR line is the only way to learn about a swallowed *transport* failure — and it
+will not catch the resolution failure above.
 
 ## 7. Common failure modes
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Mail arrives, but `From` is the instance address, not the workspace's | The workspace config has a blank host or blank From address and silently fell back | Grep for `has SMTP enabled but its config is unusable; falling back to the instance default sender`; fill both fields and re-run the send-test |
+| Mail arrives, but `From` is the instance address, not the workspace's | Usually `connex.mail.managed=true`, which ignores the workspace row outright. Only rarely the silent fallback — save-time validation blocks a blank host or From address, so that needs a legacy or hand-written row | Check `connex.mail.managed` first. Then grep for `has SMTP enabled but its config is unusable; falling back to the instance default sender`; if it appears, re-save the config through the UI to repair the row |
+| Campaign mail leaves under a `From` that matches neither `connex.mail.*` nor the workspace override | The campaign went out through an **ESP delivery provider**, whose `From` comes from its own config row and has no fallback | Expected. Read the ESP `From` in Settings → Delivery and publish SPF, DKIM, and DMARC for **that** domain ([§2.2](#22-which-from-address-is-used)) |
+| Outbound mail continues after setting `connex.mail.enabled=false` | Not an instance-wide kill switch — workspaces with their own enabled SMTP never consult it | Also set `connex.mail.managed=true`; only the pair stops workspace mail ([§3](#3-what-mail-connex-sends)) |
 | A user reports mail never arrived and saw no error in the UI | `sendForWorkspace`/`sendInstance` are `@Async` and swallow failures — nothing surfaces to the browser | Grep for `Failed to send email to` and `Email to {} not sent`; alert on both. The message is gone; there is no retry |
 | Reset / verification mail never sends although `connex.mail.enabled=true` | Each flow has its own flag, all defaulting false | Set `connex.password-reset.email-enabled`, `connex.email-change.email-enabled`, and/or `connex.registration-verification.enabled` + `.email-enabled` |
 | Reset links appear in the backend log instead of being mailed | Same cause — the logging fallback is the default when a flow's `email-enabled` is false | As above |
@@ -368,7 +472,8 @@ Alerting on that ERROR line is the only way to learn about it.
 | Mail is accepted by the relay but lands in spam or is rejected by DMARC | The relay signs with its own `d=`, or rewrites `MAIL FROM` to its own bounce domain, so nothing aligns with your `From` | Have the relay sign as your From domain and publish its selector; verify with the `Authentication-Results` header of a real delivered message ([§6.1](#61-the-send-test)) |
 | Every workspace-override domain fails DMARC while the instance domain passes | Only the instance domain's records were published | Each workspace's From domain needs its own SPF, DKIM, and DMARC records ([§4](#4-dns-records-per-deployment-shape)) |
 | SPF fails on a domain that clearly has an SPF record | Two `v=spf1` records, or more than 10 lookup mechanisms — both are permanent errors | `dig +short TXT <domain>` and collapse to one record within the limit |
-| Saving a workspace SMTP host is refused | `SmtpDestinationGuard` rejected a private-network destination; `connex.mail.allow-internal-hosts` is false and forbidden on `saas` | Use a publicly routable relay, or run the profile that permits internal hosts |
+| Saving a workspace SMTP host is refused: *"…must be a public server; private and loopback addresses are not allowed"* | `SmtpDestinationGuard` rejected a private-network destination; `connex.mail.allow-internal-hosts` is false and forbidden on `saas` | Use a publicly routable relay, or run the profile that permits internal hosts. Do **not** set the flag for an *instance* relay — that host is never checked, and the flag is a startup failure on `saas` ([§2.4](#24-the-smtp-destination-is-pinned)) |
+| Saving a workspace SMTP host is refused: *"SMTP port must be one of 25, 465, 587, or 2525"* | The port allowlist, a separate check from the private-address one | Use an allowlisted submission port; the list is fixed and no setting extends it ([§2.5](#25-the-smtp-port-allowlist)) |
 | The audit shows a scheduled report delivered, but nobody received it | The audit records *queued*, written after the async handoff; the send failed afterwards and was swallowed | Check the ERROR log line. Treat the audit as evidence of queueing only ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)) |
 
 ## 8. Campaign mail versus transactional mail
@@ -402,3 +507,10 @@ monitoring has to happen at the relay.
 unsubscribe affordance will not do so for Connex mail, and bulk-sender programs that require the
 header are not satisfied by this build. If you send campaign volume that falls under such a
 requirement, terminate it at an ESP that adds the header itself.
+
+**If you do that, publish DNS for the ESP's `From` domain before the first send.** An ESP provider
+sends under the `From` on its own config row — not `connex.mail.*`, not the workspace SMTP override —
+so it is a domain [§4](#4-dns-records-per-deployment-shape) does not otherwise cover. Moving bulk mail
+to an ESP to satisfy a bulk-sender program, and leaving that domain without SPF, DKIM, and DMARC,
+fails the program on the authentication requirement instead. See
+[§2.2](#22-which-from-address-is-used).
