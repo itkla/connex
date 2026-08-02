@@ -1010,6 +1010,127 @@
                         ]
                     }
                 ]
+            },
+            "products-and-line-items": {
+                "title": "Products & line items",
+                "description": "A catalogue of what you sell, and how line items decide a deal's value.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "The product catalogue is the list of things you sell. Adding them to a deal as line items builds up the deal's value from real numbers instead of a figure someone typed from memory.",
+                            "You will find the catalogue under Records, and line items on the deal itself."
+                        ]
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "deal-line-items",
+                        "caption": "With line items on a deal, the deal value is the sum of the lines rather than a typed figure."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "The catalogue",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "What a product holds",
+                                "description": "A name, an optional code, a unit and unit price, a currency, an optional tax rate, and whether it is charged once or repeats."
+                            },
+                            {
+                                "title": "Administrators maintain it",
+                                "description": "Everyone can see the catalogue and use it on deals, but creating, editing and deleting products is an administrator permission."
+                            },
+                            {
+                                "title": "Retire rather than delete",
+                                "description": "Marking a product inactive removes it from the picker on deals while leaving it in the catalogue. Deleting it is permanent, but never disturbs deals that already use it."
+                            },
+                            {
+                                "title": "Export, but no import",
+                                "description": "You can export the catalogue to CSV. There is no product import, so a large catalogue has to be entered through the interface."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "prose",
+                        "text": "When you add a product to a deal, Connex copies its details onto the line at that moment. Changing the catalogue afterwards never reaches back into deals that already quoted the old price, which is what makes an old deal still readable a year later."
+                    },
+                    {
+                        "type": "table",
+                        "title": "How a deal's value is decided",
+                        "columns": [
+                            "Situation",
+                            "The deal value is"
+                        ],
+                        "rows": [
+                            [
+                                "No line items",
+                                "Whatever you type in. This is the normal case for a deal you are sizing early."
+                            ],
+                            [
+                                "One or more line items",
+                                "The sum of the lines, recalculated every time you add, change or remove one. Typing over it is refused."
+                            ],
+                            [
+                                "You remove the last line item",
+                                "Back under your control, keeping the last calculated figure rather than resetting to zero."
+                            ],
+                            [
+                                "The deal is won",
+                                "The calculated total becomes the realised value and is frozen there, so later edits move the deal value but never the revenue you booked."
+                            ],
+                            [
+                                "The deal is lost",
+                                "The realised value is set to zero when you lose the deal through the close dialog. Other routes to a lost stage do not currently clear a realised value that was already recorded, so a deal won and later marked lost can keep its won figure; this is a known defect rather than the intended contract."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "One currency per deal, and no conversion",
+                        "body": "A deal and all of its line items share a single currency. A product priced in a different currency cannot be added, and the currency cannot be changed while line items exist. Connex never converts between currencies, so totals across your workspace are always reported per currency and never added together."
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Repeating charges are counted once",
+                        "body": "A repeating line contributes its amount for a single period, and the deal value is the one-off charges plus that. It is what you booked, not an annual or full-contract figure, and Connex does not multiply it out by a term."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Can I apply a discount to a line?",
+                                "answer": "Discounts are shown on a line and included in its total, but there is no discount field to fill in on the deal screen. Set the price you mean on the line, or price the product accordingly in the catalogue."
+                            },
+                            {
+                                "question": "Our historical deal values changed. Why?",
+                                "answer": "When derived values were introduced, every deal that already had line items had its value recalculated from those lines. That is a one-off correction, and the new figures are the ones that agree with the lines."
+                            },
+                            {
+                                "question": "Someone deleted a product we had quoted. Did we lose the quote?",
+                                "answer": "No. The line keeps its own copy of the name, price and tax, so the deal and any document generated from it are unaffected."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Deals and pipelines",
+                                "description": "Where line items live, and how a deal moves to won or lost.",
+                                "href": "/docs/records/deals-and-pipelines"
+                            },
+                            {
+                                "title": "Documents and approvals",
+                                "description": "Turning a deal's line items into a quote your customer can read.",
+                                "href": "/docs/library/documents-and-approvals"
+                            }
+                        ]
+                    }
+                ]
             }
         }
     },
@@ -1146,6 +1267,130 @@
                                 "title": "Relationship map",
                                 "description": "See how everyone connects, laid out visually for you to explore.",
                                 "href": "/docs/overview-suite/relationship-map"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "ai-insights": {
+                "title": "AI insights",
+                "description": "What the optional AI features write, what grounds them, and what leaves your workspace.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "Connex can use an AI model to explain what it already knows. It writes a short brief on a deal, says why a deal looks at risk, says why an introduction is worth making, drafts the summary at the top of a report, and reads a business card when the built-in reader cannot.",
+                            "Everything AI writes sits on top of figures Connex computed itself. The numbers, risk factors and warmth scores are never produced by a model, and they remain the authority if the two ever disagree."
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "AI is off until someone turns it on",
+                        "body": "AI is switched off for the whole instance by default. Your organisation also has to connect its own AI provider, and the permission to use AI is given to administrators rather than ordinary members by default. Until all three line up, the AI panels simply do not appear, which is the expected state rather than a fault."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What keeps it honest",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "A brief has to cite what it used",
+                                "description": "Every section names the records it drew on, and the citations are checked against the records that were actually supplied. A brief that cites something it was not given is discarded rather than shown."
+                            },
+                            {
+                                "title": "It refuses when there is too little to go on",
+                                "description": "If a deal has almost no history, Connex says there is not enough activity yet to write a reliable brief instead of producing something confident and empty."
+                            },
+                            {
+                                "title": "It admits when it was working blind",
+                                "description": "If part of the surrounding context could not be gathered, the brief says so underneath rather than quietly leaving it out."
+                            },
+                            {
+                                "title": "Explanations are tied to the real signals",
+                                "description": "The risk write-up may only refer to the risk factors Connex actually calculated for that deal, and an introduction write-up only to the reasons behind that suggestion. Anything else is rejected."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "prose",
+                        "text": "Every AI panel is stamped with the date and time it was generated, so you can tell a fresh reading from one written weeks ago. Results are reused when nothing relevant has changed, and you can ask for a fresh one."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What leaves your workspace",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "Names and contact details are replaced first",
+                                "description": "People, companies, email addresses and phone numbers are swapped for placeholders before anything is sent, and swapped back in the answer. In free text, Connex additionally removes email addresses, web addresses and long runs of digits such as phone numbers. It does not detect postal addresses in free text, so a street address typed into a note is sent as written."
+                            },
+                            {
+                                "title": "Sensitive free text is withheld, not masked",
+                                "description": "Text that looks like it might touch a specially protected category is left out of the request entirely rather than being sent in a disguised form. Connex errs towards withholding too much."
+                            },
+                            {
+                                "title": "A final check runs before anything is sent",
+                                "description": "The exact outgoing request is inspected for any raw identifier that should have been replaced. If one is found the request is abandoned and recorded, rather than sent."
+                            },
+                            {
+                                "title": "Only metadata is recorded",
+                                "description": "The audit trail keeps which feature ran, which provider and model, and whether it succeeded. It never stores the text sent or the text returned."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Two honest limits",
+                        "body": "Replacing identifiers reduces what your AI provider sees, but Connex still holds the mapping and can read the result, so this is not anonymisation. And an image cannot be masked at all, so a business card sent to a provider goes as the picture it is."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Reading a business card",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "The built-in reader goes first",
+                                "description": "Where card reading is available on your instance it is used first, and nothing leaves your deployment. A provider is only involved if that reader is unavailable."
+                            },
+                            {
+                                "title": "You are told which fields came from AI",
+                                "description": "Fields filled by a provider are named for you to check, and are shown without the confidence figures that accompany the built-in reader. Nothing is saved until you confirm it."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Why did an AI panel say it is temporarily unavailable?",
+                                "answer": "There is a limit on how many generations an organisation can run in a short window, so that one busy person cannot exhaust it for everyone. Wait a moment and try again."
+                            },
+                            {
+                                "question": "Can I stop a particular contact being sent to an AI provider?",
+                                "answer": "Yes. Restricting processing for a contact excludes them from AI features and clears anything already generated that involved them."
+                            },
+                            {
+                                "question": "Does it write in Japanese?",
+                                "answer": "Connex asks the model to answer in your language, and the interface around it is fully translated. The wording itself comes from your provider's model, so treat the language of the answer as a strong request rather than a guarantee."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Warmth & temperature",
+                                "description": "The computed signals the AI explanations sit on top of.",
+                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                            },
+                            {
+                                "title": "Privacy and data requests",
+                                "description": "Restricting processing for a contact, and what that clears.",
+                                "href": "/docs/settings/privacy-and-data-requests"
                             }
                         ]
                     }
@@ -1613,6 +1858,133 @@
                                 "title": "Relationship map",
                                 "description": "See the connection map these suggestions are drawn from.",
                                 "href": "/docs/overview-suite/relationship-map"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "reports-and-goals": {
+                "title": "Reports & goals",
+                "description": "Build a report from your figures, schedule it, and track targets.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "A report turns your workspace's figures into something you can hand to somebody else. Start from one of the ready-made reports and you get a finished document immediately, or build your own by choosing measures, groupings and charts.",
+                            "Reports live under Overview, alongside analytics."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What a report contains",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "A stated period",
+                                "description": "The window it covers, what it is compared against, and the moment the current-state figures were read."
+                            },
+                            {
+                                "title": "An executive summary",
+                                "description": "A written opening, when AI is available on your instance. Every claim in it is checked against the figures below before it is shown."
+                            },
+                            {
+                                "title": "Figures and charts",
+                                "description": "One card per measure you chose, with the total and how it moved against the previous period or its target."
+                            },
+                            {
+                                "title": "An appendix you can check",
+                                "description": "Every number in the report listed as a plain table, with numbered citations, so a reader can verify any claim."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Scheduling a report",
+                        "items": [
+                            {
+                                "title": "Open the report and choose to schedule delivery",
+                                "description": "Pick weekly, monthly or quarterly, the hour of day, and the time zone it should follow."
+                            },
+                            {
+                                "title": "Choose who receives it",
+                                "description": "Any active members of your workspace. Each recipient has to independently have permission to see everything in the report: if one of them does not, saving the schedule fails and tells you so, rather than quietly sending them less. Members who have left the workspace are dropped from the list for you."
+                            },
+                            {
+                                "title": "Let it run",
+                                "description": "Before each delivery, Connex freezes a copy of the report and sends everyone a link to that frozen copy, so every recipient sees exactly the same numbers as each other and as the link."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Snapshots are kept, but not forever",
+                        "body": "Scheduled deliveries keep the most recent copies per schedule, and older ones are cleared away. A link from an old email may eventually tell you the frozen copy is no longer available and offer you the live report instead. That is expected: you get a page offering you the live report, rather than an error."
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Saving a schedule changes whose permissions it runs with",
+                        "body": "A scheduled report is generated as a particular person, so it can only ever include what that person may see. Whoever saves the schedule becomes that person. If someone else edits your schedule, it will run with their access from then on."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Getting a report out of Connex",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Snapshot",
+                                "description": "Freeze the report as it stands, so you can point at a version that will not move. Frozen copies never regenerate their written summary."
+                            },
+                            {
+                                "title": "CSV",
+                                "description": "Downloads the appendix, meaning every figure as data. The written summary is not included."
+                            },
+                            {
+                                "title": "Image",
+                                "description": "Exports the report as a PNG image, rendered in your browser, for pasting into a deck or a message."
+                            },
+                            {
+                                "title": "Print or PDF",
+                                "description": "Opens your browser's print dialog, where you can save to PDF. There is no separate server-generated file."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "prose",
+                        "text": "A goal is a revenue target for one month or quarter, set for a single owner or for the whole workspace. The goals page is where you record targets; progress against them appears inside monthly and quarterly reports as an attainment figure, computed from won revenue in the same period and currency."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "The summary says it is unavailable. Is the report broken?",
+                                "answer": "No. The figures and the appendix are always complete on their own. Only the written opening depends on AI, and that is switched off unless your organisation has set it up."
+                            },
+                            {
+                                "question": "Who can delete a report?",
+                                "answer": "The person who created it, or a workspace administrator. Because deleting a report also destroys its frozen copies, an administrator is required when it holds copies belonging to someone else or created by a schedule."
+                            },
+                            {
+                                "question": "Why does the goals page not show progress?",
+                                "answer": "It is a register of targets. Attainment is calculated inside a monthly or quarterly report, which is where you can see it against the rest of the figures."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Analytics",
+                                "description": "The live dashboards the report figures are drawn from.",
+                                "href": "/docs/overview-suite/analytics"
+                            },
+                            {
+                                "title": "AI insights",
+                                "description": "What grounds the written summary, and when it refuses to write one.",
+                                "href": "/docs/relationship-intelligence/ai-insights"
                             }
                         ]
                     }
@@ -2283,6 +2655,150 @@
                             {
                                 "question": "Can a saved view include a segment?",
                                 "answer": "Yes. A view remembers your filters, search, sort, and any smart segment, so opening it brings the segment back too."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "documents-and-approvals": {
+                "title": "Documents & approvals",
+                "description": "Build a template once, generate quotes from deals, and require sign-off before finalising.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "A document template is a reusable layout for something you send to a customer, like a quote. You build it once with headings, lists and merge fields, and then generate a document from any deal.",
+                            "Templates live in the library. Documents themselves live on the deal they were generated from."
+                        ]
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "document-approval",
+                        "caption": "A document waiting for approval, and the rule that the person who wrote it is not the person who approves it."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Building a template",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Blocks, not a word processor",
+                                "description": "Headings, paragraphs, lists, quotes and dividers, added from a toolbar or by typing a slash."
+                            },
+                            {
+                                "title": "A line items block",
+                                "description": "Drops in the deal's line items and totals wherever you put it, so a quote is always the deal's real numbers."
+                            },
+                            {
+                                "title": "Merge fields",
+                                "description": "Small chips for the company name and address, the deal name and currency, the owner, the workspace, today's date and the total."
+                            },
+                            {
+                                "title": "Managed by permission",
+                                "description": "Creating and editing templates is a separate permission from generating documents, so you can let a team use templates without changing them."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "A generated document never changes again",
+                        "body": "Generating freezes everything: the resolved wording, the deal's line items and its totals as they were at that moment. There is no way to edit a document afterwards, by design. To correct one, generate a new version and mark the old one superseded. Later edits to the template or to the deal's line items never reach back into it."
+                    },
+                    {
+                        "type": "table",
+                        "title": "What each status means",
+                        "columns": [
+                            "Status",
+                            "Meaning"
+                        ],
+                        "rows": [
+                            [
+                                "Draft",
+                                "Newly generated. This is the only status that can be deleted."
+                            ],
+                            [
+                                "Pending approval",
+                                "Sent for sign-off and waiting on a decision."
+                            ],
+                            [
+                                "Approved",
+                                "Signed off, and ready to be finalised."
+                            ],
+                            [
+                                "Final",
+                                "The version you stand behind. The draft watermark disappears from the printed copy."
+                            ],
+                            [
+                                "Superseded",
+                                "Replaced by a newer version. Nothing comes back out of this state."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "prose",
+                        "text": "An approval policy describes when sign-off is required, for example above a certain total in a given currency, or beyond a certain discount. Policies are matched against the document's frozen figures, and the first active policy that matches is the one that applies."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "How approval works",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "You cannot finalise around it",
+                                "description": "If an active policy matches a draft, finalising is refused until the document has been approved. The approved and pending states can only ever be set by the approval process itself, never requested directly."
+                            },
+                            {
+                                "title": "You cannot approve your own work",
+                                "description": "A decision is refused if you wrote the document or if you were the one who sent it for approval. Someone else with permission to approve has to decide."
+                            },
+                            {
+                                "title": "One decision settles it",
+                                "description": "There is a single approver rather than a chain or a quorum. Approving moves the document on; rejecting returns it to draft so it can be reworked."
+                            },
+                            {
+                                "title": "The requester can withdraw",
+                                "description": "Whoever asked for approval can cancel the request and return the document to draft."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "The approve action is offered more widely than it is allowed",
+                        "body": "If you generated a document that a colleague then sent for approval, the approve and reject actions still appear to you. Choosing one is refused with a message explaining why. The rule is enforced properly; it is only the menu that has not caught up."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "How do I get a PDF?",
+                                "answer": "Use the PDF action, which opens a clean print view and your browser's print dialog. From there, save as PDF."
+                            },
+                            {
+                                "question": "Who can delete a document?",
+                                "answer": "Only drafts can be deleted at all, and only by the person who generated them or by a workspace administrator."
+                            },
+                            {
+                                "question": "We turned off a policy. Can old drafts now be finalised?",
+                                "answer": "Drafts, yes. The requirement is checked at the moment you finalise, against the policies that are active then, so deactivating a policy releases anything still in draft. A document already sent for approval stays where it is, because that decision has to be made or withdrawn before it can move on."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Products and line items",
+                                "description": "The line items and totals a document freezes.",
+                                "href": "/docs/records/products-and-line-items"
+                            },
+                            {
+                                "title": "Members and roles",
+                                "description": "Who holds the permission to approve.",
+                                "href": "/docs/settings/members-and-roles"
                             }
                         ]
                     }
@@ -3395,6 +3911,307 @@
                         ]
                     }
                 ]
+            },
+            "sign-in-and-security": {
+                "title": "Signing in & security",
+                "description": "Passwords, passkeys, single sign-on, and why sensitive actions ask you again.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "You can sign in to Connex with a password, with a passkey, or through your organisation's identity provider if your administrator has set one up. Passkeys are always available; the rest depend on configuration.",
+                            "Whichever way you sign in, your session is a cookie in your browser. Signing out ends it, and it also expires on its own after a period of inactivity and again after a longer fixed period."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Ways to sign in",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Password",
+                                "description": "With your username or your email address. Always available."
+                            },
+                            {
+                                "title": "Passkey",
+                                "description": "Your device's fingerprint, face or PIN, or a security key. Always available, and worth setting up even if you mainly use a password."
+                            },
+                            {
+                                "title": "Google or Microsoft",
+                                "description": "Off unless your administrator has enabled it and supplied credentials for your instance."
+                            },
+                            {
+                                "title": "Enterprise single sign-on",
+                                "description": "OpenID Connect or SAML, configured per organisation. Off by default."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Administering Connex requires a passkey",
+                        "body": "Sensitive actions ask you to confirm it is really you before they proceed, and that confirmation is satisfied only by a passkey. Signing in with a password does not count, no matter how recently you did it. If you administer a workspace, register a passkey before you need one, or these actions will refuse and tell you recent authentication is required."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What asks you to confirm",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "People and access",
+                                "description": "Inviting someone, revoking an invitation, creating invite links, changing roles and permissions, and managing organisation members and allowed domains."
+                            },
+                            {
+                                "title": "Connections and credentials",
+                                "description": "Setting up single sign-on, workspace email, delivery providers, your organisation's AI provider, and connecting or disconnecting your own accounts."
+                            },
+                            {
+                                "title": "Your own security",
+                                "description": "Renaming or removing a passkey. Adding your first passkey is authorised by your password instead, and changing your email address is also a password check rather than a passkey one."
+                            },
+                            {
+                                "title": "Data you cannot undo",
+                                "description": "Exporting a whole workspace, tearing one down, and acting on a privacy request."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Workspaces and roles",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "You usually join rather than create",
+                                "description": "Creating a workspace is normally switched off, so new people join an existing one through an invitation or an invite link. If you sign up and land with no workspace, that is why, and an invitation is what you need."
+                            },
+                            {
+                                "title": "Three built-in roles",
+                                "description": "Members do everyday CRM work. Administrators additionally manage settings, the product catalogue, goals and approvals. Owners can do everything within the workspace. Custom roles can be built from individual permissions. Exporting or removing a whole workspace is a separate, organisation-level role rather than a workspace one."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "I registered a passkey. Do I still need my password?",
+                                "answer": "Keep it. A passkey is tied to the device or key you created it on, so a password remains your way in from somewhere else."
+                            },
+                            {
+                                "question": "Why was I asked to confirm again straight after signing in?",
+                                "answer": "Because the confirmation is specifically a passkey check, and a password sign-in does not provide one. Register a passkey and the prompt becomes a quick tap."
+                            },
+                            {
+                                "question": "Can I belong to more than one workspace?",
+                                "answer": "Yes, and you switch between them from the top of the sidebar without signing out. Records do not appear across workspaces on their own, though someone can deliberately share a company, contact or pipeline with another workspace in the same organisation."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Members and roles",
+                                "description": "Inviting people and deciding what they can do.",
+                                "href": "/docs/settings/members-and-roles"
+                            },
+                            {
+                                "title": "Workspaces and teams",
+                                "description": "What a workspace is, and why nothing crosses between them.",
+                                "href": "/docs/getting-started/workspaces-and-tenancy"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "connected-accounts": {
+                "title": "Connected accounts",
+                "description": "Linking your Google or Microsoft account, and what that does and does not start.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "You can connect your own Google or Microsoft account to Connex from your account settings. The connection is yours alone: nobody else in your workspace can see it or manage it, and administrators cannot connect an account on your behalf.",
+                            "Connex asks only for read access to your mail and calendar. It never asks for permission to send anything as you."
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Connecting on its own does nothing",
+                        "body": "Linking an account does not start reading anything. Connex only begins looking at your mail or calendar after you have chosen which sources to allow and saved that choice, and only if capture is switched on for your deployment at all. Nothing is selected for you."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Connecting an account",
+                        "items": [
+                            {
+                                "title": "Confirm it is you",
+                                "description": "Connecting is one of the actions that asks for a passkey first, because it grants Connex ongoing access to your mailbox."
+                            },
+                            {
+                                "title": "Approve at the provider",
+                                "description": "You are sent to Google or Microsoft to approve. Approve everything asked for: if ongoing access is not granted, Connex refuses the connection rather than storing one that will stop working."
+                            },
+                            {
+                                "title": "Decide what may be looked at",
+                                "description": "Choose the sources you want considered, within any ceiling your workspace administrator has set. If you skip this, nothing happens."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Good to know",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "Your administrator sets the outer limit",
+                                "description": "A workspace administrator can cap what anybody may allow, for example excluding message bodies. Your own choice can be narrower than that ceiling but never wider."
+                            },
+                            {
+                                "title": "Pausing keeps the connection",
+                                "description": "Pausing stops the reading without discarding the connection, and does not ask you to reconnect afterwards."
+                            },
+                            {
+                                "title": "Disconnecting clears up first",
+                                "description": "Disconnecting removes everything captured through that provider from every workspace before the stored credential is destroyed. It cannot be undone, and you are asked to confirm you understand that."
+                            },
+                            {
+                                "title": "Revoke Microsoft access yourself",
+                                "description": "When you disconnect Google, Connex also tells Google to revoke access. There is no equivalent for Microsoft, so remove Connex from your Microsoft account settings as well if you want access withdrawn at the provider."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Capture is an internal preview",
+                        "body": "Reading mail and calendar to capture relationship signals is not yet generally available. It stays behind provider verification that is still in progress, so on most deployments the option to connect exists while capture itself is unavailable."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Connected account capture",
+                                "description": "What is captured, how it is reviewed, and how to purge it.",
+                                "href": "/docs/settings/connected-capture"
+                            },
+                            {
+                                "title": "Signing in and security",
+                                "description": "Why connecting asks you to confirm with a passkey.",
+                                "href": "/docs/settings/sign-in-and-security"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "privacy-and-data-requests": {
+                "title": "Privacy & data requests",
+                "description": "Handling a request from someone whose data you hold, and restricting processing for a contact.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "People whose details you hold can ask you what you have, ask you to correct it, ask you to stop using it, or ask you to delete it. Connex gives organisation administrators a place to record those requests and to act on them.",
+                            "This page describes the tools. It is not legal advice, and your obligations depend on your own circumstances."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "The tools Connex gives you",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "A record of every request",
+                                "description": "Requests are logged at organisation level with who made them and what was asked, so you can show how and when each one was handled."
+                            },
+                            {
+                                "title": "A disclosure you can hand over",
+                                "description": "Connex assembles what it holds about a person into a single disclosure, so answering an access request is not a manual search across screens."
+                            },
+                            {
+                                "title": "Restrictions on a contact",
+                                "description": "Suspending processing stops scoring, automation, suggestions, AI features and exports for that contact. Ceasing third-party provision blocks new sharing and excludes them from AI entirely."
+                            },
+                            {
+                                "title": "An audit trail you cannot rewrite",
+                                "description": "Actions are recorded in an append-only log with integrity protection, which is what lets you demonstrate afterwards that you did what you say you did."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Restricting a contact clears what AI already wrote",
+                        "body": "When you suspend processing or cease third-party provision for a contact, anything AI previously generated that involved them is purged, and future AI features exclude them. This happens as part of applying the restriction rather than as a separate cleanup you have to remember."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Published information",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Privacy notice",
+                                "description": "The public statement of how personal data is handled."
+                            },
+                            {
+                                "title": "Handling disclosure",
+                                "description": "The published detail required alongside it, covering how requests are received and handled."
+                            },
+                            {
+                                "title": "Legal notices",
+                                "description": "Terms and the accompanying legal pages."
+                            },
+                            {
+                                "title": "Commercial disclosure",
+                                "description": "The commercial transaction disclosure expected of a Japanese business."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Finish outstanding requests before removing a workspace",
+                        "body": "Tearing down a workspace or an organisation is refused while a data subject request is still open against it. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close out the request first, then tear down."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Who can see and act on these requests?",
+                                "answer": "Organisation administrators. Acting on one asks you to confirm with a passkey first, because the actions are not reversible."
+                            },
+                            {
+                                "question": "Does restricting a contact delete them?",
+                                "answer": "No. They stay in your CRM, but Connex stops scoring, suggesting, automating and exporting them. Deletion is a separate decision."
+                            },
+                            {
+                                "question": "Can I get everything in a workspace out at once?",
+                                "answer": "Yes. An organisation administrator can export an entire workspace, which is the tool for a migration or a full handover rather than for one person's request."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Audit logs",
+                                "description": "The record of what was done, by whom, and when.",
+                                "href": "/docs/settings/audit-logs"
+                            },
+                            {
+                                "title": "Operational boundaries",
+                                "description": "Who can reach your data, and how support works without that access.",
+                                "href": "/docs/operations/operational-boundaries"
+                            }
+                        ]
+                    }
+                ]
             }
         }
     },
@@ -4123,6 +4940,798 @@
                                 "title": "Contacts",
                                 "description": "See how the people you just imported come to life on their profiles.",
                                 "href": "/docs/records/contacts"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "DocsMarketing": {
+        "title": "Marketing",
+        "description": "Campaigns, audiences, and the delivery rules Connex applies on your behalf.",
+        "lead": "Connex can send an email or SMS campaign to a frozen audience of your contacts. The rules around consent, frequency, and measurement are deliberately conservative, and this section is honest about what is and is not counted.",
+        "articles": {
+            "campaigns": {
+                "title": "Campaigns",
+                "description": "Build an audience, freeze it, attach a message, and send.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "A campaign is a piece of outreach to a group of your contacts. You describe who it is for, freeze that group so it can never shift underneath you, attach a message, and send it. Everything is scoped to your workspace, and only people who have not opted out are ever contacted.",
+                            "Campaigns live under Marketing in the sidebar."
+                        ]
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "campaign-flow",
+                        "caption": "An audience becomes a frozen snapshot before a message is ever attached to it."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Sending a campaign",
+                        "items": [
+                            {
+                                "title": "Create the campaign",
+                                "description": "Give it a name, an objective, a type and a status. You can also record a budget and a start and end date for your own reference. These are set once here and cannot be changed afterwards, so take a moment over the status in particular."
+                            },
+                            {
+                                "title": "Build the audience",
+                                "description": "Use the segment builder to describe who should receive it. Estimate the audience to see how many people are included, and how many were left out because of consent, suppression, or a processing restriction."
+                            },
+                            {
+                                "title": "Freeze a snapshot",
+                                "description": "Freezing captures the audience as a numbered version. Sends always run against a frozen snapshot, so the group cannot change between the moment you review it and the moment it goes out."
+                            },
+                            {
+                                "title": "Write a message",
+                                "description": "Add a message for the email or SMS channel, then add a revision with the subject and body. Revisions are added, never edited or removed, so you always keep the exact wording that went out."
+                            },
+                            {
+                                "title": "Create and queue the send",
+                                "description": "Pick a frozen snapshot version and a message revision, then queue it. Queued sends go out on the next delivery pass. You can pause or cancel a send while it is running. Ignore the scheduled-time field in this dialog: it is saved but not yet acted on, so a send you queue goes out on the next pass regardless of what you put there."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Sending has to be switched on for the whole instance",
+                        "body": "Campaigns are visible to everyone, but delivering them depends on two separate instance-level settings your administrator controls, and both are off unless they turn them on. One allows a send to be queued at all; the other allows queued sends to actually go out. With only the first enabled, queueing appears to succeed and nothing is ever delivered, so ask your administrator to confirm both. Until it is on, you can build campaigns, audiences and messages normally, and queueing a send is refused with a message saying so. A working email or SMS transport also has to be configured before a send can be queued."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Rules Connex always applies",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Only people, and only the willing",
+                                "description": "Only person audiences can be sent to. Anyone who has unsubscribed, been suppressed, or had processing restricted is excluded, and the estimate tells you how many that was."
+                            },
+                            {
+                                "title": "One message per person per day",
+                                "description": "A person receives at most one message on a channel in any 24 hours, counted across campaigns. Anyone caught by that cap is reported as skipped rather than silently dropped."
+                            },
+                            {
+                                "title": "Unsubscribes are automatic",
+                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing suppresses that person and withdraws consent immediately, and it applies to future campaigns too."
+                            },
+                            {
+                                "title": "Bounces and complaints suppress",
+                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex suppresses that address and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives and nothing is suppressed."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Opens and clicks are never tracked",
+                        "body": "Connex does not put a tracking pixel in your email and does not rewrite your links. That is a deliberate choice, not a missing feature, so there are no open or click figures anywhere and there never will be from Connex itself."
+                    },
+                    {
+                        "type": "table",
+                        "title": "What the engagement figures mean",
+                        "columns": [
+                            "Figure",
+                            "Where it comes from"
+                        ],
+                        "rows": [
+                            [
+                                "Dispatched, skipped, failed",
+                                "Connex itself, as it hands each message to your transport. Always available."
+                            ],
+                            [
+                                "Unsubscribed",
+                                "People using the unsubscribe link in a message you sent."
+                            ],
+                            [
+                                "Delivered, bounced, complained",
+                                "Receipts reported back by your email provider. These need a provider that sends receipts, otherwise they read as not measured rather than zero."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Can I change a campaign after I create it?",
+                                "answer": "Not from the campaign screens. Treat the name, objective, type, status, budget and dates as decisions you make once, because the create dialog is your only chance to set them. Status is the one that catches people out, since it looks like something you would advance as the campaign progresses. Audiences, messages and sends are the parts you keep working on."
+                            },
+                            {
+                                "question": "Why did far fewer people receive it than my audience showed?",
+                                "answer": "Check the skip reasons on the send. The usual causes are people with no address on that channel, the one-message-per-day cap, or consent and suppression."
+                            },
+                            {
+                                "question": "Is the Exports tab a download?",
+                                "answer": "No. It pushes a frozen audience to an external list service your administrator has connected. Nothing is downloaded to your computer."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Saved views and segments",
+                                "description": "The same segment rules you use to build a campaign audience.",
+                                "href": "/docs/library/saved-views-and-segments"
+                            },
+                            {
+                                "title": "Email deliverability",
+                                "description": "Why your mail lands in an inbox, and what Connex does and does not do about it.",
+                                "href": "/docs/operations/deliverability-basics"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "DocsOperations": {
+        "title": "Running Connex",
+        "description": "What ships today, how Connex is deployed, where the boundaries sit, and how support works.",
+        "lead": "This section is for the people who have to trust Connex, not just use it. It sets out plainly what is finished and what is still early, how the different deployment shapes differ, what Connex can and cannot reach, and how to get help when something breaks.",
+        "articles": {
+            "what-connex-is-today": {
+                "title": "What Connex is today",
+                "description": "An honest picture of the product's scope, maturity, and intended use.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "Connex is a relationship-intelligence CRM. It keeps companies, contacts and deals, scores how warm each relationship is, warns you when one is cooling, and works out the friendliest route to an introduction. On top of that sit reports, documents, campaigns and a set of optional AI features.",
+                            "This page describes the state of the product rather than how to use it. If you are evaluating Connex, or you are responsible for it inside your organisation, start here."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What Connex is built around",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "One workspace, one boundary",
+                                "description": "Every record, file, tag and setting belongs to exactly one workspace and never appears in another. That separation is enforced in the database layer, not just in the interface."
+                            },
+                            {
+                                "title": "Deterministic figures first",
+                                "description": "Warmth, risk, pipeline and report figures are computed from your data by rules you can reason about. Where AI is involved it explains those figures, it does not produce them."
+                            },
+                            {
+                                "title": "Fail closed",
+                                "description": "When a check cannot be completed, Connex refuses rather than guesses. Optional features generally stay hidden when they are not configured, rather than appearing and then failing. Campaign sending is the main place that is not yet true."
+                            },
+                            {
+                                "title": "Japanese as a first language",
+                                "description": "The whole interface, and this documentation, ship in Japanese and English. Japanese is not an afterthought translation layer."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Connex is pre-1.0",
+                        "body": "Some surfaces are complete and in daily use, some are deliberately switched off until an external gate clears, and a few exist as groundwork for later work. The next article says exactly which is which, per surface, so you never have to guess from the interface alone."
+                    },
+                    {
+                        "type": "prose",
+                        "text": "Connex is designed to be run in more than one shape: as a service operated by Connex, as a dedicated environment operated by Connex for one customer, or entirely inside your own infrastructure. Which shape you are on changes who holds the keys and who can reach the data, and it is worth knowing which one you have."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "What ships and what is preview",
+                                "description": "A surface-by-surface status list, including everything that is off by default.",
+                                "href": "/docs/operations/whats-shipped-and-whats-preview"
+                            },
+                            {
+                                "title": "Deployment shapes",
+                                "description": "The three ways Connex runs, and what changes between them.",
+                                "href": "/docs/operations/deployment-profiles"
+                            },
+                            {
+                                "title": "What Connex is",
+                                "description": "The gentler introduction, if you are new to the product rather than responsible for it.",
+                                "href": "/docs/getting-started/what-is-connex"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "whats-shipped-and-whats-preview": {
+                "title": "What ships and what is preview",
+                "description": "A surface-by-surface status list, including everything that is off unless an administrator turns it on.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "Connex ships a lot of surfaces, and several of them are switched off out of the box. A feature being off does not always look different in the interface, so this page states the status of each one plainly.",
+                            "Three separate things have to line up before an optional feature works: your deployment shape has to allow it, your administrator has to configure it, and you have to hold the right permission. Any one of them missing is usually enough to make a feature unavailable, though Campaigns is an exception worth knowing: without permission to view campaigns the menu entry still appears and the list simply looks empty."
+                        ]
+                    },
+                    {
+                        "type": "table",
+                        "title": "Core CRM",
+                        "columns": [
+                            "Surface",
+                            "Status"
+                        ],
+                        "rows": [
+                            [
+                                "Companies, contacts, deals, pipelines",
+                                "Shipped and on. No configuration needed."
+                            ],
+                            [
+                                "Warmth, decay and relationship signals",
+                                "Shipped and on."
+                            ],
+                            [
+                                "Warm introduction paths",
+                                "Shipped and on."
+                            ],
+                            [
+                                "Notes, tasks, activities, calendar",
+                                "Shipped and on."
+                            ],
+                            [
+                                "Tags, files, saved views and segments",
+                                "Shipped and on."
+                            ],
+                            [
+                                "Search, filters, bulk actions, custom fields",
+                                "Shipped and on."
+                            ],
+                            [
+                                "CSV import and export",
+                                "Shipped and on. Products are export only, with no import."
+                            ],
+                            [
+                                "Products and deal line items",
+                                "Shipped and on. Managing the catalogue is an administrator permission."
+                            ],
+                            [
+                                "Reports and goals",
+                                "Shipped and on. Scheduled delivery needs working email."
+                            ],
+                            [
+                                "Documents, templates and approvals",
+                                "Shipped and on."
+                            ],
+                            [
+                                "Workflows and automation rules",
+                                "Shipped and on."
+                            ],
+                            [
+                                "Audit log",
+                                "Shipped and on."
+                            ],
+                            [
+                                "Tenant diagnostics",
+                                "Shipped and on. A read-only health page for your workspace, and an organisation-wide view for administrators."
+                            ],
+                            [
+                                "Support bundle",
+                                "Shipped and on. An organisation administrator can download a redacted diagnostic bundle to hand to support."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "table",
+                        "title": "Off unless an administrator turns it on",
+                        "columns": [
+                            "Surface",
+                            "Status"
+                        ],
+                        "rows": [
+                            [
+                                "AI features",
+                                "Off by default for the whole instance. Also needs your organisation to connect its own AI provider, and the permission is administrator-only by default."
+                            ],
+                            [
+                                "Campaign delivery",
+                                "Off by default. The campaign screens are visible either way; only sending is refused."
+                            ],
+                            [
+                                "Enterprise SSO",
+                                "Off by default. Supports OpenID Connect and SAML."
+                            ],
+                            [
+                                "Google and Microsoft sign-in",
+                                "Off by default, and ships with no credentials."
+                            ],
+                            [
+                                "Connected accounts",
+                                "Off by default, and ships with no credentials."
+                            ],
+                            [
+                                "Business card scanning",
+                                "Depends on whether card reading is enabled for your instance."
+                            ],
+                            [
+                                "Instance-managed email",
+                                "Depends on your deployment shape. Not available on a self-hosted deployment, where you configure your own mail."
+                            ],
+                            [
+                                "Workspace creation by users",
+                                "Off by default. People normally join an existing workspace by invitation."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Connected account capture is an internal preview",
+                        "body": "Reading your mailbox and calendar to capture relationship signals is built and works, but it is not generally available. It stays behind provider verification that is still in progress, and it should not be switched on for production use until that clears. Connecting an account is separate, and does not start any capture on its own."
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Where a feature is off, it usually just is not there",
+                        "body": "Connex hides what it cannot deliver rather than showing a control that fails. That means an absent panel is often the correct signal that something is not configured, rather than a fault. There are two exceptions. Reports always render their figures, and only the written summary reports itself as unavailable. Campaigns are the bigger one: the whole campaign surface looks completely live whether or not sending is enabled, and because sending is off by default, that is what most instances look like. Seeing the campaign screens tells you nothing about whether delivery is configured."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "AI insights",
+                                "description": "What the AI features do, and what they refuse to do.",
+                                "href": "/docs/relationship-intelligence/ai-insights"
+                            },
+                            {
+                                "title": "Operational boundaries",
+                                "description": "What Connex can reach in your deployment, and what it cannot.",
+                                "href": "/docs/operations/operational-boundaries"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "deployment-profiles": {
+                "title": "Deployment shapes",
+                "description": "The three ways Connex runs, and what changes between them.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "Every Connex deployment declares which shape it is. That declaration is required, and an instance that does not set it refuses to start rather than guessing. The shape decides who operates the environment, who holds the keys, and which settings are allowed at all."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "deployment-profiles",
+                        "caption": "The three shapes differ mainly in who operates the environment and holds the keys."
+                    },
+                    {
+                        "type": "table",
+                        "title": "The three shapes",
+                        "columns": [
+                            "Shape",
+                            "Who operates it",
+                            "What it means for you"
+                        ],
+                        "rows": [
+                            [
+                                "Cloud (saas)",
+                                "Connex",
+                                "A shared, hardened environment run by Connex. The internal escape hatches an operator might use in their own network are refused outright."
+                            ],
+                            [
+                                "Dedicated (silo)",
+                                "Connex",
+                                "Your own environment with its own database, still operated by Connex on your behalf."
+                            ],
+                            [
+                                "Self-hosted (on-prem)",
+                                "You",
+                                "Connex runs entirely inside your infrastructure. You control the network, you generate and hold the keys, and Connex operates nothing."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What the shape actually changes",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "Who can reach the environment",
+                                "description": "On a self-hosted deployment, Connex has no remote access to your instance and nothing reports back to Connex. On a Connex-operated shape, Connex staff operate the environment under the terms of your agreement."
+                            },
+                            {
+                                "title": "Who holds the keys",
+                                "description": "A self-hosted deployment generates and holds its own encryption and audit-integrity secrets, and they never leave your environment. A Connex-operated shape is operated by Connex, so it does not carry that guarantee."
+                            },
+                            {
+                                "title": "Which mail path is available",
+                                "description": "Connex-managed email is only possible where Connex operates the environment. A self-hosted deployment configures its own mail server, and enabling managed mail there is refused at startup rather than quietly ignored."
+                            },
+                            {
+                                "title": "Which optional features are permitted",
+                                "description": "Almost every optional feature is available in every shape and gated only by your administrator's configuration. Managed email is the single exception that a shape forbids outright."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Permitted is not the same as enabled",
+                        "body": "Your deployment shape only decides what is allowed. A feature still has to be configured by your administrator and granted to you before you can use it, so a capability being permitted in your shape tells you nothing about whether it is switched on."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Operational boundaries",
+                                "description": "What Connex can reach, and how support works without that access.",
+                                "href": "/docs/operations/operational-boundaries"
+                            },
+                            {
+                                "title": "What ships and what is preview",
+                                "description": "The per-surface status list, including everything off by default.",
+                                "href": "/docs/operations/whats-shipped-and-whats-preview"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "operational-boundaries": {
+                "title": "Operational boundaries",
+                "description": "What Connex can reach in your deployment, how support works, and how to report a problem usefully.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "Connex is frequently run by the customer rather than by Connex. That changes how support has to work: there is no remote session for an engineer to join, and no diagnostic channel that phones home. Everything support needs has to come out of your own environment and be handed over deliberately.",
+                            "This page explains what that means in practice, and how to give support enough to actually help."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Where the boundary sits",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "A self-hosted deployment is yours",
+                                "description": "Connex has no remote access to it and nothing in the product reports usage or content back to Connex. The keys are generated in your environment and stay there."
+                            },
+                            {
+                                "title": "The service processes your data to provide the service",
+                                "description": "Connex is not end-to-end encrypted. To score relationships, run searches and render reports, the application works with your CRM content in the clear. What differs between deployment shapes is who operates that application, not whether it can read the data."
+                            },
+                            {
+                                "title": "Administrative surfaces are closed by default",
+                                "description": "The general-purpose management endpoints are switched off entirely. The health check is deliberately minimal, and the metrics endpoint requires a token before it will answer anyone."
+                            },
+                            {
+                                "title": "The audit log is append-only",
+                                "description": "Audit entries are chained with an integrity secret and protected at the database level so the application cannot rewrite history."
+                            },
+                            {
+                                "title": "Diagnostic state moves by bundle, not by access",
+                                "description": "When a ticket needs more than a reference code, an organisation administrator downloads a redacted bundle and hands it over deliberately. It carries readiness, configuration and an audit slice, never secrets, hosts, record values or people's names, and it collects no log content at all."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Quote the reference from the error screen",
+                        "body": "When a page fails, the error screen shows a short reference code. That code is the fastest way for whoever runs your deployment to find the exact matching entry in their own logs. Copy it exactly, and include what you were doing and roughly when."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Reporting a problem",
+                        "items": [
+                            {
+                                "title": "Capture the reference",
+                                "description": "Copy the reference code from the error screen if there is one. If the failure was a save or an action rather than a whole page, note the exact time instead."
+                            },
+                            {
+                                "title": "Say what you expected",
+                                "description": "The record you were on, what you clicked, and what you expected to happen. Whether it happens every time matters a great deal."
+                            },
+                            {
+                                "title": "Hand it to whoever operates your deployment",
+                                "description": "On a self-hosted deployment that is your own team, and they can match your reference against their logs directly. On a Connex-operated deployment it goes to Connex support."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Can Connex support look at my data to debug something?",
+                                "answer": "Not on a self-hosted deployment, where Connex has no access at all. Anything support sees there is something your own team has chosen to send them."
+                            },
+                            {
+                                "question": "Does Connex send usage data back?",
+                                "answer": "No. There is no telemetry channel back to Connex from a deployment Connex does not operate."
+                            },
+                            {
+                                "question": "Who can see the audit log?",
+                                "answer": "Members of your workspace who hold the audit permission, and organisation administrators for organisation-level events. It is readable and exportable, but never editable."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Audit logs",
+                                "description": "What gets recorded, and how to read and export it.",
+                                "href": "/docs/settings/audit-logs"
+                            },
+                            {
+                                "title": "Privacy and data requests",
+                                "description": "Handling disclosure, correction and deletion requests.",
+                                "href": "/docs/settings/privacy-and-data-requests"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "diagnostics-and-support": {
+                "title": "Diagnostics & support",
+                "description": "Check your workspace's health yourself, and give support what it needs.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "When something looks wrong, Connex gives you a page that answers the first round of questions without anyone needing access to a database or a server. It reports what your instance is configured for, which providers are ready, whether background jobs are running, and whether email is working.",
+                            "You will find it under Settings, and administrators get an organisation-wide version covering every workspace."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What the page reports",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Deployment and capabilities",
+                                "description": "Which edition this instance runs as, and for each capability whether the edition forbids it or it is simply not configured. Those are different problems with different fixes."
+                            },
+                            {
+                                "title": "Provider readiness",
+                                "description": "AI, business-card reading, email, delivery channels and capture streams, each reported as ready or not."
+                            },
+                            {
+                                "title": "Scheduled jobs",
+                                "description": "The latest run of each background job, with its most recent success and its most recent failure kept separately, so a run of failures never hides the last time it worked."
+                            },
+                            {
+                                "title": "Email and secret storage",
+                                "description": "Whether mail is configured and usable, plus key-health counts for stored credentials. Only counts and status, never any stored value."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Opening the page contacts nothing",
+                        "body": "Everything on it is read back from saved configuration, so looking is always safe: it never calls your AI provider, your mail server or any connected account. Sending a test email is the only action on the page that reaches the outside world."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Sending a test email",
+                        "items": [
+                            {
+                                "title": "Confirm it is you",
+                                "description": "The test asks for a passkey first, like other administrative actions."
+                            },
+                            {
+                                "title": "Check your own inbox",
+                                "description": "It only ever sends to your own address, and your address has to be verified. Nobody can use it to send mail to anyone else."
+                            },
+                            {
+                                "title": "Read the result",
+                                "description": "You get the sending identity and the transport outcome. On a workspace that supplies its own mail server you also get an advisory note on whether SPF and DMARC records exist for that domain."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Three tests in five minutes, and the fourth says Failed",
+                        "body": "The test is limited to three sends every five minutes for each person in each workspace. Going over that limit does not produce a special message: the result comes back as Failed, looking exactly like a broken mail server, with a rate-limited reason code. If you have been testing repeatedly and suddenly everything fails, wait five minutes before believing it."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "When you do need to raise a ticket",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "Quote the codes, not the screenshots",
+                                "description": "Findings on the page carry short stable codes, and a failure gives you a reference identifier. Those two things let whoever runs your deployment find the exact matching record in their own logs."
+                            },
+                            {
+                                "title": "Say what you expected",
+                                "description": "The record you were on, what you clicked, what you expected, and whether it happens every time. That last one narrows the search more than anything else."
+                            },
+                            {
+                                "title": "Know who your operator is",
+                                "description": "On a self-hosted deployment your own team holds the logs and can match your reference directly. Otherwise it goes to Connex support."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "heading",
+                        "text": "Handing diagnostics to support",
+                        "level": 2
+                    },
+                    {
+                        "type": "prose",
+                        "text": "If the page and a reference code are not enough, an organisation administrator can download a support bundle: a single redacted archive of your deployment's diagnostic state that you hand over deliberately. It is assembled on request, so it reflects the moment you asked."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What is and is not in it",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Readiness and configuration",
+                                "description": "The same health picture the diagnostics page shows, plus allowlisted configuration and migration history."
+                            },
+                            {
+                                "title": "An audit slice",
+                                "description": "Recent audit rows for the window you asked for, identified by account id only. No display names appear anywhere."
+                            },
+                            {
+                                "title": "No secrets and no record values",
+                                "description": "No credentials, no hostnames, no CRM field values and no personal names. What was left out on purpose is listed in the bundle, so a missing file reads as a decision rather than a gap."
+                            },
+                            {
+                                "title": "No logs at all",
+                                "description": "The bundle collects no log or journal content. Server logs cannot be narrowed to one workspace, so collecting them was deliberately left out rather than shipped unsafe."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Ask for a narrower window, not a bigger bundle",
+                        "body": "Assembly stops rather than trimming: there is a size ceiling and a time budget, and exceeding either is refused outright with a message asking you to shorten the period or narrow it to one record. If a bundle is refused, make the request smaller rather than trying again unchanged."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Operational boundaries",
+                                "description": "What Connex can reach in your deployment, and how support works without that access.",
+                                "href": "/docs/operations/operational-boundaries"
+                            },
+                            {
+                                "title": "Email deliverability basics",
+                                "description": "What the SPF and DMARC hints mean, and what still has to be done on your DNS.",
+                                "href": "/docs/operations/deliverability-basics"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "deliverability-basics": {
+                "title": "Email deliverability basics",
+                "description": "Why Connex mail does or does not reach an inbox, and what to check first.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "Connex hands your email to a mail server and nothing more. It does not sign your mail, publishes none of the records that receiving servers look at, and cannot make a message land in an inbox on its own. It can now tell you whether two of those records exist, but only as a hint, and only for a workspace that supplies its own mail server. Whether your mail arrives is decided by the mail server you point Connex at and by the DNS records on your sending domain.",
+                            "That is worth knowing before you debug a delivery problem, because the fix is almost never inside Connex."
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "The three records that decide your fate",
+                        "columns": 1,
+                        "items": [
+                            {
+                                "title": "SPF says who may send for your domain",
+                                "description": "A record on your domain listing the servers allowed to send as you. If the server Connex hands mail to is not covered by it, receivers will treat your mail as suspect."
+                            },
+                            {
+                                "title": "DKIM signs your mail",
+                                "description": "Your mail server adds a cryptographic signature, and publishes the matching key in DNS under a selector name it gives you. Connex never signs anything itself, so this is entirely your mail provider's job."
+                            },
+                            {
+                                "title": "DMARC tells receivers what to do",
+                                "description": "A policy record saying how to treat mail that fails the other two, and where to send reports. Start by only monitoring, read the reports, and tighten once you are confident."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "The from address and the bounce address are the same here",
+                        "body": "Connex does not set a separate envelope sender, so the address your recipients see is also the address used for the checks. That keeps things simple, but it means the domain in your from address is the one that has to be properly set up. Ask your mail provider whether they rewrite it on the way out, because that changes which domain has to align."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Checking a workspace's own mail settings",
+                        "items": [
+                            {
+                                "title": "Open the email settings for your workspace",
+                                "description": "This is where a workspace supplies its own mail server instead of the instance default. If your instance manages mail centrally, the setting is not available and there is nothing for you to do here."
+                            },
+                            {
+                                "title": "Send yourself a test",
+                                "description": "The test uses exactly the settings you saved, with no fallback, and reports the transport result. It only ever sends to your own address."
+                            },
+                            {
+                                "title": "Read what it proves",
+                                "description": "A successful test means the host, port and credentials work and the server accepted the message. It does not tell you where the message landed. This test checks no DNS records at all; the diagnostics test described below is the one that does."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "table",
+                        "title": "Common symptoms",
+                        "columns": [
+                            "What you see",
+                            "Where to look first"
+                        ],
+                        "rows": [
+                            [
+                                "No mail at all, and no error anywhere",
+                                "Mail is probably not enabled on the instance, or the flow you expected has its own separate switch that is still off."
+                            ],
+                            [
+                                "Mail arrives, but from an address you did not expect",
+                                "Your workspace settings could not be used and the instance default was used instead. Your operator's log records this."
+                            ],
+                            [
+                                "Mail arrives in spam",
+                                "Almost always the DNS records on your sending domain, or a mail server that is not signing. Start with a DMARC report."
+                            ],
+                            [
+                                "A test email works but real mail does not",
+                                "The transport is fine. Look at the per-flow switches and at whether the recipient is suppressed or unsubscribed."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Bounces are only handled for campaigns",
+                        "body": "Bounce and complaint handling, suppression lists and unsubscribes exist for marketing campaigns, and only when your administrator has connected an email provider that reports receipts. Invitations, notifications, reports and password mail have none of that: they are sent, and if they fail, the failure is only visible in your operator's logs."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Campaigns",
+                                "description": "Audiences, sends, consent and what the engagement figures mean.",
+                                "href": "/docs/marketing/campaigns"
+                            },
+                            {
+                                "title": "Reports and goals",
+                                "description": "Including scheduled delivery, which depends on working mail.",
+                                "href": "/docs/overview-suite/reports-and-goals"
                             }
                         ]
                     }

@@ -74,6 +74,31 @@ const SEARCH_GROUPS = [
     { label: "Companies", Icon: BuildingOffice2Icon, items: ["Acme Inc."] },
 ];
 
+const LINE_ITEMS = [
+    { name: "Platform licence", qty: "12", total: "¥1,440,000" },
+    { name: "Onboarding", qty: "1", total: "¥250,000" },
+    { name: "Support hours", qty: "10", total: "¥50,000" },
+];
+
+const DOCUMENT_LINE_WIDTHS = [92, 78, 86, 54];
+
+const APPROVAL_PARTICIPANTS = [
+    { initials: "MT", name: "Mika Tanaka", role: "Author — cannot approve", decides: false },
+    { initials: "RS", name: "Riku Sato", role: "Approver", decides: true },
+];
+
+const CAMPAIGN_STEPS = [
+    { label: "Audience", detail: "248 people", accent: false },
+    { label: "Snapshot", detail: "Frozen", accent: true },
+    { label: "Message", detail: "Revision 3", accent: false },
+];
+
+const DEPLOYMENT_SHAPES = [
+    { name: "SaaS", operator: "Connex", accent: false },
+    { name: "Silo", operator: "Connex", accent: false },
+    { name: "On-prem", operator: "You", accent: true },
+];
+
 function Avatar({ initials, tone = "brand" }: { initials: string; tone?: "brand" | "muted" }) {
     const toneClass =
         tone === "brand" ? "bg-brand-light text-brand-dark" : "bg-muted text-muted-foreground";
@@ -327,6 +352,135 @@ function GlobalSearch() {
     );
 }
 
+function DealLineItems() {
+    return (
+        <div className="mx-auto max-w-sm overflow-hidden rounded-xl border border-border bg-background">
+            <div className="border-b border-border px-3 py-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+                Line items
+            </div>
+            <ul className="divide-y divide-border">
+                {LINE_ITEMS.map((item) => (
+                    <li key={item.name} className="flex items-center gap-3 px-3 py-2">
+                        <span className="min-w-0 flex-1 truncate text-xs text-foreground">{item.name}</span>
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{item.qty}</span>
+                        <span className="w-16 shrink-0 text-right text-xs tabular-nums text-foreground">
+                            {item.total}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+            <div className="flex items-center gap-3 border-t border-brand/40 bg-brand-light px-3 py-2.5">
+                <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-semibold text-brand-dark">Deal value</span>
+                    <span className="block text-[10px] text-brand-dark/80">Derived from line items</span>
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-brand-dark">¥1,740,000</span>
+            </div>
+        </div>
+    );
+}
+
+function DocumentApproval() {
+    return (
+        <div className="mx-auto max-w-sm space-y-3">
+            <div className="rounded-xl border border-border bg-background p-4">
+                <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold text-foreground">Acme Inc. — Quote</span>
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        Pending approval
+                    </span>
+                </div>
+                <div className="mt-3 space-y-1.5" aria-hidden="true">
+                    {DOCUMENT_LINE_WIDTHS.map((w, i) => (
+                        <div key={i} style={{ width: `${w}%` }} className="h-1.5 rounded-full bg-muted" />
+                    ))}
+                </div>
+            </div>
+            <ul className="overflow-hidden rounded-lg border border-border">
+                {APPROVAL_PARTICIPANTS.map((p) => (
+                    <li
+                        key={p.role}
+                        className="flex items-center gap-3 border-b border-border bg-background px-3 py-2 last:border-0"
+                    >
+                        <Avatar initials={p.initials} tone={p.decides ? "brand" : "muted"} />
+                        <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-medium text-foreground">{p.name}</span>
+                            <span className="block text-[10px] text-muted-foreground">{p.role}</span>
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+function CampaignFlow() {
+    return (
+        <ol className="flex items-stretch gap-2">
+            {CAMPAIGN_STEPS.map((step, i) => (
+                <li key={step.label} className="flex min-w-0 flex-1 items-center gap-2">
+                    <div
+                        className={`min-w-0 flex-1 rounded-lg border p-3 ${
+                            step.accent ? "border-brand/40 bg-brand-light" : "border-border bg-background"
+                        }`}
+                    >
+                        <div
+                            className={`text-[10px] uppercase tracking-wide ${
+                                step.accent ? "text-brand-dark/80" : "text-muted-foreground"
+                            }`}
+                        >
+                            {step.label}
+                        </div>
+                        <div
+                            className={`mt-1 truncate text-xs font-medium ${
+                                step.accent ? "text-brand-dark" : "text-foreground"
+                            }`}
+                        >
+                            {step.detail}
+                        </div>
+                    </div>
+                    {i < CAMPAIGN_STEPS.length - 1 ? (
+                        <span className="shrink-0 text-muted-foreground" aria-hidden="true">
+                            &rarr;
+                        </span>
+                    ) : null}
+                </li>
+            ))}
+        </ol>
+    );
+}
+
+function DeploymentProfiles() {
+    return (
+        <div className="grid grid-cols-3 gap-2">
+            {DEPLOYMENT_SHAPES.map((shape) => (
+                <div
+                    key={shape.name}
+                    className={`rounded-lg border p-3 ${
+                        shape.accent ? "border-brand/40 bg-brand-light" : "border-border bg-background"
+                    }`}
+                >
+                    <div
+                        className={`text-xs font-semibold ${
+                            shape.accent ? "text-brand-dark" : "text-foreground"
+                        }`}
+                    >
+                        {shape.name}
+                    </div>
+                    <div className="mt-2 space-y-1">
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Operated by</div>
+                        <div
+                            className={`text-xs ${shape.accent ? "text-brand-dark" : "text-foreground"}`}
+                        >
+                            {shape.operator}
+                        </div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 /**
  * Registry mapping each {@link IllustrationName} to its static, theme-aware
  * illustration component. Completeness is enforced by the `Record` type.
@@ -342,4 +496,8 @@ export const ILLUSTRATIONS: Record<IllustrationName, React.ComponentType> = {
     "warm-intro-path": WarmIntroPath,
     "notification-inbox": NotificationInbox,
     "global-search": GlobalSearch,
+    "deal-line-items": DealLineItems,
+    "document-approval": DocumentApproval,
+    "campaign-flow": CampaignFlow,
+    "deployment-profiles": DeploymentProfiles,
 };

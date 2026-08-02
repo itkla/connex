@@ -126,8 +126,11 @@ email addresses, and query strings.
 So there is no safe stored source, and the bundle declares
 `client-errors.json: no_persisted_source` rather than reading logs. Persisting a
 metadata-only projection (correlation id, redacted page path, digest, timestamp)
-is tracked as follow-up work; until it exists, correlate client errors through
-the correlation id in the journal slice instead.
+is tracked as follow-up work ([#970](https://github.com/itkla/connex/issues/970));
+until it exists, the bundle cannot correlate client errors at all. There is no
+journal slice to fall back on — see [Why there is no journal slice](#why-there-is-no-journal-slice)
+— so this lookup has to be done against the deployment's own logs, outside the
+bundle.
 
 ### Request ids
 
@@ -141,13 +144,13 @@ unrelated requests share one id, or inject rows into an investigator's filtered 
 audit field is minted server-side and cannot be influenced by the caller.
 
 **The practical consequence:** a user-quoted correlation id will *not* find audit rows. Investigate
-by `entityType`/`entityId` and `since` instead, and use the user-quoted id against logs and the
-optional journal slice. Linking the two properly needs a schema change and is tracked as follow-up
-work.
+by `entityType`/`entityId` and `since` instead, and use the user-quoted id against the deployment's
+own logs — the bundle carries no log content of any kind. Linking the two properly needs a schema
+change and is tracked as follow-up work.
 
 Audit rows written on scheduler and other non-request threads have no request id at all; this is
 long-standing behaviour, not a gap introduced here. Rows written on async or error-dispatch threads
-would likewise carry none, so the journal-correlation story above applies to request threads only.
+would likewise carry none, so the correlation story above applies to request threads only.
 
 ### Truncation and inconclusive results
 
@@ -281,7 +284,7 @@ and no SSH.
 
 If the user quoted an error id from the UI, note that it will **not** match the audit slice — see
 [Request ids](#request-ids). Narrow with `--entity-type`/`--entity-id` and `--since`, and use the
-quoted id against logs or the optional journal slice.
+quoted id against the deployment's own logs, which the bundle does not collect.
 
 ### Exit codes
 
