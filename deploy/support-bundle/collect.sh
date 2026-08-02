@@ -190,6 +190,11 @@ support_bundle_classify_status() {
             support_bundle_log error request_rejected reason invalid_request status "$status"
             return "$EXIT_API"
             ;;
+        413)
+            support_bundle_log error request_rejected reason bundle_too_large status "$status" \
+                remedy "narrow the window with --since, or add --entity-type/--entity-id, then collect again"
+            return "$EXIT_API"
+            ;;
         429)
             support_bundle_log error request_rejected reason busy status "$status" remedy "retry when concurrent bundle downloads have finished"
             return "$EXIT_API"

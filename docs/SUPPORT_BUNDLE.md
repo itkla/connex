@@ -149,12 +149,17 @@ Audit rows written on scheduler and other non-request threads have no request id
 long-standing behaviour, not a gap introduced here. Rows written on async or error-dispatch threads
 would likewise carry none, so the journal-correlation story above applies to request threads only.
 
-### Truncation
+### Truncation and inconclusive results
 
 The audit slice is capped, and a saturated window is never silently indistinguishable from a
 complete one. The query asks for one row beyond the cap, the extra row is never emitted, and the
 manifest records `auditSliceRowCount`, `auditSliceTruncated`, and `auditSliceLimit`. When
 truncation is reported, narrow `since` or add an entity filter and collect again.
+
+A correlation filter matches the **server-minted** request id, which a user cannot quote, so an
+empty result under that filter means "no rows carried this id", not "nothing happened". The
+manifest records `auditSliceInconclusive: true` for exactly that case so an empty slice is not
+misread as evidence of absence.
 
 ### Journal slice
 
@@ -198,9 +203,14 @@ and security context the queries depend on are not installed.
 
 The size is bounded by construction. The audit slice dominates it and is capped at 10,000 rows of
 bounded columns — roughly 300 bytes each, so about 3 MB uncompressed before compression, with the
-other entries measured in kilobytes. Assembly refuses to exceed a 64 MB uncompressed ceiling and a
-30-second wall-clock budget; both fail closed rather than returning a bundle that looks complete
-but is not.
+other entries measured in kilobytes. Assembly refuses to exceed a 64 MB uncompressed ceiling, checked **before** each entry is added
+rather than after, and a 30-second wall-clock budget checked between sources. Both fail closed
+with `413` and a message telling the operator to narrow `since` or add an entity filter, rather
+than returning a bundle that looks complete but is not.
+
+The two collection queries additionally carry a 20-second **statement** timeout, so a pathological
+query is cancelled at the database rather than merely noticed afterwards — the wall-clock budget
+alone cannot interrupt a query already in flight.
 
 Concurrent assembly is capped **per JVM**, not cluster-wide: an N-instance deployment can assemble
 N times that many at once. Saturation returns `429`.

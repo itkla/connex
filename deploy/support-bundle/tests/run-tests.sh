@@ -449,6 +449,11 @@ case_collect_status_classification() (
     assert_status status_404 65 "$?" || return 1
     support_bundle_classify_status 429 >/dev/null 2>&1
     assert_status status_429 66 "$?" || return 1
+    support_bundle_classify_status 413 >/dev/null 2>&1
+    assert_status status_413 66 "$?" || return 1
+    local too_large
+    too_large="$(support_bundle_classify_status 413 2>&1)"
+    assert_contains status_413_remedy 'narrow' <(printf '%s\n' "$too_large") || return 1
     support_bundle_classify_status 500 >/dev/null 2>&1
     assert_status status_500 66 "$?" || return 1
     local output

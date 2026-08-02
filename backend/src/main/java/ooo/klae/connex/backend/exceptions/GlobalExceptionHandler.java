@@ -27,6 +27,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
+import ooo.klae.connex.backend.services.SupportBundleService;
 import ooo.klae.connex.backend.observability.ReportedError;
 import ooo.klae.connex.backend.observability.ReportedError.Source;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -201,6 +202,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<String> resourceNotFound(NoResourceFoundException ex) {
         return ResponseEntity.status(ex.getStatusCode()).body("Resource not found");
+    }
+
+    /**
+     * Reports a support bundle that would exceed its size or time ceiling.
+     *
+     * <p>The message is deliberately passed through: it tells the operator how to narrow the
+     * request, and a generic body would leave them with no next step.
+     *
+     * @param ex the ceiling breach
+     * @return a 413 carrying the actionable message
+     */
+    @ExceptionHandler(SupportBundleService.SupportBundleTooLargeException.class)
+    public ResponseEntity<String> supportBundleTooLarge(
+            SupportBundleService.SupportBundleTooLargeException ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ex.getMessage());
     }
 
     @ExceptionHandler(RequestBodyTooLargeException.class)
