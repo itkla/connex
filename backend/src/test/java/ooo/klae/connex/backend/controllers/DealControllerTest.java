@@ -147,23 +147,37 @@ class DealControllerTest {
     @Test
     void closeDelegatesNullableActualValueAsAnExactBigDecimal() throws Exception {
         Deal deal = deal();
-        deal.setWon(false);
-        deal.setActualValue(new BigDecimal("-12.34"));
-        when(dealService.close(42, false, "cancelled", new BigDecimal("-12.34")))
+        deal.setWon(true);
+        deal.setActualValue(new BigDecimal("12.34"));
+        when(dealService.close(42, true, "signed", new BigDecimal("12.34")))
             .thenReturn(deal);
 
         MvcResult result = mockMvc.perform(post("/api/deals/42/close")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                    {"won":false,"reason":"cancelled","actualValue":-12.34}
+                    {"won":true,"reason":"signed","actualValue":12.34}
                     """))
             .andExpect(status().isOk())
             .andReturn();
-        assertDecimal("-12.34", objectMapper.readTree(
+        assertDecimal("12.34", objectMapper.readTree(
             result.getResponse().getContentAsString()).get("actualValue"));
 
-        verify(dealService).close(42, false, "cancelled", new BigDecimal("-12.34"));
+        verify(dealService).close(42, true, "signed", new BigDecimal("12.34"));
+    }
+
+    @Test
+    void closeRejectsANegativeActualValueWithoutCallingTheService() throws Exception {
+        mockMvc.perform(post("/api/deals/42/close")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"won":false,"reason":"cancelled","actualValue":-12.34}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.actualValue").exists());
+
+        verifyNoInteractions(dealService);
     }
 
     @Test
