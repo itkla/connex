@@ -62,20 +62,23 @@ export function PermissionsProvider({
 }) {
     const router = useRouter();
     const granted = useMemo(() => new Set(permissions), [permissions]);
-    const probing = useRef(false);
+    const probe = useRef<Promise<boolean> | null>(null);
 
-    const refresh = useCallback(async () => {
-        if (probing.current) return true;
-        probing.current = true;
-        try {
-            const probed = await getEffectivePermissions();
-            if (permissionsDrifted(status, granted, probed)) router.refresh();
-            return true;
-        } catch {
-            return false;
-        } finally {
-            probing.current = false;
-        }
+    const refresh = useCallback(() => {
+        if (probe.current !== null) return probe.current;
+        const pending = (async () => {
+            try {
+                const probed = await getEffectivePermissions();
+                if (permissionsDrifted(status, granted, probed)) router.refresh();
+                return true;
+            } catch {
+                return false;
+            } finally {
+                probe.current = null;
+            }
+        })();
+        probe.current = pending;
+        return pending;
     }, [granted, router, status]);
 
     useEffect(() => {
@@ -132,7 +135,9 @@ export function usePermissionCheck(permission: string): PermissionCheck {
  * Re-reads the viewer's effective permissions and re-renders the server tree if they changed.
  *
  * For a surface that just changed someone's role, or that is offering the viewer a way out of a
- * failed permission lookup, rather than waiting for the next focus revalidation.
+ * failed permission lookup, rather than waiting for the next focus revalidation. Callers that
+ * arrive while a probe is already running share its result rather than starting a second one or
+ * being told a check succeeded that was never made.
  *
  * @returns a function resolving to whether the lookup reached the server
  * @throws when called outside a {@link PermissionsProvider}

@@ -184,8 +184,8 @@ describe("a stale permission snapshot is re-read, not waited out", () => {
         expect(provider).toMatch(/} catch \{\s*return false;\s*}/);
     });
 
-    it("does not stack concurrent probes", () => {
-        expect(provider).toContain("if (probing.current) return true");
+    it("shares one in-flight probe rather than stacking them or reporting an unmade check", () => {
+        expect(provider).toContain("if (probe.current !== null) return probe.current");
     });
 });
 
