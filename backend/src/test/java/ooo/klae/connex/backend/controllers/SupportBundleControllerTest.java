@@ -29,8 +29,6 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AuthService;
-import ooo.klae.connex.backend.services.OrgMemberService;
-import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SupportBundleService;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundle;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleRequest;
@@ -54,8 +52,6 @@ class SupportBundleControllerTest {
     private AuthService authService;
     private WorkspaceService workspaceService;
     private TenantContext tenantContext;
-    private OrgMemberService orgMemberService;
-    private SessionSecurityService sessionSecurityService;
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -64,8 +60,6 @@ class SupportBundleControllerTest {
         authService = Mockito.mock(AuthService.class);
         workspaceService = Mockito.mock(WorkspaceService.class);
         tenantContext = Mockito.mock(TenantContext.class);
-        orgMemberService = Mockito.mock(OrgMemberService.class);
-        sessionSecurityService = Mockito.mock(SessionSecurityService.class);
 
         User actor = new User();
         actor.setId(ACTOR_ID);
@@ -245,13 +239,23 @@ class SupportBundleControllerTest {
     }
 
     @Test
-    void unusedCollaboratorsAreNotConsultedWithoutAnEntityFilter() throws Exception {
+    void aCeilingOrBudgetBreachIsReportedWithGuidanceRatherThanAsAServerError() throws Exception {
+        doThrow(new SupportBundleService.SupportBundleTooLargeException(
+                "Support bundle exceeded its uncompressed ceiling; narrow the window with since"))
+            .when(supportBundleService).generate(any(), anyInt());
+
+        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+            .andExpect(status().isPayloadTooLarge())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                .string(org.hamcrest.Matchers.containsString("narrow the window")));
+    }
+
+    @Test
+    void theWorkspaceIsNotConsultedWithoutAnEntityFilter() throws Exception {
         mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().isOk());
 
         verify(workspaceService, never()).getOrgId(anyInt());
         verify(workspaceService, never()).requirePermission(any());
-        verify(orgMemberService, never()).requireOrgAdmin(anyInt(), anyInt());
-        verify(sessionSecurityService, never()).requireRecentAuthentication(anyInt());
     }
 }

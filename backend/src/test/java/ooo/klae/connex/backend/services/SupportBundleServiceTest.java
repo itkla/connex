@@ -372,6 +372,88 @@ class SupportBundleServiceTest {
         assertTrue(manifest.get("auditSliceTruncated").asBoolean());
     }
 
+    @Test
+    void aSourceThatFailsBecomesADeclaredOmissionRatherThanAFailedBundle() throws Exception {
+        doThrow(new RuntimeException("db down")).when(migrationHistoryService).history();
+
+        JsonNode manifest = manifestOf(service.generate(request(null), ACTOR_ID));
+
+        assertEquals("source_failed", manifest.get("omissions").get("migrations.json").asString());
+        for (JsonNode file : manifest.get("files")) {
+            assertFalse("migrations.json".equals(file.get("path").asString()));
+        }
+    }
+
+    /**
+     * A ceiling or budget breach must not be degraded into a per-source omission: it is a property
+     * of the whole bundle, and the caller needs to be told to narrow the request.
+     */
+    @Test
+    void aCeilingBreachPropagatesInsteadOfBecomingAnOmission() {
+        doThrow(new SupportBundleService.SupportBundleTooLargeException("too large"))
+            .when(readinessService).readiness(anyInt());
+
+        assertThrows(SupportBundleService.SupportBundleTooLargeException.class,
+            () -> service.generate(request(null), ACTOR_ID));
+    }
+
+    /**
+     * The admission permit must be released on every path, including failure, or the effective
+     * concurrency limit ratchets down to zero over time.
+     */
+    /**
+     * The admission permit must be released on every path, including failure, or the effective
+     * concurrency limit ratchets down to zero over the life of the process.
+     */
+    @Test
+    void admissionPermitsAreReleasedOnSuccessAndOnFailure() {
+        for (int attempt = 0; attempt < SupportBundleService.MAX_CONCURRENT_BUNDLES + 2; attempt++) {
+            service.generate(request(null), ACTOR_ID);
+        }
+        // doThrow/doReturn rather than when(...): re-stubbing through when() would invoke the
+        // mock, which is currently stubbed to throw.
+        doThrow(new SupportBundleService.SupportBundleTooLargeException("boom"))
+            .when(readinessService).readiness(anyInt());
+        for (int attempt = 0; attempt < SupportBundleService.MAX_CONCURRENT_BUNDLES + 2; attempt++) {
+            assertThrows(SupportBundleService.SupportBundleTooLargeException.class,
+                () -> service.generate(request(null), ACTOR_ID));
+        }
+        org.mockito.Mockito.doReturn(Map.of("profile", "on-prem"))
+            .when(readinessService).readiness(anyInt());
+        assertNotNull(service.generate(request(null), ACTOR_ID));
+    }
+
+    @Test
+    void saturationIsRefusedAndAudited() throws Exception {
+        java.util.concurrent.CountDownLatch entered =
+            new java.util.concurrent.CountDownLatch(SupportBundleService.MAX_CONCURRENT_BUNDLES);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        when(readinessService.readiness(anyInt())).thenAnswer(invocation -> {
+            entered.countDown();
+            release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            return Map.of("profile", "on-prem");
+        });
+        java.util.List<Thread> holders = new ArrayList<>();
+        for (int index = 0; index < SupportBundleService.MAX_CONCURRENT_BUNDLES; index++) {
+            Thread holder = new Thread(() -> service.generate(request(null), ACTOR_ID));
+            holder.setDaemon(true);
+            holder.start();
+            holders.add(holder);
+        }
+        assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+
+        assertThrows(ooo.klae.connex.backend.exceptions.TooManyRequestsException.class,
+            () -> service.generate(request(null), ACTOR_ID));
+        verify(auditService).recordStrictIndependentScoped(
+            eq("org.support_bundle.completed"), anyString(), any(), any(), any(), anyString(),
+            org.mockito.ArgumentMatchers.contains("refused_busy"), any());
+
+        release.countDown();
+        for (Thread holder : holders) {
+            holder.join(5000);
+        }
+    }
+
     private JsonNode manifestOf(SupportBundle bundle) throws Exception {
         return objectMapper.readTree(entriesOf(bundle).get("manifest.json"));
     }

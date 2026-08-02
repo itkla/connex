@@ -264,6 +264,11 @@ public class SupportBundleService {
         byte[] content;
         try {
             content = supplier.get();
+        } catch (SupportBundleTooLargeException breach) {
+            // A ceiling or budget breach is a property of the whole bundle, not of one source.
+            // Degrading it to an omission would hand back an archive that looks merely partial
+            // when the real answer is "narrow the request".
+            throw breach;
         } catch (RuntimeException exception) {
             log.warn("Support bundle source {} failed; declaring the omission", path, exception);
             assembly.omit(path, "source_failed");
