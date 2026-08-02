@@ -3,6 +3,8 @@ set -euo pipefail
 
 IMAGE="${1:?Frontend image name is required}"
 NAME="connex-frontend-smoke-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHUNK_VERIFIER="$SCRIPT_DIR/verify_build_chunks.mjs"
 READY=0
 SMOKE_IMAGE="$(mktemp)"
 HEADERS="$(mktemp)"
@@ -38,7 +40,13 @@ docker run --detach \
     --cpus 2 \
     --memory 2g \
     --mount "type=bind,src=$SMOKE_IMAGE,dst=/app/public/sharp-smoke.png,readonly" \
+    --mount "type=bind,src=$CHUNK_VERIFIER,dst=/app/verify_build_chunks.mjs,readonly" \
     "$IMAGE" >/dev/null
+
+if ! docker exec "$NAME" node /app/verify_build_chunks.mjs /app/.next; then
+    report_failure
+    exit 1
+fi
 
 if ! docker exec "$NAME" sh -ec '
     addon="$(find /app/node_modules -type f -name "sharp-linuxmusl-*.node" -print -quit)"
