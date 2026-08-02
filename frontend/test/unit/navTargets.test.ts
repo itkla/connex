@@ -88,6 +88,7 @@ describe("navigation targets resolve to real routes", () => {
             "/records/pipelines",
             "/records/products",
             "/search",
+            "/settings/diagnostics",
             "/settings/members",
             "/users",
             "/workflows",
