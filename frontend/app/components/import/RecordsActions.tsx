@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -21,8 +20,7 @@ import type { ExportEntity, ImportEntity } from '@/app/lib/types';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { ActionContext, AppAction } from '@/app/lib/actions/types';
-
-const ImportDialog = dynamic(() => import('./ImportDialog'));
+import ImportDialog from '@/app/components/import/LazyImportDialog';
 
 type CurrentViewExportActionConfig = {
     id: string;
