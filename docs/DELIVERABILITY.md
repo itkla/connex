@@ -1,9 +1,11 @@
 # Email deliverability
 
-> Status: describes the mail behaviour that ships today. **Connex signs nothing and resolves no DNS.**
-> It hands a message to the SMTP relay you configure; every deliverability control that inbox
-> providers actually evaluate — SPF, DKIM, DMARC — lives in your DNS and your relay, not in this
-> application. Read it before pointing a production instance at a mail server.
+> Status: describes the mail behaviour that ships today. **Connex signs nothing and publishes
+> nothing.** It hands a message to the SMTP relay you configure; every deliverability control that
+> inbox providers actually evaluate — SPF, DKIM, DMARC — lives in your DNS and your relay, not in
+> this application. One diagnostic *reads* SPF and DMARC presence and reports a status — never a
+> record's contents, and never affecting what is sent ([§1](#1-what-connex-does-and-does-not-do)).
+> Read it before pointing a production instance at a mail server.
 
 Related: [DEPLOYMENT.md](DEPLOYMENT.md) for the operator runbook,
 [DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md) for what each profile permits,
@@ -21,14 +23,15 @@ to the host you configured, and sends. That is the whole of its involvement in d
 
 - **Sign anything with DKIM.** There is no signing code, no key material, and no configuration slot
   for a private key. If your mail is DKIM-signed, your relay signed it after Connex handed it over.
-- **Evaluate or publish SPF, DKIM, or DMARC.** No part of the backend reads these records, warns
-  about them, or reports on them.
-- **Resolve DNS for policy purposes.** The only DNS the mail path performs *itself* is resolving a
-  **workspace-supplied** SMTP host so `SmtpDestinationGuard` can pin the connection to a single
-  verified address (an SSRF/DNS-rebinding defence, see
-  [§2.4](#24-the-smtp-destination-is-pinned)). The instance transport is exempt: it is not
-  workspace-supplied, so the guard returns immediately and JavaMail resolves `connex.mail.host`
-  itself, unpinned, at connect time.
+- **Publish SPF, DKIM, or DMARC records.** Nothing in the product emits a DNS record of any kind.
+  Publishing is your job; signing is your relay's.
+- **Resolve DNS to decide whether a message may be sent.** The mail path performs DNS in two places
+  and neither one gates delivery. It resolves a **workspace-supplied** SMTP host so
+  `SmtpDestinationGuard` can pin the connection to a single verified address (an SSRF/DNS-rebinding
+  defence, see [§2.4](#24-the-smtp-destination-is-pinned)); the instance transport is exempt: it is
+  not workspace-supplied, so the guard returns immediately and JavaMail resolves `connex.mail.host`
+  itself, unpinned, at connect time. And the mail diagnostics send-test performs the advisory TXT
+  lookups described immediately below.
 - **Set a separate envelope sender.** `mail.smtp.from` is never set, so the SMTP `MAIL FROM` is
   derived from the header `From`. See [§5](#5-aligning-the-from-address).
 - **Set `Reply-To`.** Replies go to the `From` address.
@@ -39,12 +42,33 @@ to the host you configured, and sends. That is the whole of its involvement in d
   `MimeMessageHelper` is built non-multipart. A missing plain-text part is a mild spam signal with
   some filters, and there is no setting that adds one.
 
+**One advisory exception: the mail diagnostics send-test reads SPF and DMARC.**
+`POST /api/workspaces/{id}/mail/diagnostics/test-send` ([§6.1](#61-the-send-tests)) performs two
+bounded, content-free TXT lookups against the effective sender's domain — `v=spf1` at the domain
+itself, and `v=dmarc1` at `_dmarc.<domain>`. It reports a **status only** — `present`, `unknown`, or
+`not_configured` — and **never the contents of a record**. A resolvable domain with no matching
+record and a domain that does not resolve at all deliberately share the single `unknown` status, and
+no record count is returned, so the endpoint is **not a domain-existence oracle** against whatever
+resolver the instance uses. The lookup is fail-soft: a resolver failure yields `unknown` and never
+changes the send outcome. **DKIM is never checked** — its status is unconditionally
+`not_configured`, because no selector field exists anywhere in the mail configuration and so there is
+nothing to look up.
+
+**That lookup is skipped entirely unless the sender is workspace-supplied.** Under managed mail, or
+when a workspace falls back to the instance transport, the send-test still sends and still reports
+the transport outcome, but reports **no DNS status at all**: no domain, and SPF and DMARC both
+`unknown`. This is deliberate, for two reasons — a tenant cannot act on a sender domain it does not
+control, so the check has no value there, and that is precisely the path that would turn the endpoint
+into a domain-existence oracle. On a managed-mail workspace, an empty DNS section is the expected
+result and not a fault.
+
 **Therefore: DMARC alignment is entirely your relay's responsibility.** Choosing a relay that will
 sign as your domain, and publishing the records that authorize it, is the deliverability work. There
-is no Connex setting that substitutes for it.
+is no Connex setting that substitutes for it, and the advisory check above reports posture without
+changing any of it.
 
-Richer in-product mail diagnostics are tracked separately; nothing beyond the SMTP send-test in
-[§6](#6-verifying) exists today.
+Two in-product send-tests exist today, both in [§6.1](#61-the-send-tests), and nothing else. Richer
+in-product mail diagnostics remain tracked separately.
 
 ## 2. Choosing a mail shape
 
@@ -87,8 +111,10 @@ mail uses tells you which identity it will leave under.
   3. Otherwise, logs a warning and **falls back to the instance sender**.
 - **`resolveInstance()`** — the instance config, or nothing at all when `connex.mail.enabled=false`.
 - **`resolveWorkspaceOnly(workspaceId)`** — the workspace's own config with **no fallback**; returns
-  nothing in managed mode. Only the send-test uses it, deliberately, so the test validates exactly
-  what the workspace configured rather than silently proving the instance relay works.
+  nothing in managed mode. Only the **workspace SMTP send-test** uses it, deliberately, so that test
+  validates exactly what the workspace configured rather than silently proving the instance relay
+  works. The diagnostics send-test uses `resolveForWorkspace` instead, precisely so that it covers
+  the managed and fallback cases ([§6.1](#61-the-send-tests)).
 
 **The fallback in step 3 is silent to the user — and effectively unreachable through the UI.** When it
 does fire, a workspace keeps receiving mail sent as the *instance* identity, from a domain it does not
@@ -178,7 +204,7 @@ no port restriction at all.
 
 ## 3. What mail Connex sends
 
-Eight senders exist. `sendForWorkspace` uses the workspace identity (with instance fallback);
+Nine senders exist. `sendForWorkspace` uses the workspace identity (with instance fallback);
 `sendInstance` uses the instance identity **only**; `sendNow` is synchronous and throws.
 
 | Mail | Transport call | Identity | Enabled by |
@@ -190,6 +216,7 @@ Eight senders exist. `sendForWorkspace` uses the workspace identity (with instan
 | Email-change verification | `sendInstance` | **instance only** | `connex.email-change.email-enabled` (default **false**) |
 | Registration verification | `sendInstance` | **instance only** | `connex.registration-verification.enabled` **and** `.email-enabled` (both default **false**) |
 | Mail settings test email | `sendNow` (synchronous) | **workspace only**, no fallback | on demand, from Settings → Email |
+| Mail diagnostics test email | `sendNow` (synchronous) | the **effective** transport: instance in managed mode, else workspace → instance | on demand, from Settings → Diagnostics; throttled ([§6.1](#61-the-send-tests)) |
 | Campaign delivery | own dispatcher, never async | **built-in `smtp` provider:** workspace → instance. **ESP provider:** the provider config's own `From`, no fallback ([§2.2](#22-which-from-address-is-used)) | `connex.delivery.enabled` **and** `connex.delivery.dispatch-enabled` (both default **false**) |
 
 Five consequences worth planning around:
@@ -221,8 +248,8 @@ config's own, with no fallback to either — a distinct domain with its own DNS 
 ([§2.2](#22-which-from-address-is-used), [§4](#4-dns-records-per-deployment-shape)).
 
 **Three templates render with a hard-coded `en` locale: invite, notification, and registration
-verification.** Password reset, email-change verification, scheduled report delivery, and the
-send-test all render in the recipient's or actor's locale. This is a content matter, not an
+verification.** Password reset, email-change verification, scheduled report delivery, and both
+send-tests all render in the recipient's or actor's locale. This is a content matter, not an
 authentication one, but the three hard-coded ones surprise Japanese-language deployments.
 
 Neither `connex.delivery.enabled` nor `connex.delivery.dispatch-enabled` appears in
@@ -233,8 +260,9 @@ Neither `connex.delivery.enabled` nor `connex.delivery.dispatch-enabled` appears
 
 `sendInstance` and `sendForWorkspace` are `@Async` and **swallow every failure**. The delivery helper
 logs and returns; nothing propagates to the request that triggered it, and no user-visible error is
-produced. Only `sendNow` — the send-test — throws, and even there the calling service catches the
-throw and returns a generic message ([§6.1](#61-the-send-test)).
+produced. Only `sendNow` — the transport behind both send-tests — throws, and even there the calling
+service catches the throw and returns a generic message or a stable error code
+([§6.1](#61-the-send-tests)).
 
 The operational consequence is sharper than it first looks. Scheduled report delivery freezes its
 report snapshot and then records the audit event `report.schedule.delivery` (*"Queued scheduled
@@ -308,7 +336,10 @@ Practical notes:
 - **Many relays hand you a CNAME instead of a TXT record.** That is preferable when offered: the
   relay can then rotate its key without another DNS change from you.
 - **Connex never touches any of this.** There is no selector setting, no key path, and no signing
-  step in the application.
+  step in the application. That absence is also why the diagnostics send-test reports DKIM as
+  `not_configured` unconditionally: with no selector to query, there is nothing it could look up
+  ([§6.1](#61-the-send-tests)). Read that status as *not implemented*, never as *your DKIM is
+  missing*.
 
 ### 4.3 DMARC
 
@@ -398,10 +429,29 @@ change.
 
 ## 6. Verifying
 
-### 6.1 The send-test
+### 6.1 The send-tests
 
-Settings → Email has a **send test** action, backed by
-`POST /api/workspaces/{id}/mail-config/test`. It is the primary tool and it ships today.
+**Two send-tests ship, and they are not interchangeable.** The older one validates what a workspace
+*saved*; the newer one, added with tenant diagnostics, validates the transport a workspace *actually
+sends through* — including the managed and fallback cases the older one refuses to touch.
+
+| | `POST /mail-config/test` (existing) | `POST /mail/diagnostics/test-send` (new) |
+|---|---|---|
+| Surfaced at | Settings → Email | Settings → Diagnostics |
+| Resolves | `resolveWorkspaceOnly` — workspace SMTP only | `resolveForWorkspace` — managed / override / instance fallback |
+| Managed mode | refused (`requireWorkspaceOverridesAllowed`) | works, and mutates no config |
+| Recipient | the caller's own address | the caller's own address, and the actor's email must be **verified** |
+| DNS | none | advisory SPF + DMARC, fail-soft, **skipped unless the sender is workspace-supplied** |
+| Gate | `WORKSPACE_SETTINGS` + recent authentication | same |
+| Host/port shown | the workspace transport's | **suppressed unless workspace-supplied**, so a managed relay is never disclosed |
+| Throttled | no | **yes** — see below |
+
+Both write the same audit event, `workspace.mail_config.test`; only the description distinguishes
+them (*"Sent a test email"* versus *"Sent a diagnostic test email"*). Neither mutates any
+configuration.
+
+**The workspace SMTP send-test — `POST /api/workspaces/{id}/mail-config/test`.** Settings → Email has
+a **send test** action, backed by this endpoint. It is unchanged by the diagnostics work.
 
 - Requires the `WORKSPACE_SETTINGS` permission **and** recent authentication (step-up re-auth).
 - Resolves via `resolveWorkspaceOnly`, so it exercises **exactly what the workspace saved**, with no
@@ -418,16 +468,57 @@ Settings → Email has a **send test** action, backed by
 - Refused with `403` in managed mode, because workspace overrides do not exist there.
 - Writes the audit event `workspace.mail_config.test`.
 
-**Its limits, stated plainly.** The send-test is an **SMTP connectivity and authentication test and
-nothing more.** It does not check SPF, DKIM, or DMARC; it does not inspect the headers of the message
-it sent; it performs no seed-list, reputation, or inbox-placement check. A green send-test tells you
-the credentials work and the relay accepted the message. It tells you nothing about whether that
-message will reach an inbox.
+**The diagnostics send-test — `POST /api/workspaces/{id}/mail/diagnostics/test-send`.** Settings →
+Diagnostics has its own test action, backed by this endpoint.
+
+- Same gate: `WORKSPACE_SETTINGS` **and** recent authentication.
+- Resolves via `resolveForWorkspace`, so it exercises the transport the workspace's mail really
+  leaves through — the managed instance relay, the workspace override, or the instance fallback
+  ([§2.1](#21-how-a-sender-is-resolved)). **It therefore works in managed mode**, where the older
+  test returns `403`, and it changes no stored configuration.
+- Sends **only to the requesting user's own account email**, and additionally requires that address
+  to be **verified**. An unverified or missing address returns an outcome rather than a message.
+- Re-checks the destination through `SmtpDestinationGuard` before connecting, exactly as the older
+  test does.
+- Returns a structured, redacted report: the effective mode, the sender identity, the transport
+  outcome, a stable error code, a correlation id, and the advisory DNS block from
+  [§1](#1-what-connex-does-and-does-not-do). **It does not return the underlying SMTP error** — a
+  transport failure comes back as the code `smtp_transport_failed`, and a guard refusal as
+  `smtp_destination_rejected`.
+- Writes the audit event `workspace.mail_config.test`, scoped to the workspace named in the path
+  rather than the ambient tenant context.
+
+**It is throttled: 3 sends per 5 minutes, per workspace and actor together.** The cap is
+`connex.mail.diagnostics.max-test-sends` (default **3**) over
+`connex.mail.diagnostics.test-send-window-seconds` (default **300**), keyed `workspaceId:actorId`.
+Exceeding it does not raise an error — the call returns normally with a **failed** outcome and the
+error code `rate_limited`, and **no mail is sent**. A tester who fires the button repeatedly will see
+this and conclude the transport is broken; it is not. The limiter is **single-JVM only**, the same
+model as the password-reset limiter, so a multi-replica deployment gets a proportionally higher
+effective rate. (There is deliberately no deployment-wide bound; that, the organization-scope query
+fan-out, and the snapshot-id oracle are known and tracked, not shipped.)
+
+**Managed mode discloses the sender address but not the host or port, on purpose.** The test message
+is delivered to the requesting administrator's own mailbox, so its `From` is already disclosed to
+exactly that person; withholding it in the report would only make the report harder to read. The
+relay host and port are withheld because they are not otherwise disclosed to a tenant, and a tenant
+can do nothing about the operator's transport anyway. The same reasoning is why the advisory DNS
+lookup is skipped for a sender the tenant does not control.
+
+**Their limits, stated plainly.** Both send-tests are **SMTP connectivity and authentication tests**
+first. Neither inspects the headers of the message it sent, and neither performs any seed-list,
+reputation, or inbox-placement check. The workspace SMTP test checks no DNS at all. The diagnostics
+test adds only the **advisory** SPF and DMARC presence check of
+[§1](#1-what-connex-does-and-does-not-do) — presence, never contents, never DKIM, and skipped
+entirely on a sender the workspace did not supply. A green send-test tells you the credentials work
+and the relay accepted the message; a `present` SPF or DMARC status tells you a record of that kind
+exists. Neither tells you whether the message will reach an inbox, nor whether anything **aligned**.
 
 To assess authentication you need the delivered message itself: send to a mailbox you control, open
 the raw source, and read the `Authentication-Results` header the receiver added. That is where you
-find out whether DKIM signed, what `d=` it used, and whether DMARC aligned. The send-test cannot
-substitute for it, and neither can anything else in the product today.
+find out whether DKIM signed, what `d=` it used, and whether DMARC aligned. Neither send-test can
+substitute for it — a published record is not a passing one — and neither can anything else in the
+product today.
 
 ### 6.2 What to check in logs
 
@@ -441,8 +532,16 @@ distinct lines:
 | `Failed to send email to {} ({}): {}` | ERROR | The relay was reached and the send failed. The relay's own message is the tail of the line. This is the async swallow path — the user saw no error. |
 
 The parenthesized source is `instance` or `workspace <id>`, which tells you which identity was
-attempted. The send-test additionally logs `Test email for workspace {} failed: {}` at WARN with the
-underlying cause, while returning a generic message to the browser.
+attempted. The workspace SMTP send-test additionally logs `Test email for workspace {} failed: {}` at
+WARN with the underlying cause, while returning a generic message to the browser.
+
+**The diagnostics send-test logs no failure line at all.** `sendNow` throws rather than logging, and
+that path catches the throw and converts it into a response error code without a log statement, so a
+failed diagnostic send leaves nothing greppable behind. Its only log line is
+`Diagnostic test email audit could not be written for workspace {}` at WARN, which reports an audit
+write failure and not a mail failure. Read the response's error code and correlation id
+([§6.1](#61-the-send-tests)); for a cause, reproduce through the workspace SMTP send-test, which does
+log one.
 
 **A fourth failure path emits none of these three.** Resolution runs *outside* `deliverQuietly`'s
 try/catch — `sendForWorkspace` calls `resolveForWorkspace` first and only then enters the guarded
@@ -469,11 +568,16 @@ will not catch the resolution failure above.
 | Startup fails with `connex.deployment.profile=on-prem forbids: connex.mail.managed=true` | Managed mail on a customer-run install | Unset `CONNEX_MAIL_MANAGED`; configure your own relay ([DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md)) |
 | Campaign unsubscribe link in the email body is unclickable | `connex.delivery.public-base-url` is unset, so the URL is emitted as the relative path `/api/delivery/unsubscribe/{token}` | Set it to the instance's absolute public base URL before sending any campaign |
 | Campaigns never dispatch although `connex.delivery.enabled=true` | `connex.delivery.dispatch-enabled` also defaults false; neither key is in `application.yml` | Set both in the environment |
-| Mail is accepted by the relay but lands in spam or is rejected by DMARC | The relay signs with its own `d=`, or rewrites `MAIL FROM` to its own bounce domain, so nothing aligns with your `From` | Have the relay sign as your From domain and publish its selector; verify with the `Authentication-Results` header of a real delivered message ([§6.1](#61-the-send-test)) |
+| Mail is accepted by the relay but lands in spam or is rejected by DMARC | The relay signs with its own `d=`, or rewrites `MAIL FROM` to its own bounce domain, so nothing aligns with your `From` | Have the relay sign as your From domain and publish its selector; verify with the `Authentication-Results` header of a real delivered message ([§6.1](#61-the-send-tests)) |
 | Every workspace-override domain fails DMARC while the instance domain passes | Only the instance domain's records were published | Each workspace's From domain needs its own SPF, DKIM, and DMARC records ([§4](#4-dns-records-per-deployment-shape)) |
 | SPF fails on a domain that clearly has an SPF record | Two `v=spf1` records, or more than 10 lookup mechanisms — both are permanent errors | `dig +short TXT <domain>` and collapse to one record within the limit |
 | Saving a workspace SMTP host is refused: *"…must be a public server; private and loopback addresses are not allowed"* | `SmtpDestinationGuard` rejected a private-network destination; `connex.mail.allow-internal-hosts` is false and forbidden on `saas` | Use a publicly routable relay, or run the profile that permits internal hosts. Do **not** set the flag for an *instance* relay — that host is never checked, and the flag is a startup failure on `saas` ([§2.4](#24-the-smtp-destination-is-pinned)) |
 | Saving a workspace SMTP host is refused: *"SMTP port must be one of 25, 465, 587, or 2525"* | The port allowlist, a separate check from the private-address one | Use an allowlisted submission port; the list is fixed and no setting extends it ([§2.5](#25-the-smtp-port-allowlist)) |
+| The diagnostics send-test suddenly returns a failed outcome with `rate_limited`, and no mail arrives | The per-actor throttle: 3 sends per 5 minutes per workspace-and-actor. Not a transport fault | Wait out the window, or raise `connex.mail.diagnostics.max-test-sends`. It is single-JVM, so replicas each carry their own allowance ([§6.1](#61-the-send-tests)) |
+| The diagnostics send-test reports no DNS domain, and SPF and DMARC as `unknown`, on a workspace whose mail works | The sender is not workspace-supplied — managed mode or the instance fallback — so the advisory lookup is skipped deliberately | Expected, not a bug. Check the instance `From` domain's records with `dig` yourself ([§4.4](#44-verifying-the-records-with-dig)) |
+| The diagnostics send-test reports SPF or DMARC `unknown` on a domain you believe is published | `unknown` covers both *no matching record* and *the lookup did not resolve* — the two are deliberately indistinguishable | Confirm with `dig` from a host whose resolver you trust ([§4.4](#44-verifying-the-records-with-dig)). The check is advisory and never blocks a send |
+| The diagnostics send-test always reports DKIM as `not_configured` | It is hard-coded to that: there is no DKIM selector field anywhere in the mail configuration, so nothing is looked up | Expected. Verify DKIM at the relay and with `dig` against the selector the relay issued ([§4.2](#42-dkim)) |
+| A diagnostic send fails and nothing appears in the logs | That path returns an error code instead of logging; only an audit-write failure logs | Read the response error code and correlation id; reproduce through the workspace SMTP send-test for a logged cause ([§6.2](#62-what-to-check-in-logs)) |
 | The audit shows a scheduled report delivered, but nobody received it | The audit records *queued*, written after the async handoff; the send failed afterwards and was swallowed | Check the ERROR log line. Treat the audit as evidence of queueing only ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)) |
 
 ## 8. Campaign mail versus transactional mail

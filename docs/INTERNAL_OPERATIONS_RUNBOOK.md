@@ -626,6 +626,89 @@ journalctl -u <backend-unit> | grep '<reference>'
 The digest grep matches the `CLIENT`-source entry, which carries the digest, the page path, and the
 client stack — and, because the server stamped it, the correlation ID to continue with.
 
+### Tenant diagnostics — open this before you ask for logs
+
+There is a read-only diagnostics report the tenant administrator can open themselves. It needs **no
+host access, no database access, and no operator involvement**, so it is the first thing to reach for
+when a ticket arrives — it answers most "X is not working" reports without anyone touching a log.
+
+| Scope | Page | Endpoint | Gate |
+|---|---|---|---|
+| Workspace | **Settings → Diagnostics** (`/settings/diagnostics`) | `GET /api/workspaces/{id}/diagnostics` | `WORKSPACE_SETTINGS` |
+| Organization | **Organization → Diagnostics** (`/organization/diagnostics`) | `GET /api/orgs/{id}/diagnostics` | organization **administrator** |
+
+The workspace report covers that workspace alone; the organization report aggregates every workspace
+in the organization. There is also a command-palette destination ("Diagnostics") pointing at the
+workspace page, offered to owners and administrators — but the **permission gate above is the
+authoritative one**, and it is enforced server-side, so a member who reaches the page without
+`WORKSPACE_SETTINGS` gets an error in place of the report rather than a hidden tab.
+
+**Opening the page contacts nothing.** Both endpoints are `GET`s over saved configuration and stored
+job history; the provider section says so in the product — *"Reported from saved configuration.
+Opening this page does not contact any provider."* It is therefore safe to ask a customer to open it
+mid-incident. The only outbound action anywhere on the page is the mail send-test, which you trigger
+explicitly.
+
+| Section | What it answers |
+|---|---|
+| **Deployment and capabilities** | "The edition this instance runs as, and which capabilities it allows." Each capability carries `profileAllowed` and `available` **separately**, which is the distinction that ends most escalations: **Not in this edition** means the deployment profile forbids it and no amount of configuration will turn it on; **Unavailable** means the edition allows it and the instance has not configured it. Profile semantics in [DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md). |
+| **Provider readiness** | AI readiness (including image input), business-card scanning and import (OCR), and per workspace: mail mode and whether it is configured, each delivery channel (implemented / ready), and each capture stream. |
+| **Scheduled jobs** | "The latest run of each background job, with its most recent success and failure" — Last run, Last success, Last failure, plus how many workspaces failed the latest run. |
+| **Mail deliverability** | Transport state, advisory SPF/DKIM/DMARC rows, and the send-test below. |
+| **Secret store** | "Key health for stored integration credentials. Metadata only — no secret values are shown." Active key id, whether it is configured or disabled, and counts of stale, missing-key, disabled-key, mismatched and unsupported-algorithm secrets. Remediation lives in [SECRET_STORE_KEY_LIFECYCLE_RUNBOOK.md](SECRET_STORE_KEY_LIFECYCLE_RUNBOOK.md); this is an in-product read of key health and **does not replace alerting on the startup `ERROR` line** described in "What is NOT fail-closed" below. |
+
+The report opens with a badge per **finding** — a coded, severity-tagged problem naming the workspace,
+capability, provider, channel or stream it concerns. Quote the finding code in the ticket.
+
+**A failing source degrades one section, not the page.** Every section is assembled behind a guard: a
+source that throws is recorded as a `SectionFault(section, reason)` — the only reason the code emits
+is `source_unavailable` — that section renders "This section could not be checked", and **the request
+still returns `200`**. A half-empty report is therefore a real signal about that source, not a broken
+page; read the surviving sections normally and refresh to retry.
+
+The report body itself carries **no correlation ID**. `Reference ID <id>` appears only when the load
+or the send-test **fails**, and it is taken from the error envelope's `correlationId` — the same
+identifier described in "Correlation IDs — the mechanics" above, so it greps with the first recipe.
+A permission failure returns `403`, which does **not** carry one; expect an error with no Reference
+ID there and check the actor's permission rather than the logs.
+
+#### Mail send-test — self-recipient, and throttled to 3 per 5 minutes
+
+`POST /api/workspaces/{id}/mail/diagnostics/test-send`. Every constraint is enforced server-side:
+
+- **`WORKSPACE_SETTINGS` plus WebAuthn step-up.** A password-only session fails with
+  `RECENT_AUTHENTICATION_REQUIRED` — see "Step-up requires a passkey" above.
+- **The recipient is the caller's own stored address, always.** There is no recipient field, and the
+  actor's email must be **verified**: an unverified actor gets outcome `unconfigured` with error code
+  `actor_email_unverified`, and one with no address at all gets `actor_email_unconfigured`.
+- **Throttled to 3 sends per 5 minutes per (workspace, actor)** — `connex.mail.diagnostics.max-test-sends`
+  (default `3`) over a `connex.mail.diagnostics.test-send-window-seconds` (default `300`) fixed
+  window. Neither property is declared in `application.yml`; those defaults are inline.
+- Workspace scope only. The organization page renders the section read-only and points you at the
+  workspace's own page.
+
+**The throttle does not return `429`.** A throttled attempt returns `200` carrying a normal result
+whose transport outcome is `failed` with error code `rate_limited` and mode `unconfigured` — on
+screen that is the same red **Failed** pill a genuinely broken transport produces, distinguished only
+by the error-code row. **A tester who clicks the button four times will report that mail is broken.**
+Ask how many tests they just ran, and read the error code, before touching mail configuration.
+
+The limiter is **in-memory and single-JVM**, matching the password-reset limiter and the in-memory
+session model: it bounds one tester on one instance, not a fleet, and there is no deployment-wide
+limit behind it. Tracked in **#964**; treat it as a usability guard, not an abuse control.
+
+For the DNS records this section reports and the two-send test procedure, use
+[DELIVERABILITY.md](DELIVERABILITY.md) rather than working from this page alone.
+
+#### Why job history survives a bad week
+
+Job history comes from the `job_run` table added in `V141__job_run.sql` (a **tenant**-plane
+migration). Retention is per **(`job_name`, `workspace_id`, `status`)** — 50 rows per partition — and
+the `status` dimension is deliberate: it keeps last-success and last-failure independent of run
+volume, so **a run of failures cannot evict the last known good run**. Do not simplify it to a flat
+per-job cap. Statuses are `succeeded`, `failed` and `skipped`; detail payloads are key-whitelisted
+and capped, and instance-scoped rows (no workspace) retain only `phase`.
+
 ### Support bundle
 
 **Tracked and not yet shipped.** A support-bundle collector does not exist at this commit. This
