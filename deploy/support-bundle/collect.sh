@@ -233,7 +233,7 @@ support_bundle_download() {
     # awk's IGNORECASE is a gawk extension that mawk — the default awk on Debian and Ubuntu —
     # silently ignores, so the whole line is lowercased first and the value is taken by cutting
     # at the colon rather than by field splitting.
-    content_type="$(tr 'A-Z' 'a-z' < "$headers" | tr -d '\r' \
+    content_type="$(tr '[:upper:]' '[:lower:]' < "$headers" | tr -d '\r' \
         | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
     if [[ "$content_type" != application/zip* ]]; then
         support_bundle_log error request_failed reason unexpected_content_type content_type "$content_type"

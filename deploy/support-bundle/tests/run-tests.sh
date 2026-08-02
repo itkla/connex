@@ -143,6 +143,7 @@ rebuild_archive() {
 }
 
 case_log_format() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local line
     line="$(support_bundle_log info collect_started org_id 3)"
@@ -155,7 +156,9 @@ case_log_format() (
 )
 
 case_summary_lines() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
+    # shellcheck disable=SC2034  # consumed by support_bundle_finish in the sourced library
     SUPPORT_BUNDLE_PHASE=complete
     local success failure
     success="$(support_bundle_finish 0 support_bundle_collect_summary org_id 3)"
@@ -165,6 +168,7 @@ case_summary_lines() (
 )
 
 case_exit_code_catalog() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     assert_equals exit_codes '64
 65
@@ -175,6 +179,7 @@ case_exit_code_catalog() (
 )
 
 case_cookie_file_permissions() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local cookie="$SANDBOX/cookies.txt"
     printf 'x\n' > "$cookie"
@@ -189,6 +194,7 @@ case_cookie_file_permissions() (
 )
 
 case_argument_validation() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     support_bundle_validate_correlation_id 'abcd1234' >/dev/null 2>&1
     assert_status correlation_ok 0 "$?" || return 1
@@ -215,6 +221,7 @@ case_argument_validation() (
 )
 
 case_urlencode() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     assert_equals urlencode_plain 'abc-123' "$(support_bundle_urlencode 'abc-123')" || return 1
     assert_equals urlencode_special '%26a%3D1%20b' "$(support_bundle_urlencode '&a=1 b')" || return 1
@@ -222,6 +229,7 @@ case_urlencode() (
 
 # Ported verbatim from RequestPathRedactorTest.
 case_redactor_fixtures() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     # The base64url token the Java fixture builds from its fixed byte array, and
     # the 32-byte hex shape HexFormat produces for delivery webhook tokens.
@@ -260,6 +268,7 @@ case_redactor_fixtures() (
 )
 
 case_verify_valid_bundle() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/valid"
     make_bundle "$work/src" "$work/bundle.zip"
@@ -269,6 +278,7 @@ case_verify_valid_bundle() (
 )
 
 case_verify_altered_payload() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/altered-payload"
     make_bundle "$work/src" ""
@@ -284,6 +294,7 @@ case_verify_altered_payload() (
 )
 
 case_verify_altered_manifest() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/altered-manifest"
     make_bundle "$work/src" ""
@@ -297,6 +308,7 @@ case_verify_altered_manifest() (
 )
 
 case_verify_missing_manifest() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/missing-manifest"
     make_bundle "$work/src" ""
@@ -310,6 +322,7 @@ case_verify_missing_manifest() (
 )
 
 case_verify_unlisted_file() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/unlisted"
     make_bundle "$work/src" ""
@@ -323,6 +336,7 @@ case_verify_unlisted_file() (
 )
 
 case_verify_missing_inventory_entry() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/missing-entry"
     make_bundle "$work/src" ""
@@ -336,6 +350,7 @@ case_verify_missing_inventory_entry() (
 )
 
 case_verify_unsupported_schema_version() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/schema-version"
     make_bundle "$work/src" ""
@@ -353,6 +368,7 @@ case_verify_unsupported_schema_version() (
 # refused before extraction, which is what stops a nested or traversing entry
 # from ever reaching the filesystem.
 case_verify_nested_entry_rejected() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/nested"
     make_bundle "$work/src" ""
@@ -369,6 +385,7 @@ case_verify_nested_entry_rejected() (
 )
 
 case_manifest_self_listing_rejected() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/self-listed"
     make_bundle "$work/src" ""
@@ -384,6 +401,7 @@ case_manifest_self_listing_rejected() (
 )
 
 case_collect_rejects_partial_entity_filter() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     BASE_URL='https://connex.example.com'
     ORG_ID=3
@@ -402,6 +420,7 @@ case_collect_rejects_partial_entity_filter() (
 )
 
 case_collect_query_encoding() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     CORRELATION_ID='abcd1234efgh'
     ENTITY_TYPE=person
@@ -418,6 +437,7 @@ case_collect_query_encoding() (
 )
 
 case_collect_status_classification() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     support_bundle_classify_status 200 >/dev/null 2>&1
     assert_status status_200 0 "$?" || return 1
@@ -440,6 +460,7 @@ case_collect_status_classification() (
 # records, so it gets the strictest assertions: the sentinel secret, the raw
 # message body and the stack trace must all be gone, and the path redacted.
 case_journal_projection_drops_bodies() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     WORK_DIR="$SANDBOX/journal"
     mkdir -p "$WORK_DIR"
@@ -463,6 +484,7 @@ JSON
 )
 
 case_journal_correlation_filter() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     WORK_DIR="$SANDBOX/journal-filter"
     mkdir -p "$WORK_DIR"
@@ -529,6 +551,7 @@ case_read_rejects_bad_arguments() (
 # Ubuntu) silently ignores, so a case-sensitive match against Content-Type rejected every real
 # Spring Boot response as unexpected_content_type.
 case_download_accepts_real_content_type_headers() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     WORK_DIR="$SANDBOX/ct"
     mkdir -p "$WORK_DIR"
@@ -539,7 +562,7 @@ case_download_accepts_real_content_type_headers() (
                   'Content-Type: application/zip;charset=UTF-8'; do
         printf 'HTTP/1.1 200 OK\r\n%s\r\n\r\n' "$header" > "$WORK_DIR/response-headers"
         local parsed
-        parsed="$(tr 'A-Z' 'a-z' < "$WORK_DIR/response-headers" | tr -d '\r' \
+        parsed="$(tr '[:upper:]' '[:lower:]' < "$WORK_DIR/response-headers" | tr -d '\r' \
             | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
         case "$parsed" in
             application/zip*) ;;
@@ -548,7 +571,7 @@ case_download_accepts_real_content_type_headers() (
     done
     printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n' > "$WORK_DIR/response-headers"
     local parsed
-    parsed="$(tr 'A-Z' 'a-z' < "$WORK_DIR/response-headers" | tr -d '\r' \
+    parsed="$(tr '[:upper:]' '[:lower:]' < "$WORK_DIR/response-headers" | tr -d '\r' \
         | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
     case "$parsed" in
         application/zip*) printf 'html was accepted as zip\n'; return 1 ;;
@@ -559,6 +582,7 @@ case_download_accepts_real_content_type_headers() (
 # was absent from the cross-check set and slipped through unverified, and the renderers' plain
 # `[ -f ]` test then followed the link and printed the target.
 case_verify_rejects_symlink_entry() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/symlink"
     make_bundle "$work/src" ""
@@ -608,6 +632,7 @@ case_publish_refuses_existing_output() (
 # Regression: a mutation to the byteLength comparison survived the suite, so the length check was
 # effectively untested. This bundle has a correct digest recorded against a wrong length.
 case_verify_detects_length_mismatch() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/length"
     make_bundle "$work/src" ""
@@ -626,6 +651,7 @@ case_verify_detects_length_mismatch() (
 # (an array-valued sha256) aborted jq before the first row, so the loop body never ran, EVERY hash
 # and length check was skipped, and verification returned success on a forged bundle.
 case_verify_rejects_unprojectable_inventory() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/unprojectable"
     make_bundle "$work/src" ""
@@ -657,6 +683,7 @@ case_read_refuses_forged_manifest_without_claiming_verified() (
 
 # A short inventory projection must never be mistaken for a complete verification.
 case_verify_requires_every_row_examined() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/rowcount"
     make_bundle "$work/src" ""
@@ -695,6 +722,7 @@ case_read_strips_terminal_control_sequences() (
 # (g) support_bundle_download had no coverage at all, which is how the mawk content-type defect
 # reached a review. curl is stubbed so the real function runs offline.
 case_download_accepts_a_real_zip_response() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     WORK_DIR="$SANDBOX/dl-ok"
     mkdir -p "$WORK_DIR"
@@ -723,6 +751,7 @@ case_download_accepts_a_real_zip_response() (
 )
 
 case_download_rejects_a_non_zip_response() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     WORK_DIR="$SANDBOX/dl-html"
     mkdir -p "$WORK_DIR"
@@ -749,6 +778,7 @@ case_download_rejects_a_non_zip_response() (
 )
 
 case_download_maps_auth_failures() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     WORK_DIR="$SANDBOX/dl-403"
     mkdir -p "$WORK_DIR"
@@ -768,6 +798,7 @@ case_download_maps_auth_failures() (
 )
 
 case_download_rejects_transport_failure() (
+    # shellcheck source=deploy/support-bundle/collect.sh
     source "$SANDBOX/collect-lib.sh" 2>/dev/null
     WORK_DIR="$SANDBOX/dl-fail"
     mkdir -p "$WORK_DIR"
@@ -788,7 +819,9 @@ case_download_rejects_transport_failure() (
 
 # (f) sourcing the library twice must be a no-op rather than a readonly-redeclaration abort.
 case_library_is_safe_to_source_twice() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     assert_equals double_source_exit_integrity 67 "$EXIT_INTEGRITY" || return 1
 )
@@ -805,6 +838,7 @@ case_library_refuses_a_conflicting_exit_catalog() (
 # (d) a path carrying an embedded newline must be redacted as one value, not split into records
 # where only the first is examined.
 case_redactor_handles_embedded_newlines() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local result
     result="$(support_bundle_redact_path "/a

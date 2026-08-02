@@ -13,6 +13,7 @@ CATEGORIES = (
     "ocr",
     "migrations",
     "backup",
+    "support_bundle",
     "compose",
     "profile_boot",
     "cross_stack",
@@ -156,6 +157,10 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
 
         if path.startswith("deploy/backup/"):
             categories["backup"] = True
+            continue
+
+        if path.startswith("deploy/support-bundle/"):
+            categories["support_bundle"] = True
             continue
 
         if path.startswith("deploy/"):

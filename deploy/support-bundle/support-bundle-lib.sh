@@ -358,7 +358,7 @@ support_bundle_verify_inventory() {
     local directory="$1"
     local manifest="$directory/manifest.json"
     local schema_version listed path expected_hash expected_length actual_hash actual_length present
-    local rows expected_rows rows_read
+    local rows expected_rows rows_read verify_failure
     if [ ! -f "$manifest" ] || [ -L "$manifest" ]; then
         support_bundle_log error manifest_invalid reason manifest_missing
         return "$EXIT_INTEGRITY"
@@ -395,6 +395,7 @@ support_bundle_verify_inventory() {
     fi
     expected_rows="$(jq -r '.files | length' "$manifest")"
     rows_read=0
+    verify_failure=0
     while IFS=$'\t' read -r path expected_length expected_hash; do
         if [ -z "$path" ]; then
             continue
@@ -402,38 +403,41 @@ support_bundle_verify_inventory() {
         rows_read=$((rows_read + 1))
         if [[ ! "$path" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
             support_bundle_log error manifest_invalid reason unsafe_inventory_path entry "$path"
-            rm -f "$rows"
-            return "$EXIT_INTEGRITY"
+            verify_failure=1
+            break
         fi
         if [ "$path" = manifest.json ]; then
             support_bundle_log error manifest_invalid reason manifest_self_listed
-            rm -f "$rows"
-            return "$EXIT_INTEGRITY"
+            verify_failure=1
+            break
         fi
         if [[ ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]]; then
             support_bundle_log error manifest_invalid reason invalid_digest entry "$path"
-            rm -f "$rows"
-            return "$EXIT_INTEGRITY"
+            verify_failure=1
+            break
         fi
         if [ ! -f "$directory/$path" ] || [ -L "$directory/$path" ]; then
             support_bundle_log error integrity_failure reason inventory_entry_missing entry "$path"
-            rm -f "$rows"
-            return "$EXIT_INTEGRITY"
+            verify_failure=1
+            break
         fi
         actual_length="$(stat -c '%s' "$directory/$path")"
         if [ "$expected_length" != "$actual_length" ]; then
             support_bundle_log error integrity_failure reason length_mismatch entry "$path" expected "$expected_length" actual "$actual_length"
-            rm -f "$rows"
-            return "$EXIT_INTEGRITY"
+            verify_failure=1
+            break
         fi
         actual_hash="$(sha256sum "$directory/$path" | awk '{print $1}')"
         if [ "$expected_hash" != "$actual_hash" ]; then
             support_bundle_log error integrity_failure reason digest_mismatch entry "$path"
-            rm -f "$rows"
-            return "$EXIT_INTEGRITY"
+            verify_failure=1
+            break
         fi
     done < "$rows"
     rm -f "$rows"
+    if [ "$verify_failure" -ne 0 ]; then
+        return "$EXIT_INTEGRITY"
+    fi
     # Belt and braces: even with the status checked, assert every declared row was actually
     # examined, so a truncated projection can never masquerade as a complete verification.
     if [ "$rows_read" != "$expected_rows" ]; then
