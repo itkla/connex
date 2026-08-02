@@ -1843,11 +1843,11 @@ export function getCompanyTags(id: number, init: RequestInit = {}) {
 }
 
 export function addCompanyTag(id: number, tagId: number, init: RequestInit = {}) {
-    return postJson<void[]>(`/api/companies/${id}/tags/${tagId}`, {}, init);
+    return postJson<void>(`/api/companies/${id}/tags/${tagId}`, {}, init);
 }
 
 export function removeCompanyTag(id: number, tagId: number, init: RequestInit = {}) {
-    return deleteJson<void[]>(`/api/companies/${id}/tags/${tagId}`, init);
+    return deleteJson<void>(`/api/companies/${id}/tags/${tagId}`, init);
 }
 
 /*
@@ -2456,11 +2456,14 @@ export function addContactTag(id: number, tagId: number, init: RequestInit = {})
  * A write reports {@link CookieResult} rather than going through {@link safeWithCookie},
  * so a rejected request — a permission denial, a tenant mismatch, an unreachable backend —
  * cannot be mistaken for a completed one. A missing cookie reports `ok: false` for the same
- * reason: with no session there is nothing to write under, and the tag was not applied.
+ * reason: with no session there is nothing to write under, so nothing was applied.
+ *
+ * `ok: true` means the client saw the backend confirm the write. A connection lost after the
+ * backend committed still reports `ok: false`, which is the honest direction to be wrong in.
  * @param id the contact to tag
  * @param tagId the tag to apply
  * @param cookie the incoming request's cookie header, or null
- * @returns whether the tag was applied
+ * @returns whether the write was confirmed
  */
 export function addContactTagFromCookie(
     id: number,
@@ -2479,7 +2482,7 @@ export function removeContactTag(id: number, tagId: number, init: RequestInit = 
  * @param id the contact to untag
  * @param tagId the tag to remove
  * @param cookie the incoming request's cookie header, or null
- * @returns whether the tag was removed
+ * @returns whether the write was confirmed
  */
 export function removeContactTagFromCookie(
     id: number,

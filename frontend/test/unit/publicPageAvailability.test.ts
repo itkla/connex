@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -133,7 +133,18 @@ describe('authenticated surfaces keep the backend-unreachable guard', () => {
         expect(layout).not.toContain('getPublicPageUserFromCookie');
     });
 
-    it('leaves the invite pages on the guarded resolver', () => {
+    it('keeps the public resolver out of every authenticated surface', () => {
+        const authenticated = globSync('app/(app)/**/*.tsx', { cwd: process.cwd() });
+
+        expect(authenticated.length).toBeGreaterThan(50);
+        for (const file of authenticated) {
+            expect(source(file), `${file} must not degrade an auth failure`).not.toContain(
+                'getPublicPageUserFromCookie',
+            );
+        }
+    });
+
+    it('leaves the invite pages on the guarded resolver, since they decide on the visitor', () => {
         for (const page of ['app/invite/[token]/page.tsx', 'app/invite-link/[token]/page.tsx']) {
             expect(source(page)).toContain('getCurrentUserFromCookie');
             expect(source(page)).not.toContain('getPublicPageUserFromCookie');
