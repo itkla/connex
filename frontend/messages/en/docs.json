@@ -4990,7 +4990,7 @@
                             },
                             {
                                 "title": "Create and queue the send",
-                                "description": "Pick a frozen snapshot version and a message revision, then queue it. Queued sends go out on the next delivery pass. You can pause or cancel a send while it is running. Ignore the scheduled-time field in this dialog: it is saved but not yet acted on, so a send you queue goes out on the next pass regardless of what you put there."
+                                "description": "Pick a frozen snapshot version and a message revision, then queue it. Queued sends go out on the next delivery pass. You can pause or cancel a send while it is running. Sends cannot be scheduled for a later time: queueing is what sends them."
                             }
                         ]
                     },
@@ -5120,7 +5120,7 @@
                             },
                             {
                                 "title": "Fail closed",
-                                "description": "When a check cannot be completed, Connex refuses rather than guesses. Optional features generally stay hidden when they are not configured, rather than appearing and then failing. Campaign sending is the main place that is not yet true."
+                                "description": "When a check cannot be completed, Connex refuses rather than guesses. Optional features generally stay hidden when they are not configured, rather than appearing and then failing. Campaign delivery says so in place rather than hiding, because the rest of the campaign surface still works without it."
                             },
                             {
                                 "title": "Japanese as a first language",
@@ -5290,7 +5290,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Where a feature is off, it usually just is not there",
-                        "body": "Connex hides what it cannot deliver rather than showing a control that fails. That means an absent panel is often the correct signal that something is not configured, rather than a fault. There are two exceptions. Reports always render their figures, and only the written summary reports itself as unavailable. Campaigns are the bigger one: the whole campaign surface looks completely live whether or not sending is enabled, and because sending is off by default, that is what most instances look like. Seeing the campaign screens tells you nothing about whether delivery is configured."
+                        "body": "Connex hides what it cannot deliver rather than showing a control that fails. That means an absent panel is often the correct signal that something is not configured, rather than a fault. There are two exceptions, and both announce themselves in place. Reports always render their figures, and only the written summary reports itself as unavailable. Campaigns keep their planning, audience and message screens live whether or not sending is enabled, because those genuinely work without it; the delivery and export panels say up front when sending is not enabled on this instance, and the queue control stays disabled."
                     },
                     {
                         "type": "cards",
