@@ -104,7 +104,7 @@
     <result property="createdAt" column="created_at"/>
   </resultMap>
 
-  <select id="findOrgSupportSlice" resultMap="AuditSupportRow">
+  <select id="findOrgSupportSlice" resultMap="AuditSupportRow" timeout="20">
     SELECT <include refid="supportColumns"/>
     FROM audit_log al
     WHERE al.org_id = #{orgId}
@@ -122,10 +122,11 @@
     LIMIT #{limit}
   </select>
 
-  <select id="findEntitySupportSlice" resultMap="AuditSupportRow">
+  <select id="findEntitySupportSlice" resultMap="AuditSupportRow" timeout="20">
     SELECT <include refid="supportColumns"/>
     FROM audit_log al
     WHERE al.workspace_id = #{workspaceId}
+      AND al.org_id = #{orgId}
       AND al.entity_type = #{entityType}
       AND al.entity_id = #{entityId}
       AND al.created_at &gt;= #{since}

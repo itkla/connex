@@ -43,6 +43,9 @@ declare -rx EXIT_READ=69
 
 declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=1
 
+# Mirrors the backend's own uncompressed ceiling.
+declare -rx SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES=67108864
+
 SUPPORT_BUNDLE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPPORT_BUNDLE_STARTED_EPOCH="$(date +%s)"
 SUPPORT_BUNDLE_PHASE=initializing
@@ -334,7 +337,16 @@ support_bundle_validate_entry_names() {
 support_bundle_extract() {
     local archive="$1"
     local destination="$2"
-    local irregular
+    local irregular declared
+    # The size guard runs first: it is the cheapest check and it is the one protecting the
+    # operator's filesystem, so a decompression bomb must be refused before any other inspection.
+    declared="$(zipinfo -t "$archive" 2>/dev/null | awk '{print $3}')"
+    if [[ "$declared" =~ ^[0-9]+$ ]] \
+        && [ "$declared" -gt "$SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES" ]; then
+        support_bundle_log error archive_invalid reason uncompressed_size_exceeded \
+            declared "$declared" limit "$SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES"
+        return "$EXIT_INTEGRITY"
+    fi
     support_bundle_validate_entry_names "$archive" || return "$EXIT_INTEGRITY"
     if ! unzip -qq -o -DD "$archive" -d "$destination" >/dev/null 2>&1; then
         support_bundle_log error archive_invalid reason extraction_failed

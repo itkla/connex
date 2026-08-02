@@ -924,6 +924,7 @@ case_redactor_handles_embedded_newlines() (
 # pass through the renderer's sanitizer. A rejected ZIP entry name is logged precisely BECAUSE it
 # failed the charset check, handing the archive control of the operator's terminal.
 case_log_escaper_strips_terminal_control_bytes() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local hostile line
     hostile="$(printf 'evil\033[2K\033[1A\033[8mhidden')"
@@ -957,6 +958,56 @@ case_hostile_entry_name_cannot_repaint_the_terminal() (
     assert_contains hostile_entry_summary 'status=failure' <(printf '%s\n' "$output") || return 1
 )
 
+# Regression: `column -t -s ,` split on commas inside quoted CSV fields, shifting every later
+# value under the wrong header — a support engineer would read the wrong actor for an event.
+case_read_parses_quoted_csv_fields() (
+    local work="$SANDBOX/quoted-csv"
+    make_bundle "$work/src" ""
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
+    printf '9001,workspace,7,3,"person.archive, bulk",person,412,55,success,req-1,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
+    local length hash
+    length="$(stat -c '%s' "$work/src/audit-slice.csv")"
+    hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
+    jq --argjson len "$length" --arg sha "$hash" \
+        '.files = [.files[] | if .path == "audit-slice.csv" then .byteLength = $len | .sha256 = $sha else . end]' \
+        "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    local output status
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --section audit 2>&1)"
+    status=$?
+    assert_status quoted_csv_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    # The embedded comma must not push the actor id into a different column.
+    local row
+    row="$(printf '%s\n' "$output" | grep '^9001')"
+    case "$row" in
+        *"person.archive, bulk"*) ;;
+        *) printf 'quoted field was split: [%s]\n' "$row"; return 1 ;;
+    esac
+)
+
+# Regression: nothing bounded what extraction would write, so a decompression bomb could fill the
+# operator's temporary filesystem simply by being opened.
+case_extract_refuses_an_oversized_archive() (
+    # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
+    source "$SANDBOX/support-bundle-lib.sh"
+    local work="$SANDBOX/bomb"
+    mkdir -p "$work/src" "$work/out"
+    # Highly compressible payload well past the ceiling.
+    head -c 100000000 /dev/zero > "$work/src/readiness.json" 2>/dev/null || {
+        printf 'skip: cannot create the oversized fixture\n'; return 0; }
+    rm -f "$work/bundle.zip"
+    ( cd "$work/src" && zip --quiet --no-dir-entries -X "$work/bundle.zip" ./* )
+    rm -f "$work/src/readiness.json"
+    local output
+    output="$(support_bundle_extract "$work/bundle.zip" "$work/out" 2>&1)"
+    assert_status bomb_rejected 67 "$?" || return 1
+    assert_contains bomb_reason 'reason=uncompressed_size_exceeded' <(printf '%s\n' "$output") || return 1
+    rm -f "$work/bundle.zip"
+)
+
+run_case read_parses_quoted_csv_fields case_read_parses_quoted_csv_fields
+run_case extract_refuses_an_oversized_archive case_extract_refuses_an_oversized_archive
 run_case log_escaper_strips_terminal_control_bytes case_log_escaper_strips_terminal_control_bytes
 run_case hostile_entry_name_cannot_repaint_the_terminal case_hostile_entry_name_cannot_repaint_the_terminal
 run_case download_accepts_a_real_zip_response case_download_accepts_a_real_zip_response

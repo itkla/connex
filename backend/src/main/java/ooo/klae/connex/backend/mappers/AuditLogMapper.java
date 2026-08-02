@@ -40,6 +40,7 @@ public interface AuditLogMapper {
         @Param("limit") int limit);
 
     List<AuditSupportRowDto> findEntitySupportSlice(@Param("workspaceId") int workspaceId,
+        @Param("orgId") int orgId,
         @Param("entityType") String entityType,
         @Param("entityId") int entityId,
         @Param("since") Instant since,

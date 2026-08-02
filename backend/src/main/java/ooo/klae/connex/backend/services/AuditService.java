@@ -642,6 +642,7 @@ public class AuditService {
      * and that the actor holds {@code AUDIT_READ} in it; this method does not widen that gate.
      *
      * @param workspaceId the workspace the entity belongs to
+     * @param orgId       the organization the workspace belongs to
      * @param entityType  the record type
      * @param entityId    the record id
      * @param since       the inclusive window start
@@ -650,10 +651,11 @@ public class AuditService {
      * @param limit       the maximum number of rows to disclose
      * @return the support slice
      */
-    public AuditSlice supportSliceForEntity(int workspaceId, String entityType, int entityId,
-            Instant since, Instant until, String requestId, int limit) {
+    public AuditSlice supportSliceForEntity(int workspaceId, int orgId, String entityType,
+            int entityId, Instant since, Instant until, String requestId, int limit) {
         return toSupportSlice(auditLogMapper.findEntitySupportSlice(
-                workspaceId, entityType, entityId, since, until, requestId, limit + 1), limit);
+                workspaceId, orgId, entityType, entityId, since, until, requestId, limit + 1),
+            limit);
     }
 
     /**

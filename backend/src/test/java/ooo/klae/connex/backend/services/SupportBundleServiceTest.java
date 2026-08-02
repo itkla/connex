@@ -50,6 +50,9 @@ import tools.jackson.databind.ObjectMapper;
  */
 class SupportBundleServiceTest {
     private static final String SENTINEL = "SENTINEL_SECRET_VALUE";
+    private static final String SUPPORT_CSV_HEADER =
+        "auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,"
+            + "createdAt,contentFieldsOmitted";
     private static final Instant NOW = Instant.parse("2026-07-31T05:00:00Z");
     private static final int ORG_ID = 3;
     private static final int ACTOR_ID = 55;
@@ -243,13 +246,94 @@ class SupportBundleServiceTest {
         AuditService.AuditSlice slice = realAuditService.supportSliceForOrg(
             3, NOW.minus(Duration.ofDays(7)), NOW, null, 10);
 
-        assertTrue(slice.csv().contains("actorId"));
+        // Pinned exactly, not spot-checked. A deny-list of remembered column names cannot catch a
+        // sensitive column nobody thought to add to the list.
+        assertEquals(SUPPORT_CSV_HEADER, slice.csv().lines().findFirst().orElseThrow());
         assertTrue(slice.csv().contains("55"));
-        assertFalse(slice.csv().contains("actorLabel"));
-        assertFalse(slice.csv().contains("currentActorLabel"));
-        assertFalse(slice.csv().contains("targetLabel"));
         assertFalse(slice.truncated());
         assertEquals(1, slice.rowCount());
+    }
+
+    /**
+     * Pins the projection DTO's shape. The CSV formatter can only emit what this record carries,
+     * so widening it is the first step of any accidental disclosure and must fail here.
+     */
+    @Test
+    void theAuditProjectionExposesExactlyTheApprovedFields() {
+        List<String> fields = java.util.Arrays.stream(AuditSupportRowDto.class.getRecordComponents())
+            .map(java.lang.reflect.RecordComponent::getName)
+            .toList();
+
+        assertEquals(List.of("auditId", "workspaceId", "orgId", "action", "entityType", "entityId",
+            "actorId", "outcome", "requestId", "createdAt"), fields,
+            "The support projection changed. Every field here is disclosed to whoever receives the "
+                + "bundle, so a new field must be reviewed as a disclosure, not added for "
+                + "convenience.");
+    }
+
+    /**
+     * Pins the SQL fragment itself, which nothing else reads. The DTO cannot protect what the
+     * query fetches: adding a column to the fragment and the result map would put employee free
+     * text into memory and, the moment the DTO grew a matching field, into the bundle.
+     */
+    @Test
+    void theSupportSqlFragmentSelectsExactlyTheApprovedColumns() throws Exception {
+        String mapper = java.nio.file.Files.readString(
+            java.nio.file.Path.of("src/main/resources/mappers/AuditLogMapper.xml"));
+        java.util.regex.Matcher fragment = java.util.regex.Pattern
+            .compile("<sql id=\"supportColumns\">(.*?)</sql>", java.util.regex.Pattern.DOTALL)
+            .matcher(mapper);
+        assertTrue(fragment.find(), "The supportColumns fragment is missing");
+
+        List<String> columns = java.util.Arrays.stream(fragment.group(1).split(","))
+            .map(String::trim)
+            .filter(column -> !column.isEmpty())
+            .toList();
+
+        assertEquals(List.of("al.id", "al.workspace_id", "al.org_id", "al.action", "al.entity_type",
+            "al.entity_id", "al.actor_id", "al.outcome", "al.request_id", "al.created_at"), columns,
+            "The support SQL projection changed. Columns such as summary, changes, context, "
+                + "actor_label, target_label, ip_address, user_agent and session_id carry user "
+                + "data and must never be fetched for a bundle.");
+
+        for (String statement : List.of("findOrgSupportSlice", "findEntitySupportSlice")) {
+            java.util.regex.Matcher select = java.util.regex.Pattern
+                .compile("<select id=\"" + statement + "\".*?</select>",
+                    java.util.regex.Pattern.DOTALL)
+                .matcher(mapper);
+            assertTrue(select.find(), statement + " is missing");
+            String body = select.group();
+            assertTrue(body.contains("supportColumns"),
+                statement + " must use the narrow support projection");
+            assertFalse(body.toLowerCase(java.util.Locale.ROOT).contains("app_user"),
+                statement + " must not join app_user; that join exists only to resolve a display "
+                    + "name, which a bundle must never carry");
+        }
+    }
+
+    /**
+     * Sensitive columns must be unreachable rather than merely unformatted: the projection has no
+     * field to hold them, so a value seeded into the audit row cannot reach the CSV at all.
+     */
+    @Test
+    void sensitiveAuditContentCannotReachTheCsv() {
+        AuditService realAuditService = new AuditService(
+            auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
+            new ClientIpResolver(""));
+        when(auditLogMapper.findOrgSupportSlice(anyInt(), any(), any(), any(), anyInt()))
+            .thenReturn(List.of(new AuditSupportRowDto(
+                9001L, 7, 3, "person.archive", "person", 412, 55, "success",
+                "req-1", Instant.parse("2026-07-31T04:05:06Z"))));
+
+        String csv = realAuditService.supportSliceForOrg(
+            3, NOW.minus(Duration.ofDays(7)), NOW, null, 10).csv();
+
+        assertFalse(csv.contains(SENTINEL));
+        for (String forbidden : List.of("actorLabel", "currentActorLabel", "targetLabel", "summary",
+                "changes", "context", "ipAddress", "userAgent", "sessionId", "prevHash",
+                "rowHash")) {
+            assertFalse(csv.contains(forbidden), "CSV disclosed " + forbidden);
+        }
     }
 
     /**

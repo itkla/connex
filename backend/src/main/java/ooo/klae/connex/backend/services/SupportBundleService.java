@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -124,6 +125,7 @@ public class SupportBundleService {
             generatedAt);
 
         if (!admission.tryAcquire()) {
+            auditOutcome(request.orgId(), "refused_busy", 0);
             throw new TooManyRequestsException(
                 "Too many support bundles are being assembled; retry shortly");
         }
@@ -133,7 +135,13 @@ public class SupportBundleService {
             auditOutcome(request.orgId(), "success", bundle.content().length);
             return bundle;
         } catch (RuntimeException | Error failure) {
-            auditOutcome(request.orgId(), "failed", 0);
+            try {
+                auditOutcome(request.orgId(), "failed", 0);
+            } catch (RuntimeException | Error auditFailure) {
+                // The original failure is what the caller needs; an audit problem must not replace
+                // it, but it must not vanish either.
+                failure.addSuppressed(auditFailure);
+            }
             throw failure;
         } finally {
             admission.release();
@@ -203,24 +211,31 @@ public class SupportBundleService {
 
     private SupportBundle assemble(int orgId, SupportBundleFilters filters) {
         Assembly assembly = new Assembly(filters, clock.instant().plus(ASSEMBLY_BUDGET));
+        AtomicReference<AuditService.AuditSlice> slice = new AtomicReference<>();
         try (ZipOutputStream zip = new ZipOutputStream(assembly.buffer, StandardCharsets.UTF_8)) {
-            AuditService.AuditSlice slice = auditSlice(orgId, filters);
-            SupportBundleConfigService.SafeConfiguration configuration =
-                configService.safeConfiguration();
-
+            // Every source is read inside collect(), never before it. Reading eagerly would put
+            // the expensive work ahead of the budget check and, worse, would make a failing source
+            // abort the whole bundle instead of taking the declared-omission path this method
+            // promises.
             collect(assembly, zip, "readiness.json", "application/json",
                 () -> objectMapper.writeValueAsBytes(readinessService.readiness(orgId)));
-            collect(assembly, zip, "config.json", "application/json",
-                () -> objectMapper.writeValueAsBytes(configuration.values()));
+            collect(assembly, zip, "config.json", "application/json", () -> {
+                SupportBundleConfigService.SafeConfiguration configuration =
+                    configService.safeConfiguration();
+                configuration.omissions().forEach(assembly::omit);
+                return objectMapper.writeValueAsBytes(configuration.values());
+            });
             collect(assembly, zip, "migrations.json", "application/json",
                 () -> objectMapper.writeValueAsBytes(migrationHistoryService.history()));
-            collect(assembly, zip, "audit-slice.csv", "text/csv",
-                () -> slice.csv().getBytes(StandardCharsets.UTF_8));
+            collect(assembly, zip, "audit-slice.csv", "text/csv", () -> {
+                AuditService.AuditSlice collected = auditSlice(orgId, filters);
+                slice.set(collected);
+                return collected.csv().getBytes(StandardCharsets.UTF_8);
+            });
 
             assembly.omit("client-errors.json", "no_persisted_source");
             assembly.omit("job-runs.json", "job_run_not_available");
-            configuration.omissions().forEach(assembly::omit);
-            writeManifest(zip, orgId, filters, assembly, slice);
+            writeManifest(zip, orgId, filters, assembly, slice.get());
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to assemble the support bundle", exception);
         }
@@ -290,18 +305,20 @@ public class SupportBundleService {
          * field sizes is wrong, and truncating silently would hand support an archive that looks
          * complete but is not.
          */
-        private void requireWithinCap(String path, int length) {
-            uncompressedBytes += length;
-            if (uncompressedBytes > MAX_UNCOMPRESSED_BYTES) {
-                throw new IllegalStateException(
-                    "Support bundle exceeded its uncompressed ceiling while adding " + path);
+        private void requireWithinCap(String path, long length) {
+            if (uncompressedBytes + length > MAX_UNCOMPRESSED_BYTES) {
+                throw new SupportBundleTooLargeException(
+                    "Support bundle exceeded its uncompressed ceiling while adding " + path
+                        + "; narrow the window with since or add an entity filter");
             }
+            uncompressedBytes += length;
         }
 
         private void requireWithinBudget(Instant now) {
             if (now.isAfter(deadline)) {
-                throw new IllegalStateException(
-                    "Support bundle assembly exceeded its time budget");
+                throw new SupportBundleTooLargeException(
+                    "Support bundle assembly exceeded its time budget; narrow the window with "
+                        + "since or add an entity filter");
             }
         }
     }
@@ -316,6 +333,7 @@ public class SupportBundleService {
         if (filters.entityType() != null) {
             return auditService.supportSliceForEntity(
                 filters.workspaceId(),
+                orgId,
                 filters.entityType(),
                 filters.entityId(),
                 filters.since(),
@@ -362,9 +380,14 @@ public class SupportBundleService {
         manifest.put("filters", manifestFilters(filters));
         inventory.sort(Comparator.comparing(ManifestEntry::path));
         manifest.put("files", inventory);
-        manifest.put("auditSliceRowCount", slice.rowCount());
-        manifest.put("auditSliceTruncated", slice.truncated());
+        manifest.put("auditSliceRowCount", slice == null ? null : slice.rowCount());
+        manifest.put("auditSliceTruncated", slice == null ? null : slice.truncated());
         manifest.put("auditSliceLimit", AUDIT_SLICE_LIMIT);
+        // A correlation filter matches the server-minted request id, which a user cannot quote, so
+        // an empty result under that filter is reported as inconclusive rather than as evidence
+        // that nothing happened.
+        manifest.put("auditSliceInconclusive",
+            filters.correlationId() != null && slice != null && slice.rowCount() == 0);
         manifest.put("omissions", omissions);
         ZipEntry entry = new ZipEntry(MANIFEST_ENTRY);
         entry.setTime(filters.until().toEpochMilli());
@@ -441,6 +464,18 @@ public class SupportBundleService {
      * @param sha256     the hex SHA-256 of the uncompressed bytes
      */
     public record ManifestEntry(String path, String mediaType, int byteLength, String sha256) {
+    }
+
+    /** Signals that a bundle would exceed its size or time ceiling. */
+    public static class SupportBundleTooLargeException extends RuntimeException {
+        /**
+         * Creates the exception.
+         *
+         * @param message the operator-facing message, including how to narrow the request
+         */
+        public SupportBundleTooLargeException(String message) {
+            super(message);
+        }
     }
 
     /**

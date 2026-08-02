@@ -81,6 +81,19 @@ support_bundle_heading() {
     printf '\n== %s ==\n' "$1"
 }
 
+# `column -t -s ,` splits on every comma, including ones inside a quoted CSV field, which silently
+# shifts values under the wrong headers — exactly the misreading a support engineer must not make.
+# Parse the CSV properly and re-emit it tab-separated for column.
+support_bundle_render_csv() {
+    python3 -c '
+import csv, sys
+writer = csv.writer(sys.stdout, delimiter="\t", lineterminator="\n")
+for row in csv.reader(sys.stdin):
+    if row:
+        writer.writerow(row)
+' | support_bundle_sanitize_output | column -t -s $'\t'
+}
+
 support_bundle_render_json() {
     local directory="$1"
     local file="$2"
@@ -123,17 +136,17 @@ support_bundle_render_audit() {
     fi
     if [ -z "$CORRELATION_ID" ]; then
         support_bundle_heading "Audit slice"
-        support_bundle_sanitize_output < "$slice" | column -t -s , || return "$EXIT_READ"
+        support_bundle_render_csv < "$slice" || return "$EXIT_READ"
         return 0
     fi
     support_bundle_heading "Audit slice (correlation $CORRELATION_ID)"
-    head -n 1 "$slice" | support_bundle_sanitize_output | column -t -s , || return "$EXIT_READ"
+    head -n 1 "$slice" | support_bundle_render_csv || return "$EXIT_READ"
     matches="$(tail -n +2 "$slice" | grep -F -- "$CORRELATION_ID" || true)"
     if [ -z "$matches" ]; then
         printf '(no matching rows)\n'
         return 0
     fi
-    printf '%s\n' "$matches" | support_bundle_sanitize_output | column -t -s , || return "$EXIT_READ"
+    printf '%s\n' "$matches" | support_bundle_render_csv || return "$EXIT_READ"
 }
 
 support_bundle_render_journal() {
@@ -162,7 +175,7 @@ main() {
     local exit_code=0
     support_bundle_parse_arguments "$@" || exit "$?"
     SUPPORT_BUNDLE_PHASE=validating
-    support_bundle_require_commands jq unzip zipinfo sha256sum column || exit "$?"
+    support_bundle_require_commands jq unzip zipinfo sha256sum column python3 || exit "$?"
     support_bundle_validate_archive_path "$ARCHIVE" || exit "$?"
 
     WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/connex-support-bundle-read.XXXXXX")"
