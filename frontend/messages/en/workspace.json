@@ -588,6 +588,7 @@
     "retry": "Try again",
     "empty": "Nothing to report.",
     "loadFailed": "Could not load diagnostics.",
+    "noAccess": "Only members with workspace settings access can view diagnostics.",
     "never": "Never",
     "ready": "Ready",
     "notReady": "Not ready",

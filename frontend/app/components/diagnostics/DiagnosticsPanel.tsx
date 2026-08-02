@@ -6,7 +6,9 @@ import { useTranslations } from "next-intl";
 import type { TenantDiagnostics } from "@/app/lib/types";
 import { ApiError, getOrgDiagnostics, getWorkspaceDiagnostics } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import AccessDenied from "@/app/components/AccessDenied";
 import SectionBoundary from "@/app/components/SectionBoundary";
+import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
 import { Button } from "@/components/ui/button";
 import { JobRunsSection } from "./JobRunsSection";
 import { MailDeliverabilitySection } from "./MailDeliverabilitySection";
@@ -27,14 +29,21 @@ export type DiagnosticsScope = "workspace" | "organization";
  *
  * The endpoint is a single aggregate, so the fetch has one failure mode: if the request itself
  * fails the page shows one error with one retry, rather than repeating the same doomed retry in
- * every section. Partial degradation is carried in the payload — the backend guards each source
- * independently and names the ones that failed in `unavailableSections`, so a degraded section is
- * never presented as a healthy empty one — and each section is wrapped in a render boundary keyed
- * on the scope and reload count, so a tripped boundary recovers on the next refresh. Refresh is
- * always available, and a failed refresh keeps the last good payload behind a stale banner.
+ * every section. A refusal is not one of those failures. The caller lacks the permission the
+ * endpoint requires, so the request is forbidden however many times it is sent and only a
+ * permission grant changes that; a 403 therefore replaces the panel with the shared inline denial
+ * instead of offering a retry that cannot succeed, in the same grammar the other settings and
+ * organization tabs use. Partial degradation is carried in the payload — the backend guards each
+ * source independently and names the ones that failed in `unavailableSections`, so a degraded
+ * section is never presented as a healthy empty one — and each section is wrapped in a render
+ * boundary keyed on the scope and reload count, so a tripped boundary recovers on the next
+ * refresh. Refresh stays available on every state that renders the panel, and a failed refresh
+ * keeps the last good payload behind a stale banner.
  *
  * The mail section owns its own endpoint and state, so it stays mounted even when the aggregate
- * fails: a broken aggregate is exactly when an administrator needs the send test.
+ * fails: a broken aggregate is exactly when an administrator needs the send test. A refusal is the
+ * one exception — the send test is gated on the same permission as the aggregate, so it leaves
+ * with the rest of the panel rather than offering a member an action they cannot take.
  */
 export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope }) {
     const t = useTranslations("TenantDiagnostics");
@@ -43,6 +52,7 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [referenceId, setReferenceId] = useState<string | null>(null);
+    const [accessDenied, setAccessDenied] = useState(false);
     const [reloadToken, setReloadToken] = useState(0);
 
     const workspaceId = activeWorkspace?.id ?? null;
@@ -56,6 +66,7 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
             setLoading(true);
             setError(null);
             setReferenceId(null);
+            setAccessDenied(false);
             try {
                 const next =
                     scope === "workspace"
@@ -65,7 +76,9 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
                 setData(next);
             } catch (caught) {
                 if (cancelled) return;
-                if (caught instanceof ApiError) {
+                if (caught instanceof ApiError && caught.status === 403) {
+                    setAccessDenied(true);
+                } else if (caught instanceof ApiError) {
                     setError(caught.message);
                     setReferenceId(caught.correlationId ?? null);
                 } else {
@@ -83,6 +96,14 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
     const refresh = useCallback(() => {
         setReloadToken((token) => token + 1);
     }, []);
+
+    if (accessDenied) {
+        return scope === "organization" ? (
+            <NoAccessCard />
+        ) : (
+            <AccessDenied variant="inline" body={t("noAccess")} />
+        );
+    }
 
     const showLoading = scopeId !== null && loading;
     const findings = showLoading ? [] : (data?.findings ?? []);
