@@ -852,6 +852,8 @@ class DealServiceTest extends AbstractServiceTest {
         addLineItem(deal);
         Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
 
+        long valueChangedBefore = dealEventCount(deal.getId(), "deal.value_changed");
+
         Deal updated = dealService.updateName(deal.getId(), "FY27 Renewal");
 
         assertEquals("FY27 Renewal", updated.getName());
@@ -872,7 +874,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(before.getName(), changes.path("name").path("old").asText());
         assertEquals("FY27 Renewal", changes.path("name").path("new").asText());
         assertTrue(hasDealEvent(deal.getId(), "deal.updated"));
-        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+        assertEquals(valueChangedBefore, dealEventCount(deal.getId(), "deal.value_changed"));
     }
 
     @Test
@@ -971,6 +973,8 @@ class DealServiceTest extends AbstractServiceTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         addLineItem(deal);
 
+        long valueChangedBefore = dealEventCount(deal.getId(), "deal.value_changed");
+
         ConflictException exception = assertThrows(ConflictException.class,
             () -> dealService.updateValue(deal.getId(), new BigDecimal("125000.00")));
 
@@ -981,7 +985,7 @@ class DealServiceTest extends AbstractServiceTest {
             "SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
             BigDecimal.class, workspace.getId(), deal.getId());
         assertEquals(0, new BigDecimal("25.00").compareTo(storedValue));
-        assertFalse(hasDealEvent(deal.getId(), "deal.value_changed"));
+        assertEquals(valueChangedBefore, dealEventCount(deal.getId(), "deal.value_changed"));
     }
 
     @Test
@@ -1480,6 +1484,15 @@ class DealServiceTest extends AbstractServiceTest {
         request.setUnitPrice(new BigDecimal(unitPrice));
         request.setQuantity(BigDecimal.ONE);
         dealLineItemService.create(deal.getId(), request);
+    }
+
+    private long dealEventCount(int dealId, String event) {
+        return applicationEvents.stream(RuleTriggerEvent.class)
+            .filter(trigger -> trigger.workspaceId() == workspace.getId()
+                && trigger.entityId() == dealId
+                && "deal".equals(trigger.recordType())
+                && event.equals(trigger.event()))
+            .count();
     }
 
     private boolean hasDealEvent(int dealId, String event) {
