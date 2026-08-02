@@ -711,10 +711,41 @@ and capped, and instance-scoped rows (no workspace) retain only `phase`.
 
 ### Support bundle
 
-**Tracked and not yet shipped.** A support-bundle collector does not exist at this commit. This
-section will be replaced with its contents, invocation, and redaction guarantees when the work
-lands. Until then, do not promise a partner a bundle, and do not improvise one by collecting logs ad
-hoc without agreeing scope in writing first — deployment logs contain tenant-identifying data.
+A redacted support bundle is the sanctioned way to move diagnostic state out of a deployment Connex
+does not operate. Full contents, the redaction contract, and a worked investigation are in
+[SUPPORT_BUNDLE.md](SUPPORT_BUNDLE.md) — read that before you ask a customer for one. What follows is
+only what an operator needs at ticket time.
+
+| | |
+|---|---|
+| In-product | `GET /api/orgs/{orgId}/support-bundle` — organization administrator **plus WebAuthn step-up** |
+| Operator tooling | [`deploy/support-bundle/collect.sh`](../deploy/support-bundle/collect.sh) to collect, [`read.sh`](../deploy/support-bundle/read.sh) to inspect — both executable, invoked directly |
+| Assembly | **Synchronous**, not streamed |
+| Bounds | 64 MB uncompressed ceiling and a 30-second budget, both **fail closed**; collection queries carry a 20-second database statement timeout |
+| Busy | `429` |
+| Too large or too slow | `413`, with text telling you to narrow the window or add an entity filter |
+
+**Ask for a narrower window before you ask for a bigger bundle.** The ceiling and budget are refusals,
+not truncations, so a `413` means the request was too broad — shorten `since` or filter to an entity.
+The statement timeout is enforced at the database, so a runaway collection query is cancelled rather
+than merely noticed.
+
+**There is no journal or log slice, deliberately.** A systemd unit's journal cannot be scoped to one
+tenant, so journal collection was removed rather than shipped unsafe; the requirements for a correct
+implementation are tracked in [#970](https://github.com/itkla/connex/issues/970). **Do not improvise
+one by collecting logs ad hoc** — deployment logs contain tenant-identifying data, and that is exactly
+the collection the bundle refuses to make. If you genuinely need log content, agree the scope in
+writing first.
+
+**The bundle's request id is not the id your user quoted.** `audit-slice.csv` carries a
+**server-minted** `requestId`, deliberately distinct from the `X-Correlation-Id` a caller can supply.
+Do not expect a user's reference to appear in a bundle; use the bundle for state and the deployment's
+own logs for that lookup.
+
+The audit slice carries `actorId` only and no display names, marks truncation explicitly
+(`auditSliceTruncated` with a row count), and ships a declared-omissions map so a missing file is
+visibly a decision rather than a gap — `client-errors.json` is declared absent because no persisted
+source exists for it.
 
 ## Access boundaries
 

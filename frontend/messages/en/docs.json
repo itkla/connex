@@ -5231,6 +5231,10 @@
                             [
                                 "Tenant diagnostics",
                                 "Shipped and on. A read-only health page for your workspace, and an organisation-wide view for administrators."
+                            ],
+                            [
+                                "Support bundle",
+                                "Shipped and on. An organisation administrator can download a redacted diagnostic bundle to hand to support."
                             ]
                         ]
                     },
@@ -5423,6 +5427,10 @@
                             {
                                 "title": "The audit log is append-only",
                                 "description": "Audit entries are chained with an integrity secret and protected at the database level so the application cannot rewrite history."
+                            },
+                            {
+                                "title": "Diagnostic state moves by bundle, not by access",
+                                "description": "When a ticket needs more than a reference code, an organisation administrator downloads a redacted bundle and hands it over deliberately. It carries readiness, configuration and an audit slice, never secrets, hosts, record values or people's names, and it collects no log content at all."
                             }
                         ]
                     },
@@ -5568,6 +5576,44 @@
                                 "description": "On a self-hosted deployment your own team holds the logs and can match your reference directly. Otherwise it goes to Connex support."
                             }
                         ]
+                    },
+                    {
+                        "type": "heading",
+                        "text": "Handing diagnostics to support",
+                        "level": 2
+                    },
+                    {
+                        "type": "prose",
+                        "text": "If the page and a reference code are not enough, an organisation administrator can download a support bundle: a single redacted archive of your deployment's diagnostic state that you hand over deliberately. It is assembled on request, so it reflects the moment you asked."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What is and is not in it",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Readiness and configuration",
+                                "description": "The same health picture the diagnostics page shows, plus allowlisted configuration and migration history."
+                            },
+                            {
+                                "title": "An audit slice",
+                                "description": "Recent audit rows for the window you asked for, identified by account id only. No display names appear anywhere."
+                            },
+                            {
+                                "title": "No secrets and no record values",
+                                "description": "No credentials, no hostnames, no CRM field values and no personal names. What was left out on purpose is listed in the bundle, so a missing file reads as a decision rather than a gap."
+                            },
+                            {
+                                "title": "No logs at all",
+                                "description": "The bundle collects no log or journal content. Server logs cannot be narrowed to one workspace, so collecting them was deliberately left out rather than shipped unsafe."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Ask for a narrower window, not a bigger bundle",
+                        "body": "Assembly stops rather than trimming: there is a size ceiling and a time budget, and exceeding either is refused outright with a message asking you to shorten the period or narrow it to one record. If a bundle is refused, make the request smaller rather than trying again unchanged."
                     },
                     {
                         "type": "cards",
