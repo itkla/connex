@@ -513,7 +513,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         return (
             <>
                 <EmptyState
-                    tone="muted"
+                    tone={filtersActive ? 'muted' : 'brand'}
                     icon={InboxIcon}
                     title={filtersActive ? t('noResults') : t('emptyState')}
                     action={
