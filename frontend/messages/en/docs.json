@@ -1080,7 +1080,7 @@
                             ],
                             [
                                 "The deal is lost",
-                                "The realised value is zero, on every route to losing a deal."
+                                "The realised value is set to zero when you lose the deal through the close dialog. Other routes to a lost stage do not currently clear a realised value that was already recorded, so a deal won and later marked lost can keep its won figure; this is a known defect rather than the intended contract."
                             ]
                         ]
                     },
@@ -1323,7 +1323,7 @@
                         "items": [
                             {
                                 "title": "Names and contact details are replaced first",
-                                "description": "People, companies, email addresses and phone numbers are swapped for placeholders before anything is sent, and swapped back in the answer. Remaining addresses and long number sequences in free text are stripped."
+                                "description": "People, companies, email addresses and phone numbers are swapped for placeholders before anything is sent, and swapped back in the answer. In free text, Connex additionally removes email addresses, web addresses and long runs of digits such as phone numbers. It does not detect postal addresses in free text, so a street address typed into a note is sent as written."
                             },
                             {
                                 "title": "Sensitive free text is withheld, not masked",
@@ -1383,7 +1383,7 @@
                         "title": "Keep going",
                         "items": [
                             {
-                                "title": "Warmth and temperature",
+                                "title": "Warmth & temperature",
                                 "description": "The computed signals the AI explanations sit on top of.",
                                 "href": "/docs/relationship-intelligence/warmth-and-temperature"
                             },
@@ -1907,7 +1907,7 @@
                             },
                             {
                                 "title": "Choose who receives it",
-                                "description": "Any active members of your workspace. Each recipient has to independently have permission to see everything in the report, and anyone who no longer does is dropped when you save."
+                                "description": "Any active members of your workspace. Each recipient has to independently have permission to see everything in the report: if one of them does not, saving the schedule fails and tells you so, rather than quietly sending them less. Members who have left the workspace are dropped from the list for you."
                             },
                             {
                                 "title": "Let it run",
@@ -1919,7 +1919,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Snapshots are kept, but not forever",
-                        "body": "Scheduled deliveries keep the most recent copies per schedule, and older ones are cleared away. A link from an old email may eventually tell you the frozen copy is no longer available and offer you the live report instead. That is expected, and it is never a broken page."
+                        "body": "Scheduled deliveries keep the most recent copies per schedule, and older ones are cleared away. A link from an old email may eventually tell you the frozen copy is no longer available and offer you the live report instead. That is expected: you get a page offering you the live report, rather than an error."
                     },
                     {
                         "type": "callout",
@@ -1942,7 +1942,7 @@
                             },
                             {
                                 "title": "Image",
-                                "description": "Renders the report as a picture in your browser, for pasting into a deck or a message."
+                                "description": "Exports the report as a PNG image, rendered in your browser, for pasting into a deck or a message."
                             },
                             {
                                 "title": "Print or PDF",
@@ -2782,7 +2782,7 @@
                             },
                             {
                                 "question": "We turned off a policy. Can old drafts now be finalised?",
-                                "answer": "Yes. The requirement is checked at the moment you finalise, against the policies that are active then. Deactivating a policy releases drafts that were waiting on it."
+                                "answer": "Drafts, yes. The requirement is checked at the moment you finalise, against the policies that are active then, so deactivating a policy releases anything still in draft. A document already sent for approval stays where it is, because that decision has to be made or withdrawn before it can move on."
                             }
                         ]
                     },
@@ -3967,7 +3967,7 @@
                             },
                             {
                                 "title": "Your own security",
-                                "description": "Adding, renaming or removing a passkey, and changing your account details."
+                                "description": "Renaming or removing a passkey. Adding your first passkey is authorised by your password instead, and changing your email address is also a password check rather than a passkey one."
                             },
                             {
                                 "title": "Data you cannot undo",
@@ -3986,7 +3986,7 @@
                             },
                             {
                                 "title": "Three built-in roles",
-                                "description": "Members do everyday CRM work. Administrators additionally manage settings, the product catalogue, goals and approvals. Owners can do everything, including tearing the workspace down. Custom roles can be built from individual permissions."
+                                "description": "Members do everyday CRM work. Administrators additionally manage settings, the product catalogue, goals and approvals. Owners can do everything within the workspace. Custom roles can be built from individual permissions. Exporting or removing a whole workspace is a separate, organisation-level role rather than a workspace one."
                             }
                         ]
                     },
@@ -4004,7 +4004,7 @@
                             },
                             {
                                 "question": "Can I belong to more than one workspace?",
-                                "answer": "Yes, and you switch between them from the top of the sidebar without signing out. Nothing is shared between them."
+                                "answer": "Yes, and you switch between them from the top of the sidebar without signing out. Records do not appear across workspaces on their own, though someone can deliberately share a company, contact or pipeline with another workspace in the same organisation."
                             }
                         ]
                     },
@@ -4018,7 +4018,7 @@
                                 "href": "/docs/settings/members-and-roles"
                             },
                             {
-                                "title": "Workspaces and tenancy",
+                                "title": "Workspaces and teams",
                                 "description": "What a workspace is, and why nothing crosses between them.",
                                 "href": "/docs/getting-started/workspaces-and-tenancy"
                             }
@@ -4095,7 +4095,7 @@
                         "title": "Keep going",
                         "items": [
                             {
-                                "title": "Connected capture",
+                                "title": "Connected account capture",
                                 "description": "What is captured, how it is reviewed, and how to purge it.",
                                 "href": "/docs/settings/connected-capture"
                             },
@@ -4974,7 +4974,7 @@
                         "items": [
                             {
                                 "title": "Create the campaign",
-                                "description": "Give it a name, an objective, and a type. You can also record a budget and a start and end date for your own reference."
+                                "description": "Give it a name, an objective, a type and a status. You can also record a budget and a start and end date for your own reference. These are set once here and cannot be changed afterwards, so take a moment over the status in particular."
                             },
                             {
                                 "title": "Build the audience",
@@ -4990,7 +4990,7 @@
                             },
                             {
                                 "title": "Create and queue the send",
-                                "description": "Pick a frozen snapshot version and a message revision, then queue it. Queued sends go out on the next delivery pass. You can pause or cancel a send while it is running."
+                                "description": "Pick a frozen snapshot version and a message revision, then queue it. Queued sends go out on the next delivery pass. You can pause or cancel a send while it is running. Ignore the scheduled-time field in this dialog: it is saved but not yet acted on, so a send you queue goes out on the next pass regardless of what you put there."
                             }
                         ]
                     },
@@ -4998,7 +4998,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Sending has to be switched on for the whole instance",
-                        "body": "Campaigns are visible to everyone, but the ability to actually deliver is an instance-level setting your administrator controls, and it is off unless they turn it on. Until it is on, you can build campaigns, audiences and messages normally, and queueing a send is refused with a message saying so. A working email or SMS transport also has to be configured before a send can be queued."
+                        "body": "Campaigns are visible to everyone, but delivering them depends on two separate instance-level settings your administrator controls, and both are off unless they turn them on. One allows a send to be queued at all; the other allows queued sends to actually go out. With only the first enabled, queueing appears to succeed and nothing is ever delivered, so ask your administrator to confirm both. Until it is on, you can build campaigns, audiences and messages normally, and queueing a send is refused with a message saying so. A working email or SMS transport also has to be configured before a send can be queued."
                     },
                     {
                         "type": "featureList",
@@ -5015,11 +5015,11 @@
                             },
                             {
                                 "title": "Unsubscribes are automatic",
-                                "description": "Every recipient gets their own unsubscribe link. Unsubscribing suppresses them and withdraws consent immediately, and it applies to future campaigns too."
+                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing suppresses that person and withdraws consent immediately, and it applies to future campaigns too."
                             },
                             {
                                 "title": "Bounces and complaints suppress",
-                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex suppresses that address and revokes consent without anyone having to act."
+                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex suppresses that address and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives and nothing is suppressed."
                             }
                         ]
                     },
@@ -5057,7 +5057,7 @@
                         "items": [
                             {
                                 "question": "Can I change a campaign after I create it?",
-                                "answer": "Not from the campaign itself. Treat the name, type, budget and dates as decisions you make once. Audiences, messages and sends are the parts you keep working on."
+                                "answer": "Not from the campaign screens. Treat the name, objective, type, status, budget and dates as decisions you make once, because the create dialog is your only chance to set them. Status is the one that catches people out, since it looks like something you would advance as the campaign progresses. Audiences, messages and sends are the parts you keep working on."
                             },
                             {
                                 "question": "Why did far fewer people receive it than my audience showed?",
@@ -5120,7 +5120,7 @@
                             },
                             {
                                 "title": "Fail closed",
-                                "description": "When a check cannot be completed, Connex refuses rather than guesses. Optional features stay hidden when they are not configured instead of appearing and then failing."
+                                "description": "When a check cannot be completed, Connex refuses rather than guesses. Optional features generally stay hidden when they are not configured, rather than appearing and then failing. Campaign sending is the main place that is not yet true."
                             },
                             {
                                 "title": "Japanese as a first language",
@@ -5169,7 +5169,7 @@
                         "type": "prose",
                         "text": [
                             "Connex ships a lot of surfaces, and several of them are switched off out of the box. A feature being off does not always look different in the interface, so this page states the status of each one plainly.",
-                            "Three separate things have to line up before an optional feature works: your deployment shape has to allow it, your administrator has to configure it, and you have to hold the right permission. Any one of them missing is enough to make a feature unavailable."
+                            "Three separate things have to line up before an optional feature works: your deployment shape has to allow it, your administrator has to configure it, and you have to hold the right permission. Any one of them missing is usually enough to make a feature unavailable, though Campaigns is an exception worth knowing: without permission to view campaigns the menu entry still appears and the list simply looks empty."
                         ]
                     },
                     {
@@ -5275,14 +5275,14 @@
                     {
                         "type": "callout",
                         "variant": "warning",
-                        "title": "Connected capture is an internal preview",
+                        "title": "Connected account capture is an internal preview",
                         "body": "Reading your mailbox and calendar to capture relationship signals is built and works, but it is not generally available. It stays behind provider verification that is still in progress, and it should not be switched on for production use until that clears. Connecting an account is separate, and does not start any capture on its own."
                     },
                     {
                         "type": "callout",
                         "variant": "note",
                         "title": "Where a feature is off, it usually just is not there",
-                        "body": "Connex hides what it cannot deliver rather than showing a control that fails. That means an absent panel is often the correct signal that something is not configured, rather than a fault. Reports are the exception: the figures always render, and only the written summary reports itself as unavailable."
+                        "body": "Connex hides what it cannot deliver rather than showing a control that fails. That means an absent panel is often the correct signal that something is not configured, rather than a fault. There are two exceptions. Reports always render their figures, and only the written summary reports itself as unavailable. Campaigns are the bigger one: the whole campaign surface looks completely live whether or not sending is enabled, and because sending is off by default, that is what most instances look like. Seeing the campaign screens tells you nothing about whether delivery is configured."
                     },
                     {
                         "type": "cards",
