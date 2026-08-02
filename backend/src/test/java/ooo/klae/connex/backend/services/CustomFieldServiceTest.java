@@ -16,6 +16,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CustomFieldOption;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
@@ -215,7 +216,39 @@ class CustomFieldServiceTest extends AbstractServiceTest {
             new UsernamePasswordAuthenticationToken(member, null, member.getAuthorities()));
 
         assertThrows(ForbiddenException.class, () -> service.create(def("company", "text", "blocked"), null));
-        assertThrows(ForbiddenException.class, () -> service.getAll());
+    }
+
+    @Test
+    void read_asMember_returnsTheWorkspaceCatalog() {
+        CustomFieldDefinition created = service.create(def("person", "text", "member_visible"), null);
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertEquals("member", tenantContext.getRole());
+        assertTrue(service.getAll().stream().anyMatch(d -> d.getId() == created.getId()));
+        assertTrue(service.getByEntityType("person").stream().anyMatch(d -> d.getId() == created.getId()));
+        assertEquals("member_visible", service.getById(created.getId()).getFieldKey());
+    }
+
+    @Test
+    void read_asMember_doesNotReachAnotherWorkspace() {
+        CustomFieldDefinition otherWorkspaceField = service.create(def("company", "text", "other_ws_only"), null);
+        Workspace other = newWorkspaceInSameOrg();
+        User member = newUser();
+        workspaceMapper.addMember(other.getId(), member.getId(), "member");
+        authenticateAs(member, other.getId());
+
+        assertTrue(service.getAll().stream().noneMatch(d -> d.getId() == otherWorkspaceField.getId()));
+        assertThrows(ResourceNotFoundException.class, () -> service.getById(otherWorkspaceField.getId()));
+    }
+
+    private Workspace newWorkspaceInSameOrg() {
+        Workspace other = new Workspace();
+        other.setName("Custom Field Peer Workspace");
+        other.setSlug("custom-field-peer-" + unique());
+        other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(other);
+        return other;
     }
 
     private CustomFieldDefinition def(String entityType, String fieldType, String key) {

@@ -20,9 +20,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
- * REST controller for the custom-field catalog. Every operation requires
- * {@code CUSTOM_FIELD_MANAGE} (enforced on the service) — this is the admin
- * management surface, not the member-facing record read path.
+ * REST controller for the custom-field catalog. Reads are open to any member of the active
+ * workspace, because the definitions describe the shape of records the caller can already read
+ * and list views need them to render their columns; the mutating operations require
+ * {@code CUSTOM_FIELD_MANAGE} (enforced on the service). Every operation is workspace-scoped.
  */
 @RestController
 @RequestMapping("/api/custom-fields")
