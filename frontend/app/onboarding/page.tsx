@@ -7,6 +7,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
 
 import { ApiError, createWorkspace, logout } from "@/app/lib/api";
+import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -49,16 +50,13 @@ export default function OnboardingPage() {
 
     function handleJoin(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
-        const raw = joinValue.trim();
-        if (!raw) return;
-        const marker = "/invite/";
-        const idx = raw.indexOf(marker);
-        const token = (idx >= 0 ? raw.slice(idx + marker.length) : raw).split(/[?#/]/)[0];
-        if (!token) {
+        if (!joinValue.trim()) return;
+        const parsed = parseInviteInput(joinValue);
+        if (!parsed) {
             toastError(t("joinInvalid"));
             return;
         }
-        router.push(`/invite/${token}`);
+        router.push(parsed.href);
     }
 
     async function handleSignOut() {

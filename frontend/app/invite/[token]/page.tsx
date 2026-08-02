@@ -3,12 +3,24 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
-import { getCurrentUserFromCookie, getInvitePreview } from "@/app/lib/api";
+import { getCurrentUserFromCookie, getInviteLinkPreview, getInvitePreview } from "@/app/lib/api";
 import type { InvitePreview, WorkspaceRole } from "@/app/lib/types";
 import AcceptInvite from "@/app/components/invite/AcceptInvite";
 
 function roleKey(role: WorkspaceRole): "roleOwner" | "roleAdmin" | "roleMember" {
     return role === "owner" ? "roleOwner" : role === "admin" ? "roleAdmin" : "roleMember";
+}
+
+async function redeemableAsShareableLink(token: string, cookie: string | null): Promise<boolean> {
+    try {
+        const preview = await getInviteLinkPreview(token, {
+            headers: { cookie: cookie ?? "" },
+            cache: "no-store",
+        });
+        return preview.valid;
+    } catch {
+        return false;
+    }
 }
 
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
@@ -28,9 +40,13 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
         preview = null;
     }
 
+    const unavailable = preview == null || !preview.valid;
+    if (unavailable && (await redeemableAsShareableLink(token, cookie))) {
+        redirect(`/invite-link/${encodeURIComponent(token)}`);
+    }
+
     const emailMismatch =
         preview != null && preview.email.toLowerCase() !== user.email.toLowerCase();
-    const unavailable = preview == null || !preview.valid;
 
     return (
         <div className="grid min-h-dvh place-items-center bg-background px-6 py-12">

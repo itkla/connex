@@ -1,0 +1,75 @@
+/**
+ * Which redemption route an invite belongs to. An emailed invite and a shareable link are
+ * different tokens redeemed by different endpoints, so a value naming one must never be routed to
+ * the other: a shareable token sent to `/invite/{token}` reads to the user as "invite not found"
+ * even though their invite is perfectly valid.
+ */
+export type InviteKind = "invite" | "invite-link";
+
+/** A pasted invite resolved to the route that can redeem it. */
+export type ParsedInviteInput = {
+    kind: InviteKind;
+    token: string;
+    href: string;
+};
+
+const MARKERS: ReadonlyArray<{ marker: string; kind: InviteKind }> = [
+    { marker: "/invite-link/", kind: "invite-link" },
+    { marker: "/invite/", kind: "invite" },
+];
+
+const TOKEN_HEAD = /^[A-Za-z0-9_-]+/;
+const LEADING_WRAPPER = /^[<([{"']+/;
+const MIN_TOKEN_LENGTH = 16;
+const MAX_TOKEN_LENGTH = 512;
+
+function resolve(kind: InviteKind, candidate: string): ParsedInviteInput | null {
+    const matched = TOKEN_HEAD.exec(candidate);
+    if (matched === null) {
+        return null;
+    }
+    const token = matched[0];
+    if (token.length < MIN_TOKEN_LENGTH || token.length > MAX_TOKEN_LENGTH) {
+        return null;
+    }
+    return { kind, token, href: `/${kind}/${token}` };
+}
+
+/**
+ * Resolves whatever a user pasted into the onboarding join box to the route that redeems it, or
+ * `null` when the value cannot be an invite at all.
+ *
+ * Accepts a full URL of either shape — the emailed `/invite/{token}` and the shareable
+ * `/invite-link/{token}` that Members → Invite copies — plus a bare token. When both markers are
+ * present the first one wins, so a query string that mentions the other route cannot hijack the
+ * destination. A bare token is redeemed as an emailed invite, whose page falls back to the
+ * shareable-link preview when the token turns out to be a link token, so either kind of token
+ * works without asking the user which one they hold.
+ *
+ * The token is the leading run of the URL-safe base64 alphabet the backend issues rather than
+ * whatever followed the marker. That tolerates the punctuation a pasted link picks up in transit —
+ * a query string, a fragment, a trailing slash, the angle brackets a mail client adds, a full stop
+ * at the end of a sentence — while refusing junk with a message instead of navigating to a page
+ * that can only report the invite as missing. It also means the returned href can never carry a
+ * caller-chosen path or origin.
+ *
+ * @param raw the pasted value, trimmed or not
+ * @returns the route to navigate to, or `null` when the value is not a usable invite
+ */
+export function parseInviteInput(raw: string): ParsedInviteInput | null {
+    const trimmed = raw.trim().replace(LEADING_WRAPPER, "");
+    if (!trimmed) {
+        return null;
+    }
+    let best: { index: number; length: number; kind: InviteKind } | null = null;
+    for (const { marker, kind } of MARKERS) {
+        const index = trimmed.indexOf(marker);
+        if (index >= 0 && (best === null || index < best.index)) {
+            best = { index, length: marker.length, kind };
+        }
+    }
+    if (best === null) {
+        return resolve("invite", trimmed);
+    }
+    return resolve(best.kind, trimmed.slice(best.index + best.length));
+}

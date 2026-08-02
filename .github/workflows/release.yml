@@ -352,6 +352,7 @@ jobs:
           sed -i "s/^CONNEX_OCR_DIGEST=.*/CONNEX_OCR_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-ocr.json)/" .env
           sed -i "s/^CONNEX_OCR_SERVICE_TOKEN=.*/CONNEX_OCR_SERVICE_TOKEN=${TOKEN}/" .env
           printf '%s\n' \
+            'CONNEX_DEPLOYMENT_PROFILE=silo' \
             'CONNEX_BOOTSTRAP_ENABLED=true' \
             'CONNEX_BOOTSTRAP_USERNAME=benchmark' \
             'CONNEX_BOOTSTRAP_EMAIL=benchmark@example.test' \

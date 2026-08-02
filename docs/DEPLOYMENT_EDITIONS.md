@@ -31,10 +31,13 @@ because it reads as protection in a review. There is no soft-launch warning mode
 direction — `SeederStartupConfigurationValidator` *refuses* a set deployment profile, because a
 fixture-loading run is not a deployment. Bean validation still rejects an invalid value everywhere.
 
-The bundled templates already set it: [`deploy/silo.env.example`](../deploy/silo.env.example),
-[`deploy/onprem.env.example`](../deploy/onprem.env.example), and
-[`deploy/eval.env.example`](../deploy/eval.env.example) (which uses `silo` so profile behaviour is
-still exercised during evaluation).
+The deployment templates already set it: [`deploy/silo.env.example`](../deploy/silo.env.example) and
+[`deploy/onprem.env.example`](../deploy/onprem.env.example).
+[`deploy/eval.env.example`](../deploy/eval.env.example) deliberately does **not** — an evaluation is
+not an edition, and the `dev` Spring profile it activates is exactly what makes the value optional.
+Leaving it unset keeps that template from reading as a seed for a real deployment, and makes the
+backend refuse to start if anyone production-shapes it without choosing an edition. An evaluator who
+wants to exercise profile behaviour sets the value themselves.
 
 ## What the profile controls
 
