@@ -18,6 +18,20 @@ set -euo pipefail
 
 umask 077
 
+# The exit-code constants below are readonly, so sourcing this file twice — or sourcing it
+# alongside deploy/backup/connex-backup-lib.sh, whose EXIT_INTEGRITY is 69 where this catalog uses
+# 67 — would abort the shell on the redeclaration. Guard the definitions and refuse the collision
+# explicitly rather than failing with an opaque readonly-variable error.
+if [ -n "${SUPPORT_BUNDLE_LIB_LOADED:-}" ]; then
+    return 0
+fi
+if [ -n "${EXIT_INTEGRITY:-}" ] && [ "${EXIT_INTEGRITY}" != 67 ]; then
+    printf 'support-bundle-lib.sh: EXIT_INTEGRITY is already %s; refusing to load alongside a conflicting exit-code catalog\n' \
+        "$EXIT_INTEGRITY" >&2
+    return 64
+fi
+declare -rx SUPPORT_BUNDLE_LIB_LOADED=1
+
 declare -rx EXIT_USAGE=64
 declare -rx EXIT_AUTH=65
 declare -rx EXIT_API=66
@@ -209,7 +223,11 @@ support_bundle_urlencode() {
 # tests/run-tests.sh, which re-run the Java test vectors against this function.
 support_bundle_redact_path() {
     local path="$1"
-    printf '%s' "$path" | awk '
+    # The path is passed as an awk variable rather than on stdin: a path containing a newline
+    # would otherwise be split into separate records, and only the first would be redacted while
+    # the rest were emitted verbatim. Journal-sourced paths are attacker-influenced, so that
+    # divergence from the Java redactor — which treats the whole string as one value — matters.
+    awk -v raw="$path" '
         function is_numeric_id(segment) {
             return segment ~ /^[0-9]+$/
         }
@@ -231,8 +249,8 @@ support_bundle_redact_path() {
                 || parent == "unsubscribe" || parent == "content" \
                 || parent == "logo" || parent == "profile-picture"
         }
-        {
-            count = split($0, segments, "/")
+        BEGIN {
+            count = split(raw, segments, "/")
             previous = ""
             output = ""
             for (position = 1; position <= count; position++) {
@@ -250,7 +268,7 @@ support_bundle_redact_path() {
             }
             printf "%s", output
         }
-    '
+    ' < /dev/null
 }
 
 # Bundle content is attacker-controlled text. Terminals act on control sequences, so an omission

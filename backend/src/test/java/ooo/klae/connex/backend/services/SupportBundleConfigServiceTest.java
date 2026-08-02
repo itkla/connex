@@ -72,10 +72,15 @@ class SupportBundleConfigServiceTest {
     }
 
     @Test
-    void omitsUnsetKeysRatherThanEmittingNull() {
-        Map<String, String> configuration = new SupportBundleConfigService(new MockEnvironment())
-            .safeConfiguration().values();
+    void declaresEveryUnresolvableKeyRatherThanSilentlyDroppingIt() {
+        SupportBundleConfigService.SafeConfiguration configuration =
+            new SupportBundleConfigService(new MockEnvironment()).safeConfiguration();
 
-        assertTrue(configuration.isEmpty());
+        assertTrue(configuration.values().isEmpty());
+        for (String key : SupportBundleConfigService.SAFE_CONFIG_KEYS) {
+            assertEquals("not_resolvable", configuration.omissions().get("config:" + key),
+                "Key " + key + " was dropped without declaring why; a defaulted-off flag would "
+                    + "otherwise be indistinguishable from an uncollected one");
+        }
     }
 }

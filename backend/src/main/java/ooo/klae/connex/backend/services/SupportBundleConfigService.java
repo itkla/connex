@@ -126,6 +126,10 @@ public class SupportBundleConfigService {
             }
             String value = environment.getProperty(key);
             if (value == null) {
+                // A key bound only through @ConfigurationProperties defaults is never visible to
+                // the Environment, so silently skipping it would make "defaulted off" look
+                // identical to "not collected". Declare it instead.
+                omissions.put("config:" + key, "not_resolvable");
                 continue;
             }
             if (UNSAFE_VALUE.matcher(value).find()) {

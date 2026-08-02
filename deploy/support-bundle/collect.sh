@@ -300,10 +300,18 @@ support_bundle_journal_projection() {
 support_bundle_append_journal() {
     local staging="$1"
     local since until entry_length entry_hash
-    since="$(jq -r '.filters.since' "$staging/manifest.json")"
-    until="$(jq -r '.generatedAt' "$staging/manifest.json")"
-    if [ -z "$since" ] || [ "$since" = null ] || [ -z "$until" ] || [ "$until" = null ]; then
+    since="$(jq -r '.filters.since // empty' "$staging/manifest.json")"
+    until="$(jq -r '.generatedAt // empty' "$staging/manifest.json")"
+    if [ -z "$since" ] || [ -z "$until" ]; then
         support_bundle_log error journal_failed reason manifest_window_missing
+        return "$EXIT_JOURNAL"
+    fi
+    # These values come from the server and are passed to journalctl, so they get the same instant
+    # validation as the operator's own --since rather than being trusted because the manifest
+    # hashed cleanly: the manifest attests to the payload files, not to its own field shapes.
+    if ! support_bundle_validate_instant manifest_since "$since" \
+        || ! support_bundle_validate_instant manifest_until "$until"; then
+        support_bundle_log error journal_failed reason manifest_window_malformed
         return "$EXIT_JOURNAL"
     fi
     support_bundle_journal_projection "$since" "$until" "$staging/journal-slice.jsonl" || return "$EXIT_JOURNAL"
@@ -314,9 +322,10 @@ support_bundle_append_journal() {
         --argjson byte_length "$entry_length" \
         --arg sha256 "$entry_hash" \
         --arg redactor request_path_redactor_v1 \
+        --arg unit "$JOURNAL_UNIT" \
         '.files += [{path: $path, mediaType: $media_type, byteLength: $byte_length, sha256: $sha256}]
          | .files |= sort_by(.path)
-         | .journalSlice = {unit: "'"$JOURNAL_UNIT"'", redactor: $redactor, projection: "closed_fields"}' \
+         | .journalSlice = {unit: $unit, redactor: $redactor, projection: "closed_fields"}' \
         "$staging/manifest.json" > "$staging/manifest.json.new"; then
         support_bundle_log error journal_failed reason manifest_update_failed
         return "$EXIT_JOURNAL"

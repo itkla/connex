@@ -692,6 +692,136 @@ case_read_strips_terminal_control_sequences() (
     fi
 )
 
+# (g) support_bundle_download had no coverage at all, which is how the mawk content-type defect
+# reached a review. curl is stubbed so the real function runs offline.
+case_download_accepts_a_real_zip_response() (
+    source "$SANDBOX/collect-lib.sh" 2>/dev/null
+    WORK_DIR="$SANDBOX/dl-ok"
+    mkdir -p "$WORK_DIR"
+    BASE_URL='https://connex.example.com'
+    ORG_ID=3
+    COOKIE_FILE="$SANDBOX/dl-cookies"
+    printf 'x\n' > "$COOKIE_FILE"; chmod 0600 "$COOKIE_FILE"
+    WORKSPACE_ID=
+    CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
+    curl() {
+        local out="" headers=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --output) out="$2"; shift 2 ;;
+                --dump-header) headers="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        printf 'PK\003\004stub-zip-bytes' > "$out"
+        printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "$headers"
+        printf '200'
+    }
+    support_bundle_download "$WORK_DIR/bundle.partial" >/dev/null 2>&1
+    assert_status download_ok 0 "$?" || return 1
+    [ -s "$WORK_DIR/bundle.partial" ] || { printf 'no body written\n'; return 1; }
+)
+
+case_download_rejects_a_non_zip_response() (
+    source "$SANDBOX/collect-lib.sh" 2>/dev/null
+    WORK_DIR="$SANDBOX/dl-html"
+    mkdir -p "$WORK_DIR"
+    BASE_URL='https://connex.example.com'; ORG_ID=3; WORKSPACE_ID=
+    CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
+    COOKIE_FILE="$SANDBOX/dl-cookies"
+    curl() {
+        local out="" headers=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --output) out="$2"; shift 2 ;;
+                --dump-header) headers="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        printf '<html>login</html>' > "$out"
+        printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n' > "$headers"
+        printf '200'
+    }
+    local output
+    output="$(support_bundle_download "$WORK_DIR/bundle.partial" 2>&1)"
+    assert_status download_html_rejected 66 "$?" || return 1
+    assert_contains download_html_reason 'reason=unexpected_content_type' <(printf '%s\n' "$output") || return 1
+)
+
+case_download_maps_auth_failures() (
+    source "$SANDBOX/collect-lib.sh" 2>/dev/null
+    WORK_DIR="$SANDBOX/dl-403"
+    mkdir -p "$WORK_DIR"
+    BASE_URL='https://connex.example.com'; ORG_ID=3; WORKSPACE_ID=
+    CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
+    COOKIE_FILE="$SANDBOX/dl-cookies"
+    curl() {
+        local headers=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in --dump-header) headers="$2"; shift 2 ;; *) shift ;; esac
+        done
+        printf 'HTTP/1.1 403 Forbidden\r\n\r\n' > "$headers"
+        printf '403'
+    }
+    support_bundle_download "$WORK_DIR/bundle.partial" >/dev/null 2>&1
+    assert_status download_403 65 "$?" || return 1
+)
+
+case_download_rejects_transport_failure() (
+    source "$SANDBOX/collect-lib.sh" 2>/dev/null
+    WORK_DIR="$SANDBOX/dl-fail"
+    mkdir -p "$WORK_DIR"
+    BASE_URL='https://connex.example.com'; ORG_ID=3; WORKSPACE_ID=
+    CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
+    COOKIE_FILE="$SANDBOX/dl-cookies"
+    curl() {
+        local headers=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in --dump-header) headers="$2"; shift 2 ;; *) shift ;; esac
+        done
+        : > "$headers"
+        return 7
+    }
+    support_bundle_download "$WORK_DIR/bundle.partial" >/dev/null 2>&1
+    assert_status download_transport 66 "$?" || return 1
+)
+
+# (f) sourcing the library twice must be a no-op rather than a readonly-redeclaration abort.
+case_library_is_safe_to_source_twice() (
+    source "$SANDBOX/support-bundle-lib.sh"
+    source "$SANDBOX/support-bundle-lib.sh"
+    assert_equals double_source_exit_integrity 67 "$EXIT_INTEGRITY" || return 1
+)
+
+case_library_refuses_a_conflicting_exit_catalog() (
+    # deploy/backup uses 69 for its integrity class where this catalog uses 67.
+    local output status
+    output="$(EXIT_INTEGRITY=69 bash -c 'source "$1"' _ "$SANDBOX/support-bundle-lib.sh" 2>&1)"
+    status=$?
+    assert_status conflicting_catalog_refused 64 "$status" || return 1
+    assert_contains conflicting_catalog_reason 'conflicting exit-code catalog' <(printf '%s\n' "$output") || return 1
+)
+
+# (d) a path carrying an embedded newline must be redacted as one value, not split into records
+# where only the first is examined.
+case_redactor_handles_embedded_newlines() (
+    source "$SANDBOX/support-bundle-lib.sh"
+    local result
+    result="$(support_bundle_redact_path "/a
+/invite/short")"
+    case "$result" in
+        */invite/\{token\}) ;;
+        *) printf 'embedded newline was not redacted: [%s]\n' "$result"; return 1 ;;
+    esac
+)
+
+run_case download_accepts_a_real_zip_response case_download_accepts_a_real_zip_response
+run_case download_rejects_a_non_zip_response case_download_rejects_a_non_zip_response
+run_case download_maps_auth_failures case_download_maps_auth_failures
+run_case download_rejects_transport_failure case_download_rejects_transport_failure
+run_case library_is_safe_to_source_twice case_library_is_safe_to_source_twice
+run_case library_refuses_a_conflicting_exit_catalog case_library_refuses_a_conflicting_exit_catalog
+run_case redactor_handles_embedded_newlines case_redactor_handles_embedded_newlines
 run_case verify_rejects_unprojectable_inventory case_verify_rejects_unprojectable_inventory
 run_case read_refuses_forged_manifest_without_claiming_verified case_read_refuses_forged_manifest_without_claiming_verified
 run_case verify_requires_every_row_examined case_verify_requires_every_row_examined

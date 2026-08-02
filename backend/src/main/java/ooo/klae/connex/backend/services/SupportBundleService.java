@@ -18,6 +18,8 @@ import java.util.concurrent.Semaphore;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,6 +56,8 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class SupportBundleService {
+    private static final Logger log = LoggerFactory.getLogger(SupportBundleService.class);
+
     private static final String AUDIT_ACTION = "org.support_bundle.download";
     private static final String AUDIT_OUTCOME_ACTION = "org.support_bundle.completed";
     private static final int SCHEMA_VERSION = 1;
@@ -63,6 +67,19 @@ public class SupportBundleService {
 
     /** The maximum number of audit rows a slice may carry. */
     static final int AUDIT_SLICE_LIMIT = 10_000;
+
+    /**
+     * The uncompressed ceiling for one bundle. The audit slice dominates it: {@link
+     * #AUDIT_SLICE_LIMIT} rows of bounded columns is roughly three megabytes, so this leaves ample
+     * headroom while still refusing to build something unbounded in memory.
+     */
+    static final long MAX_UNCOMPRESSED_BYTES = 64L * 1024 * 1024;
+
+    /**
+     * The wall-clock budget for assembling one bundle. Assembly is synchronous and holds a request
+     * thread, so a pathological query must fail rather than pin the thread indefinitely.
+     */
+    static final Duration ASSEMBLY_BUDGET = Duration.ofSeconds(30);
 
     /**
      * Bounds concurrent assembly so a burst cannot run many {@link #AUDIT_SLICE_LIMIT}-row audit
@@ -185,31 +202,108 @@ public class SupportBundleService {
     }
 
     private SupportBundle assemble(int orgId, SupportBundleFilters filters) {
-        List<ManifestEntry> inventory = new ArrayList<>();
-        Map<String, Object> omissions = new LinkedHashMap<>();
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        SupportBundleConfigService.SafeConfiguration configuration =
-            configService.safeConfiguration();
-        AuditService.AuditSlice slice = auditSlice(orgId, filters);
-        try (ZipOutputStream zip = new ZipOutputStream(buffer, StandardCharsets.UTF_8)) {
-            writeEntry(zip, inventory, filters, "readiness.json", "application/json",
-                objectMapper.writeValueAsBytes(readinessService.readiness(orgId)));
-            writeEntry(zip, inventory, filters, "config.json", "application/json",
-                objectMapper.writeValueAsBytes(configuration.values()));
-            writeEntry(zip, inventory, filters, "migrations.json", "application/json",
-                objectMapper.writeValueAsBytes(migrationHistoryService.history()));
-            writeEntry(zip, inventory, filters, "audit-slice.csv", "text/csv",
-                slice.csv().getBytes(StandardCharsets.UTF_8));
-            omissions.put("client-errors.json", "no_persisted_source");
-            omissions.put("job-runs.json", "job_run_not_available");
-            omissions.putAll(configuration.omissions());
-            writeManifest(zip, orgId, filters, inventory, omissions, slice);
+        Assembly assembly = new Assembly(filters, clock.instant().plus(ASSEMBLY_BUDGET));
+        try (ZipOutputStream zip = new ZipOutputStream(assembly.buffer, StandardCharsets.UTF_8)) {
+            AuditService.AuditSlice slice = auditSlice(orgId, filters);
+            SupportBundleConfigService.SafeConfiguration configuration =
+                configService.safeConfiguration();
+
+            collect(assembly, zip, "readiness.json", "application/json",
+                () -> objectMapper.writeValueAsBytes(readinessService.readiness(orgId)));
+            collect(assembly, zip, "config.json", "application/json",
+                () -> objectMapper.writeValueAsBytes(configuration.values()));
+            collect(assembly, zip, "migrations.json", "application/json",
+                () -> objectMapper.writeValueAsBytes(migrationHistoryService.history()));
+            collect(assembly, zip, "audit-slice.csv", "text/csv",
+                () -> slice.csv().getBytes(StandardCharsets.UTF_8));
+
+            assembly.omit("client-errors.json", "no_persisted_source");
+            assembly.omit("job-runs.json", "job_run_not_available");
+            configuration.omissions().forEach(assembly::omit);
+            writeManifest(zip, orgId, filters, assembly, slice);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to assemble the support bundle", exception);
         }
         return new SupportBundle(
             "connex-org-" + orgId + "-support-bundle.zip",
-            buffer.toByteArray());
+            assembly.buffer.toByteArray());
+    }
+
+    /**
+     * Emits one bundle entry, or records exactly one omission explaining why it is absent.
+     *
+     * <p>This is the only place an entry may be added, so an entry and its omission cannot drift
+     * apart: every source produces exactly one of the two outcomes and there is no third path in
+     * which a file silently vanishes from an otherwise successful bundle. A source that fails is
+     * not fatal — a bundle missing one section is far more useful to support than no bundle — but
+     * the failure is always declared, and the reason is a fixed code rather than an exception
+     * message, which could carry the very content the bundle must not disclose.
+     */
+    private void collect(
+            Assembly assembly,
+            ZipOutputStream zip,
+            String path,
+            String mediaType,
+            EntrySupplier supplier) throws IOException {
+        assembly.requireWithinBudget(clock.instant());
+        byte[] content;
+        try {
+            content = supplier.get();
+        } catch (RuntimeException exception) {
+            log.warn("Support bundle source {} failed; declaring the omission", path, exception);
+            assembly.omit(path, "source_failed");
+            return;
+        }
+        assembly.requireWithinCap(path, content.length);
+        writeEntry(zip, assembly.inventory, assembly.filters, path, mediaType, content);
+    }
+
+    /** Produces the bytes of one bundle entry. */
+    @FunctionalInterface
+    private interface EntrySupplier {
+        byte[] get();
+    }
+
+    /** Mutable assembly state: the buffer, the inventory, and the declared omissions. */
+    private static final class Assembly {
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        private final List<ManifestEntry> inventory = new ArrayList<>();
+        private final Map<String, Object> omissions = new LinkedHashMap<>();
+        private final SupportBundleFilters filters;
+        private final Instant deadline;
+        private long uncompressedBytes;
+
+        private Assembly(SupportBundleFilters filters, Instant deadline) {
+            this.filters = filters;
+            this.deadline = deadline;
+        }
+
+        private void omit(String path, Object reason) {
+            omissions.put(path, reason);
+        }
+
+        /**
+         * Fails closed if an entry would push the bundle past its ceiling.
+         *
+         * <p>The audit slice is capped at {@link #AUDIT_SLICE_LIMIT} rows of bounded columns, so a
+         * real bundle is a few megabytes at most. Exceeding the cap means an assumption about
+         * field sizes is wrong, and truncating silently would hand support an archive that looks
+         * complete but is not.
+         */
+        private void requireWithinCap(String path, int length) {
+            uncompressedBytes += length;
+            if (uncompressedBytes > MAX_UNCOMPRESSED_BYTES) {
+                throw new IllegalStateException(
+                    "Support bundle exceeded its uncompressed ceiling while adding " + path);
+            }
+        }
+
+        private void requireWithinBudget(Instant now) {
+            if (now.isAfter(deadline)) {
+                throw new IllegalStateException(
+                    "Support bundle assembly exceeded its time budget");
+            }
+        }
     }
 
     private AuditService.AuditSlice auditSlice(int orgId, SupportBundleFilters filters) {
@@ -256,9 +350,10 @@ public class SupportBundleService {
             ZipOutputStream zip,
             int orgId,
             SupportBundleFilters filters,
-            List<ManifestEntry> inventory,
-            Map<String, Object> omissions,
+            Assembly assembly,
             AuditService.AuditSlice slice) throws IOException {
+        List<ManifestEntry> inventory = assembly.inventory;
+        Map<String, Object> omissions = assembly.omissions;
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("schemaVersion", SCHEMA_VERSION);
         manifest.put("productVersion", productVersionService.version());
