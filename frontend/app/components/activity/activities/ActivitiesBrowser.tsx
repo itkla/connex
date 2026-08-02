@@ -37,6 +37,7 @@ import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEv
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteActivity, getActivityById } from '@/app/lib/api';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
@@ -359,21 +360,21 @@ export default function ActivitiesBrowser({
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <header className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                            <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                            <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-                        </div>
-                        <Button
-                            variant="brand"
-                            className="shadow-sm transition-transform active:scale-[0.98]"
-                            aria-label={t('newAria')}
-                            onClick={() => setCreating(true)}
-                        >
-                            <PlusIcon strokeWidth={2.5} />
-                            {t('new')}
-                        </Button>
-                    </header>
+                    <PageHeader
+                        title={t('title')}
+                        description={t('subtitle')}
+                        actions={
+                            <Button
+                                variant="brand"
+                                className="shadow-sm transition-transform active:scale-[0.98]"
+                                aria-label={t('newAria')}
+                                onClick={() => setCreating(true)}
+                            >
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('new')}
+                            </Button>
+                        }
+                    />
                 </Rise>
 
                 {hasAny && (

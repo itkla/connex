@@ -50,6 +50,7 @@ import { updateContact, createContact, importBusinessCard, getContactsPage, getC
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 import {
@@ -717,10 +718,10 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     return (
         <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('heading')}</h1>
-                        <div className="flex items-center gap-2">
-                            {!showArchived && (
+                    <PageHeader
+                        title={t('heading')}
+                        actions={
+                            !showArchived ? (
                                 <RecordsActions
                                     entity="persons"
                                     onNew={openNewContactDialog}
@@ -729,9 +730,9 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                                     onImported={refresh}
                                     onExport={exportContacts}
                                 />
-                            )}
-                        </div>
-                    </div>
+                            ) : undefined
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>

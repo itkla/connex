@@ -18,6 +18,7 @@ import { SearchField } from '@/app/components/filters';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ProductDialog from '@/app/components/records/products/ProductDialog';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteProduct, exportProductsCsv, getProducts } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -133,16 +134,18 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                        <RecordsActions
-                            entity="products"
-                            onNew={() => setDialog({ mode: 'create' })}
-                            newLabel={t('newButton')}
-                            newAriaLabel={t('newButton')}
-                            onExport={exportProducts}
-                        />
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            <RecordsActions
+                                entity="products"
+                                onNew={() => setDialog({ mode: 'create' })}
+                                newLabel={t('newButton')}
+                                newAriaLabel={t('newButton')}
+                                onExport={exportProducts}
+                            />
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>

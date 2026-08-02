@@ -24,6 +24,7 @@ import { type ColumnDef } from '@/app/components/records/types';
 import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
 import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDialog';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import {
     createPipeline,
@@ -519,13 +520,15 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     return (
         <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                        <Button variant="brand" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
-                            <PlusIcon strokeWidth={2.5} />
-                            {t('new')}
-                        </Button>
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            <Button variant="brand" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('new')}
+                            </Button>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>

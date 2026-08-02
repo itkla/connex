@@ -18,6 +18,7 @@ import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ApprovalPolicyDialog from '@/app/components/records/approval-policies/ApprovalPolicyDialog';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteApprovalPolicy } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -100,19 +101,21 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                        <div className="flex items-center gap-2">
-                            <Button variant="outline" onClick={() => router.push('/library/documents')}>
-                                <DocumentDuplicateIcon className="size-4" />
-                                {t('templatesLink')}
-                            </Button>
-                            <Button variant="brand" onClick={openNew}>
-                                <PlusIcon className="size-4" />
-                                {t('newButton')}
-                            </Button>
-                        </div>
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            <>
+                                <Button variant="outline" onClick={() => router.push('/library/documents')}>
+                                    <DocumentDuplicateIcon className="size-4" />
+                                    {t('templatesLink')}
+                                </Button>
+                                <Button variant="brand" onClick={openNew}>
+                                    <PlusIcon className="size-4" />
+                                    {t('newButton')}
+                                </Button>
+                            </>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>

@@ -85,6 +85,7 @@ import IconLink from '@/app/components/library/files/IconLink';
 import { EmptyState } from '@/app/components/EmptyState';
 import FileDetailSheet from '@/app/components/library/files/FileDetailSheet';
 import FileTagChips from '@/app/components/library/files/FileTagChips';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 
 type SortKey = 'newest' | 'oldest' | 'name' | 'largest';
@@ -452,20 +453,20 @@ export default function FilesBrowser() {
     return (
         <PageShell tier="wide">
             <Rise>
-                <header className="flex flex-wrap items-end justify-between gap-4">
-                    <div>
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
-                    </div>
-                    {facets && facets.total > 0 && (
-                        <div className="text-right tabular-nums">
-                            <div className="text-sm font-medium text-foreground">{t('count', { count: facets.total })}</div>
-                            <div className="text-xs text-muted-foreground">
-                                {t('totalSize', { size: formatFileSize(facets.totalSize) })}
+                <PageHeader
+                    title={t('title')}
+                    description={t('subtitle')}
+                    actions={
+                        facets && facets.total > 0 ? (
+                            <div className="text-right tabular-nums">
+                                <div className="text-sm font-medium text-foreground">{t('count', { count: facets.total })}</div>
+                                <div className="text-xs text-muted-foreground">
+                                    {t('totalSize', { size: formatFileSize(facets.totalSize) })}
+                                </div>
                             </div>
-                        </div>
-                    )}
-                </header>
+                        ) : undefined
+                    }
+                />
             </Rise>
 
             {isEmptyLibrary ? (

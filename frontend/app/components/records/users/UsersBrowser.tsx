@@ -18,6 +18,7 @@ import NewUserDialog from "@/app/components/records/users/NewUserDialog";
 import { useRecordsBrowser } from "@/app/hooks/useRecordsBrowser";
 import { useRecordsSort } from "@/app/hooks/useRecordsSort";
 import { type ColumnDef } from "@/app/components/records/types";
+import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 import { type User } from "@/app/lib/types";
@@ -105,10 +106,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
     return (
         <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t("heading")}</h1>
-                        <NewUserDialog />
-                    </div>
+                    <PageHeader title={t("heading")} actions={<NewUserDialog />} />
                 </Rise>
 
                 <Rise delay={0.06}>

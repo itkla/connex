@@ -13,6 +13,7 @@ import { toastError } from "@/app/lib/toast";
 import { formatCurrency, formatShortDate } from "@/app/lib/utils";
 import NewCampaignDialog from "@/app/components/marketing/campaigns/NewCampaignDialog";
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
+import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
 
 const EMPTY_PAYLOAD: CampaignPayload = {
@@ -64,16 +65,16 @@ export default function CampaignsBrowser({ campaigns }: { campaigns: Campaign[] 
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-                        <div className="min-w-0">
-                            <h1 className="text-4xl font-extrabold tracking-tight">{t("title")}</h1>
-                            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{t("subtitle")}</p>
-                        </div>
-                        <Button variant="brand" onClick={openDialog} className="shrink-0">
-                            <PlusIcon className="size-4" />
-                            {t("new")}
-                        </Button>
-                    </header>
+                    <PageHeader
+                        title={t("title")}
+                        description={t("subtitle")}
+                        actions={
+                            <Button variant="brand" onClick={openDialog} className="shrink-0">
+                                <PlusIcon className="size-4" />
+                                {t("new")}
+                            </Button>
+                        }
+                    />
                 </Rise>
 
                 {campaigns.length === 0 ? (

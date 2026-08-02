@@ -125,6 +125,7 @@ import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
 import DealsRevenueChart from '@/app/components/records/deals/DealsRevenueChart';
 import StageRatio from '@/app/components/records/deals/StageRatio';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import {
     evaluableSegmentDefinition,
@@ -1285,43 +1286,45 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             />
             <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                        <div className="flex items-center gap-2">
-                            {currencyCounts.size > 1 && (
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <button
-                                            type="button"
-                                            aria-label={t('currency')}
-                                            className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/80"
-                                        >
-                                            {displayCurrency}
-                                            <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-                                        </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                        {Array.from(currencyCounts.entries())
-                                            .sort((a, b) => b[1] - a[1])
-                                            .map(([c, n]) => (
-                                                <DropdownMenuItem key={c} onSelect={() => changeCurrency(c)}>
-                                                    <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
-                                                    <span className="ml-auto text-xs text-muted-foreground">{t('currencyCount', { count: n })}</span>
-                                                </DropdownMenuItem>
-                                            ))}
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                            )}
-                            <RecordsActions
-                                entity="deals"
-                                onNew={() => setNewDialogOpen(true)}
-                                newLabel={t('newButton')}
-                                newAriaLabel={t('addDeal')}
-                                onImported={refreshRecords}
-                                onExport={exportDeals}
-                            />
-                        </div>
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            <>
+                                {currencyCounts.size > 1 && (
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <button
+                                                type="button"
+                                                aria-label={t('currency')}
+                                                className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/80"
+                                            >
+                                                {displayCurrency}
+                                                <ChevronDownIcon className="size-3.5 text-muted-foreground" />
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                            {Array.from(currencyCounts.entries())
+                                                .sort((a, b) => b[1] - a[1])
+                                                .map(([c, n]) => (
+                                                    <DropdownMenuItem key={c} onSelect={() => changeCurrency(c)}>
+                                                        <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
+                                                        <span className="ml-auto text-xs text-muted-foreground">{t('currencyCount', { count: n })}</span>
+                                                    </DropdownMenuItem>
+                                                ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                )}
+                                <RecordsActions
+                                    entity="deals"
+                                    onNew={() => setNewDialogOpen(true)}
+                                    newLabel={t('newButton')}
+                                    newAriaLabel={t('addDeal')}
+                                    onImported={refreshRecords}
+                                    onExport={exportDeals}
+                                />
+                            </>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>

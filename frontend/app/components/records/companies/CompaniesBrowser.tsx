@@ -59,6 +59,7 @@ import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialo
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 import {
@@ -849,10 +850,10 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     return (
         <PageShell tier="wide">
                 <Rise>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                        <div className="flex items-center gap-2">
-                            {!showArchived && (
+                    <PageHeader
+                        title={t('title')}
+                        actions={
+                            !showArchived ? (
                                 <RecordsActions
                                     entity="companies"
                                     onNew={openNewDialog}
@@ -861,9 +862,9 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                     onImported={refresh}
                                     onExport={exportCompanies}
                                 />
-                            )}
-                        </div>
-                    </div>
+                            ) : undefined
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>

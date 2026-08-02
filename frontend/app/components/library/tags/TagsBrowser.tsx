@@ -40,6 +40,7 @@ import { compareByColor, copyToClipboard, readableTextColor } from '@/app/lib/ut
 import type { Tag } from '@/app/lib/types';
 import Rise from '@/app/components/motion/Rise';
 import TagDialog from '@/app/components/library/tags/TagDialog';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 
 type Props = { tags: Tag[] };
@@ -136,22 +137,22 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
     return (
         <PageShell tier="wide">
             <Rise>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
-                    </div>
-                    {hasTags && (
-                        <Button
-                            variant="brand"
-                            aria-label={t('newAria')}
-                            onClick={openCreate}
-                        >
-                            <PlusIcon strokeWidth={2.5} />
-                            {t('newTag')}
-                        </Button>
-                    )}
-                </div>
+                <PageHeader
+                    title={t('title')}
+                    description={t('subtitle')}
+                    actions={
+                        hasTags ? (
+                            <Button
+                                variant="brand"
+                                aria-label={t('newAria')}
+                                onClick={openCreate}
+                            >
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('newTag')}
+                            </Button>
+                        ) : undefined
+                    }
+                />
             </Rise>
 
             {hasTags && (

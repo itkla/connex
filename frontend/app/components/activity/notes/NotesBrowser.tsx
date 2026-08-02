@@ -27,6 +27,7 @@ import { SearchField, FilterBar, RadioFilter, type FilterChipData } from '@/app/
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteNote } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -165,21 +166,19 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                            <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                            <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-                                {t('subtitle')}
-                            </p>
-                        </div>
-                        <Button
-                            variant="brand"
-                            onClick={() => router.push('/activity/notes/new')}
-                        >
-                            <PlusIcon strokeWidth={2.5} />
-                            {t('new')}
-                        </Button>
-                    </div>
+                    <PageHeader
+                        title={t('title')}
+                        description={t('subtitle')}
+                        actions={
+                            <Button
+                                variant="brand"
+                                onClick={() => router.push('/activity/notes/new')}
+                            >
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('new')}
+                            </Button>
+                        }
+                    />
                 </Rise>
 
                 <Rise delay={0.06}>
