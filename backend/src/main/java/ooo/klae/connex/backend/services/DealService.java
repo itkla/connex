@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -1503,11 +1505,16 @@ public class DealService {
      */
     private Deal moveInternal(int dealId, int stageId, int position, boolean forceStageChanged) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, dealId);
-        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Boolean previousOutcome = before.getWon();
+        Deal discovered = requireDeal(workspaceId, dealId);
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
+        List<Deal> lockedDeals = lockDealMoveRows(
+            workspaceId, dealId, discovered.getStageId(), stageId);
+        Deal before = lockedDeals.stream()
+            .filter(deal -> deal.getId() == dealId)
+            .findFirst()
+            .orElseThrow(() -> new ResourceNotFoundException("Deal not found with id: " + dealId));
+        Boolean previousOutcome = before.getWon();
         Integer stagePipelineId = stage.getPipeline() != null ? stage.getPipeline().getId() : null;
         if (!Objects.equals(before.getPipelineId(), stagePipelineId)) {
             throw new BadRequestException(
@@ -1517,13 +1524,13 @@ public class DealService {
         boolean stageChanged = oldStageId == null || oldStageId != stageId;
         boolean publishStageChanged = forceStageChanged || stageChanged;
 
-        List<Integer> target = dealMapper.getDealIdsInStageOrdered(workspaceId, stageId);
+        List<Integer> target = dealIdsInStage(lockedDeals, stageId);
         target.removeIf(existing -> existing == dealId);
         int index = Math.max(0, Math.min(position, target.size()));
         target.add(index, dealId);
 
         if (stageChanged && oldStageId != null) {
-            List<Integer> source = dealMapper.getDealIdsInStageOrdered(workspaceId, oldStageId);
+            List<Integer> source = dealIdsInStage(lockedDeals, oldStageId);
             source.removeIf(existing -> existing == dealId);
             setPositionBatches(
                 workspaceId,
@@ -1553,6 +1560,36 @@ public class DealService {
         notificationChanges.publish(workspaceId, "deal", dealId);
         ruleTriggers.publish(workspaceId, "deal", dealId, publishStageChanged ? "deal.stage_changed" : "deal.updated");
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
+    }
+
+    private List<Deal> lockDealMoveRows(
+            int workspaceId, int requestedDealId, Integer sourceStageId, int targetStageId) {
+        Set<Integer> dealIds = new TreeSet<>(
+            dealMapper.getDealIdsInStageOrdered(workspaceId, targetStageId));
+        if (sourceStageId != null && sourceStageId != targetStageId) {
+            dealIds.addAll(dealMapper.getDealIdsInStageOrdered(workspaceId, sourceStageId));
+        }
+        dealIds.add(requestedDealId);
+        List<Deal> lockedDeals = new ArrayList<>(dealIds.size());
+        for (int lockedDealId : dealIds) {
+            Deal locked = lockedDealId == requestedDealId
+                ? requireDealForUpdate(workspaceId, lockedDealId)
+                : dealMapper.getDealByIdForUpdate(workspaceId, lockedDealId);
+            if (locked != null) {
+                lockedDeals.add(locked);
+            }
+        }
+        return lockedDeals;
+    }
+
+    private List<Integer> dealIdsInStage(List<Deal> deals, int stageId) {
+        return new ArrayList<>(
+            deals.stream()
+                .filter(deal -> Objects.equals(deal.getStageId(), stageId))
+                .sorted(Comparator.comparingInt(Deal::getPosition).thenComparingInt(Deal::getId))
+                .map(Deal::getId)
+                .toList()
+        );
     }
 
     private void setPositionBatches(
