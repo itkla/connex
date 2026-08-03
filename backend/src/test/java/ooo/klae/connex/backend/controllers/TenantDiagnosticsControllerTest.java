@@ -46,7 +46,6 @@ class TenantDiagnosticsControllerTest {
                 orgMemberService,
                 authService);
         when(authService.getCurrentUser()).thenReturn(actor());
-        when(authService.getCurrentPrincipal()).thenReturn(actor());
     }
 
     @Test
@@ -91,6 +90,7 @@ class TenantDiagnosticsControllerTest {
         controller.organizationDiagnostics(ORG_ID);
         controller.testMail(WORKSPACE_ID);
 
+        verify(authService, times(3)).getCurrentUser();
         verify(workspaceService, times(2)).requirePermission(
                 WORKSPACE_ID, ACTOR_ID, Permission.WORKSPACE_SETTINGS);
         verify(orgMemberService).requireOrgAdmin(ORG_ID, ACTOR_ID);

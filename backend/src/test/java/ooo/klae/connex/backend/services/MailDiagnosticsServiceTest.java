@@ -85,7 +85,8 @@ class MailDiagnosticsServiceTest {
                 dnsDiagnosticsService,
                 auditService,
                 workspaceService,
-                new MailDiagnosticsRateLimiter(3, 300),
+                new MailDiagnosticsRateLimiter(
+                        3, 300, Clock.fixed(Instant.parse("2026-08-01T00:00:00Z"), ZoneOffset.UTC)),
                 Clock.fixed(Instant.parse("2026-08-01T00:00:00Z"), ZoneOffset.UTC));
         when(userMapper.getUserById(ACTOR_ID)).thenReturn(actor());
         when(dnsDiagnosticsService.diagnose(any())).thenReturn(dns());
