@@ -56,14 +56,14 @@ describe("the workspace snapshot follows the server, not only the first render",
         expect(provider.match(/^export /gm) ?? []).toHaveLength(2);
     });
 
-    it("does not adopt the active workspace, and does not claim it cannot diverge", () => {
+    it("does not blindly adopt the active workspace from a refreshed prop", () => {
         const provider = source(PROVIDER);
 
         expect(providerBodyBeforeItsHandlers()).not.toContain("setActiveWorkspaceId(initialActiveId)");
         expect(provider).toContain(
             "const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId)",
         );
-        expect(provider).toContain("known gap rather than an\n * invariant");
+        expect(provider).toContain("never adopted from a refreshed prop");
         expect(provider).not.toMatch(/props can only ever echo a decision/);
     });
 });
