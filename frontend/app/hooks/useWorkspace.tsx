@@ -13,6 +13,7 @@ type WorkspaceContextValue = {
     activeWorkspace: Workspace | null;
     switching: boolean;
     runInWorkspace: (id: number, operation: (switched: boolean) => Promise<void>) => Promise<boolean>;
+    adoptActiveWorkspace: (id: number | null) => void;
     switchTo: (id: number) => Promise<void>;
     create: (name: string) => Promise<Workspace>;
 };
@@ -34,15 +35,13 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
  * commit one frame of exactly that stale chrome before correcting it, which is the defect in
  * miniature. {@link adoptWorkspaces} settles what a payload may overwrite.
  *
- * Which workspace is active is **not** adopted from props, and that is a known gap rather than an
- * invariant — see #1021. Four endpoints move it by writing the session cookie without going through
- * this provider (accepting an invite, accepting an invite link, accepting a pending membership, and
- * leaving a workspace, each followed by a bare `router.refresh()`), so the cookie and the payload
- * can name a workspace this provider does not. Syncing it from props is not the fix: a server
- * render that began before {@link WorkspaceContextValue.switchTo} set the cookie can resolve after
- * it, and the payload carries no generation to order two in-flight renders by, so adopting it
- * blindly trades a stale active workspace for a non-deterministic one. The role staleness this
- * sync does address lives entirely in the list.
+ * Which workspace is active is never adopted from a refreshed prop. A server render that began
+ * before {@link WorkspaceContextValue.switchTo} set the cookie can resolve after it, and the payload
+ * carries no generation to order two in-flight renders. Operations that authoritatively change the
+ * selection publish their own result through this provider instead. Explicit adoption publishes
+ * immediately even while another workspace operation is in progress. If that operation later
+ * succeeds, its later response publishes again and wins, matching the order in which the browser
+ * applies the responses' workspace cookies. If it fails, the adopted decision remains published.
  *
  * @param initialWorkspaces - the viewer's workspaces as of the current server render
  * @param initialActiveId - the workspace the session cookie selects, or null when none is
@@ -70,6 +69,11 @@ export function WorkspaceProvider({
         setWorkspaces(adoptWorkspaces(workspaces, publishedWorkspaces, initialWorkspaces));
     }
 
+    const publishActiveWorkspace = useCallback((id: number | null) => {
+        activeWorkspaceIdRef.current = id;
+        setActiveWorkspaceId(id);
+    }, []);
+
     const runInWorkspace = useCallback(async (
         id: number,
         operation: (switched: boolean) => Promise<void>,
@@ -81,8 +85,7 @@ export function WorkspaceProvider({
             const switched = id !== activeWorkspaceIdRef.current;
             if (switched) {
                 await switchWorkspace(id);
-                activeWorkspaceIdRef.current = id;
-                setActiveWorkspaceId(id);
+                publishActiveWorkspace(id);
             }
             await operation(switched);
             return true;
@@ -90,7 +93,11 @@ export function WorkspaceProvider({
             switchingRef.current = false;
             setSwitching(false);
         }
-    }, []);
+    }, [publishActiveWorkspace]);
+
+    const adoptActiveWorkspace = useCallback((id: number | null) => {
+        publishActiveWorkspace(id);
+    }, [publishActiveWorkspace]);
 
     const switchTo = useCallback(
         async (id: number) => {
@@ -110,8 +117,7 @@ export function WorkspaceProvider({
             try {
                 const workspace = await createWorkspace(name);
                 setWorkspaces((prev) => [...prev, workspace]);
-                activeWorkspaceIdRef.current = workspace.id;
-                setActiveWorkspaceId(workspace.id);
+                publishActiveWorkspace(workspace.id);
                 router.replace("/dashboard");
                 router.refresh();
                 return workspace;
@@ -120,7 +126,7 @@ export function WorkspaceProvider({
                 setSwitching(false);
             }
         },
-        [router],
+        [publishActiveWorkspace, router],
     );
 
     const activeWorkspace = useMemo(
@@ -135,6 +141,7 @@ export function WorkspaceProvider({
             activeWorkspace,
             switching,
             runInWorkspace,
+            adoptActiveWorkspace,
             switchTo,
             create,
         }),
@@ -144,6 +151,7 @@ export function WorkspaceProvider({
             activeWorkspace,
             switching,
             runInWorkspace,
+            adoptActiveWorkspace,
             switchTo,
             create,
         ],
