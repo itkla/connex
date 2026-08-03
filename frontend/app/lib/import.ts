@@ -13,6 +13,35 @@ export type ParsedCsv = {
 /** Inferred data type for a CSV column, used to suggest a custom-field type when auto-creating. */
 export type InferredType = 'text' | 'number' | 'date' | 'boolean' | 'url';
 
+/** Mapping target for a column the import should leave out entirely. */
+export const IGNORE_COLUMN = 'ignore';
+
+/** Mapping target for a column that should define a new custom field, gated on `CUSTOM_FIELD_MANAGE`. */
+export const CREATE_CUSTOM_FIELD = '__create__';
+
+/**
+ * The mapping target a chosen column actually resolves to.
+ *
+ * A "create custom field" choice made by someone who may no longer make it resolves to ignored.
+ * The wizard hides that option from a viewer without `CUSTOM_FIELD_MANAGE`, but a role change
+ * takes effect while the dialog is open, so the choice can outlive the permission that allowed
+ * it. Resolving it here keeps the mapped count, the column selector and the committed mapping
+ * agreeing with one another, and keeps the wizard from submitting a mapping whose only possible
+ * outcome is a refusal at commit time.
+ *
+ * @param target - the column's chosen mapping target
+ * @param canCreateCustomField - whether the viewer holds `CUSTOM_FIELD_MANAGE`
+ * @returns the target to map, count and display
+ */
+export function resolveColumnTarget(
+    target: string | undefined,
+    canCreateCustomField: boolean,
+): string {
+    if (target === undefined) return IGNORE_COLUMN;
+    if (target === CREATE_CUSTOM_FIELD && !canCreateCustomField) return IGNORE_COLUMN;
+    return target;
+}
+
 /** Standard Connex fields that a column can map to, per entity. Keys mirror the backend exactly. */
 export const STANDARD_FIELDS: Record<ImportEntity, readonly string[]> = {
     persons: ['name', 'email', 'phone', 'title', 'company'],

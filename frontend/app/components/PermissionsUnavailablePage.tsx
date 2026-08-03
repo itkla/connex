@@ -1,23 +1,17 @@
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { getTranslations } from 'next-intl/server';
 
-import PageState from '@/app/components/PageState';
+import PermissionsUnavailable from '@/app/components/PermissionsUnavailable';
 
 /**
- * Route-level state for a page whose permission check could not be evaluated because
- * the effective-permissions lookup itself failed.
- *
- * Exists to replace two dishonest alternatives. Treating an unreadable permission list
- * as "no permissions" either redirects the user off a page they are entitled to, or
- * renders a stripped read-only screen that misrepresents their role. This stays
- * fail-closed — the content is still withheld — while saying plainly that the check
- * failed rather than implying a verdict.
+ * Route-level state for a page whose permission check could not be evaluated, localized from the
+ * shared `PermissionsUnavailable` namespace so a page that detects a failed lookup can return it in
+ * one line. Wraps the presentational {@link PermissionsUnavailable}, which stays string-driven for
+ * reuse from client trees.
  */
 export default async function PermissionsUnavailablePage() {
     const t = await getTranslations('PermissionsUnavailable');
     return (
-        <PageState
-            icon={ExclamationTriangleIcon}
+        <PermissionsUnavailable
             title={t('title')}
             body={t('body')}
             actions={[{ href: '/dashboard', label: t('home') }]}

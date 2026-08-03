@@ -63,11 +63,12 @@ export default async function AppLayout({
         getEffectivePermissionsResultFromCookie(cookie),
     ]);
     const effectivePermissions = permissionsResult.ok ? permissionsResult.data : [];
+    const permissionsStatus = permissionsResult.ok ? "resolved" : "unavailable";
     const navAccess = resolveNavAccess(capabilities, effectivePermissions);
 
     return (
         <NowProvider value={requestNow()}>
-            <PermissionsProvider permissions={effectivePermissions}>
+            <PermissionsProvider permissions={effectivePermissions} status={permissionsStatus}>
                 <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
                     <NotificationProvider key={user.id} recipientId={user.id}>
                         <NavTrailProvider>
