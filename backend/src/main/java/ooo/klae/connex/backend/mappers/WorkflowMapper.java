@@ -123,6 +123,8 @@ public interface WorkflowMapper {
         @Param("workspaceId") int workspaceId,
         @Param("triggerType") String triggerType);
 
+    List<Integer> workspaceIdsWithEnabledScheduleWorkflows();
+
     int disableForOffboarding(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id);

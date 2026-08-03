@@ -33,6 +33,17 @@ public interface SegmentMapper {
     boolean entityIdInWorkspace(@Param("workspaceId") int workspaceId,
             @Param("recordType") String recordType, @Param("entityId") int entityId);
 
+    Integer maximumEntityId(
+        @Param("workspaceId") int workspaceId,
+        @Param("recordType") String recordType);
+
+    List<Integer> entityIdsPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("recordType") String recordType,
+        @Param("afterId") int afterId,
+        @Param("upperId") int upperId,
+        @Param("limit") int limit);
+
     /** Ids of companies that have at least one open deal ({@code won IS NULL}). */
     List<Integer> companyIdsWithOpenDeal(int workspaceId);
 

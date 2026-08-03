@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
@@ -25,6 +26,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
 
 /**
  * The rule engine: given a committed entity change or a scheduled tick, finds the matching enabled
@@ -48,6 +50,7 @@ public class RuleEngineService {
     private final SystemActor systemActor;
     private final ObjectMapper objectMapper;
     private final WorkflowRuntimeClaimService workflowRuntimeClaimService;
+    private final WorkflowMapper workflowMapper;
 
     private static final Logger log = LoggerFactory.getLogger(RuleEngineService.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -69,39 +72,25 @@ public class RuleEngineService {
         int workspaceId = dispatch.workspaceId();
         String recordType = dispatch.recordType();
         int entityId = dispatch.recordId();
-        String event = dispatch.event();
-        if ("person".equals(recordType)
-                && personMapper.getProcessablePersonIds(workspaceId, List.of(entityId)).isEmpty()) {
-            return;
-        }
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "entity_change")) {
             try {
-                if (!recordType.equals(rule.getRecordType())) {
-                    continue;
-                }
-                RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
-                if (trigger.getEvents() == null || !trigger.getEvents().contains(event)) {
-                    continue;
-                }
-                if (!stageMatches(trigger, workspaceId, recordType, entityId)) {
-                    continue;
-                }
-                WorkflowRuntimeClaimService.LegacyClaim claim =
-                    workflowRuntimeClaimService.claimLegacyEntity(rule, trigger, dispatch);
-                if (!claim.started() || claim.execution() == null) {
-                    continue;
-                }
-                if (!conditionMatches(rule, workspaceId, entityId)) {
-                    finishExecution(claim.execution(), "skipped", null);
-                    continue;
-                }
-                fireClaimed(rule, workspaceId, recordType, entityId, claim);
+                processEntityRule(rule, dispatch);
             } catch (Exception e) {
                 log.warn(
                     "Rule dispatch failed ruleId={} recordType={} recordId={} exceptionClass={}",
                     rule.getId(), recordType, entityId, e.getClass().getSimpleName());
             }
         }
+    }
+
+    /** Runs the legacy side of one generation-pinned durable entity target. */
+    public void onEntityChangeForWorkflow(
+            int workflowId, WorkflowTriggerDispatch.EntityChange dispatch) {
+        Rule rule = linkedRule(dispatch.workspaceId(), workflowId);
+        if (rule == null) {
+            return;
+        }
+        processEntityRule(rule, dispatch);
     }
 
     /** Evaluates every enabled schedule rule of this cadence over the workspace's records. */
@@ -129,6 +118,70 @@ public class RuleEngineService {
                     rule.getId(), e.getClass().getSimpleName());
             }
         }
+    }
+
+    /** Runs the legacy side of one already-matched durable schedule enrollment. */
+    public void runScheduleRecordForWorkflow(
+            int workflowId,
+            WorkflowTriggerDispatch.ScheduleTick dispatch,
+            int recordId) {
+        Rule rule = linkedRule(dispatch.workspaceId(), workflowId);
+        if (rule == null) {
+            return;
+        }
+        RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
+        if (!"schedule".equalsIgnoreCase(trigger.getType())
+                || trigger.getCadence() == null
+                || !dispatch.cadence().equalsIgnoreCase(trigger.getCadence().trim())) {
+            return;
+        }
+        fireSchedule(rule, dispatch, recordId);
+    }
+
+    private void processEntityRule(
+            Rule rule, WorkflowTriggerDispatch.EntityChange dispatch) {
+        if ("person".equals(dispatch.recordType())
+                && personMapper.getProcessablePersonIds(
+                    dispatch.workspaceId(), List.of(dispatch.recordId())).isEmpty()) {
+            return;
+        }
+        if (!dispatch.recordType().equals(rule.getRecordType())) {
+            return;
+        }
+        RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
+        if (trigger.getEvents() == null || !trigger.getEvents().contains(dispatch.event())) {
+            return;
+        }
+        if (!stageMatches(
+                trigger,
+                dispatch.workspaceId(),
+                dispatch.recordType(),
+                dispatch.recordId())) {
+            return;
+        }
+        WorkflowRuntimeClaimService.LegacyClaim claim =
+            workflowRuntimeClaimService.claimLegacyEntity(rule, trigger, dispatch);
+        if (!claim.started() || claim.execution() == null) {
+            return;
+        }
+        if (!conditionMatches(rule, dispatch.workspaceId(), dispatch.recordId())) {
+            finishExecution(claim.execution(), "skipped", null);
+            return;
+        }
+        fireClaimed(
+            rule,
+            dispatch.workspaceId(),
+            dispatch.recordType(),
+            dispatch.recordId(),
+            claim);
+    }
+
+    private Rule linkedRule(int workspaceId, int workflowId) {
+        Workflow workflow = workflowMapper.getById(workspaceId, workflowId);
+        if (workflow == null || workflow.getLegacyRuleId() == null) {
+            return null;
+        }
+        return ruleMapper.getById(workspaceId, workflow.getLegacyRuleId());
     }
 
     private boolean stageMatches(RuleTrigger trigger, int workspaceId, String recordType, int entityId) {

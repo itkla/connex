@@ -20,10 +20,17 @@ public class WorkflowRun {
     private String recordType;
     private int recordId;
     private String dedupeKey;
+    private Long triggerOutboxId;
     private String executionMode;
     private Integer actorUserId;
     private Integer attributionUserId;
     private String currentNodeId;
+    private String waitKind;
+    private LocalDateTime resumeAt;
+    private String leaseOwner;
+    private LocalDateTime leaseUntil;
+    private int dispatchCount;
+    private LocalDateTime cancelRequestedAt;
     private String failureNodeId;
     private String failureCode;
     private String failureMessage;

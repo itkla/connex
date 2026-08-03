@@ -28,6 +28,8 @@ class WorkflowTraversalServiceTest {
     @Mock private WorkflowDraftCanonicalizer canonicalizer;
     @Mock private WorkflowDefinitionValidator definitionValidator;
     @Mock private WorkflowStepTransactionService stepTransactionService;
+    @Mock private WorkflowActionAttemptReservationService attemptReservationService;
+    @Mock private WorkflowRunCancellationService cancellationService;
     @Mock private WorkflowRunFailureService failureService;
     @Mock private CompiledWorkflow compiled;
 
@@ -41,6 +43,8 @@ class WorkflowTraversalServiceTest {
             canonicalizer,
             definitionValidator,
             stepTransactionService,
+            attemptReservationService,
+            cancellationService,
             failureService);
     }
 

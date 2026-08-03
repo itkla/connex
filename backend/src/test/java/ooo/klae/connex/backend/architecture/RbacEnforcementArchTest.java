@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
+import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.services.WorkflowSimulationService;
@@ -140,6 +141,7 @@ class RbacEnforcementArchTest {
         Map<Class<?>, Integer> surfaces = Map.of(
             WorkflowRuntimeOwnershipService.class, 2,
             WorkflowRunReadService.class, 2,
+            WorkflowRunOperationService.class, 2,
             WorkflowSimulationService.class, 1);
         List<String> violations = new ArrayList<>();
         for (Map.Entry<Class<?>, Integer> surface : surfaces.entrySet()) {

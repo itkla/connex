@@ -14,6 +14,7 @@ public record WorkflowRunSummaryDto(
     String legacyStatus,
     Version version,
     Trigger trigger,
+    RuntimeState runtimeState,
     LocalDateTime startedAt,
     LocalDateTime finishedAt,
     Long durationMs,
@@ -37,6 +38,14 @@ public record WorkflowRunSummaryDto(
         String event,
         String recordType,
         Integer recordId
+    ) { }
+
+    /** Bounded wait and cooperative-cancellation state for a canonical run. */
+    @JsonInclude(Include.ALWAYS)
+    public record RuntimeState(
+        String waitKind,
+        LocalDateTime resumeAt,
+        boolean cancellationRequested
     ) { }
 
     /** Fixed-code failure evidence without exception text. */

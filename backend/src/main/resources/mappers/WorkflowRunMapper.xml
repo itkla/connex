@@ -5,16 +5,19 @@
 
   <sql id="runColumns">
     id, workspace_id, workflow_id, workflow_version_id, status, trigger_type,
-    trigger_event, trigger_key, record_type, record_id, dedupe_key, execution_mode,
-    actor_user_id, attribution_user_id, current_node_id, failure_node_id,
-    failure_code, failure_message, started_at, finished_at, updated_at
+    trigger_event, trigger_key, record_type, record_id, dedupe_key, trigger_outbox_id,
+    execution_mode, actor_user_id, attribution_user_id, current_node_id, wait_kind,
+    resume_at, lease_owner, lease_until, dispatch_count, cancel_requested_at,
+    failure_node_id, failure_code, failure_message, started_at, finished_at, updated_at
   </sql>
 
   <sql id="viewColumns">
     wr.id, wr.workspace_id, wr.workflow_id, wr.workflow_version_id, wr.status,
     wr.trigger_type, wr.trigger_event, wr.trigger_key, wr.record_type, wr.record_id,
-    wr.dedupe_key, wr.execution_mode, wr.actor_user_id, wr.attribution_user_id,
-    wr.current_node_id, wr.failure_node_id, wr.failure_code, wr.failure_message,
+    wr.dedupe_key, wr.trigger_outbox_id, wr.execution_mode, wr.actor_user_id,
+    wr.attribution_user_id, wr.current_node_id, wr.wait_kind, wr.resume_at,
+    wr.lease_owner, wr.lease_until, wr.dispatch_count, wr.cancel_requested_at,
+    wr.failure_node_id, wr.failure_code, wr.failure_message,
     wr.started_at, wr.finished_at, wr.updated_at,
     v.version_number, v.definition_hash AS version_definition_hash,
     v.published_at AS version_published_at
@@ -22,19 +25,20 @@
 
   <sql id="stepColumns">
     id, workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
-    attempt_count, selected_outcome, selected_edge_id, next_node_id, failure_code,
-    failure_message, started_at, finished_at
+    attempt_count, retry_safety, selected_outcome, selected_edge_id, next_node_id,
+    failure_code, failure_message, started_at, finished_at
   </sql>
 
   <insert id="insertRun" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workflow_run
       (workspace_id, workflow_id, workflow_version_id, status, trigger_type,
-       trigger_event, trigger_key, record_type, record_id, dedupe_key, execution_mode,
-       actor_user_id, attribution_user_id, current_node_id, started_at)
+       trigger_event, trigger_key, record_type, record_id, dedupe_key, trigger_outbox_id,
+       execution_mode, actor_user_id, attribution_user_id, current_node_id, started_at)
     VALUES
       (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{status}, #{triggerType},
        #{triggerEvent}, #{triggerKey}, #{recordType}, #{recordId}, #{dedupeKey},
-       #{executionMode}, #{actorUserId}, #{attributionUserId}, #{currentNodeId}, #{startedAt})
+       #{triggerOutboxId}, #{executionMode}, #{actorUserId}, #{attributionUserId},
+       #{currentNodeId}, #{startedAt})
   </insert>
 
   <select id="getByDedupe" resultType="WorkflowRun">
@@ -62,6 +66,16 @@
     FOR UPDATE
   </select>
 
+  <select id="getOwnedByIdForUpdate" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+    FOR UPDATE
+  </select>
+
   <select id="getRunningByTrigger" resultType="WorkflowRun">
     SELECT <include refid="runColumns"/> FROM workflow_run
     WHERE workspace_id = #{workspaceId}
@@ -81,13 +95,277 @@
   <insert id="insertStep" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workflow_step_run
       (workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
-       attempt_count, selected_outcome, selected_edge_id, next_node_id,
+       attempt_count, retry_safety, selected_outcome, selected_edge_id, next_node_id,
        failure_code, failure_message, started_at, finished_at)
     VALUES
       (#{workspaceId}, #{workflowRunId}, #{sequenceNumber}, #{nodeId}, #{nodeType},
-       #{status}, #{attemptCount}, #{selectedOutcome}, #{selectedEdgeId}, #{nextNodeId},
-       #{failureCode}, #{failureMessage}, #{startedAt}, #{finishedAt})
+       #{status}, #{attemptCount}, #{retrySafety}, #{selectedOutcome}, #{selectedEdgeId},
+       #{nextNodeId}, #{failureCode}, #{failureMessage}, #{startedAt}, #{finishedAt})
   </insert>
+
+  <select id="getStepByNodeForUpdate" resultType="WorkflowStepRun">
+    SELECT <include refid="stepColumns"/> FROM workflow_step_run
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertAttempt" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_step_attempt
+      (workspace_id, workflow_run_id, workflow_step_run_id, attempt_number,
+       retry_safety, status, error_code, started_at, finished_at)
+    VALUES
+      (#{workspaceId}, #{workflowRunId}, #{workflowStepRunId}, #{attemptNumber},
+       #{retrySafety}, #{status}, #{errorCode}, #{startedAt}, #{finishedAt})
+  </insert>
+
+  <update id="reserveExistingStep">
+    UPDATE workflow_step_run
+    SET status = 'running',
+        attempt_count = #{attemptCount},
+        retry_safety = #{retrySafety},
+        selected_outcome = NULL,
+        selected_edge_id = NULL,
+        next_node_id = NULL,
+        failure_code = NULL,
+        failure_message = NULL,
+        started_at = #{startedAt},
+        finished_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND status IN ('running', 'failed')
+      AND attempt_count &lt; #{attemptCount}
+  </update>
+
+  <update id="completeAttempt">
+    UPDATE workflow_step_attempt
+    SET status = 'succeeded', finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND workflow_step_run_id = #{workflowStepRunId}
+      AND attempt_number = #{attemptNumber}
+      AND status = 'running'
+  </update>
+
+  <update id="failAttempt">
+    UPDATE workflow_step_attempt
+    SET status = #{status}, error_code = #{errorCode}, finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND workflow_step_run_id = #{workflowStepRunId}
+      AND attempt_number = #{attemptNumber}
+      AND status = 'running'
+  </update>
+
+  <update id="abandonRunningAttempts">
+    UPDATE workflow_step_attempt
+    SET status = 'abandoned', error_code = #{errorCode}, finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND workflow_step_run_id = #{workflowStepRunId}
+      AND status = 'running'
+  </update>
+
+  <update id="succeedExistingStep">
+    UPDATE workflow_step_run
+    SET status = 'succeeded',
+        attempt_count = #{attemptCount},
+        selected_outcome = #{selectedOutcome},
+        selected_edge_id = #{selectedEdgeId},
+        next_node_id = #{nextNodeId},
+        failure_code = NULL,
+        failure_message = NULL,
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND status = 'running'
+      AND attempt_count = #{attemptCount}
+  </update>
+
+  <update id="succeedWaitingDelayStep">
+    UPDATE workflow_step_run
+    SET status = 'succeeded',
+        selected_outcome = 'next',
+        selected_edge_id = #{selectedEdgeId},
+        next_node_id = #{nextNodeId},
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND node_type = 'delay'
+      AND status = 'waiting'
+  </update>
+
+  <update id="failExistingStep">
+    UPDATE workflow_step_run
+    SET status = 'failed',
+        selected_outcome = NULL,
+        selected_edge_id = NULL,
+        next_node_id = NULL,
+        failure_code = #{failureCode},
+        failure_message = #{failureMessage},
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND status IN ('running', 'waiting')
+  </update>
+
+  <update id="cancelExistingStep">
+    UPDATE workflow_step_run
+    SET status = 'cancelled',
+        selected_outcome = NULL,
+        selected_edge_id = NULL,
+        next_node_id = NULL,
+        failure_code = NULL,
+        failure_message = NULL,
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND status IN ('running', 'waiting')
+  </update>
+
+  <select id="countActiveRunLeases" resultType="int">
+    SELECT COUNT(*)
+    FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'running'
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </select>
+
+  <select id="findDueRunForUpdate" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND cancel_requested_at IS NULL
+      AND (
+        status = 'queued'
+        OR (status = 'waiting' AND resume_at &lt;= CURRENT_TIMESTAMP(6))
+        OR (status = 'running' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+      )
+    ORDER BY
+      CASE WHEN status = 'waiting' THEN resume_at ELSE started_at END,
+      id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+  </select>
+
+  <select id="findExpiredCancellationForUpdate" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'running'
+      AND cancel_requested_at IS NOT NULL
+      AND lease_until &lt; CURRENT_TIMESTAMP(6)
+    ORDER BY cancel_requested_at, id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+  </select>
+
+  <update id="interveneExhaustedRun">
+    UPDATE workflow_run
+    SET status = 'intervention_required',
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        failure_node_id = current_node_id,
+        failure_code = 'dispatch_limit',
+        failure_message = 'The workflow run exhausted its bounded worker dispatches.',
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status IN ('queued', 'waiting', 'running')
+      AND dispatch_count &gt;= #{maxDispatches}
+      AND cancel_requested_at IS NULL
+      AND (
+        status IN ('queued', 'waiting')
+        OR lease_until &lt; CURRENT_TIMESTAMP(6)
+      )
+    ORDER BY id
+    LIMIT 1
+  </update>
+
+  <update id="leaseRun">
+    UPDATE workflow_run
+    SET status = 'running',
+        lease_owner = #{leaseOwner},
+        lease_until = DATE_ADD(
+          CURRENT_TIMESTAMP(6), INTERVAL #{leaseSeconds} SECOND),
+        dispatch_count = dispatch_count + 1
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND dispatch_count &lt; #{maxDispatches}
+      AND cancel_requested_at IS NULL
+      AND (
+        status = 'queued'
+        OR (status = 'waiting' AND resume_at &lt;= CURRENT_TIMESTAMP(6))
+        OR (status = 'running' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+      )
+  </update>
+
+  <update id="releaseRunLease">
+    UPDATE workflow_run
+    SET status = 'queued', lease_owner = NULL, lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND wait_kind IS NULL
+      AND resume_at IS NULL
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="waitForDelay">
+    UPDATE workflow_run
+    SET status = 'waiting',
+        wait_kind = 'delay',
+        resume_at = DATE_ADD(
+          CURRENT_TIMESTAMP(6), INTERVAL #{durationSeconds} SECOND),
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="waitForRetry">
+    UPDATE workflow_run
+    SET status = 'waiting',
+        wait_kind = 'retry',
+        resume_at = DATE_ADD(
+          CURRENT_TIMESTAMP(6), INTERVAL #{delaySeconds} SECOND),
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="clearClaimedRetryWait">
+    UPDATE workflow_run
+    SET wait_kind = NULL, resume_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND wait_kind = 'retry'
+      AND resume_at IS NOT NULL
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
+  </update>
 
   <update id="advanceRun">
     UPDATE workflow_run
@@ -98,6 +376,20 @@
       AND current_node_id = #{expectedNodeId}
   </update>
 
+  <update id="advanceClaimedRun">
+    UPDATE workflow_run
+    SET current_node_id = #{nextNodeId},
+        wait_kind = NULL,
+        resume_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
+  </update>
+
   <update id="completeRun">
     UPDATE workflow_run
     SET status = 'succeeded', current_node_id = NULL, finished_at = #{finishedAt}
@@ -105,6 +397,24 @@
       AND id = #{id}
       AND status = 'running'
       AND current_node_id = #{expectedNodeId}
+  </update>
+
+  <update id="completeClaimedRun">
+    UPDATE workflow_run
+    SET status = 'succeeded',
+        current_node_id = NULL,
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
   </update>
 
   <update id="failRun">
@@ -117,6 +427,94 @@
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND status IN ('queued', 'running', 'waiting')
+      AND current_node_id = #{expectedNodeId}
+  </update>
+
+  <update id="failClaimedRun">
+    UPDATE workflow_run
+    SET status = #{status},
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        failure_node_id = #{expectedNodeId},
+        failure_code = #{failureCode},
+        failure_message = #{failureMessage},
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </update>
+
+  <update id="cancelImmediately">
+    UPDATE workflow_run
+    SET status = 'cancelled',
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        cancel_requested_at = COALESCE(cancel_requested_at, #{finishedAt}),
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status IN ('queued', 'waiting')
+  </update>
+
+  <update id="requestCancellation">
+    UPDATE workflow_run
+    SET cancel_requested_at = COALESCE(cancel_requested_at, #{requestedAt})
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+  </update>
+
+  <update id="cancelClaimed">
+    UPDATE workflow_run
+    SET status = 'cancelled',
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        cancel_requested_at = COALESCE(cancel_requested_at, #{finishedAt}),
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NOT NULL
+  </update>
+
+  <update id="cancelExpired">
+    UPDATE workflow_run
+    SET status = 'cancelled',
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND cancel_requested_at IS NOT NULL
+      AND lease_until &lt; CURRENT_TIMESTAMP(6)
+  </update>
+
+  <update id="scheduleManualRetry">
+    UPDATE workflow_run
+    SET status = 'waiting',
+        wait_kind = 'retry',
+        resume_at = CURRENT_TIMESTAMP(6),
+        failure_node_id = NULL,
+        failure_code = NULL,
+        failure_message = NULL,
+        finished_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'intervention_required'
       AND current_node_id = #{expectedNodeId}
   </update>
 

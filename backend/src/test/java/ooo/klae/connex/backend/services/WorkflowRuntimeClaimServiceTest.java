@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
@@ -48,6 +49,7 @@ class WorkflowRuntimeClaimServiceTest {
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;
     @Mock private WorkflowRunMapper workflowRunMapper;
+    @Mock private WorkflowTriggerOutboxMapper workflowTriggerOutboxMapper;
     @Mock private RuleMapper ruleMapper;
     @Mock private DealMapper dealMapper;
     @Mock private WorkflowDraftCanonicalizer canonicalizer;
@@ -66,6 +68,7 @@ class WorkflowRuntimeClaimServiceTest {
             workflowMapper,
             workflowVersionMapper,
             workflowRunMapper,
+            workflowTriggerOutboxMapper,
             ruleMapper,
             dealMapper,
             canonicalizer,
@@ -197,8 +200,9 @@ class WorkflowRuntimeClaimServiceTest {
         assertTrue(claim.started());
         assertEquals(19L, run.getValue().getWorkflowVersionId());
         assertEquals("trigger", run.getValue().getCurrentNodeId());
-        assertEquals("running", run.getValue().getStatus());
+        assertEquals("queued", run.getValue().getStatus());
         assertEquals(7, run.getValue().getWorkspaceId());
+        verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
     }
 
     @Test

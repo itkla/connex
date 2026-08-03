@@ -20,6 +20,7 @@ public class Workflow {
     private boolean enabled;
     private String runtimeOwner = "legacy";
     private LocalDateTime archivedAt;
+    private long runtimeGeneration;
     private int draftRevision;
     private String draftRecordType;
     private String draftExecutionMode;

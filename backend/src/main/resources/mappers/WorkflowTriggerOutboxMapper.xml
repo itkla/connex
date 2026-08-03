@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper">
+
+  <sql id="outboxColumns">
+    id, workspace_id, workflow_id, workflow_version_id, workflow_runtime_generation,
+    trigger_type, trigger_event, trigger_key, record_type, record_id, occurred_at,
+    record_scan_after_id, record_scan_upper_id, dedupe_key, status, available_at,
+    lease_owner, lease_until, delivery_attempt_count, last_error_code, completed_at,
+    created_at, updated_at
+  </sql>
+
+  <select id="findEntityTargets" resultType="WorkflowOutboxTarget">
+    SELECT w.id AS workflow_id,
+           v.id AS workflow_version_id,
+           w.runtime_generation,
+           v.record_type
+    FROM workflow w
+    JOIN workflow_version v
+      ON v.workspace_id = w.workspace_id
+     AND v.workflow_id = w.id
+     AND v.id = w.active_version_id
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.enabled = TRUE
+      AND w.archived_at IS NULL
+      AND v.trigger_type = 'entity_change'
+      AND v.record_type = #{recordType}
+      AND JSON_CONTAINS(v.trigger_config, JSON_QUOTE(#{triggerEvent}), '$.events') = 1
+    ORDER BY w.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findScheduleTargets" resultType="WorkflowOutboxTarget">
+    SELECT w.id AS workflow_id,
+           v.id AS workflow_version_id,
+           w.runtime_generation,
+           v.record_type
+    FROM workflow w
+    JOIN workflow_version v
+      ON v.workspace_id = w.workspace_id
+     AND v.workflow_id = w.id
+     AND v.id = w.active_version_id
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.enabled = TRUE
+      AND w.archived_at IS NULL
+      AND v.trigger_type = 'schedule'
+      AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(v.trigger_config, '$.cadence'))) = #{cadence}
+    ORDER BY w.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="workspaceIdsPage" resultType="int">
+    SELECT workspace_id
+    FROM workflow_runtime_workspace
+    WHERE workspace_id &gt; #{afterId}
+    ORDER BY workspace_id
+    LIMIT #{limit}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_trigger_outbox
+      (workspace_id, workflow_id, workflow_version_id, workflow_runtime_generation,
+       trigger_type, trigger_event, trigger_key, record_type, record_id, occurred_at,
+       record_scan_after_id, record_scan_upper_id, dedupe_key, status, available_at)
+    VALUES
+      (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{workflowRuntimeGeneration},
+       #{triggerType}, #{triggerEvent}, #{triggerKey}, #{recordType}, #{recordId},
+       #{occurredAt}, #{recordScanAfterId}, #{recordScanUpperId}, #{dedupeKey},
+       'pending', CURRENT_TIMESTAMP(6))
+    ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)
+  </insert>
+
+  <insert id="ensureWorkspaceGate">
+    INSERT INTO workflow_runtime_workspace (workspace_id)
+    VALUES (#{workspaceId})
+    ON DUPLICATE KEY UPDATE workspace_id = workflow_runtime_workspace.workspace_id
+  </insert>
+
+  <select id="getNextQueueForUpdate" resultType="string">
+    SELECT next_queue
+    FROM workflow_runtime_workspace
+    WHERE workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
+  <update id="setNextQueue">
+    UPDATE workflow_runtime_workspace
+    SET next_queue = #{nextQueue}, last_claimed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+  </update>
+
+  <select id="countActiveLeases" resultType="int">
+    SELECT COUNT(*)
+    FROM workflow_trigger_outbox
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'leased'
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </select>
+
+  <select id="findDueIdForUpdate" resultType="long">
+    SELECT id
+    FROM workflow_trigger_outbox
+    WHERE workspace_id = #{workspaceId}
+      AND available_at &lt;= CURRENT_TIMESTAMP(6)
+      AND (
+        status = 'pending'
+        OR (status = 'leased' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+      )
+    ORDER BY available_at, id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+  </select>
+
+  <update id="deadLetterExpiredExhausted">
+    UPDATE workflow_trigger_outbox
+    SET status = 'dead',
+        lease_owner = NULL,
+        lease_until = NULL,
+        last_error_code = 'delivery_attempt_limit',
+        completed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND delivery_attempt_count &gt;= #{maxAttempts}
+      AND (
+        status = 'pending'
+        OR (status = 'leased' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+      )
+    ORDER BY id
+    LIMIT 1
+  </update>
+
+  <update id="lease">
+    UPDATE workflow_trigger_outbox
+    SET status = 'leased',
+        lease_owner = #{leaseOwner},
+        lease_until = DATE_ADD(
+          CURRENT_TIMESTAMP(6), INTERVAL #{leaseSeconds} SECOND),
+        delivery_attempt_count = delivery_attempt_count + 1,
+        last_error_code = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND delivery_attempt_count &lt; #{maxAttempts}
+      AND available_at &lt;= CURRENT_TIMESTAMP(6)
+      AND (
+        status = 'pending'
+        OR (status = 'leased' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+      )
+  </update>
+
+  <select id="getById" resultType="WorkflowTriggerOutbox">
+    SELECT <include refid="outboxColumns"/>
+    FROM workflow_trigger_outbox
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getOwnedForUpdate" resultType="WorkflowTriggerOutbox">
+    SELECT <include refid="outboxColumns"/>
+    FROM workflow_trigger_outbox
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'leased'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+    FOR UPDATE
+  </select>
+
+  <update id="complete">
+    UPDATE workflow_trigger_outbox
+    SET status = 'completed',
+        lease_owner = NULL,
+        lease_until = NULL,
+        last_error_code = NULL,
+        completed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'leased'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </update>
+
+  <update id="invalidate">
+    UPDATE workflow_trigger_outbox
+    SET status = 'invalidated',
+        lease_owner = NULL,
+        lease_until = NULL,
+        last_error_code = NULL,
+        completed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'leased'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </update>
+
+  <update id="saveSchedulePage">
+    UPDATE workflow_trigger_outbox
+    SET record_scan_after_id = #{recordScanAfterId},
+        delivery_attempt_count = 0,
+        status = CASE WHEN #{completed} THEN 'completed' ELSE 'pending' END,
+        available_at = CURRENT_TIMESTAMP(6),
+        lease_owner = NULL,
+        lease_until = NULL,
+        last_error_code = NULL,
+        completed_at = CASE WHEN #{completed} THEN CURRENT_TIMESTAMP(6) ELSE NULL END
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'leased'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </update>
+
+  <update id="releaseForRetry">
+    UPDATE workflow_trigger_outbox
+    SET status = 'pending',
+        available_at = DATE_ADD(
+          CURRENT_TIMESTAMP(6), INTERVAL #{delaySeconds} SECOND),
+        lease_owner = NULL,
+        lease_until = NULL,
+        last_error_code = #{errorCode}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'leased'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </update>
+
+  <update id="deadLetter">
+    UPDATE workflow_trigger_outbox
+    SET status = 'dead',
+        lease_owner = NULL,
+        lease_until = NULL,
+        last_error_code = #{errorCode},
+        completed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'leased'
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+  </update>
+
+  <delete id="purgeCompletedBefore">
+    DELETE FROM workflow_trigger_outbox
+    WHERE workspace_id = #{workspaceId}
+      AND status IN ('completed', 'invalidated')
+      AND completed_at &lt; #{cutoff}
+    ORDER BY id
+    LIMIT #{limit}
+  </delete>
+
+  <delete id="purgeDeadBefore">
+    DELETE FROM workflow_trigger_outbox
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'dead'
+      AND completed_at &lt; #{cutoff}
+    ORDER BY id
+    LIMIT #{limit}
+  </delete>
+
+</mapper>
