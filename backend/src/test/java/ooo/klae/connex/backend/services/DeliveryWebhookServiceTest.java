@@ -1,10 +1,12 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -16,9 +18,14 @@ import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
@@ -39,7 +46,8 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 
 /**
  * Unit tests for webhook ingestion: workspace/provider resolution from the token only, per-event
- * idempotency, hard-bounce/complaint suppression as the system actor, and cross-tenant isolation.
+ * idempotency, hard-bounce/complaint suppression as the system actor, cross-tenant isolation, and
+ * the workspace scope being entered before the transaction opens (#994).
  */
 @ExtendWith(MockitoExtension.class)
 class DeliveryWebhookServiceTest {
@@ -57,10 +65,11 @@ class DeliveryWebhookServiceTest {
     @Mock private ConsentService consentService;
     @Mock private SystemActor systemActor;
     @Mock private AutomationExecutor automationExecutor;
+    @Mock private TransactionTemplate transactionTemplate;
 
     private DeliveryWebhookService service() {
         return new DeliveryWebhookService(configService, router, campaignDeliveryMapper, campaignSendMapper,
-                suppressionService, consentService, systemActor, automationExecutor);
+                suppressionService, consentService, systemActor, automationExecutor, transactionTemplate);
     }
 
     private ResolvedDeliveryProvider target(int workspaceId) {
@@ -85,12 +94,30 @@ class DeliveryWebhookServiceTest {
         return delivery;
     }
 
-    private void runAsInline() {
+    private void scopeInline() {
         User system = new User();
         system.setId(1);
         when(systemActor.user()).thenReturn(system);
         when(automationExecutor.runAs(anyInt(), any(), eq("system"), any())).thenAnswer(
                 invocation -> ((Supplier<?>) invocation.getArgument(3)).get());
+        when(transactionTemplate.execute(any())).thenAnswer(invocation ->
+                ((TransactionCallback<?>) invocation.getArgument(0))
+                        .doInTransaction(new SimpleTransactionStatus()));
+    }
+
+    @Test
+    void ingest_entersTheWorkspaceScopeBeforeOpeningTheTransactionOrReadingTenantData() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", "e1", DeliveryEventType.DELIVERED, null, null)));
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
+                .thenReturn(delivery(WORKSPACE_A));
+        scopeInline();
+
+        assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+
+        InOrder ordered = inOrder(automationExecutor, transactionTemplate, campaignDeliveryMapper);
+        ordered.verify(automationExecutor).runAs(eq(WORKSPACE_A), any(), eq("system"), any());
+        ordered.verify(transactionTemplate).execute(any());
+        ordered.verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_A, PROVIDER, "m1");
     }
 
     @Test
@@ -98,6 +125,7 @@ class DeliveryWebhookServiceTest {
         resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", "e1", DeliveryEventType.DELIVERED, null, null)));
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
                 .thenReturn(delivery(WORKSPACE_A));
+        scopeInline();
 
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
@@ -115,7 +143,7 @@ class DeliveryWebhookServiceTest {
         send.setChannel("email");
         send.setPurpose("marketing");
         when(campaignSendMapper.getSend(WORKSPACE_A, 300)).thenReturn(send);
-        runAsInline();
+        scopeInline();
 
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
@@ -135,6 +163,7 @@ class DeliveryWebhookServiceTest {
                 .thenReturn(delivery(WORKSPACE_A));
         org.mockito.Mockito.doThrow(new DuplicateKeyException("dup"))
                 .when(campaignDeliveryMapper).insertEvent(any(CampaignDeliveryEvent.class));
+        scopeInline();
 
         assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
@@ -147,6 +176,7 @@ class DeliveryWebhookServiceTest {
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
                 .thenReturn(delivery(WORKSPACE_A));
         when(campaignDeliveryMapper.hasEvent(WORKSPACE_A, 500, "bounced")).thenReturn(true);
+        scopeInline();
 
         assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
@@ -161,6 +191,7 @@ class DeliveryWebhookServiceTest {
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
                 .thenReturn(delivery(WORKSPACE_A));
         when(campaignDeliveryMapper.hasEvent(WORKSPACE_A, 500, "delivered")).thenReturn(false);
+        scopeInline();
 
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
@@ -172,12 +203,25 @@ class DeliveryWebhookServiceTest {
     void ingest_resolvesWorkspaceFromTokenAndCannotTouchAnotherTenantsDelivery() {
         resolveTo(WORKSPACE_B, List.of(new DeliveryEvent("m1", "e1", DeliveryEventType.DELIVERED, null, null)));
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_B, PROVIDER, "m1")).thenReturn(null);
+        scopeInline();
 
         assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
+        verify(automationExecutor).runAs(eq(WORKSPACE_B), any(), eq("system"), any());
+        verify(automationExecutor, never()).runAs(eq(WORKSPACE_A), any(), any(), any());
         verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_B, PROVIDER, "m1");
         verify(campaignDeliveryMapper, never()).findByProviderMessage(eq(WORKSPACE_A), any(), any());
         verify(campaignDeliveryMapper, never()).insertEvent(any());
+    }
+
+    @Test
+    void ingestIsNotTransactional() throws NoSuchMethodException {
+        String reason = "TenantWorkScope cannot change the pinned catalog inside an active "
+                + "transaction, so the provider's workspace scope has to open first";
+        assertNull(DeliveryWebhookService.class.getAnnotation(Transactional.class), reason);
+        assertNull(DeliveryWebhookService.class
+                .getMethod("ingest", String.class, String.class, byte[].class, Map.class)
+                .getAnnotation(Transactional.class), reason);
     }
 
     @Test
