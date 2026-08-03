@@ -25,8 +25,7 @@ function workspace(role: WorkspaceRole, orgRole: OrgRole | null = null): Workspa
     };
 }
 
-/** Every capability the check answers true for, so a blanket grant cannot hide behind one lookup. */
-function allowed(subject: Workspace | null): string[] {
+function everyCapabilityAnsweredTrue(subject: Workspace | null): string[] {
     const can = resolveCan(subject);
     return WORKSPACE_CAPABILITIES.filter((capability) => can(capability));
 }
@@ -76,24 +75,24 @@ describe("an unrecognised permission key is refused, not granted", () => {
 
 describe("the role-derived capability table", () => {
     it("grants an owner workspace administration but not organization access on its own", () => {
-        expect(allowed(workspace("owner"))).toEqual(["WORKSPACE_MANAGE", "MEMBER_MANAGE"]);
+        expect(everyCapabilityAnsweredTrue(workspace("owner"))).toEqual(["WORKSPACE_MANAGE", "MEMBER_MANAGE"]);
     });
 
     it("grants an admin the same workspace administration as an owner", () => {
-        expect(allowed(workspace("admin"))).toEqual(["WORKSPACE_MANAGE", "MEMBER_MANAGE"]);
+        expect(everyCapabilityAnsweredTrue(workspace("admin"))).toEqual(["WORKSPACE_MANAGE", "MEMBER_MANAGE"]);
     });
 
     it("grants a plain member nothing", () => {
-        expect(allowed(workspace("member"))).toEqual([]);
+        expect(everyCapabilityAnsweredTrue(workspace("member"))).toEqual([]);
     });
 
     it("grants nothing at all before a workspace is selected", () => {
-        expect(allowed(null)).toEqual([]);
+        expect(everyCapabilityAnsweredTrue(null)).toEqual([]);
     });
 
     it("adds organization access from the organization role, independently of the workspace one", () => {
-        expect(allowed(workspace("member", "admin"))).toEqual(["ORGANIZATION_VIEW"]);
-        expect(allowed(workspace("owner", "owner"))).toEqual([
+        expect(everyCapabilityAnsweredTrue(workspace("member", "admin"))).toEqual(["ORGANIZATION_VIEW"]);
+        expect(everyCapabilityAnsweredTrue(workspace("owner", "owner"))).toEqual([
             "ORGANIZATION_VIEW",
             "WORKSPACE_MANAGE",
             "MEMBER_MANAGE",

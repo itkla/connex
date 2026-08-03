@@ -38,8 +38,7 @@ function json(body: unknown): Response {
     });
 }
 
-/** Answers only the reads this route makes, so a branch cannot pass by reaching a real backend. */
-function stubBackend(world: SnapshotWorld): void {
+function stubOnlyThisRoutesReads(world: SnapshotWorld): void {
     const measure = world.attainment ? 'attainment' : 'deal_value';
     const snapshotState = world.snapshot ?? 'ready';
     vi.stubGlobal('fetch', (input: string) => {
@@ -76,7 +75,7 @@ function stubBackend(world: SnapshotWorld): void {
 }
 
 async function renderSnapshotPage(world: SnapshotWorld): Promise<unknown> {
-    stubBackend(world);
+    stubOnlyThisRoutesReads(world);
     const rendered = await ReportSnapshotPage({
         params: Promise.resolve({ id: '1', snapshotId: '2' }),
     });

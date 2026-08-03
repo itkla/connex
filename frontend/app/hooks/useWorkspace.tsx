@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import type { Workspace } from "@/app/lib/types";
 import { createWorkspace, switchWorkspace } from "@/app/lib/api";
+import { adoptWorkspaces } from "@/app/lib/workspaceSnapshot";
 
 type WorkspaceContextValue = {
     workspaces: Workspace[];
@@ -17,38 +18,6 @@ type WorkspaceContextValue = {
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
-
-/**
- * Merges a freshly arrived server payload over the currently held workspaces.
- *
- * The payload wins, except for workspaces the server has never mentioned. {@link
- * WorkspaceContextValue.create} appends the workspace it just created before the refresh that will
- * report it, so a server render that began earlier can arrive with the creation missing. Dropping
- * it there would not merely flicker: the active workspace is already the new one, so it would name
- * a workspace absent from the list and `activeWorkspace` would resolve to null, leaving the shell
- * with no active workspace until some later refresh happened to repair it.
- *
- * Absence is only treated as an addition when the previously consumed payload did not mention the
- * workspace either. A workspace that was in the last payload and is gone from this one was removed
- * — the viewer left it, or lost their membership — and must not be resurrected.
- *
- * @param held - the workspaces currently published to the tree
- * @param consumed - the payload those were last reconciled against
- * @param arriving - the payload just received from the server
- * @returns the workspaces to publish
- */
-export function adoptWorkspaces(
-    held: readonly Workspace[],
-    consumed: readonly Workspace[],
-    arriving: Workspace[],
-): Workspace[] {
-    const consumedIds = new Set(consumed.map((workspace) => workspace.id));
-    const arrivingIds = new Set(arriving.map((workspace) => workspace.id));
-    const unacknowledged = held.filter(
-        (workspace) => !arrivingIds.has(workspace.id) && !consumedIds.has(workspace.id),
-    );
-    return unacknowledged.length === 0 ? arriving : [...arriving, ...unacknowledged];
-}
 
 /**
  * Publishes the viewer's workspaces and which one is active to client components.

@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { adoptWorkspaces } from "@/app/hooks/useWorkspace";
 import type { Workspace } from "@/app/lib/types";
+import { adoptWorkspaces } from "@/app/lib/workspaceSnapshot";
 
 const PROVIDER = "app/hooks/useWorkspace.tsx";
 const MEMBERS_PANEL = "app/components/settings/MembersPanel.tsx";
@@ -13,8 +13,7 @@ function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
 }
 
-/** The provider body up to its first callback, so an assertion cannot reach into the handlers. */
-function seeding(): string {
+function providerBodyBeforeItsHandlers(): string {
     const provider = source(PROVIDER);
     return provider.slice(
         provider.indexOf("export function WorkspaceProvider"),
@@ -30,29 +29,37 @@ describe("the workspace snapshot follows the server, not only the first render",
     });
 
     it("adopts a later payload instead of ignoring it", () => {
-        expect(seeding()).toMatch(
+        expect(providerBodyBeforeItsHandlers()).toMatch(
             /if \(publishedWorkspaces !== initialWorkspaces\) \{\s*setPublishedWorkspaces\(initialWorkspaces\);\s*setWorkspaces\(adoptWorkspaces\(workspaces, publishedWorkspaces, initialWorkspaces\)\);\s*\}/,
         );
     });
 
     it("adopts it during render, so no frame commits the role the viewer just left", () => {
-        expect(seeding()).not.toMatch(/useEffect\([\s\S]*setWorkspaces\(initialWorkspaces\)/);
+        expect(providerBodyBeforeItsHandlers()).not.toMatch(/useEffect\([\s\S]*setWorkspaces\(initialWorkspaces\)/);
     });
 
     it("tracks what it has already consumed, so adopting cannot loop", () => {
-        expect(seeding()).toContain(
+        expect(providerBodyBeforeItsHandlers()).toContain(
             "const [publishedWorkspaces, setPublishedWorkspaces] = useState(initialWorkspaces)",
         );
     });
 
     it("does not gate adoption on an operation being idle, which only defers the same overwrite", () => {
-        expect(seeding()).not.toContain("if (!switching &&");
+        expect(providerBodyBeforeItsHandlers()).not.toContain("if (!switching &&");
+    });
+
+    it("keeps the pure merge out of the component file, so Fast Refresh still preserves state", () => {
+        const provider = source(PROVIDER);
+
+        expect(provider).toContain('from "@/app/lib/workspaceSnapshot"');
+        expect(provider).not.toContain("export function adoptWorkspaces");
+        expect(provider.match(/^export /gm) ?? []).toHaveLength(2);
     });
 
     it("does not adopt the active workspace, and does not claim it cannot diverge", () => {
         const provider = source(PROVIDER);
 
-        expect(seeding()).not.toContain("setActiveWorkspaceId(initialActiveId)");
+        expect(providerBodyBeforeItsHandlers()).not.toContain("setActiveWorkspaceId(initialActiveId)");
         expect(provider).toContain(
             "const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId)",
         );
