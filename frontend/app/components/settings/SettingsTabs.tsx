@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
 
+import { usePermission } from "@/app/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -17,11 +18,26 @@ const TABS = [
     { key: "tabDiagnostics", href: "/settings/diagnostics" },
 ] as const;
 
+/**
+ * The workspace settings tab strip.
+ *
+ * Diagnostics is gated on `WORKSPACE_SETTINGS`, the permission its endpoints enforce, so a member
+ * without it is not offered a tab that can only answer with a refusal. The gate reads the shell's
+ * server-resolved effective permissions, which are fail-closed, and the panel keeps its own denial
+ * state for the case where the permission is lost while the page is open.
+ *
+ * @param mailManaged - whether the instance owns mail delivery, which retires the Email tab
+ */
 export default function SettingsTabs({ mailManaged = false }: { mailManaged?: boolean }) {
     const pathname = usePathname() ?? "";
     const t = useTranslations("WorkspaceSettings");
     const reduce = useReducedMotion() ?? false;
-    const tabs = TABS.filter((tab) => tab.key !== "tabEmail" || !mailManaged);
+    const canManageSettings = usePermission("WORKSPACE_SETTINGS");
+    const tabs = TABS.filter((tab) => {
+        if (tab.key === "tabEmail") return !mailManaged;
+        if (tab.key === "tabDiagnostics") return canManageSettings;
+        return true;
+    });
 
     return (
         <nav aria-label={t("title")} className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
