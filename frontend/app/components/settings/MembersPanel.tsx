@@ -120,8 +120,8 @@ function TabListHeading({ title, count }: { title: string; count?: number }) {
  *
  * A role change is refreshed from the server rather than only patched into local state. An
  * admin can change their own row here, and the app shell resolves the viewer's effective
- * permissions once per server render — so without the refresh they would keep the gates and
- * navigation of the role they just left until a full page load.
+ * permissions once per server render — so without the refresh they would keep the permission
+ * gates and navigation of the role they just left until a full page load.
  *
  * @param currentUserId the viewer, so their own row can be handled differently
  */

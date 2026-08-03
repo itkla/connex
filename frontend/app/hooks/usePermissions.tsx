@@ -14,7 +14,7 @@ import {
 type PermissionsContextValue = {
     status: PermissionsStatus;
     granted: ReadonlySet<string>;
-    refresh: () => Promise<boolean>;
+    refresh: () => Promise<void>;
 };
 
 const PermissionsContext = createContext<PermissionsContextValue | null>(null);
@@ -62,7 +62,7 @@ export function PermissionsProvider({
 }) {
     const router = useRouter();
     const granted = useMemo(() => new Set(permissions), [permissions]);
-    const probe = useRef<Promise<boolean> | null>(null);
+    const probe = useRef<Promise<void> | null>(null);
 
     const refresh = useCallback(() => {
         if (probe.current !== null) return probe.current;
@@ -70,13 +70,12 @@ export function PermissionsProvider({
             try {
                 const probed = await getEffectivePermissions();
                 if (permissionsDrifted(status, granted, probed)) router.refresh();
-                return true;
             } catch {
-                return false;
-            } finally {
-                probe.current = null;
+                return;
             }
-        })();
+        })().finally(() => {
+            probe.current = null;
+        });
         probe.current = pending;
         return pending;
     }, [granted, router, status]);
@@ -134,14 +133,18 @@ export function usePermissionCheck(permission: string): PermissionCheck {
 /**
  * Re-reads the viewer's effective permissions and re-renders the server tree if they changed.
  *
- * For a surface that just changed someone's role, or that is offering the viewer a way out of a
- * failed permission lookup, rather than waiting for the next focus revalidation. Callers that
- * arrive while a probe is already running share its result rather than starting a second one or
- * being told a check succeeded that was never made.
+ * For a surface offering the viewer a way out of a failed permission lookup, rather than waiting
+ * for the next focus revalidation. Callers arriving while a probe is already running share it
+ * instead of starting a second one.
  *
- * @returns a function resolving to whether the lookup reached the server
+ * Reports no outcome, because it can observe none worth reporting: the client probe and the
+ * shell's own server-side lookup fail independently, so a probe that reached the backend is no
+ * evidence the page will recover. Whether it recovered is what the caller can already see — the
+ * refused surface is replaced, or it is not.
+ *
+ * @returns a function resolving once the probe, and any refresh it triggered, has been issued
  * @throws when called outside a {@link PermissionsProvider}
  */
-export function usePermissionsRefresh(): () => Promise<boolean> {
+export function usePermissionsRefresh(): () => Promise<void> {
     return usePermissionsContext().refresh;
 }

@@ -291,7 +291,7 @@ function PermissionsUnavailableSection() {
 
     const retry = () => {
         startTransition(async () => {
-            if (!(await refreshPermissions())) toastError(t("retryFailed"));
+            await refreshPermissions();
         });
     };
 

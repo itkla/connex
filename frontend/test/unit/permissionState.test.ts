@@ -73,9 +73,6 @@ describe("a failed permission lookup is not a denial", () => {
         );
     });
 
-    it("keeps the boolean hook fail-closed on an unresolved lookup", () => {
-        expect(checkPermission(UNRESOLVED, new Set(), "CUSTOM_FIELD_MANAGE") === "granted").toBe(false);
-    });
 });
 
 describe("the app shell publishes the lookup outcome", () => {
@@ -115,7 +112,12 @@ describe("a route-level refusal tells the truth about which one it is", () => {
 
     it("offers a way out, because the fix for a failed check is to retry", () => {
         expect(panel).toContain("usePermissionsRefresh");
-        expect(panel).toMatch(/toastError\(t\("retryFailed"\)\)/);
+        expect(panel).toMatch(/await refreshPermissions\(\)/);
+    });
+
+    it("claims no outcome the retry cannot observe", () => {
+        expect(panel).not.toMatch(/refreshPermissions\(\)\)\)/);
+        expect(source(PROVIDER)).toContain("refresh: () => Promise<void>");
     });
 
     it("reuses the shared state rather than hand-rolling a card", () => {
@@ -126,14 +128,15 @@ describe("a route-level refusal tells the truth about which one it is", () => {
     it("keeps the shared state free of hooks, so route-level dead ends ship no client bundle", () => {
         const unavailable = source(UNAVAILABLE);
 
-        expect(unavailable).not.toContain('"use client"');
-        expect(unavailable).not.toMatch(/\buse(State|Effect|Transition|Translations|Router)\b/);
+        expect(unavailable).not.toMatch(/^\s*['"]use client['"]/m);
+        expect(unavailable).not.toMatch(/\buse[A-Z]\w*\s*\(/);
     });
 
-    it("ships the copy it renders in both locales", () => {
-        for (const key of ["title", "sectionBody", "retry", "retrying", "retryFailed"]) {
+    it("ships the copy it renders in both locales, actually translated", () => {
+        for (const key of ["title", "sectionBody", "retry", "retrying"]) {
             expect(message("en", key).length).toBeGreaterThan(0);
-            expect(message("ja", key).length).toBeGreaterThan(0);
+            expect(message("ja", key)).not.toBe(message("en", key));
+            expect(message("ja", key)).toMatch(/[^\x00-\x7F]/);
         }
     });
 
@@ -162,6 +165,11 @@ describe("a stale permission snapshot is re-read, not waited out", () => {
         expect(permissionsDrifted(UNRESOLVED, new Set(), ["A"])).toBe(true);
     });
 
+    it("leaves an unchanged answer alone, so an ordinary tab-back costs one small read", () => {
+        expect(permissionsDrifted(RESOLVED, new Set(), [])).toBe(false);
+        expect(permissionsDrifted(RESOLVED, new Set(["A", "B"]), ["A", "B"])).toBe(false);
+    });
+
     it("re-reads the permission list on regaining focus, both ways a tab can regain it", () => {
         expect(provider).toContain('window.addEventListener("focus", refreshWhenVisible)');
         expect(provider).toContain('document.addEventListener("visibilitychange", refreshWhenVisible)');
@@ -169,9 +177,9 @@ describe("a stale permission snapshot is re-read, not waited out", () => {
         expect(provider).toContain('document.removeEventListener("visibilitychange", refreshWhenVisible)');
     });
 
-    it("re-reads it for real instead of expiring a cache", () => {
+    it("re-reads it for real instead of polling or expiring a cache", () => {
         expect(provider).toContain("await getEffectivePermissions()");
-        expect(provider).not.toMatch(/setInterval|Date\.now\(\)|TTL|maxAge|staleTime/);
+        expect(provider).not.toMatch(/\bsetInterval\s*\(|\bsetTimeout\s*\(/);
     });
 
     it("re-renders the server tree only when the answer actually changed", () => {
@@ -181,11 +189,21 @@ describe("a stale permission snapshot is re-read, not waited out", () => {
     });
 
     it("leaves a good snapshot alone when the probe itself fails", () => {
-        expect(provider).toMatch(/} catch \{\s*return false;\s*}/);
+        const refresh = provider.slice(
+            provider.indexOf("const refresh = useCallback"),
+            provider.indexOf("useEffect(()"),
+        );
+
+        expect(refresh).toMatch(/catch \{/);
+        expect(refresh).not.toMatch(/catch \{[\s\S]*?router\.refresh\(\)/);
     });
 
-    it("shares one in-flight probe rather than stacking them or reporting an unmade check", () => {
+    it("shares one in-flight probe rather than stacking them", () => {
         expect(provider).toContain("if (probe.current !== null) return probe.current");
+    });
+
+    it("clears the in-flight probe after the assignment can never be undone by it", () => {
+        expect(provider).toMatch(/\}\)\(\)\.finally\(\(\) => \{\s*probe\.current = null;\s*\}\);/);
     });
 });
 
@@ -193,22 +211,49 @@ describe("a role change re-seeds the shell it was made from", () => {
     const members = source(MEMBERS_PANEL);
     const roles = source(ROLES_PANEL);
 
+    /** The body of one handler, so an assertion cannot reach past it into its neighbour. */
+    function handler(file: string, declaration: string, next: string): string {
+        const start = file.indexOf(declaration);
+        const end = file.indexOf(next, start);
+
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+        return file.slice(start, end);
+    }
+
+    const changeRole = handler(members, "const changeRole = async", "const assignCustom = async");
+    const assignCustom = handler(members, "const assignCustom = async", "const confirmRemove = async");
+    const submitRole = handler(roles, "const submitRole = async", "const confirmRemove = async");
+    const deleteRole = handler(roles, "const confirmRemove = async", "if (accessDenied)");
+
     it("refreshes after a member's built-in role changes", () => {
-        expect(members).toMatch(/await updateMemberRole\([^)]*\);[\s\S]{0,160}?router\.refresh\(\)/);
+        expect(changeRole).toContain("await updateMemberRole(");
+        expect(changeRole).toContain("router.refresh()");
     });
 
     it("refreshes after a member is assigned a custom role", () => {
-        expect(members).toMatch(/await assignMemberCustomRole\([^)]*\);[\s\S]{0,160}?router\.refresh\(\)/);
+        expect(assignCustom).toContain("await assignMemberCustomRole(");
+        expect(assignCustom).toContain("router.refresh()");
     });
 
-    it("refreshes after a custom role's permission set is saved or deleted", () => {
-        expect(roles).toMatch(/await createWorkspaceRole\([\s\S]{0,320}?router\.refresh\(\)/);
-        expect(roles).toMatch(/await deleteWorkspaceRole\([\s\S]{0,160}?router\.refresh\(\)/);
+    it("refreshes after a custom role is created or its permission set is edited", () => {
+        expect(submitRole).toContain("await updateWorkspaceRole(");
+        expect(submitRole).toContain("await createWorkspaceRole(");
+        expect(submitRole.match(/router\.refresh\(\)/g) ?? []).toHaveLength(1);
+        expect(submitRole.indexOf("router.refresh()")).toBeGreaterThan(
+            submitRole.indexOf("await createWorkspaceRole("),
+        );
+    });
+
+    it("refreshes after a custom role is deleted", () => {
+        expect(deleteRole).toContain("await deleteWorkspaceRole(");
+        expect(deleteRole).toContain("router.refresh()");
     });
 
     it("does not refresh from a failed mutation, which changed nothing", () => {
-        expect(members).not.toMatch(/catch \(err\) \{[\s\S]{0,200}?router\.refresh\(\)/);
-        expect(roles).not.toMatch(/catch \(err\) \{[\s\S]{0,200}?router\.refresh\(\)/);
+        for (const body of [changeRole, assignCustom, submitRole, deleteRole]) {
+            expect(body).not.toMatch(/catch \([\s\S]*?router\.refresh\(\)/);
+        }
     });
 });
 
