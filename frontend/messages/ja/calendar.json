@@ -13,7 +13,7 @@
     "viewWeek": "週",
     "viewDay": "日",
     "viewAgenda": "予定リスト",
-    "filters": "種類で絞り込み",
+    "filters": "種類でフィルター",
     "filterTasks": "タスク",
     "filterActivities": "アクティビティ",
     "filterDeals": "案件",
@@ -75,14 +75,14 @@
     "sourceNotice": {
       "failedTitle": "一部の予定を読み込めませんでした",
       "failedBody": "このカレンダーは不完全です。{sources}を読み込めませんでした。ページを再読み込みしてお試しください。",
-      "warmthFailed": "コンタクトの温度感を読み込めなかったため、関係性の色分けが表示されない場合があります。",
+      "warmthFailed": "連絡先の温度感を読み込めなかったため、関係性の色分けが表示されない場合があります。",
       "truncatedRecent": "{total}件の{source}のうち、最新の{shown}件を表示しています。それより古いものは表示されない場合があります。",
       "truncatedNeutral": "{total}件の{source}のうち{shown}件を表示しています。一部は表示されない場合があります。",
       "separator": "、",
       "source": {
         "activities": "アクティビティ",
         "tasks": "タスク",
-        "persons": "コンタクト",
+        "persons": "連絡先",
         "deals": "案件",
         "notes": "メモ"
       }

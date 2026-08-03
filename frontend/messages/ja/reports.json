@@ -11,8 +11,8 @@
       "documentDescription": "生成されたビジネスレポート",
       "goalsTitle": "目標",
       "goalsDescription": "レポート達成率の売上目標",
-      "snapshotTitle": "凍結レポートスナップショット",
-      "snapshotDescription": "配信時点で凍結されたレポートスナップショット"
+      "snapshotTitle": "確定レポートスナップショット",
+      "snapshotDescription": "配信時点で確定されたレポートスナップショット"
     },
     "common": {
       "cancel": "キャンセル",
@@ -52,7 +52,7 @@
       "updated": "{date} に更新",
       "actions": "{name} の操作",
       "deleteTitle": "レポートを削除しますか？",
-      "deleteBody": "{name} とすべての凍結スナップショットが完全に削除されます。",
+      "deleteBody": "{name} とすべての確定スナップショットが完全に削除されます。",
       "deleted": "{name} を削除しました"
     },
     "templates": {
@@ -152,7 +152,7 @@
       "snapshotting": "スナップショットを保存中…",
       "snapshotCreated": "スナップショットを作成しました",
       "snapshotDeleted": "スナップショットを削除しました",
-      "snapshots": "凍結スナップショット",
+      "snapshots": "確定スナップショット",
       "live": "ライブレポート",
       "deleteSnapshot": "スナップショットを削除",
       "deleteSnapshotNamed": "{date}のスナップショットを削除",
@@ -204,9 +204,9 @@
       "noCurrentStateData": "現在状態のデータはありません",
       "source": "出典",
       "metric": "指標",
-      "scheduledSnapshot": "スケジュール配信により凍結",
+      "scheduledSnapshot": "スケジュール配信により確定",
       "snapshotUnavailableTitle": "このスナップショットは利用できなくなりました",
-      "snapshotUnavailableBody": "凍結スナップショットは順次削除されるため、メールのリンクがスナップショットより長く残ることがあります。ライブレポートは引き続き閲覧できます。",
+      "snapshotUnavailableBody": "確定スナップショットは順次削除されるため、メールのリンクがスナップショットより長く残ることがあります。ライブレポートは引き続き閲覧できます。",
       "snapshotForbiddenTitle": "このスナップショットへのアクセス権がありません",
       "snapshotForbiddenBody": "このレポートへのアクセスが必要な場合は、ワークスペース管理者にお問い合わせください。",
       "viewLiveReport": "ライブレポートを表示",

@@ -2,11 +2,11 @@
   "EngineEvaluation": {
     "title": "インサイト",
     "contactRiskLabel": "リスク・関係低下シグナル",
-    "contactRiskHint": "この連絡先の関係低下の通知と、商談リスクへの反映",
+    "contactRiskHint": "この連絡先の関係低下の通知と、案件リスクへの反映",
     "contactIntroLabel": "紹介の候補",
     "contactIntroHint": "この連絡先を紹介の候補として提案します",
     "dealRiskLabel": "リスク評価",
-    "dealRiskHint": "この商談をリスクシグナルの評価対象にします。クローズ日のリマインダーは維持されます",
+    "dealRiskHint": "この案件をリスクシグナルの評価対象にします。クローズ日のリマインダーは維持されます",
     "updateFailed": "設定を更新できませんでした"
   },
   "SmartSegments": {
@@ -14,12 +14,12 @@
     "evaluateFailed": "セグメントを評価できませんでした。",
     "fieldsFailed": "セグメントの選択肢を読み込めませんでした。",
     "builderTitle": "セグメントを作成",
-    "builderDescription": "関係シグナルとフィールド条件を組み合わせて、目的の企業を正確に絞り込みます。",
+    "builderDescription": "関係シグナルとフィールド条件を組み合わせて、目的の会社を正確に絞り込みます。",
     "matchPrefix": "次の条件の",
     "matchAll": "すべて",
     "matchAny": "いずれか",
     "matchSuffix": "に一致",
-    "noConditions": "条件がまだありません。追加して絞り込みを始めましょう。",
+    "noConditions": "条件がまだありません。追加してフィルターを始めましょう。",
     "addCondition": "条件を追加",
     "clearConditions": "すべてクリア",
     "done": "完了",
@@ -306,7 +306,7 @@
   },
   "RecordsFilterMenu": {
     "filterAria": "フィルター",
-    "filterBy": "絞り込み",
+    "filterBy": "フィルター",
     "clearAll": "すべてクリア"
   },
   "RecordsDeleteDialog": {
@@ -341,12 +341,12 @@
     "description": "パイプラインを管理"
   },
   "RecordsContactsLayout": {
-    "title": "レコード / コンタクト",
-    "description": "コンタクトを管理"
+    "title": "レコード / 連絡先",
+    "description": "連絡先を管理"
   },
   "RecordsCompaniesLayout": {
-    "title": "レコード / 企業",
-    "description": "企業を管理"
+    "title": "レコード / 会社",
+    "description": "会社を管理"
   },
   "RecordsBulkTagDialog": {
     "titleAdd": "{count}件のレコードにタグを追加",
@@ -409,8 +409,8 @@
       "other": "その他"
     },
     "attribution": {
-      "directPerson": "このコンタクトに直接紐づくソースです。",
-      "presentDayCompany": "現在この会社に所属するコンタクトと、現在この会社に紐づく案件を根拠に含めています。",
+      "directPerson": "この連絡先に直接紐づくソースです。",
+      "presentDayCompany": "現在この会社に所属する連絡先と、現在この会社に紐づく案件を根拠に含めています。",
       "touchTimeCompany": "接触時点の勤務先と、各案件の現在の会社を基準に根拠を帰属しています。"
     },
     "omitted": "ほか{count}件の対象ソースもスコアに含まれています。",

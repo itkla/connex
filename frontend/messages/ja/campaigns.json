@@ -91,7 +91,7 @@
         "subtitle": "対象者はスマートセグメントから算出されます。配信前に許諾と抑制が適用されます。",
         "recordType": "対象の種類",
         "person": "連絡先",
-        "company": "企業",
+        "company": "会社",
         "deal": "案件",
         "saveAudience": "対象者を保存",
         "saving": "保存中…",

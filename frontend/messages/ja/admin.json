@@ -66,7 +66,7 @@
     "noMatchesMoreBody": "読み込み済みの{loaded}件のイベントに一致するものはありません。さらに読み込んで検索を続けるか、フィルターを調整してください。",
     "searchAria": "監査ログを検索",
     "clearSearchAria": "検索をクリア",
-    "filtersAria": "イベントを絞り込み",
+    "filtersAria": "イベントをフィルター",
     "sortAria": "並び替え",
     "chipSearch": "検索: 「{query}」",
     "lastEventNever": "なし",
