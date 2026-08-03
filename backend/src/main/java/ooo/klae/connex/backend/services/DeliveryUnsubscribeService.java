@@ -1,9 +1,11 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 
@@ -20,8 +22,20 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 /**
  * Handles the public unsubscribe endpoints. The signed token alone identifies a single
  * {@code campaign_delivery} row; the workspace is resolved from that row and never trusted from the
- * request, so no caller-supplied id is honored. The suppression and consent-revocation writes run as
- * the system actor in the delivery's own workspace, and the whole operation is idempotent.
+ * request, so no caller-supplied id is honored. The whole operation is idempotent.
+ *
+ * <p>The only caller these endpoints have is an email recipient with no session, so
+ * {@code TenantResolutionInterceptor} leaves the request thread unresolved and every
+ * workspace-scoped statement would otherwise be refused by the {@code TenantScopeInterceptor}
+ * backstop (#994). Everything after the exempt token lookup therefore runs inside
+ * {@link AutomationExecutor#runAs}, which resolves the delivery's own workspace placement
+ * fail-closed and installs the narrowly-permissioned system actor that {@link SuppressionService}
+ * and {@link ConsentService} require.
+ *
+ * <p>That scope is installed <em>before</em> the transaction opens, not inside it:
+ * {@code TenantWorkScope} refuses to change the pinned catalog while a transaction is already
+ * active, because the transaction-bound connection keeps its original catalog. The write path
+ * therefore opens its transaction through {@link TransactionTemplate} inside the scope.
  */
 @Service
 @RequiredArgsConstructor
@@ -35,36 +49,42 @@ public class DeliveryUnsubscribeService {
     private final ConsentService consentService;
     private final SystemActor systemActor;
     private final AutomationExecutor automationExecutor;
+    private final TransactionTemplate transactionTemplate;
 
     /** Returns the confirmation payload for an unsubscribe link. */
     public DeliveryUnsubscribeDto preview(String token) {
         CampaignDelivery delivery = requireDelivery(token);
-        CampaignSend send = requireSend(delivery);
-        boolean unsubscribed = campaignDeliveryMapper.hasEvent(
-                delivery.getWorkspaceId(), delivery.getId(), EVENT_UNSUBSCRIBED);
-        return new DeliveryUnsubscribeDto(send.getChannel(), maskAddress(delivery.getAddress()), unsubscribed);
+        return inDeliveryWorkspace(delivery, () -> {
+            CampaignSend send = requireSend(delivery);
+            boolean unsubscribed = campaignDeliveryMapper.hasEvent(
+                    delivery.getWorkspaceId(), delivery.getId(), EVENT_UNSUBSCRIBED);
+            return new DeliveryUnsubscribeDto(
+                    send.getChannel(), maskAddress(delivery.getAddress()), unsubscribed);
+        });
     }
 
     /** Performs the unsubscribe: idempotent suppression, consent revocation, and an event. */
-    @Transactional
     public DeliveryUnsubscribeDto unsubscribe(String token) {
         CampaignDelivery delivery = requireDelivery(token);
+        DeliveryUnsubscribeDto result = inDeliveryWorkspace(delivery,
+                () -> transactionTemplate.execute(status -> apply(delivery)));
+        return Objects.requireNonNull(result, "unsubscribe result");
+    }
+
+    private DeliveryUnsubscribeDto apply(CampaignDelivery delivery) {
         CampaignSend send = requireSend(delivery);
         int workspaceId = delivery.getWorkspaceId();
         if (campaignDeliveryMapper.hasEvent(workspaceId, delivery.getId(), EVENT_UNSUBSCRIBED)) {
             return new DeliveryUnsubscribeDto(send.getChannel(), maskAddress(delivery.getAddress()), true);
         }
-        automationExecutor.runAs(workspaceId, systemActor.user(), "system", () -> {
-            suppressionService.add(new SuppressionEntryRequest(
-                    "workspace", send.getChannel(), delivery.getAddress(), delivery.getPersonId(),
-                    "unsubscribe", "Recipient unsubscribed via campaign link"));
-            if (delivery.getPersonId() != null) {
-                consentService.setForPerson(delivery.getPersonId(), new ContactChannelConsentRequest(
-                        send.getChannel(), send.getPurpose(), "revoked", "unsubscribe", null,
-                        LocalDateTime.now()));
-            }
-            return null;
-        });
+        suppressionService.add(new SuppressionEntryRequest(
+                "workspace", send.getChannel(), delivery.getAddress(), delivery.getPersonId(),
+                "unsubscribe", "Recipient unsubscribed via campaign link"));
+        if (delivery.getPersonId() != null) {
+            consentService.setForPerson(delivery.getPersonId(), new ContactChannelConsentRequest(
+                    send.getChannel(), send.getPurpose(), "revoked", "unsubscribe", null,
+                    LocalDateTime.now()));
+        }
         CampaignDeliveryEvent event = new CampaignDeliveryEvent();
         event.setWorkspaceId(workspaceId);
         event.setDeliveryId(delivery.getId());
@@ -72,6 +92,11 @@ public class DeliveryUnsubscribeService {
         event.setDetail("Recipient unsubscribed");
         campaignDeliveryMapper.insertEvent(event);
         return new DeliveryUnsubscribeDto(send.getChannel(), maskAddress(delivery.getAddress()), true);
+    }
+
+    private <T> T inDeliveryWorkspace(CampaignDelivery delivery, Supplier<T> work) {
+        return automationExecutor.runAs(
+                delivery.getWorkspaceId(), systemActor.user(), "system", work);
     }
 
     private CampaignDelivery requireDelivery(String token) {
