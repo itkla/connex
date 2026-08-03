@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
@@ -35,7 +36,14 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
  * <p>That scope is installed <em>before</em> the transaction opens, not inside it:
  * {@code TenantWorkScope} refuses to change the pinned catalog while a transaction is already
  * active, because the transaction-bound connection keeps its original catalog. The write path
- * therefore opens its transaction through {@link TransactionTemplate} inside the scope.
+ * therefore opens its transaction through {@link TransactionTemplate} inside the scope, and both
+ * entry points fail fast when a caller has already opened one — under {@code single-database} the
+ * wrong order is silently harmless, so it has to be rejected rather than discovered on the first
+ * dedicated-placement tenant.
+ *
+ * <p>The token lookup itself still runs unrouted on the default catalog, so under
+ * {@code catalog-per-placement} a dedicated-placement tenant's link resolves to nothing and the
+ * recipient gets a 404. Resolving a token before its catalog is known is a separate problem.
  */
 @Service
 @RequiredArgsConstructor
@@ -95,6 +103,11 @@ public class DeliveryUnsubscribeService {
     }
 
     private <T> T inDeliveryWorkspace(CampaignDelivery delivery, Supplier<T> work) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException(
+                    "The delivery's workspace scope must be established before a transaction opens; "
+                        + "a transaction-bound connection keeps the catalog it was checked out with");
+        }
         return automationExecutor.runAs(
                 delivery.getWorkspaceId(), systemActor.user(), "system", work);
     }

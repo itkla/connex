@@ -20,7 +20,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
@@ -49,9 +48,14 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * the fail-closed {@code TenantScopeInterceptor} refused the first workspace-scoped statement after
  * the exempt token lookup; MyBatis wrapped that refusal into a {@code MyBatisSystemException}, which
  * no handler maps, so the recipient got a 500 instead of being unsubscribed.
+ *
+ * <p>Deliberately not {@code @Transactional}: a real recipient request arrives with no transaction
+ * on the thread, and the service must establish its workspace scope before opening one. A
+ * test-managed transaction would put the handler in exactly the shape the fix forbids, so it would
+ * mask a regression instead of catching it. Fixtures therefore commit, each into their own
+ * throwaway workspace.
  */
 @SpringBootTest
-@Transactional
 class DeliveryUnsubscribeIntegrationTest {
 
     @Autowired private WebApplicationContext context;
