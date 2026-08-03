@@ -18,8 +18,29 @@ public class WorkflowExecutionPrincipalService {
     private final SystemActor systemActor;
 
     public WorkflowExecutionPrincipal resolve(int workspaceId, WorkflowVersion version) {
-        if ("system".equals(version.getExecutionMode())) {
-            Integer attributionId = version.getCreatedById();
+        return resolve(
+            workspaceId,
+            version.getExecutionMode(),
+            version.getRunAsUserId(),
+            version.getCreatedById());
+    }
+
+    /** Revalidates the configured actor of one saved workflow draft without version persistence. */
+    public WorkflowExecutionPrincipal resolveDraft(
+            int workspaceId,
+            String executionMode,
+            Integer runAsUserId,
+            Integer createdById) {
+        return resolve(workspaceId, executionMode, runAsUserId, createdById);
+    }
+
+    private WorkflowExecutionPrincipal resolve(
+            int workspaceId,
+            String executionMode,
+            Integer runAsUserId,
+            Integer createdById) {
+        if ("system".equals(executionMode)) {
+            Integer attributionId = createdById;
             if (attributionId == null || workspaceService.getRole(workspaceId, attributionId) == null) {
                 throw new WorkflowExecutionException(
                     "actor_unavailable",
@@ -30,7 +51,7 @@ public class WorkflowExecutionPrincipalService {
             return new WorkflowExecutionPrincipal(
                 actor, "system", actor.getId(), attributionId);
         }
-        Integer actorId = version.getRunAsUserId();
+        Integer actorId = runAsUserId;
         if (actorId == null) {
             throw new WorkflowExecutionException(
                 "actor_unavailable",

@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowListView;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
@@ -27,12 +28,17 @@ import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
+import ooo.klae.connex.backend.dto.WorkflowLegacyRuleResolutionDto;
+import ooo.klae.connex.backend.dto.WorkflowListItemDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
 import ooo.klae.connex.backend.dto.WorkflowVersionDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -65,10 +71,10 @@ public class WorkflowService {
     /** Lists workflows in the active workspace using the existing deterministic mapper order. */
     @Transactional(readOnly = true)
     @RequirePermission(Permission.RULE_MANAGE)
-    public List<WorkflowDto> list(boolean archived) {
+    public List<WorkflowListItemDto> list(boolean archived) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return workflowMapper.listByWorkspace(workspaceId, archived).stream()
-            .map(this::toDto)
+        return workflowMapper.listItemsByWorkspace(workspaceId, archived).stream()
+            .map(this::toListItem)
             .toList();
     }
 
@@ -211,15 +217,57 @@ public class WorkflowService {
         Workflow workflow = requireWorkflow(workspaceId, id);
         requireMutable(workflow);
         CanonicalDraft draft = canonicalPersistedDraft(workflow);
-        canonicalizer.requirePublishableCanvas(draft);
-        workflowDefinitionValidator.validate(
-            draft.recordType(),
-            draft.executionMode(),
-            canonicalizer.parseDefinition(draft.definitionJson()));
-        if (!canonicalPublicationOwner(workflow)) {
-            project(workflow, draft);
+        boolean systemAuthoringAllowed = !"system".equals(draft.executionMode())
+            || workspaceService.isBuiltInAdmin(
+                workspaceId, workspaceService.getCurrentUserId());
+        Set<Permission> requiredPermissions;
+        try {
+            canonicalizer.requirePublishableCanvas(draft);
+            requiredPermissions = workflowDefinitionValidator.validateForMutation(
+                draft.recordType(),
+                draft.executionMode(),
+                canonicalizer.parseDefinition(draft.definitionJson()));
+        } catch (WorkflowDefinitionValidationException exception) {
+            return new WorkflowValidationDto(
+                workflow.getDraftRevision(),
+                false,
+                false,
+                systemAuthoringAllowed,
+                List.of(),
+                List.of(),
+                List.of(exception.diagnostic()));
         }
-        return new WorkflowValidationDto(workflow.getDraftRevision(), true);
+        List<String> required = requiredPermissions.stream()
+            .map(Enum::name)
+            .sorted()
+            .toList();
+        Set<Permission> currentPermissions = workspaceService.getCurrentPermissions();
+        List<String> missing = requiredPermissions.stream()
+            .filter(permission -> !currentPermissions.contains(permission))
+            .map(Enum::name)
+            .sorted()
+            .toList();
+        WorkflowDiagnosticDto publicationBlocker = publicationBlocker(workflow, draft);
+        return new WorkflowValidationDto(
+            workflow.getDraftRevision(),
+            true,
+            systemAuthoringAllowed && missing.isEmpty() && publicationBlocker == null,
+            systemAuthoringAllowed,
+            required,
+            missing,
+            publicationBlocker == null ? List.of() : List.of(publicationBlocker));
+    }
+
+    /** Resolves one explicit legacy rule id without consulting the canonical workflow id space. */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.RULE_MANAGE)
+    public WorkflowLegacyRuleResolutionDto resolveLegacyRule(int legacyRuleId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspaceId, legacyRuleId);
+        if (workflow == null) {
+            throw workflowNotFound();
+        }
+        return new WorkflowLegacyRuleResolutionDto(workflow.getId());
     }
 
     /** Publishes a revision-preconditioned immutable version under the workflow's runtime owner. */
@@ -672,6 +720,24 @@ public class WorkflowService {
         return graphConverter.project(converted);
     }
 
+    private WorkflowDiagnosticDto publicationBlocker(
+            Workflow workflow, CanonicalDraft draft) {
+        if (canonicalPublicationOwner(workflow)) {
+            return null;
+        }
+        try {
+            project(workflow, draft);
+            return null;
+        } catch (BadRequestException exception) {
+            return new WorkflowDiagnosticDto(
+                WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
+                null,
+                null,
+                null,
+                Map.of());
+        }
+    }
+
     private Integer resolveDraftRunAs(Workflow existing, String executionMode) {
         if ("system".equals(executionMode)) {
             return null;
@@ -1025,6 +1091,76 @@ public class WorkflowService {
             workflow.getUpdatedById(),
             workflow.getCreatedAt(),
             workflow.getUpdatedAt());
+    }
+
+    private WorkflowListItemDto toListItem(WorkflowListView workflow) {
+        WorkflowListItemDto.ActiveVersion activeVersion = null;
+        if (workflow.getActiveVersionId() != null) {
+            if (workflow.getActiveVersionNumber() == null
+                    || workflow.getActiveVersionPublishedAt() == null) {
+                throw inconsistentWorkflow();
+            }
+            activeVersion = new WorkflowListItemDto.ActiveVersion(
+                workflow.getActiveVersionId(),
+                workflow.getActiveVersionNumber(),
+                workflow.getActiveVersionPublishedAt());
+        }
+        return new WorkflowListItemDto(
+            workflow.getId(),
+            workflow.getName(),
+            workflow.getDescription(),
+            workflow.isEnabled(),
+            workflow.getRuntimeOwner(),
+            workflow.getArchivedAt(),
+            workflow.getDraftRevision(),
+            workflow.getRecordType(),
+            workflow.getExecutionMode(),
+            workflow.getRunAsUserId(),
+            activeVersion,
+            workflow.getNodeCount(),
+            workflow.getActionCount(),
+            latestRun(workflow),
+            workflow.getCreatedById(),
+            workflow.getUpdatedById(),
+            workflow.getCreatedAt(),
+            workflow.getUpdatedAt());
+    }
+
+    private static WorkflowListItemDto.LatestRun latestRun(WorkflowListView workflow) {
+        LocalDateTime canonicalTime = workflow.getCanonicalRunStartedAt();
+        LocalDateTime legacyTime = workflow.getLegacyRunExecutedAt();
+        boolean canonicalLatest = canonicalTime != null
+            && (legacyTime == null || !canonicalTime.isBefore(legacyTime));
+        if (canonicalLatest) {
+            Long id = workflow.getCanonicalRunId();
+            if (id == null || workflow.getCanonicalRunStatus() == null) {
+                throw inconsistentWorkflow();
+            }
+            return new WorkflowListItemDto.LatestRun(
+                "canonical-" + id,
+                "canonical",
+                workflow.getCanonicalRunStatus(),
+                null,
+                canonicalTime,
+                workflow.getCanonicalRunFinishedAt(),
+                true);
+        }
+        if (legacyTime == null) {
+            return null;
+        }
+        Integer id = workflow.getLegacyRunId();
+        String legacyStatus = workflow.getLegacyRunStatus();
+        if (id == null || legacyStatus == null) {
+            throw inconsistentWorkflow();
+        }
+        return new WorkflowListItemDto.LatestRun(
+            "legacy-" + id,
+            "legacy",
+            WorkflowRunReadService.normalizeLegacyStatus(legacyStatus),
+            legacyStatus,
+            legacyTime,
+            legacyTime,
+            false);
     }
 
     private WorkflowVersionDto toVersionDto(WorkflowVersion version) {

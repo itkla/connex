@@ -24,6 +24,67 @@
     ORDER BY updated_at DESC, id DESC
   </select>
 
+  <select id="listItemsByWorkspace" resultType="WorkflowListView">
+    SELECT w.id,
+           w.workspace_id,
+           w.name,
+           w.description,
+           w.enabled,
+           w.runtime_owner,
+           w.archived_at,
+           w.draft_revision,
+           w.draft_record_type AS record_type,
+           w.draft_execution_mode AS execution_mode,
+           w.draft_run_as_user_id AS run_as_user_id,
+           w.active_version_id,
+           active_version.version_number AS active_version_number,
+           active_version.published_at AS active_version_published_at,
+           JSON_LENGTH(w.draft_definition_json, '$.nodes') AS node_count,
+           (
+             SELECT COUNT(*)
+             FROM JSON_TABLE(
+               w.draft_definition_json,
+               '$.nodes[*]' COLUMNS(node_type VARCHAR(16) PATH '$.type')
+             ) draft_node
+             WHERE draft_node.node_type = 'ACTION'
+           ) AS action_count,
+           canonical_run.id AS canonical_run_id,
+           canonical_run.status AS canonical_run_status,
+           canonical_run.started_at AS canonical_run_started_at,
+           canonical_run.finished_at AS canonical_run_finished_at,
+           legacy_run.id AS legacy_run_id,
+           legacy_run.status AS legacy_run_status,
+           legacy_run.executed_at AS legacy_run_executed_at,
+           w.created_by_id,
+           w.updated_by_id,
+           w.created_at,
+           w.updated_at
+    FROM workflow w
+    LEFT JOIN workflow_version active_version
+      ON active_version.workspace_id = w.workspace_id
+     AND active_version.workflow_id = w.id
+     AND active_version.id = w.active_version_id
+    LEFT JOIN LATERAL (
+      SELECT wr.id, wr.status, wr.started_at, wr.finished_at
+      FROM workflow_run wr
+      WHERE wr.workspace_id = w.workspace_id
+        AND wr.workflow_id = w.id
+      ORDER BY wr.started_at DESC, wr.id DESC
+      LIMIT 1
+    ) canonical_run ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT re.id, re.status, re.executed_at
+      FROM rule_execution re
+      WHERE re.workspace_id = w.workspace_id
+        AND re.rule_id = w.legacy_rule_id
+      ORDER BY re.executed_at DESC, re.id DESC
+      LIMIT 1
+    ) legacy_run ON TRUE
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.archived_at IS <choose><when test="archived">NOT NULL</when><otherwise>NULL</otherwise></choose>
+    ORDER BY w.updated_at DESC, w.id DESC
+  </select>
+
   <select id="getById" resultType="Workflow">
     SELECT <include refid="workflowColumns"/> FROM workflow
     WHERE workspace_id = #{workspaceId} AND id = #{id}

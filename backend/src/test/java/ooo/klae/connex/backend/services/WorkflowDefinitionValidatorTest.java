@@ -28,10 +28,13 @@ import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -372,6 +375,100 @@ class WorkflowDefinitionValidatorTest {
         assertInvalid(
             missingEnrollment,
             "Workflow schedule trigger must immediately target its enrollment condition");
+    }
+
+    @Test
+    void structuredMissingBranchAndTypedConfigFocusTheInspector() {
+        WorkflowDefinition missingNo = definition(
+            List.of(
+                new WorkflowNode.Trigger("trigger", entityChange()),
+                new WorkflowNode.Condition("condition", condition()),
+                new WorkflowNode.Action("action", notifyAction()),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-condition", "trigger", "condition", WorkflowEdge.Outcome.NEXT),
+                edge("condition-yes", "condition", "action", WorkflowEdge.Outcome.YES),
+                edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT)));
+
+        WorkflowDefinitionValidationException branch = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", missingNo));
+
+        assertEquals(WorkflowDiagnosticCode.BRANCH_OUTCOME_REQUIRED,
+            branch.diagnostic().code());
+        assertEquals("condition", branch.diagnostic().nodeId());
+        assertEquals("no", branch.diagnostic().params().get("outcome"));
+
+        RuleAction invalid = new RuleAction();
+        invalid.setType("notify");
+        WorkflowDefinition invalidAction = definition(
+            List.of(
+                new WorkflowNode.Trigger("trigger", entityChange()),
+                new WorkflowNode.Action("action", invalid),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT)));
+
+        WorkflowDefinitionValidationException config = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", invalidAction));
+
+        assertEquals(WorkflowDiagnosticCode.ACTION_FIELD_REQUIRED,
+            config.diagnostic().code());
+        assertEquals("action", config.diagnostic().nodeId());
+        assertEquals("config.title", config.diagnostic().fieldPath());
+    }
+
+    @Test
+    void delayBoundsIncludeTheMaximumCumulativeDagPath() {
+        WorkflowDefinition belowMinimum = delayDefinition(List.of(59));
+        WorkflowDefinitionValidationException minimum = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", belowMinimum));
+        assertEquals(WorkflowDiagnosticCode.DELAY_DURATION_BELOW_MINIMUM,
+            minimum.diagnostic().code());
+        assertEquals("delay-0", minimum.diagnostic().nodeId());
+        assertEquals("config.durationSeconds", minimum.diagnostic().fieldPath());
+
+        WorkflowDefinition aboveNodeMaximum = delayDefinition(List.of(2_592_001));
+        WorkflowDefinitionValidationException nodeMaximum = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", aboveNodeMaximum));
+        assertEquals(WorkflowDiagnosticCode.DELAY_DURATION_ABOVE_MAXIMUM,
+            nodeMaximum.diagnostic().code());
+
+        WorkflowDefinition abovePathMaximum = delayDefinition(
+            List.of(2_592_000, 2_592_000, 2_592_000, 60));
+        WorkflowDefinitionValidationException pathMaximum = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", abovePathMaximum));
+        assertEquals(WorkflowDiagnosticCode.CUMULATIVE_DELAY_ABOVE_MAXIMUM,
+            pathMaximum.diagnostic().code());
+        assertEquals("delay-3", pathMaximum.diagnostic().nodeId());
+    }
+
+    private static WorkflowDefinition delayDefinition(List<Integer> durations) {
+        List<WorkflowNode> nodes = new java.util.ArrayList<>();
+        List<WorkflowEdge> edges = new java.util.ArrayList<>();
+        nodes.add(new WorkflowNode.Trigger("trigger", entityChange()));
+        String previous = "trigger";
+        for (int index = 0; index < durations.size(); index++) {
+            String nodeId = "delay-" + index;
+            nodes.add(new WorkflowNode.Delay(
+                nodeId, new WorkflowDelayConfig(durations.get(index))));
+            edges.add(edge(
+                previous + "-" + nodeId,
+                previous,
+                nodeId,
+                WorkflowEdge.Outcome.NEXT));
+            previous = nodeId;
+        }
+        nodes.add(new WorkflowNode.Action("action", notifyAction()));
+        nodes.add(new WorkflowNode.End("end"));
+        edges.add(edge(previous + "-action", previous, "action", WorkflowEdge.Outcome.NEXT));
+        edges.add(edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT));
+        return definition(nodes, edges);
     }
 
     private void assertInvalid(WorkflowDefinition definition, String expectedMessage) {

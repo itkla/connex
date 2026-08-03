@@ -35,6 +35,11 @@ class WorkflowMapperXmlTest {
             WorkflowMapper.class,
             "listByWorkspace",
             Map.of("workspaceId", 7, "archived", false));
+        assertScoped(
+            configuration,
+            WorkflowMapper.class,
+            "listItemsByWorkspace",
+            Map.of("workspaceId", 7, "archived", false));
         assertScoped(configuration, WorkflowMapper.class, "getById", identity);
         assertScoped(configuration, WorkflowMapper.class, "getByIdForUpdate", identity);
         assertScoped(configuration, WorkflowMapper.class, "getByLegacyRuleId", legacy);
@@ -156,6 +161,17 @@ class WorkflowMapperXmlTest {
         assertTrue(legacySql.contains("r.workspace_id = ?"));
         assertTrue(legacySql.contains("w.workspace_id = ?"));
         assertTrue(legacySql.endsWith("ORDER BY r.id"));
+        String listItems = sql(
+            configuration,
+            WorkflowMapper.class,
+            "listItemsByWorkspace",
+            Map.of("workspaceId", 7, "archived", false));
+        assertTrue(listItems.contains("LEFT JOIN LATERAL"));
+        assertTrue(listItems.contains("wr.workspace_id = w.workspace_id"));
+        assertTrue(listItems.contains("re.workspace_id = w.workspace_id"));
+        assertTrue(listItems.contains("ORDER BY wr.started_at DESC, wr.id DESC LIMIT 1"));
+        assertTrue(listItems.contains("ORDER BY re.executed_at DESC, re.id DESC LIMIT 1"));
+        assertFalse(listItems.contains("draft_canvas_json"));
 
         String replacementSql = sql(
             configuration,

@@ -4,7 +4,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 
-import ooo.klae.connex.backend.dto.WorkflowEdge;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 
 /** Executes one supported schema-v1 node without owning transaction boundaries. */
@@ -12,27 +12,29 @@ import ooo.klae.connex.backend.dto.WorkflowNode;
 @RequiredArgsConstructor
 public class WorkflowNodeExecutor {
 
-    private final SegmentService segmentService;
     private final RuleActionExecutor actionExecutor;
     private final AutomationExecutor automationExecutor;
+    private final WorkflowNodeDecisionService decisionService;
+    private final WorkflowActionGuard actionGuard;
 
     public WorkflowStepTransition execute(
             WorkflowNodeExecutionContext context, WorkflowNode node) {
-        if (node instanceof WorkflowNode.Trigger) {
-            return immediate(WorkflowEdge.Outcome.NEXT);
-        }
-        if (node instanceof WorkflowNode.Condition condition) {
-            boolean enrollment = "schedule".equals(context.run().getTriggerType())
-                && node.id().equals(context.compiled().enrollmentConditionNodeId());
-            boolean matched = enrollment || segmentService.matchesEntity(
-                context.run().getWorkspaceId(),
-                context.principal().attributionUserId(),
-                context.run().getRecordType(),
-                condition.config(),
-                context.run().getRecordId());
-            return immediate(matched ? WorkflowEdge.Outcome.YES : WorkflowEdge.Outcome.NO);
-        }
+        WorkflowStepTransition transition = decisionService.decide(
+            decisionContext(context), node);
         if (node instanceof WorkflowNode.Action action) {
+            WorkflowDiagnosticDto blocker = actionGuard.blocker(
+                context.run().getWorkspaceId(),
+                context.principal().actorUserId(),
+                context.run().getRecordType(),
+                context.run().getRecordId(),
+                node.id(),
+                action.config());
+            if (blocker != null) {
+                throw new WorkflowExecutionException(
+                    blocker.code().value(),
+                    "The workflow action is no longer executable.",
+                    true);
+            }
             WorkflowActionContext actionContext = new WorkflowActionContext(
                 context.run().getWorkspaceId(),
                 context.run().getId(),
@@ -48,20 +50,20 @@ public class WorkflowNodeExecutor {
                     actionExecutor.execute(action.config(), actionContext);
                     return null;
                 });
-            return immediate(WorkflowEdge.Outcome.NEXT);
+            return transition;
         }
-        if (node instanceof WorkflowNode.End) {
-            return new WorkflowStepTransition(
-                WorkflowStepTransition.Continuation.TERMINAL, null);
-        }
-        throw new WorkflowExecutionException(
-            "node_unsupported",
-            "The active workflow contains an unsupported node.",
-            true);
+        return transition;
     }
 
-    private static WorkflowStepTransition immediate(WorkflowEdge.Outcome outcome) {
-        return new WorkflowStepTransition(
-            WorkflowStepTransition.Continuation.IMMEDIATE, outcome);
+    private static WorkflowNodeDecisionContext decisionContext(
+            WorkflowNodeExecutionContext context) {
+        return new WorkflowNodeDecisionContext(
+            context.run().getWorkspaceId(),
+            context.principal().attributionUserId(),
+            context.run().getTriggerType(),
+            context.run().getRecordType(),
+            context.run().getRecordId(),
+            true,
+            context.compiled());
     }
 }

@@ -15,8 +15,15 @@ public class WorkflowRecordGuard {
     private final SegmentMapper segmentMapper;
 
     public void requireAccessible(WorkflowRun run) {
+        requireAccessible(
+            run.getWorkspaceId(), run.getRecordType(), run.getRecordId());
+    }
+
+    /** Requires one record to remain in the canonical runtime's workspace/restriction universe. */
+    public void requireAccessible(
+            int workspaceId, String recordType, int recordId) {
         if (!segmentMapper.entityIdInWorkspace(
-                run.getWorkspaceId(), run.getRecordType(), run.getRecordId())) {
+                workspaceId, recordType, recordId)) {
             throw new WorkflowExecutionException(
                 "record_unavailable",
                 "The workflow record is no longer available for automation.",

@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
+import ooo.klae.connex.backend.services.WorkflowSimulationService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -128,7 +129,7 @@ class RbacEnforcementArchTest {
                 violations.add(method.getName());
             }
         }
-        assertEquals(11, lifecycleMethodCount,
+        assertEquals(12, lifecycleMethodCount,
             "Workflow lifecycle surface changed without updating the RBAC guard");
         assertTrue(violations.isEmpty(),
             "Every workflow lifecycle method must require RULE_MANAGE: " + violations);
@@ -138,7 +139,8 @@ class RbacEnforcementArchTest {
     void workflowOwnershipAndRunReadsRequireRuleManage() {
         Map<Class<?>, Integer> surfaces = Map.of(
             WorkflowRuntimeOwnershipService.class, 2,
-            WorkflowRunReadService.class, 2);
+            WorkflowRunReadService.class, 2,
+            WorkflowSimulationService.class, 1);
         List<String> violations = new ArrayList<>();
         for (Map.Entry<Class<?>, Integer> surface : surfaces.entrySet()) {
             int publicMethods = 0;

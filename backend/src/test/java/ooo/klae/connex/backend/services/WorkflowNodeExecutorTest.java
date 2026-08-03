@@ -1,12 +1,15 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.Map;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +23,9 @@ import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
@@ -30,6 +36,7 @@ class WorkflowNodeExecutorTest {
     @Mock private SegmentService segmentService;
     @Mock private RuleActionExecutor actionExecutor;
     @Mock private AutomationExecutor automationExecutor;
+    @Mock private WorkflowActionGuard actionGuard;
     @Mock private CompiledWorkflow compiled;
 
     private WorkflowNodeExecutor executor;
@@ -39,7 +46,10 @@ class WorkflowNodeExecutorTest {
     @BeforeEach
     void setUp() {
         executor = new WorkflowNodeExecutor(
-            segmentService, actionExecutor, automationExecutor);
+            actionExecutor,
+            automationExecutor,
+            new WorkflowNodeDecisionService(segmentService),
+            actionGuard);
         run = new WorkflowRun();
         run.setWorkspaceId(7);
         run.setId(31L);
@@ -104,5 +114,36 @@ class WorkflowNodeExecutorTest {
             context, new WorkflowNode.End("end"));
         assertEquals(WorkflowStepTransition.Continuation.TERMINAL, end.continuation());
         assertEquals(null, end.outcome());
+    }
+
+    @Test
+    void delaySuspendsWithoutExecutingAnAction() {
+        WorkflowStepTransition delay = executor.execute(
+            context, new WorkflowNode.Delay("delay", new WorkflowDelayConfig(3_600)));
+
+        assertEquals(WorkflowStepTransition.Continuation.SUSPENDED, delay.continuation());
+        assertEquals(null, delay.outcome());
+        verifyNoInteractions(actionExecutor, automationExecutor, actionGuard);
+    }
+
+    @Test
+    void actionPreflightBlocksTheRuntimeBeforeTheExecutor() {
+        RuleAction action = new RuleAction();
+        action.setType("create_task");
+        WorkflowDiagnosticDto blocker = new WorkflowDiagnosticDto(
+            WorkflowDiagnosticCode.ACTION_PERMISSION_MISSING,
+            "action",
+            null,
+            null,
+            Map.of("permission", "TASK_CREATE"));
+        when(actionGuard.blocker(7, 17, "deal", 41, "action", action))
+            .thenReturn(blocker);
+
+        WorkflowExecutionException failure = assertThrows(
+            WorkflowExecutionException.class,
+            () -> executor.execute(context, new WorkflowNode.Action("action", action)));
+
+        assertEquals("action_permission_missing", failure.code());
+        verifyNoInteractions(actionExecutor, automationExecutor);
     }
 }

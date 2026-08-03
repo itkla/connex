@@ -6,11 +6,16 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowListView;
 
 /** Workspace-scoped persistence for mutable workflows and deterministic legacy-rule pairing. */
 public interface WorkflowMapper {
 
     List<Workflow> listByWorkspace(
+        @Param("workspaceId") int workspaceId,
+        @Param("archived") boolean archived);
+
+    List<WorkflowListView> listItemsByWorkspace(
         @Param("workspaceId") int workspaceId,
         @Param("archived") boolean archived);
 

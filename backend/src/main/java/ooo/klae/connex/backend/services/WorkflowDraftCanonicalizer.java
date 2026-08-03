@@ -31,9 +31,12 @@ import tools.jackson.databind.type.LogicalType;
 
 import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 
 /** Validates workflow draft boundaries and produces deterministic persisted JSON and hashes. */
 @Component
@@ -156,7 +159,19 @@ public class WorkflowDraftCanonicalizer {
             nodeIds.add(node.id());
         }
         if (!nodeIds.equals(canvas.positions().keySet())) {
-            throw new BadRequestException("Workflow canvas must position every graph node");
+            String missingNodeId = nodeIds.stream()
+                .filter(nodeId -> !canvas.positions().containsKey(nodeId))
+                .sorted()
+                .findFirst()
+                .orElse(null);
+            throw new WorkflowDefinitionValidationException(
+                "Workflow canvas must position every graph node",
+                new WorkflowDiagnosticDto(
+                    WorkflowDiagnosticCode.CANVAS_NODE_POSITION_REQUIRED,
+                    missingNodeId,
+                    null,
+                    missingNodeId == null ? "canvas.positions" : "canvas.positions." + missingNodeId,
+                    Map.of()));
         }
     }
 

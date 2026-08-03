@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(value = WorkflowNode.Trigger.class, name = "TRIGGER"),
     @JsonSubTypes.Type(value = WorkflowNode.Condition.class, name = "CONDITION"),
     @JsonSubTypes.Type(value = WorkflowNode.Action.class, name = "ACTION"),
+    @JsonSubTypes.Type(value = WorkflowNode.Delay.class, name = "DELAY"),
     @JsonSubTypes.Type(value = WorkflowNode.End.class, name = "END")
 })
 public sealed interface WorkflowNode {
@@ -23,6 +24,9 @@ public sealed interface WorkflowNode {
 
     /** One ordered workflow action using the current rule action vocabulary. */
     record Action(String id, RuleAction config) implements WorkflowNode { }
+
+    /** A bounded duration wait that continues through one next edge. */
+    record Delay(String id, WorkflowDelayConfig config) implements WorkflowNode { }
 
     /** A terminal workflow node. */
     record End(String id) implements WorkflowNode { }

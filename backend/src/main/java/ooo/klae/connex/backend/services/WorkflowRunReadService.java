@@ -320,7 +320,7 @@ public class WorkflowRunReadService {
         return new WorkflowRunSummaryDto.Failure(null, code, message);
     }
 
-    private static String normalizeLegacyStatus(String legacyStatus) {
+    static String normalizeLegacyStatus(String legacyStatus) {
         return switch (normalize(legacyStatus)) {
             case "matched" -> "succeeded";
             case "partial" -> "partial";

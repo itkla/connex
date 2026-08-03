@@ -19,12 +19,17 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
+import ooo.klae.connex.backend.dto.WorkflowLegacyRuleResolutionDto;
+import ooo.klae.connex.backend.dto.WorkflowListItemDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowRuntimeOwnerRequest;
+import ooo.klae.connex.backend.dto.WorkflowSimulateRequest;
+import ooo.klae.connex.backend.dto.WorkflowSimulationDto;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
 import ooo.klae.connex.backend.dto.WorkflowVersionDto;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
+import ooo.klae.connex.backend.services.WorkflowSimulationService;
 
 /** HTTP lifecycle contract for workspace-scoped versioned workflows. */
 @RestController
@@ -34,9 +39,10 @@ public class WorkflowController {
 
     private final WorkflowService workflowService;
     private final WorkflowRuntimeOwnershipService runtimeOwnershipService;
+    private final WorkflowSimulationService simulationService;
 
     @GetMapping
-    public List<WorkflowDto> list(
+    public List<WorkflowListItemDto> list(
             @RequestParam(defaultValue = "false") boolean archived) {
         return workflowService.list(archived);
     }
@@ -63,6 +69,19 @@ public class WorkflowController {
     @PostMapping("/{id}/validate")
     public WorkflowValidationDto validate(@PathVariable int id) {
         return workflowService.validate(id);
+    }
+
+    @PostMapping("/{id}/simulate")
+    public WorkflowSimulationDto simulate(
+            @PathVariable int id,
+            @Valid @RequestBody WorkflowSimulateRequest request) {
+        return simulationService.simulate(id, request);
+    }
+
+    @GetMapping("/legacy-rules/{legacyRuleId}")
+    public WorkflowLegacyRuleResolutionDto resolveLegacyRule(
+            @PathVariable int legacyRuleId) {
+        return workflowService.resolveLegacyRule(legacyRuleId);
     }
 
     @PostMapping("/{id}/publish")

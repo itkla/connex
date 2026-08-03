@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -51,10 +52,13 @@ import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
 import ooo.klae.connex.backend.dto.WorkflowDto;
+import ooo.klae.connex.backend.dto.WorkflowLegacyRuleResolutionDto;
+import ooo.klae.connex.backend.dto.WorkflowListItemDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowRunDetailDto;
 import ooo.klae.connex.backend.dto.WorkflowRunPageDto;
 import ooo.klae.connex.backend.dto.WorkflowRunSummaryDto;
+import ooo.klae.connex.backend.dto.WorkflowSimulationDto;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
 import ooo.klae.connex.backend.dto.WorkflowVersionDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -66,6 +70,7 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
+import ooo.klae.connex.backend.services.WorkflowSimulationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
@@ -96,6 +101,7 @@ class WorkflowControllerTest {
     @MockitoBean private WorkflowService workflowService;
     @MockitoBean private WorkflowRunReadService workflowRunReadService;
     @MockitoBean private WorkflowRuntimeOwnershipService runtimeOwnershipService;
+    @MockitoBean private WorkflowSimulationService simulationService;
     @MockitoBean private WorkspaceService workspaceService;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;
     @MockitoBean private SocialLoginClientRegistrations socialLoginClientRegistrations;
@@ -116,12 +122,20 @@ class WorkflowControllerTest {
         WorkflowDto workflow = workflow(false);
         WorkflowDto enabled = workflow(true);
         WorkflowVersionDto version = version();
-        when(workflowService.list(false)).thenReturn(List.of(workflow));
+        when(workflowService.list(false)).thenReturn(List.of(listItem()));
         when(workflowService.create(any(WorkflowCreateRequest.class))).thenReturn(workflow);
         when(workflowService.getById(42)).thenReturn(workflow);
         when(workflowService.saveDraft(any(Integer.class), any(WorkflowDraftRequest.class)))
             .thenReturn(workflow);
-        when(workflowService.validate(42)).thenReturn(new WorkflowValidationDto(3, true));
+        when(workflowService.validate(42)).thenReturn(new WorkflowValidationDto(
+            3, true, true, true, List.of(), List.of(), List.of()));
+        when(simulationService.simulate(eq(42), any())).thenReturn(
+            new WorkflowSimulationDto(
+                WorkflowSimulationDto.Result.WOULD_COMPLETE,
+                List.of(),
+                List.of()));
+        when(workflowService.resolveLegacyRule(77))
+            .thenReturn(new WorkflowLegacyRuleResolutionDto(42));
         when(workflowService.publish(any(Integer.class), any(WorkflowPublishRequest.class)))
             .thenReturn(workflow);
         when(workflowService.enable(42)).thenReturn(enabled);
@@ -166,7 +180,19 @@ class WorkflowControllerTest {
             .andExpect(status().isOk());
         mockMvc.perform(post("/api/workflows/42/validate").with(csrf().asHeader()))
             .andExpect(status().isOk())
-            .andExpect(content().json("{\"draftRevision\":3,\"valid\":true}"));
+            .andExpect(jsonPath("$.draftRevision").value(3))
+            .andExpect(jsonPath("$.valid").value(true))
+            .andExpect(jsonPath("$.canPublish").value(true))
+            .andExpect(jsonPath("$.errors").isEmpty());
+        mockMvc.perform(post("/api/workflows/42/simulate")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":3,\"recordId\":91}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.result").value("would_complete"));
+        mockMvc.perform(get("/api/workflows/legacy-rules/77"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.workflowId").value(42));
         mockMvc.perform(post("/api/workflows/42/publish")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -252,6 +278,18 @@ class WorkflowControllerTest {
                 .content("{}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.expectedRevision").exists());
+        mockMvc.perform(post("/api/workflows/42/simulate")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":\"3\",\"recordId\":91}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("Malformed request body"));
+        mockMvc.perform(post("/api/workflows/42/simulate")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":3}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.recordId").exists());
         mockMvc.perform(post("/api/workflows")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -260,6 +298,7 @@ class WorkflowControllerTest {
             .andExpect(content().string("Malformed request body"));
 
         verifyNoInteractions(workflowService);
+        verifyNoInteractions(simulationService);
     }
 
     @Test
@@ -346,7 +385,7 @@ class WorkflowControllerTest {
             Set.of(
                 "list", "create", "get", "saveDraft", "validate", "publish", "enable",
                 "disable", "archive", "restore", "cutOverToCanonical", "rollBackToLegacy",
-                "versions"),
+                "versions", "simulate", "resolveLegacyRule"),
             methodNames);
 
         verifyNoInteractions(workflowService);
@@ -364,6 +403,10 @@ class WorkflowControllerTest {
                 .content(draftBody()))
             .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/workflows/42/validate"))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/workflows/42/simulate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":3,\"recordId\":91}"))
             .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/workflows/42/publish")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -444,6 +487,28 @@ class WorkflowControllerTest {
                 Map.of(),
                 new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE)),
             88L,
+            41,
+            41,
+            null,
+            null);
+    }
+
+    private static WorkflowListItemDto listItem() {
+        return new WorkflowListItemDto(
+            42,
+            "Workflow",
+            null,
+            false,
+            "legacy",
+            null,
+            3,
+            "deal",
+            "user",
+            41,
+            new WorkflowListItemDto.ActiveVersion(88L, 1, null),
+            4,
+            1,
+            null,
             41,
             41,
             null,
