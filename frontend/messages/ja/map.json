@@ -2,30 +2,30 @@
     "MapPage": {
         "yourCompany": "自社",
         "emptyTitle": "関係地図はまだ空です",
-        "emptyBody": "企業やコンタクトを追加すると、ネットワークのつながりと成長を可視化できます。",
-        "emptyCta": "企業を追加",
+        "emptyBody": "会社や連絡先を追加すると、ネットワークのつながりと成長を可視化できます。",
+        "emptyCta": "会社を追加",
         "limitTitle": "このマップは安全に表示できる上限を超えています",
         "limitBody": "より大規模なグラフ表示を準備する間、レコードの検索とフィルターをご利用ください。"
     },
     "CompanyNode": {
-        "title": "企業ノード"
+        "title": "会社ノード"
     },
     "ContactNode": {
-        "title": "コンタクトノード"
+        "title": "連絡先ノード"
     },
     "Legend": {
         "title": "凡例",
         "nodes": {
             "yourOrganization": "あなたの組織",
             "teamMember": "チームメンバー",
-            "clientCompany": "クライアント企業",
-            "contactActive": "コンタクト (アクティブ)",
-            "contactInactive": "コンタクト (非アクティブ)"
+            "clientCompany": "クライアント会社",
+            "contactActive": "連絡先 (アクティブ)",
+            "contactInactive": "連絡先 (非アクティブ)"
         },
         "connections": {
             "orgMembership": "組織メンバー",
             "relationshipDeals": "関係 (案件)",
-            "companyToContact": "うちの企業 → コンタクト",
+            "companyToContact": "うちの会社 → 連絡先",
             "knownNoDeals": "既知, 案件なし"
         },
         "dealStatus": {

@@ -68,17 +68,17 @@ test.describe("record archive and restore", () => {
             await page.getByRole("menuitem", { name: "アーカイブ", exact: true }).click();
 
             const archiveDialog = page.getByRole("dialog");
-            await expect(archiveDialog.getByRole("heading", { name: "企業 をアーカイブ" })).toBeVisible();
+            await expect(archiveDialog.getByRole("heading", { name: "会社 をアーカイブ" })).toBeVisible();
             await expect(archiveDialog).toContainText(company.name);
             await archiveDialog.getByRole("button", { name: "アーカイブ", exact: true }).click();
 
-            await expect(page.getByText("企業をアーカイブしました")).toBeVisible();
+            await expect(page.getByText("会社をアーカイブしました")).toBeVisible();
             await expect(row).toBeHidden();
 
             await page.getByRole("button", { name: "レコードを絞り込んで並び替える" }).click();
-            const filterSheet = page.getByRole("dialog", { name: "絞り込みと並び替え" });
+            const filterSheet = page.getByRole("dialog", { name: "フィルターと並び替え" });
             const scope = filterSheet.getByRole("group", {
-                name: "有効な企業とアーカイブ済みの企業を切り替える",
+                name: "有効な会社とアーカイブ済みの会社を切り替える",
             });
             await scope.getByRole("button", { name: /^アーカイブ済み/ }).click();
             await filterSheet.getByRole("button", { name: "完了", exact: true }).click();
@@ -90,10 +90,10 @@ test.describe("record archive and restore", () => {
             await page.getByRole("menuitem", { name: "復元", exact: true }).click();
 
             const restoreDialog = page.getByRole("dialog");
-            await expect(restoreDialog.getByRole("heading", { name: "企業 を復元" })).toBeVisible();
+            await expect(restoreDialog.getByRole("heading", { name: "会社 を復元" })).toBeVisible();
             await restoreDialog.getByRole("button", { name: "復元", exact: true }).click();
 
-            await expect(page.getByText("企業を復元しました")).toBeVisible();
+            await expect(page.getByText("会社を復元しました")).toBeVisible();
             await expect(archivedRow).toBeHidden();
             await page.getByRole("button", { name: "レコードを絞り込んで並び替える" }).click();
             await scope.getByRole("button", { name: "有効", exact: true }).click();

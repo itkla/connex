@@ -2,7 +2,7 @@
   "DashboardPage": {
     "overview": "概要",
     "companies": "会社",
-    "contacts": "コンタクト",
+    "contacts": "連絡先",
     "deals": "案件",
     "pipelines": "パイプライン",
     "pipeline": "パイプライン",
@@ -11,8 +11,8 @@
     "viewAll": "すべて表示",
     "viewMap": "マップを表示",
     "coolingRelationships": "冷め込んでいる関係",
-    "atRiskDeals": "リスクのある商談",
-    "viewDeals": "商談を表示",
+    "atRiskDeals": "リスクのある案件",
+    "viewDeals": "案件を表示",
     "introductions": "紹介",
     "recentlyMoved": "最近の転職",
     "files": "ファイル",
@@ -47,9 +47,9 @@
     "empty": "今週クローズ予定の取引はありません。"
   },
   "AtRiskDeals": {
-    "empty": "現在、対応が必要な商談はありません。",
-    "truncated": "一部の結果のみ表示しています。優先度の高い進行中商談 1,000 件をリスク評価しました。",
-    "truncatedEmpty": "評価した 1,000 件にはリスクが見つかりませんでした。未評価の商談が残っています。"
+    "empty": "現在、対応が必要な案件はありません。",
+    "truncated": "一部の結果のみ表示しています。優先度の高い進行中案件 1,000 件をリスク評価しました。",
+    "truncatedEmpty": "評価した 1,000 件にはリスクが見つかりませんでした。未評価の案件が残っています。"
   },
   "CoolingRelationships": {
     "empty": "現在、冷え込みつつある関係はありません。",
@@ -62,7 +62,7 @@
     "scheduleFailed": "フォローアップを予約できませんでした。"
   },
   "RecentMoves": {
-    "empty": "ワークスペースのコンタクトに最近の転職はありません。",
+    "empty": "ワークスペースの連絡先に最近の転職はありません。",
     "unknown": "不明"
   },
   "DashboardActivation": {
@@ -75,10 +75,10 @@
     "followUp": "フォローアップを予約",
     "steps": {
       "contacts": {
-        "title": "コンタクトを取り込む",
+        "title": "連絡先を取り込む",
         "body": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。追加時に名刺をスキャンすることもできます。",
-        "cta": "コンタクトをインポート",
-        "done": "{count}件のコンタクト"
+        "cta": "連絡先をインポート",
+        "done": "{count}件の連絡先"
       },
       "companies": {
         "title": "所属する会社を追加する",
@@ -113,12 +113,12 @@
     },
     "insight": {
       "dealRisk": {
-        "headline": "対応が必要な商談があります",
-        "open": "商談を開く"
+        "headline": "対応が必要な案件があります",
+        "open": "案件を開く"
       },
       "coolingContact": {
         "headline": "この関係は冷え込みつつあります",
-        "open": "コンタクトを開く"
+        "open": "連絡先を開く"
       },
       "introPath": {
         "headline": "温かい紹介ができます",
@@ -142,9 +142,9 @@
       "retry": "もう一度試す",
       "gapsTitle": "足りないもの",
       "gap": {
-        "contacts": "コンタクトがまだありません",
+        "contacts": "連絡先がまだありません",
         "interactions": "接点が記録されていません",
-        "noSignal": "コンタクトと接点はありますが、示すに足るシグナルにはまだ達していません。"
+        "noSignal": "連絡先と接点はありますが、示すに足るシグナルにはまだ達していません。"
       }
     }
   },
