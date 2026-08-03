@@ -423,14 +423,14 @@
     "assignee": "担当者",
     "unassigned": "未割り当て",
     "contact": "連絡先",
-    "deal": "取引",
+    "deal": "案件",
     "created": "作成日"
   },
   "ActivityActivityDetail": {
     "back": "アクティビティに戻る",
     "type": "種類",
     "contact": "連絡先",
-    "deal": "取引",
+    "deal": "案件",
     "loggedBy": "記録者",
     "when": "日時"
   },

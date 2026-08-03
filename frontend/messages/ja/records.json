@@ -36,7 +36,7 @@
       "title": "役職",
       "email": "メール",
       "company": "会社",
-      "value": "取引額",
+      "value": "案件額",
       "stage": "ステージ",
       "owner": "担当者",
       "status": "ステータス",
@@ -81,9 +81,9 @@
       "description": "チームの誰かがつながっていますが、あなたはまだ活動がありません。"
     },
     "open_deal": {
-      "label": "進行中の取引あり",
-      "labelNot": "進行中の取引なし",
-      "description": "少なくとも1件の取引が進行中です。"
+      "label": "進行中の案件あり",
+      "labelNot": "進行中の案件なし",
+      "description": "少なくとも1件の案件が進行中です。"
     },
     "cooling": {
       "label": "冷めかけ／冷たい",
@@ -170,12 +170,12 @@
     "at_risk": {
       "label": "リスクあり",
       "labelNot": "リスクなし",
-      "description": "取引リスクが高または中です。"
+      "description": "案件リスクが高または中です。"
     },
     "risk_high": {
       "label": "高リスク",
       "labelNot": "高リスクでない",
-      "description": "取引リスクレベルが高です。"
+      "description": "案件リスクレベルが高です。"
     },
     "risk_close_overdue": {
       "label": "完了予定日超過",
@@ -190,7 +190,7 @@
     "risk_stalled": {
       "label": "停滞中",
       "labelNot": "停滞していない",
-      "description": "取引に最近の活動がありません。"
+      "description": "案件に最近の活動がありません。"
     },
     "risk_stakeholder_cold": {
       "label": "関係者が冷却",
@@ -200,7 +200,7 @@
     "risk_no_stakeholders": {
       "label": "関係者なし",
       "labelNot": "関係者あり",
-      "description": "取引に紐づく連絡先がありません。"
+      "description": "案件に紐づく連絡先がありません。"
     }
   },
   "SavedViews": {
@@ -373,16 +373,16 @@
     "toastFailed": "レコードを更新できませんでした"
   },
   "RecordsBulkStageDialog": {
-    "title": "{count}件の取引をステージへ移動",
-    "description": "選択したすべての取引を移動するステージを選択してください。",
-    "mixedPipelines": "選択した取引は異なるパイプラインにあります。ステージを変更するには、単一のパイプラインの取引を選択してください。",
+    "title": "{count}件の案件をステージへ移動",
+    "description": "選択したすべての案件を移動するステージを選択してください。",
+    "mixedPipelines": "選択した案件は異なるパイプラインにあります。ステージを変更するには、単一のパイプラインの案件を選択してください。",
     "stageLabel": "ステージ",
     "selectStagePlaceholder": "ステージを選択",
     "noStagesFound": "ステージが見つかりません",
     "cancel": "キャンセル",
     "apply": "移動",
     "close": "閉じる",
-    "toastFailed": "取引を移動できませんでした"
+    "toastFailed": "案件を移動できませんでした"
   },
   "RelationshipEvidence": {
     "title": "関係性の根拠",
@@ -422,7 +422,7 @@
   "RecordPeek": {
     "type_company": "会社",
     "type_person": "連絡先",
-    "type_deal": "取引",
+    "type_deal": "案件",
     "loading": "読み込み中…",
     "previous": "前のレコード",
     "next": "次のレコード",
@@ -437,7 +437,7 @@
     "email": "メール",
     "phone": "電話",
     "company": "会社",
-    "openDeals": "進行中の取引",
+    "openDeals": "進行中の案件",
     "industry": "業種",
     "website": "ウェブサイト",
     "people": "担当者",

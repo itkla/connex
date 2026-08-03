@@ -80,7 +80,7 @@
     "introductionMentionTitle": "新しいメンション",
     "introductionMentionBody": "{actor} さんが紹介であなたにメンションしました。",
     "dealMentionTitle": "新しいメンション",
-    "dealMentionBody": "{actor} さんが取引であなたにメンションしました。",
+    "dealMentionBody": "{actor} さんが案件であなたにメンションしました。",
     "documentApprovalRequestTitle": "承認依頼",
     "documentApprovalRequestBody": "{actor} さんが{document}の承認を依頼しました。",
     "documentApprovedTitle": "ドキュメント承認",

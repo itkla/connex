@@ -18,6 +18,7 @@ export const WORKFLOW_DELAY_MAX_SECONDS = 2_592_000;
 export const WORKFLOW_DELAY_PATH_MAX_SECONDS = 7_776_000;
 
 const EMPTY_CONDITION: WorkflowConditionNode["config"] = { match: "all", conditions: [] };
+const DEFAULT_WORKFLOW_VIEWPORT = { x: 0, y: 0, zoom: 1 } as const;
 
 function newOpaqueId(prefix: "n" | "e"): string {
     return `${prefix}_${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
@@ -106,9 +107,23 @@ export function createEmptyWorkflowGraph(recordType = "deal"): {
                 [trigger.id]: { x: 80, y: 80 },
                 [end.id]: { x: 80, y: 320 },
             },
-            viewport: { x: 0, y: 0, zoom: 1 },
+            viewport: { ...DEFAULT_WORKFLOW_VIEWPORT },
         },
     };
+}
+
+/** Returns whether the initial canvas should fit all nodes instead of restoring its saved viewport. */
+export function shouldFitWorkflowCanvasOnOpen(
+    definition: WorkflowDefinition,
+    canvas: WorkflowCanvas,
+): boolean {
+    const { viewport } = canvas;
+    return definition.nodes.some((node) => !canvas.positions[node.id])
+        || (
+            viewport.x === DEFAULT_WORKFLOW_VIEWPORT.x
+            && viewport.y === DEFAULT_WORKFLOW_VIEWPORT.y
+            && viewport.zoom === DEFAULT_WORKFLOW_VIEWPORT.zoom
+        );
 }
 
 /** Returns nodes in deterministic topological order, with unreachable nodes ordered by id last. */
