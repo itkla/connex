@@ -187,7 +187,16 @@ public class TenantScopeInterceptor implements Interceptor {
      * {@code UserOffboardingService.prepareFreshMembership}), all of which a user
      * with no active workspace may reach. The fresh-membership saved-view
      * cleanup follows the same workspace-and-user-bound policy. These statements
-     * anchor {@code workspace_id} and the user id in SQL. The recipient
+     * anchor {@code workspace_id} and the user id in SQL.
+     *
+     * <p>The workspace-scoped provider-capture purge belongs to that same
+     * fresh-membership flow and is listed for the same reason. Only the
+     * {@code *Anywhere} variants were exempt when connected capture landed, but
+     * {@code prepareFreshMembership} calls the workspace-scoped ones — so a
+     * first-time invitee, and every SSO JIT provisioning, ran them with no
+     * resolved context and failed (#1011). Each binds {@code workspace_id} and
+     * the user id in SQL exactly as its {@code *Anywhere} sibling binds the user
+     * id, so exempting them narrows nothing. The recipient
      * membership lock, actor-recipient projection and per-recipient
      * state-version bump are identity-scoped coordination writes for those same
      * offboarding flows. Workflow discovery is likewise bound to the departing
@@ -213,6 +222,13 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ProviderCaptureMapper.deleteSyncStatesAnywhere",
         MAPPERS + "ProviderCaptureMapper.deleteUserPolicyAnywhere",
         MAPPERS + "ProviderCaptureMapper.deleteDecisionsAnywhere",
+        MAPPERS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
+        MAPPERS + "ProviderCaptureMapper.deleteProviderActivities",
+        MAPPERS + "ProviderCaptureMapper.deleteInteractions",
+        MAPPERS + "ProviderCaptureMapper.deleteSyncStates",
+        MAPPERS + "ProviderCaptureMapper.deleteUserPolicy",
+        MAPPERS + "ProviderCaptureMapper.deleteDecisions",
+        MAPPERS + "ProviderCaptureMapper.countUserProviderResiduals",
         MAPPERS + "IntroductionMapper.countIntroducedAnywhere",
         MAPPERS + "NotificationMapper.lockRecipientMemberships",
         MAPPERS + "NotificationMapper.findRecipientIdsByActor",

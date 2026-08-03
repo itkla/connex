@@ -114,6 +114,27 @@ class TenantScopeInterceptorTest {
         assertTrue(interceptor.requiresResolvedContext(NS + "PersonMapper.clearMemberOwnership"));
     }
 
+    /**
+     * Every statement {@code UserOffboardingService.prepareFreshMembership} reaches must run
+     * without a resolved context, because a first-time invitee and every SSO JIT provisioning
+     * arrive on a request thread with no workspace to resolve. The provider-capture purge was
+     * added to that flow after its exempt set was curated, so only the {@code *Anywhere} variants
+     * were listed and the workspace-scoped ones it actually calls threw (#1011).
+     */
+    @Test
+    void freshMembershipProviderCapturePurgeRunsWithoutAResolvedContext() {
+        bindRequest();
+        for (String statement : new String[] {
+            "deleteProviderActivities", "deleteInteractions", "deleteSyncStates",
+            "deleteUserPolicy", "deleteDecisions", "countUserProviderResiduals",
+            "clearWorkspacePolicyUpdater",
+        }) {
+            String id = NS + "ProviderCaptureMapper." + statement;
+            assertFalse(interceptor.requiresResolvedContext(id), id);
+            assertDoesNotThrow(() -> interceptor.enforce(id), id);
+        }
+    }
+
     @Test
     void blocksScopedStatementOnRequestThreadWhenUnresolved() {
         bindRequest();
