@@ -14,6 +14,7 @@ type DrawerContextValue = {
   showSwipeHandle: boolean
   swipeDirection: SwipeDirection
   hasSnapPoints: boolean
+  motionClassName?: string
 }
 
 const DrawerContext = React.createContext<DrawerContextValue | null>(null)
@@ -33,14 +34,16 @@ function Drawer({
   showSwipeHandle = false,
   snapPoints,
   swipeDirection = "down",
+  motionClassName,
   ...props
 }: DrawerPrimitive.Root.Props & {
   showSwipeHandle?: boolean
+  motionClassName?: string
 }) {
   const hasSnapPoints = snapPoints != null && snapPoints.length > 0
   const contextValue = React.useMemo<DrawerContextValue>(
-    () => ({ modal, showSwipeHandle, swipeDirection, hasSnapPoints }),
-    [modal, showSwipeHandle, swipeDirection, hasSnapPoints]
+    () => ({ modal, showSwipeHandle, swipeDirection, hasSnapPoints, motionClassName }),
+    [modal, showSwipeHandle, swipeDirection, hasSnapPoints, motionClassName]
   )
 
   return (
@@ -74,11 +77,13 @@ function DrawerOverlay({
   className,
   ...props
 }: DrawerPrimitive.Backdrop.Props) {
+  const { motionClassName } = useDrawerContext()
   return (
     <DrawerPrimitive.Backdrop
       data-slot="drawer-overlay"
       className={cn(
         "fixed inset-0 z-50 bg-black/10 bg-clip-padding opacity-[max(0,calc(1-var(--drawer-swipe-progress,0)))] transition-opacity duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] select-none dark:bg-black/50 supports-backdrop-filter:backdrop-blur-xs motion-reduce:transition-none data-swiping:duration-0 data-starting-style:opacity-0 data-ending-style:pointer-events-none data-ending-style:opacity-0 supports-[-webkit-touch-callout:none]:absolute",
+        motionClassName,
         className
       )}
       {...props}
@@ -111,7 +116,7 @@ function DrawerContent({
 }: DrawerPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
-  const { modal, showSwipeHandle, swipeDirection, hasSnapPoints } =
+  const { modal, showSwipeHandle, swipeDirection, hasSnapPoints, motionClassName } =
     useDrawerContext()
   const swipeAxis =
     swipeDirection === "down" || swipeDirection === "up" ? "y" : "x"
@@ -160,6 +165,7 @@ function DrawerContent({
           className={cn(
             "group/drawer-popup pointer-events-auto relative flex min-h-0 flex-col overflow-hidden bg-popover bg-clip-padding text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/10 outline-none",
             "transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none data-swiping:transition-none",
+            motionClassName,
             layout,
             className
           )}

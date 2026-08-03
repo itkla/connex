@@ -2923,6 +2923,327 @@ export type RuleRequest = {
     executionMode: "user" | "system";
 };
 
+export type WorkflowRuntimeOwner = "legacy" | "canonical";
+
+export type WorkflowExecutionMode = "user" | "system";
+
+export type WorkflowNodeType = "TRIGGER" | "CONDITION" | "ACTION" | "DELAY" | "END";
+
+export type WorkflowRuntimeNodeType = Lowercase<WorkflowNodeType>;
+
+export type WorkflowEdgeOutcome = "next" | "yes" | "no";
+
+export type WorkflowTriggerNode = {
+    id: string;
+    type: "TRIGGER";
+    config: RuleTrigger;
+};
+
+export type WorkflowConditionNode = {
+    id: string;
+    type: "CONDITION";
+    config: SegmentDefinition;
+};
+
+export type WorkflowActionNode = {
+    id: string;
+    type: "ACTION";
+    config: RuleAction;
+};
+
+export type WorkflowDelayNode = {
+    id: string;
+    type: "DELAY";
+    config: {
+        durationSeconds: number;
+    };
+};
+
+export type WorkflowEndNode = {
+    id: string;
+    type: "END";
+};
+
+export type WorkflowNode =
+    | WorkflowTriggerNode
+    | WorkflowConditionNode
+    | WorkflowActionNode
+    | WorkflowDelayNode
+    | WorkflowEndNode;
+
+export type WorkflowEdge = {
+    id: string;
+    sourceNodeId: string;
+    targetNodeId: string;
+    outcome: WorkflowEdgeOutcome;
+};
+
+export type WorkflowDefinition = {
+    schemaVersion: 1;
+    entryNodeId: string;
+    nodes: WorkflowNode[];
+    edges: WorkflowEdge[];
+};
+
+export type WorkflowCanvas = {
+    positions: Record<string, { x: number; y: number }>;
+    viewport: { x: number; y: number; zoom: number };
+};
+
+export type WorkflowDto = {
+    id: number;
+    name: string;
+    description: string | null;
+    enabled: boolean;
+    runtimeOwner: WorkflowRuntimeOwner;
+    archivedAt: string | null;
+    draftRevision: number;
+    recordType: string | null;
+    executionMode: WorkflowExecutionMode;
+    runAsUserId: number | null;
+    definition: WorkflowDefinition;
+    canvas: WorkflowCanvas;
+    activeVersionId: number | null;
+    createdById: number | null;
+    updatedById: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type WorkflowRunStatus =
+    | "queued"
+    | "running"
+    | "waiting"
+    | "succeeded"
+    | "failed"
+    | "skipped"
+    | "cancelled"
+    | "intervention_required";
+
+export type WorkflowRunWireStatus = WorkflowRunStatus | "partial";
+
+export type WorkflowListItem = Omit<WorkflowDto, "definition" | "canvas" | "activeVersionId"> & {
+    activeVersion: {
+        id: number;
+        number: number;
+        publishedAt: string;
+    } | null;
+    nodeCount: number;
+    actionCount: number;
+    latestRun: {
+        runKey: string;
+        source: "canonical" | "legacy";
+        status: WorkflowRunWireStatus;
+        legacyStatus: RuleExecutionStatus | null;
+        startedAt: string;
+        finishedAt: string | null;
+        stepDetailAvailable: boolean;
+    } | null;
+};
+
+export type WorkflowCreateRequest = {
+    name: string;
+    description: string | null;
+    recordType: string | null;
+    executionMode: WorkflowExecutionMode;
+    definition: WorkflowDefinition;
+    canvas: WorkflowCanvas;
+};
+
+export type WorkflowDraftRequest = WorkflowCreateRequest & {
+    expectedRevision: number;
+};
+
+export type WorkflowDiagnosticCode =
+    | "canvas_node_position_required"
+    | "trigger_count_invalid"
+    | "entry_node_required"
+    | "entry_trigger_invalid"
+    | "branch_outcome_duplicate"
+    | "incoming_edge_forbidden"
+    | "incoming_edge_required"
+    | "incoming_edge_count_invalid"
+    | "branch_outcome_required"
+    | "branch_outcome_not_allowed"
+    | "outgoing_edge_forbidden"
+    | "node_unreachable"
+    | "graph_cycle"
+    | "node_type_unsupported"
+    | "schedule_enrollment_condition_required"
+    | "trigger_config_required"
+    | "condition_config_required"
+    | "action_required"
+    | "action_config_required"
+    | "config_field_invalid"
+    | "record_type_invalid"
+    | "execution_mode_invalid"
+    | "condition_record_type_unsupported"
+    | "condition_empty"
+    | "condition_limit_exceeded"
+    | "condition_depth_exceeded"
+    | "condition_match_invalid"
+    | "condition_group_empty"
+    | "condition_type_invalid"
+    | "condition_predicate_unknown"
+    | "condition_predicate_record_type_unsupported"
+    | "condition_field_required"
+    | "condition_field_unknown"
+    | "condition_operator_required"
+    | "condition_operator_unsupported"
+    | "condition_value_required"
+    | "condition_value_invalid"
+    | "trigger_type_invalid"
+    | "entity_change_record_type_unsupported"
+    | "trigger_events_required"
+    | "trigger_event_unsupported"
+    | "schedule_record_type_unsupported"
+    | "schedule_cadence_invalid"
+    | "schedule_condition_required"
+    | "action_type_invalid"
+    | "action_record_type_unsupported"
+    | "action_field_required"
+    | "delay_duration_required"
+    | "delay_duration_below_minimum"
+    | "delay_duration_above_maximum"
+    | "cumulative_delay_above_maximum"
+    | "legacy_projection_unsupported"
+    | "actor_unavailable"
+    | "record_unavailable"
+    | "trigger_filter_not_matched"
+    | "action_permission_missing"
+    | "action_tag_unavailable"
+    | "action_target_member_unavailable"
+    | "action_stage_unavailable"
+    | "action_stage_pipeline_mismatch"
+    | "definition_corrupt"
+    | "traversal_limit"
+    | "trigger_ready"
+    | "condition_matched"
+    | "condition_not_matched"
+    | "enrollment_not_matched"
+    | "action_ready"
+    | "delay_wait"
+    | "end_reached";
+
+export type WorkflowDiagnostic = {
+    code: WorkflowDiagnosticCode;
+    nodeId: string | null;
+    edgeId: string | null;
+    fieldPath: string | null;
+    params: Record<string, string>;
+};
+
+export type WorkflowValidation = {
+    draftRevision: number;
+    valid: boolean;
+    canPublish: boolean;
+    systemAuthoringAllowed: boolean;
+    requiredPermissions: string[];
+    missingPermissions: string[];
+    errors: WorkflowDiagnostic[];
+};
+
+export type WorkflowSimulation = {
+    result: "would_complete" | "not_enrolled" | "would_wait" | "blocked";
+    path: Array<{
+        nodeId: string;
+        nodeType: WorkflowRuntimeNodeType;
+        status: string;
+        outcome: WorkflowEdgeOutcome | null;
+        actionType: string | null;
+        code: WorkflowDiagnosticCode;
+    }>;
+    blockers: Array<{
+        code: WorkflowDiagnosticCode;
+        nodeId: string | null;
+        fieldPath: string | null;
+        params: Record<string, string>;
+    }>;
+};
+
+export type WorkflowVersion = {
+    id: number;
+    versionNumber: number;
+    name: string;
+    description: string | null;
+    recordType: string | null;
+    executionMode: WorkflowExecutionMode;
+    runAsUserId: number | null;
+    createdById: number | null;
+    publishedById: number | null;
+    definition: WorkflowDefinition;
+    canvas: WorkflowCanvas;
+    publishedAt: string;
+};
+
+export type WorkflowRunFailure = {
+    nodeId: string | null;
+    code: string;
+    message: string;
+};
+
+export type WorkflowRunSummary = {
+    runKey: string;
+    source: "canonical" | "legacy";
+    status: WorkflowRunWireStatus;
+    legacyStatus: RuleExecutionStatus | null;
+    version: {
+        id: number;
+        number: number;
+        definitionHash: string;
+        publishedAt: string;
+    } | null;
+    trigger: {
+        type: "entity_change" | "schedule" | "manual";
+        event: string | null;
+        recordType: string | null;
+        recordId: number | null;
+    } | null;
+    startedAt: string;
+    finishedAt: string | null;
+    durationMs: number | null;
+    failure: WorkflowRunFailure | null;
+    stepDetailAvailable: boolean;
+};
+
+export type WorkflowStepRun = {
+    sequence: number;
+    nodeId: string;
+    nodeType: WorkflowRuntimeNodeType;
+    status: Exclude<WorkflowRunStatus, "intervention_required">;
+    attempts: number;
+    selectedOutcome: WorkflowEdgeOutcome | null;
+    selectedEdgeId: string | null;
+    nextNodeId: string | null;
+    startedAt: string;
+    finishedAt: string | null;
+    durationMs: number | null;
+    failure: WorkflowRunFailure | null;
+};
+
+export type WorkflowRunDetail = Omit<WorkflowRunSummary, "version"> & {
+    workflowId: number;
+    version: {
+        id: number;
+        number: number;
+        definitionHash: string;
+        publishedAt: string;
+        definition: WorkflowDefinition;
+        canvas: WorkflowCanvas;
+    } | null;
+    execution: {
+        mode: WorkflowExecutionMode;
+        actorUserId: number | null;
+        attributionUserId: number | null;
+    } | null;
+    path: WorkflowStepRun[];
+};
+
+export type WorkflowRunPage = {
+    items: WorkflowRunSummary[];
+    nextCursor: string | null;
+};
+
 export type Share = {
     workspaceId: number;
     workspaceName: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -277,28 +277,60 @@ export default function SegmentBuilder({
     definition,
     fields,
     onChange,
+    onTransientChange,
+    onCommitTransient,
     recordType = "company",
     options,
     advanced = false,
     allowGroups = advanced,
+    triggerProps,
+    focusPath,
+    focusDescriptionId,
+    initiallyOpen = false,
 }: {
     definition: SegmentDefinition;
     fields: SegmentFields | null;
     onChange: (definition: SegmentDefinition) => void;
+    onTransientChange?: (definition: SegmentDefinition) => void;
+    onCommitTransient?: () => void;
     recordType?: string;
     options?: RuleBuilderOptions | null;
     advanced?: boolean;
     allowGroups?: boolean;
+    triggerProps?: ComponentProps<typeof Button>;
+    focusPath?: string | null;
+    focusDescriptionId?: string;
+    initiallyOpen?: boolean;
 }) {
     const t = useTranslations("SmartSegments");
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(initiallyOpen);
     const catalog = useSegmentCatalog(recordType);
     const total = countConditions(definition);
+
+    useEffect(() => {
+        if (!open || !focusPath) return;
+        let nestedFrame = 0;
+        const frame = window.requestAnimationFrame(() => {
+            nestedFrame = window.requestAnimationFrame(() => {
+                const field = globalThis.document.querySelector<HTMLElement>(
+                    `[data-segment-field="${CSS.escape(focusPath)}"]`,
+                );
+                if (!field) return;
+                field.setAttribute("aria-invalid", "true");
+                if (focusDescriptionId) field.setAttribute("aria-describedby", focusDescriptionId);
+                field.focus();
+            });
+        });
+        return () => {
+            window.cancelAnimationFrame(frame);
+            window.cancelAnimationFrame(nestedFrame);
+        };
+    }, [focusDescriptionId, focusPath, open]);
 
     return (
         <ResponsiveDialog open={open} onOpenChange={setOpen}>
             <ResponsiveDialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5">
+                <Button variant="outline" size="sm" className="gap-1.5" {...triggerProps}>
                     <SparklesIcon className="size-4" />
                     {t("title")}
                     {total > 0 && (
@@ -327,7 +359,10 @@ export default function SegmentBuilder({
                             allowGroups={allowGroups}
                             totalConditions={total}
                             depth={1}
+                            path="config"
                             onChange={onChange}
+                            onTransientChange={onTransientChange}
+                            onCommitTransient={onCommitTransient}
                         />
                     ) : (
                         <p className="py-8 text-center text-sm text-muted-foreground">{t("loading")}</p>
@@ -365,7 +400,10 @@ function GroupEditor({
     focusOnMount = false,
     onFocusHandled,
     depth,
+    path,
     onChange,
+    onTransientChange,
+    onCommitTransient,
     onRemove,
 }: {
     group: SegmentDefinition;
@@ -379,7 +417,10 @@ function GroupEditor({
     focusOnMount?: boolean;
     onFocusHandled?: () => void;
     depth: number;
+    path: string;
     onChange: (group: SegmentDefinition) => void;
+    onTransientChange?: (group: SegmentDefinition) => void;
+    onCommitTransient?: () => void;
     onRemove?: () => void;
 }) {
     const t = useTranslations("SmartSegments");
@@ -392,6 +433,9 @@ function GroupEditor({
     const nested = depth > 1;
 
     const setConditions = (next: SegmentCondition[]) => onChange({ ...group, conditions: next });
+    const setConditionsTransient = (next: SegmentCondition[]) => (
+        onTransientChange ?? onChange
+    )({ ...group, conditions: next });
     const setGroups = (next: SegmentDefinition[]) => onChange({ ...group, groups: next.length ? next : undefined });
     const hasConditionCapacity = totalConditions < catalog.limits.maxConditions;
     const canAddCondition = hasConditionCapacity && conditions.length < catalog.limits.maxGroupConditions;
@@ -418,7 +462,13 @@ function GroupEditor({
             <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-muted-foreground">{t("matchPrefix")}</span>
                 <Select value={group.match} onValueChange={(value) => onChange({ ...group, match: value as SegmentMatch })}>
-                    <SelectTrigger ref={matchTriggerRef} size="sm" aria-label={t("a11yMatch")} className="w-[5.5rem] shrink-0">
+                    <SelectTrigger
+                        ref={matchTriggerRef}
+                        size="sm"
+                        aria-label={t("a11yMatch")}
+                        data-segment-field={`${path}.match`}
+                        className="w-[5.5rem] shrink-0"
+                    >
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -460,7 +510,12 @@ function GroupEditor({
                             fields={fields}
                             options={options}
                             advanced={advanced}
+                            path={`${path}.conditions[${index}]`}
                             onChange={(next) => setConditions(conditions.map((existing, i) => (i === index ? next : existing)))}
+                            onTransientChange={(next) => setConditionsTransient(
+                                conditions.map((existing, i) => (i === index ? next : existing)),
+                            )}
+                            onCommitTransient={onCommitTransient}
                             onRemove={() => setConditions(conditions.filter((_, i) => i !== index))}
                         />
                     </motion.div>
@@ -481,7 +536,13 @@ function GroupEditor({
                     focusOnMount={pendingFocusGroup === index}
                     onFocusHandled={() => setPendingFocusGroup(null)}
                     depth={depth + 1}
+                    path={`${path}.groups[${index}]`}
                     onChange={(next) => setGroups(groups.map((existing, i) => (i === index ? next : existing)))}
+                    onTransientChange={(next) => (onTransientChange ?? onChange)({
+                        ...group,
+                        groups: groups.map((existing, i) => (i === index ? next : existing)),
+                    })}
+                    onCommitTransient={onCommitTransient}
                     onRemove={() => {
                         setGroups(groups.filter((_, i) => i !== index));
                         window.requestAnimationFrame(() =>
@@ -576,7 +637,10 @@ function ConditionCard({
     fields,
     options,
     advanced,
+    path,
     onChange,
+    onTransientChange,
+    onCommitTransient,
     onRemove,
 }: {
     condition: SegmentCondition;
@@ -584,7 +648,10 @@ function ConditionCard({
     fields: SegmentFields | null;
     options?: RuleBuilderOptions | null;
     advanced: boolean;
+    path: string;
     onChange: (condition: SegmentCondition) => void;
+    onTransientChange: (condition: SegmentCondition) => void;
+    onCommitTransient?: () => void;
     onRemove: () => void;
 }) {
     const t = useTranslations("SmartSegments");
@@ -614,7 +681,12 @@ function ConditionCard({
             <div className="flex items-start gap-2">
                 <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
                     <Select value={subjectValue(condition)} onValueChange={(value) => onChange(newCondition(catalog, value))}>
-                        <SelectTrigger size="sm" aria-label={t("a11ySubject")} className="w-full sm:w-52">
+                        <SelectTrigger
+                            size="sm"
+                            aria-label={t("a11ySubject")}
+                            data-segment-field={condition.type === "predicate" ? `${path}.key` : `${path}.field`}
+                            className="w-full sm:w-52"
+                        >
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -633,7 +705,12 @@ function ConditionCard({
 
                     {operators.length > 0 && (
                         <Select value={currentOperatorToken(condition, spec)} onValueChange={onOperator}>
-                            <SelectTrigger size="sm" aria-label={t("a11yOperator")} className="w-full sm:w-40">
+                            <SelectTrigger
+                                size="sm"
+                                aria-label={t("a11yOperator")}
+                                data-segment-field={`${path}.op`}
+                                className="w-full sm:w-40"
+                            >
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -651,7 +728,10 @@ function ConditionCard({
                         catalog={catalog}
                         fields={fields}
                         options={options}
+                        path={path}
                         onChange={onChange}
+                        onTransientChange={onTransientChange}
+                        onCommitTransient={onCommitTransient}
                     />
                 </div>
 
@@ -676,7 +756,10 @@ function ValueInput({
     catalog,
     fields,
     options,
+    path,
     onChange,
+    onTransientChange,
+    onCommitTransient,
 }: {
     condition: SegmentCondition;
     spec: SegmentCatalogField | undefined;
@@ -684,7 +767,10 @@ function ValueInput({
     catalog: SegmentCatalog;
     fields: SegmentFields | null;
     options?: RuleBuilderOptions | null;
+    path: string;
     onChange: (condition: SegmentCondition) => void;
+    onTransientChange: (condition: SegmentCondition) => void;
+    onCommitTransient?: () => void;
 }) {
     const t = useTranslations("SmartSegments");
 
@@ -692,7 +778,14 @@ function ValueInput({
         if (!predicate?.acceptsDays) {
             return <div className="hidden flex-1 sm:block" />;
         }
-        return <DaysInput condition={condition} onChange={onChange} />;
+        return (
+            <DaysInput
+                condition={condition}
+                path={`${path}.days`}
+                onChange={onTransientChange}
+                onCommit={onCommitTransient}
+            />
+        );
     }
 
     if (condition.op === "is_set" || !spec) {
@@ -701,14 +794,23 @@ function ValueInput({
 
     if (spec.kind === "date") {
         if (condition.op === "within_days") {
-            return <DaysInput condition={condition} onChange={onChange} />;
+            return (
+                <DaysInput
+                    condition={condition}
+                    path={`${path}.days`}
+                    onChange={onTransientChange}
+                    onCommit={onCommitTransient}
+                />
+            );
         }
         return (
             <Input
                 type="date"
                 value={condition.value ?? ""}
-                onChange={(event) => onChange({ ...condition, value: event.target.value })}
+                onChange={(event) => onTransientChange({ ...condition, value: event.target.value })}
+                onBlur={onCommitTransient}
                 aria-label={t("datePlaceholder")}
+                data-segment-field={`${path}.value`}
                 className="h-9 w-full min-w-0 flex-1"
             />
         );
@@ -719,9 +821,11 @@ function ValueInput({
             <Input
                 type="number"
                 value={condition.value ?? ""}
-                onChange={(event) => onChange({ ...condition, value: event.target.value })}
+                onChange={(event) => onTransientChange({ ...condition, value: event.target.value })}
+                onBlur={onCommitTransient}
                 placeholder={t("numberPlaceholder")}
                 aria-label={t("numberPlaceholder")}
+                data-segment-field={`${path}.value`}
                 className="h-9 w-full min-w-0 flex-1"
             />
         );
@@ -730,7 +834,12 @@ function ValueInput({
     if (spec.kind === "enum") {
         const values = catalog.enumOptions[spec.field] ?? [];
         return (
-            <ValueSelect value={condition.value} placeholder={t("pickStatus")} onChange={(value) => onChange({ ...condition, value })}>
+            <ValueSelect
+                value={condition.value}
+                placeholder={t("pickStatus")}
+                path={`${path}.value`}
+                onChange={(value) => onChange({ ...condition, value })}
+            >
                 {values.map((status) => (
                     <SelectItem key={status} value={status}>{t(`status.${status}`)}</SelectItem>
                 ))}
@@ -740,7 +849,12 @@ function ValueInput({
 
     if (spec.kind === "tag") {
         return (
-            <ValueSelect value={condition.value} placeholder={t("pickTag")} onChange={(value) => onChange({ ...condition, value })}>
+            <ValueSelect
+                value={condition.value}
+                placeholder={t("pickTag")}
+                path={`${path}.value`}
+                onChange={(value) => onChange({ ...condition, value })}
+            >
                 {(fields?.tags ?? []).map((tag) => (
                     <SelectItem key={tag.id} value={String(tag.id)}>{tag.name}</SelectItem>
                 ))}
@@ -751,7 +865,12 @@ function ValueInput({
     if (spec.kind === "id") {
         if (spec.valueSource === "owners") {
             return (
-                <ValueSelect value={condition.value} placeholder={t("pickOwner")} onChange={(value) => onChange({ ...condition, value })}>
+                <ValueSelect
+                    value={condition.value}
+                    placeholder={t("pickOwner")}
+                    path={`${path}.value`}
+                    onChange={(value) => onChange({ ...condition, value })}
+                >
                     {(options?.owners ?? []).map((owner) => (
                         <SelectItem key={owner.id} value={String(owner.id)}>{owner.name}</SelectItem>
                     ))}
@@ -760,7 +879,12 @@ function ValueInput({
         }
         if (spec.valueSource === "companies") {
             return (
-                <ValueSelect value={condition.value} placeholder={t("pickCompany")} onChange={(value) => onChange({ ...condition, value })}>
+                <ValueSelect
+                    value={condition.value}
+                    placeholder={t("pickCompany")}
+                    path={`${path}.value`}
+                    onChange={(value) => onChange({ ...condition, value })}
+                >
                     {(options?.companies ?? []).map((company) => (
                         <SelectItem key={company.id} value={String(company.id)}>{company.name}</SelectItem>
                     ))}
@@ -768,7 +892,12 @@ function ValueInput({
             );
         }
         return (
-            <ValueSelect value={condition.value} placeholder={t("pickStage")} onChange={(value) => onChange({ ...condition, value })}>
+            <ValueSelect
+                value={condition.value}
+                placeholder={t("pickStage")}
+                path={`${path}.value`}
+                onChange={(value) => onChange({ ...condition, value })}
+            >
                 {(options?.stages ?? []).map((stage) => (
                     <SelectItem key={stage.id} value={String(stage.id)}>{stage.pipeline} · {stage.name}</SelectItem>
                 ))}
@@ -786,7 +915,7 @@ function ValueInput({
                         eventDetails.allowPropagation();
                         return;
                     }
-                    onChange({ ...condition, value });
+                    onTransientChange({ ...condition, value });
                 }}
                 mode="list"
                 openOnInputClick
@@ -794,7 +923,9 @@ function ValueInput({
                 <AutocompleteInput
                     placeholder={t("pickIndustry")}
                     aria-label={t("industryValueLabel")}
+                    data-segment-field={`${path}.value`}
                     maxLength={255}
+                    onBlur={onCommitTransient}
                     className="w-full min-w-0 flex-1"
                 />
                 <AutocompleteContent>
@@ -814,9 +945,11 @@ function ValueInput({
     return (
         <Input
             value={condition.value ?? ""}
-            onChange={(event) => onChange({ ...condition, value: event.target.value })}
+            onChange={(event) => onTransientChange({ ...condition, value: event.target.value })}
+            onBlur={onCommitTransient}
             placeholder={t("valuePlaceholder")}
             aria-label={t("valuePlaceholder")}
+            data-segment-field={`${path}.value`}
             maxLength={255}
             className="h-9 w-full min-w-0 flex-1"
         />
@@ -826,17 +959,24 @@ function ValueInput({
 function ValueSelect({
     value,
     placeholder,
+    path,
     onChange,
     children,
 }: {
     value: string | undefined;
     placeholder: string;
+    path: string;
     onChange: (value: string) => void;
     children: React.ReactNode;
 }) {
     return (
         <Select value={value || undefined} onValueChange={onChange}>
-            <SelectTrigger size="sm" aria-label={placeholder} className="w-full min-w-0 flex-1">
+            <SelectTrigger
+                size="sm"
+                aria-label={placeholder}
+                data-segment-field={path}
+                className="w-full min-w-0 flex-1"
+            >
                 <SelectValue placeholder={placeholder} />
             </SelectTrigger>
             <SelectContent>{children}</SelectContent>
@@ -846,10 +986,14 @@ function ValueSelect({
 
 function DaysInput({
     condition,
+    path,
     onChange,
+    onCommit,
 }: {
     condition: SegmentCondition;
+    path: string;
     onChange: (condition: SegmentCondition) => void;
+    onCommit?: () => void;
 }) {
     const t = useTranslations("SmartSegments");
     return (
@@ -860,7 +1004,9 @@ function DaysInput({
                 min={1}
                 value={condition.days ?? DEFAULT_DAYS}
                 onChange={(event) => onChange({ ...condition, days: Math.max(1, Number(event.target.value) || DEFAULT_DAYS) })}
+                onBlur={onCommit}
                 aria-label={t("days")}
+                data-segment-field={path}
                 className="h-9 w-16"
             />
             <span>{t("days")}</span>

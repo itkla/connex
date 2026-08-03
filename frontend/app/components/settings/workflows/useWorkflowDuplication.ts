@@ -4,17 +4,16 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import type { Rule } from "@/app/lib/types";
-import { createRule, getRuleById } from "@/app/lib/api";
+import type { WorkflowListItem } from "@/app/lib/types";
+import { createWorkflow, getWorkflowById } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
-import { ruleToRequest } from "@/app/components/settings/RulesPanel";
 
-const MAX_RULE_NAME_LENGTH = 128;
+const MAX_WORKFLOW_NAME_LENGTH = 128;
 
 type DuplicateOperation = {
     controller: AbortController;
     pathname: string;
-    ruleId: number;
+    workflowId: number;
     systemMode: boolean;
     workspaceId: number;
 };
@@ -25,10 +24,10 @@ type WorkflowDuplicationOptions = {
     switching: boolean;
 };
 
-function fitDuplicatedRuleName(name: string, format: (value: string) => string): string {
+function fitDuplicatedWorkflowName(name: string, format: (value: string) => string): string {
     const affixLength = format("").length;
-    const baseName = truncateUtf16(name.trim(), Math.max(0, MAX_RULE_NAME_LENGTH - affixLength)).trimEnd();
-    return truncateUtf16(format(baseName), MAX_RULE_NAME_LENGTH);
+    const baseName = truncateUtf16(name.trim(), Math.max(0, MAX_WORKFLOW_NAME_LENGTH - affixLength)).trimEnd();
+    return truncateUtf16(format(baseName), MAX_WORKFLOW_NAME_LENGTH);
 }
 
 function truncateUtf16(value: string, maximumLength: number): string {
@@ -53,7 +52,7 @@ export function useWorkflowDuplication({
     const tw = useTranslations("WorkspaceWorkflows");
     const router = useRouter();
     const pathname = usePathname();
-    const [duplicatingRuleId, setDuplicatingRuleId] = useState<number | null>(null);
+    const [duplicatingWorkflowId, setDuplicatingWorkflowId] = useState<number | null>(null);
     const duplicateOperationRef = useRef<DuplicateOperation | null>(null);
     const duplicateScopeRef = useRef({
         active: true,
@@ -83,7 +82,7 @@ export function useWorkflowDuplication({
         ) {
             duplicateOperationRef.current = null;
             operation.controller.abort();
-            setDuplicatingRuleId(null);
+            setDuplicatingWorkflowId(null);
         }
     }, [activeWorkspaceId, canRunAsSystem, pathname, switching]);
 
@@ -97,22 +96,22 @@ export function useWorkflowDuplication({
         operation?.controller.abort();
     }, []);
 
-    const duplicateRule = async (rule: Rule) => {
+    const duplicateWorkflow = async (workflow: WorkflowListItem) => {
         const scope = duplicateScopeRef.current;
         if (
             duplicateOperationRef.current !== null
             || !scope.active
             || scope.switching
             || scope.activeWorkspaceId === null
-            || (rule.executionMode === "system" && !scope.canRunAsSystem)
+            || (workflow.executionMode === "system" && !scope.canRunAsSystem)
         ) return;
 
         const controller = new AbortController();
         const operation: DuplicateOperation = {
             controller,
             pathname: scope.pathname,
-            ruleId: rule.id,
-            systemMode: rule.executionMode === "system",
+            workflowId: workflow.id,
+            systemMode: workflow.executionMode === "system",
             workspaceId: scope.activeWorkspaceId,
         };
         const isCurrent = () => {
@@ -132,36 +131,39 @@ export function useWorkflowDuplication({
         };
 
         duplicateOperationRef.current = operation;
-        setDuplicatingRuleId(rule.id);
+        setDuplicatingWorkflowId(workflow.id);
         try {
-            const source = await getRuleById(rule.id, sourceRequestInit);
+            const source = await getWorkflowById(workflow.id, sourceRequestInit);
             if (!isCurrent()) return;
             if (source.executionMode === "system" && !duplicateScopeRef.current.canRunAsSystem) {
                 toastError(tw("duplicateSystemRestricted"));
                 return;
             }
             operation.systemMode = source.executionMode === "system";
-            const created = await createRule(
+            const created = await createWorkflow(
                 {
-                    ...ruleToRequest(source),
-                    name: fitDuplicatedRuleName(source.name, (name) => tw("copyName", { name })),
-                    enabled: false,
+                    name: fitDuplicatedWorkflowName(source.name, (name) => tw("copyName", { name })),
+                    description: source.description,
+                    recordType: source.recordType,
+                    executionMode: source.executionMode,
+                    definition: source.definition,
+                    canvas: source.canvas,
                 },
                 { headers: workspaceHeaders },
             );
             if (!isCurrent()) return;
             toastSuccess(tw("duplicated", { name: created.name }));
             router.push(`/workflows/${created.id}`);
-        } catch (error) {
+        } catch {
             if (!isCurrent()) return;
-            toastError(error instanceof Error ? error.message : tw("duplicateFailed"));
+            toastError(tw("duplicateFailed"));
         } finally {
             if (duplicateOperationRef.current === operation) {
                 duplicateOperationRef.current = null;
-                setDuplicatingRuleId(null);
+                setDuplicatingWorkflowId(null);
             }
         }
     };
 
-    return { duplicateRule, duplicatingRuleId };
+    return { duplicateWorkflow, duplicatingWorkflowId };
 }
