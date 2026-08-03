@@ -35,12 +35,6 @@ class TenantScopeInterceptorTest {
 
     private static final String NS = "ooo.klae.connex.backend.mappers.";
 
-    /**
-     * {@link Executor} methods that take a {@link MappedStatement} without
-     * executing it: cache-key derivation, a local-cache probe, and nested-select
-     * deferral. Everything else that accepts a mapped statement reaches the
-     * database and must be intercepted.
-     */
     private static final Set<String> NON_EXECUTING_EXECUTOR_METHODS =
         Set.of("createCacheKey", "isCached", "deferLoad");
 
@@ -193,6 +187,17 @@ class TenantScopeInterceptorTest {
         verify(delegate).queryCursor(statement, parameter, RowBounds.DEFAULT);
     }
 
+    /**
+     * Asserts that an interceptor's {@code @Intercepts} set is exactly the
+     * {@link Executor} methods that reach the database. Every method taking a
+     * {@link MappedStatement} executes it except the three in
+     * {@code NON_EXECUTING_EXECUTOR_METHODS} — cache-key derivation, a
+     * local-cache probe, and nested-select deferral — so only those may be
+     * excluded, and widening that list means exempting a real statement path
+     * from the backstop.
+     *
+     * @param interceptorType the annotated MyBatis plugin under test
+     */
     private static void assertInterceptsEveryStatementExecutingExecutorMethod(Class<?> interceptorType) {
         Set<String> executing = new TreeSet<>();
         for (Method method : Executor.class.getDeclaredMethods()) {
