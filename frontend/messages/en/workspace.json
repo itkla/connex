@@ -222,6 +222,7 @@
     "save": "Save rule",
     "saving": "Saving…",
     "whenLabel": "When",
+    "eventsLabel": "Events",
     "recordType": "Record type",
     "triggerKind": "Trigger",
     "kindEntityChange": "when it changes",

@@ -222,6 +222,7 @@
     "save": "ルールを保存",
     "saving": "保存中…",
     "whenLabel": "条件（WHEN）",
+    "eventsLabel": "イベント",
     "recordType": "レコードタイプ",
     "triggerKind": "トリガー",
     "kindEntityChange": "変更されたとき",
