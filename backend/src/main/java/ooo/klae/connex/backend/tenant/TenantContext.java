@@ -101,7 +101,20 @@ public class TenantContext {
         return previous;
     }
 
+    /**
+     * Releases everything this thread holds — the identity scope and any
+     * {@code TenantWorkScope} catalog override. Both matter: the override wins
+     * over the scope's own catalog in {@link #getCatalog()}, which is what
+     * {@link TenantRoutingDataSource} reads to pick the physical database, so
+     * dropping only the identity would reset who the thread is but not where
+     * its SQL goes (#995). Structured overrides restore their own previous
+     * value absolutely when their span ends, so a clear inside a span is
+     * repaired on exit; anything issued after a clear and outside a span fails
+     * closed in {@link TenantScopeInterceptor} rather than silently routing to
+     * the default catalog.
+     */
     public void clear() {
         CURRENT.remove();
+        CATALOG_OVERRIDE.remove();
     }
 }

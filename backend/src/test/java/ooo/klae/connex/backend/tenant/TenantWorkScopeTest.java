@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.tenant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.times;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
@@ -54,6 +56,40 @@ class TenantWorkScopeTest {
         String during = workScope.inWorkspace(7, () -> tenantContext.getCatalog());
 
         assertEquals("cnx_abc", during);
+        assertNull(tenantContext.getCatalog());
+    }
+
+    @Test
+    void clearReleasesTheCatalogOverrideAsWellAsTheIdentityScope() {
+        tenantContext.set(7, 42, 3, "owner", "cnx_scope");
+        tenantContext.swapCatalogOverride(Optional.of("cnx_override"));
+
+        tenantContext.clear();
+
+        assertFalse(tenantContext.isResolved());
+        assertFalse(tenantContext.hasCatalogOverride());
+        assertNull(tenantContext.getCatalog());
+    }
+
+    @Test
+    void clearInsideANestedSpanCannotCorruptTheEnclosingOverride() {
+        when(workspaceMapper.getOrgId(7)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_inner");
+        AtomicReference<String> duringClear = new AtomicReference<>("unset");
+        AtomicReference<String> afterInnerSpan = new AtomicReference<>("unset");
+
+        workScope.withCatalog("cnx_outer", () -> {
+            workScope.inWorkspace(7, () -> {
+                tenantContext.clear();
+                duringClear.set(tenantContext.getCatalog());
+                return null;
+            });
+            afterInnerSpan.set(tenantContext.getCatalog());
+            return null;
+        });
+
+        assertNull(duringClear.get());
+        assertEquals("cnx_outer", afterInnerSpan.get());
         assertNull(tenantContext.getCatalog());
     }
 
