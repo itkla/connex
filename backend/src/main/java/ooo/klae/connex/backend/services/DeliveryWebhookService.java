@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
@@ -47,10 +46,11 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
  * <p>That scope is installed <em>before</em> the transaction opens, not inside it:
  * {@code TenantWorkScope} refuses to change the pinned catalog while a transaction is already
  * active, because the transaction-bound connection keeps its original catalog. The apply loop
- * therefore opens its transaction through {@link TransactionTemplate} inside the scope, every event
- * in one callback still commits or rolls back together, and ingestion fails fast when a caller has
- * already opened a transaction — under {@code single-database} the wrong order is silently
- * harmless, so it has to be rejected rather than discovered on the first dedicated-placement tenant.
+ * therefore opens its transaction through {@link TransactionTemplate} inside the scope, and every
+ * event in one delivery still commits or rolls back together. {@code ingest} may not become
+ * {@code @Transactional} again; {@code DeliveryWebhookServiceTest} asserts that, because under
+ * {@code single-database} the wrong order is silently harmless and would otherwise surface only on
+ * the first dedicated-placement tenant.
  *
  * <p>The token lookup itself still runs unrouted on the default catalog, so under
  * {@code catalog-per-placement} a dedicated-placement tenant's webhook token resolves to nothing.
@@ -83,11 +83,6 @@ public class DeliveryWebhookService {
      * @return the number of events newly applied
      */
     public int ingest(String provider, String rawToken, byte[] rawBody, Map<String, String> headers) {
-        if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            throw new IllegalStateException(
-                    "The provider's workspace scope must be established before a transaction opens; "
-                        + "a transaction-bound connection keeps the catalog it was checked out with");
-        }
         ResolvedDeliveryProvider target = deliveryProviderConfigService.resolveByWebhookToken(rawToken);
         if (!target.providerId().equals(normalize(provider))) {
             throw new DeliveryProviderException("Webhook provider does not match the token");

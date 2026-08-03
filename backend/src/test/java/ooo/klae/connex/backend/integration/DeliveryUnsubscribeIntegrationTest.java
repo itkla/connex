@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
@@ -49,13 +50,14 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * the exempt token lookup; MyBatis wrapped that refusal into a {@code MyBatisSystemException}, which
  * no handler maps, so the recipient got a 500 instead of being unsubscribed.
  *
- * <p>Deliberately not {@code @Transactional}: a real recipient request arrives with no transaction
- * on the thread, and the service must establish its workspace scope before opening one. A
- * test-managed transaction would put the handler in exactly the shape the fix forbids, so it would
- * mask a regression instead of catching it. Fixtures therefore commit, each into their own
- * throwaway workspace.
+ * <p>It stays {@code @Transactional} so its fixtures roll back: the suite shares one schema, these
+ * workspaces land in the default organization, and committed ones change what organization-wide
+ * assertions elsewhere observe. That does mean a transaction is already open when the handler runs,
+ * which is harmless under {@code single-database} but is not the shape production uses — the
+ * "scope before transaction" ordering is asserted separately by {@code DeliveryUnsubscribeServiceTest}.
  */
 @SpringBootTest
+@Transactional
 class DeliveryUnsubscribeIntegrationTest {
 
     @Autowired private WebApplicationContext context;

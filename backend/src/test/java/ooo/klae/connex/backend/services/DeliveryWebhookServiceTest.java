@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -21,6 +22,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -210,6 +212,16 @@ class DeliveryWebhookServiceTest {
         verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_B, PROVIDER, "m1");
         verify(campaignDeliveryMapper, never()).findByProviderMessage(eq(WORKSPACE_A), any(), any());
         verify(campaignDeliveryMapper, never()).insertEvent(any());
+    }
+
+    @Test
+    void ingestIsNotTransactional() throws NoSuchMethodException {
+        String reason = "TenantWorkScope cannot change the pinned catalog inside an active "
+                + "transaction, so the provider's workspace scope has to open first";
+        assertNull(DeliveryWebhookService.class.getAnnotation(Transactional.class), reason);
+        assertNull(DeliveryWebhookService.class
+                .getMethod("ingest", String.class, String.class, byte[].class, Map.class)
+                .getAnnotation(Transactional.class), reason);
     }
 
     @Test

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -20,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -179,6 +181,17 @@ class DeliveryUnsubscribeServiceTest {
 
         verify(campaignDeliveryMapper, never()).insertEvent(any());
         verifyNoInteractions(suppressionService, consentService);
+    }
+
+    @Test
+    void neitherEntryPointIsTransactional() throws NoSuchMethodException {
+        String reason = "TenantWorkScope cannot change the pinned catalog inside an active "
+                + "transaction, so the delivery's workspace scope has to open first";
+        assertNull(DeliveryUnsubscribeService.class.getAnnotation(Transactional.class), reason);
+        assertNull(DeliveryUnsubscribeService.class
+                .getMethod("preview", String.class).getAnnotation(Transactional.class), reason);
+        assertNull(DeliveryUnsubscribeService.class
+                .getMethod("unsubscribe", String.class).getAnnotation(Transactional.class), reason);
     }
 
     @Test
