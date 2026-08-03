@@ -153,7 +153,7 @@ public class WorkflowRunReadService {
             .toList();
     }
 
-    private WorkflowRunSummaryDto canonicalSummary(WorkflowRunView run) {
+    WorkflowRunSummaryDto canonicalSummary(WorkflowRunView run) {
         return new WorkflowRunSummaryDto(
             "canonical-" + run.getId(),
             "canonical",

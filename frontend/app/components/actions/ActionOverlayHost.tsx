@@ -20,6 +20,9 @@ const ActivityDialog = dynamic(() => import("@/app/components/activity/activitie
 const CompanyCreateContainer = dynamic(() => import("@/app/components/actions/create/CompanyCreateContainer"));
 const ContactCreateContainer = dynamic(() => import("@/app/components/actions/create/ContactCreateContainer"));
 const DealCreateContainer = dynamic(() => import("@/app/components/actions/create/DealCreateContainer"));
+const WorkflowManualRunLauncher = dynamic(
+    () => import("@/app/components/settings/workflows/manual-runs/WorkflowManualRunLauncher"),
+);
 
 const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
     "create-task",
@@ -487,6 +490,18 @@ export default function ActionOverlayHost({
                         onOpenChange={handleOpenChange}
                         onImported={() => {}}
                         requestInit={requestInit}
+                    />
+                ) : null}
+                {rendered?.request.kind === "workflow-manual-run" ? (
+                    <WorkflowManualRunLauncher
+                        key={rendered.generation}
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        requestInit={requestInit}
+                        recordType={rendered.request.recordType}
+                        sourceSurface={rendered.request.sourceSurface}
+                        initialScope={rendered.request.scope}
+                        initialWorkflowId={rendered.request.workflowId}
                     />
                 ) : null}
             </Fragment>

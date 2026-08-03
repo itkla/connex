@@ -336,6 +336,8 @@
     "subtitle": "Connex 上でリレーションシップワークフローの作成、プレビュー、公開、確認を行います。",
     "accessDeniedTitle": "ワークフローへのアクセス権が必要です",
     "newWorkflow": "新規ワークフロー",
+    "operations": "オペレーション",
+    "recipes": "レシピ",
     "activeTab": "有効",
     "archivedTab": "アーカイブ済み",
     "visibilityLabel": "ワークフローの表示範囲",
@@ -356,6 +358,8 @@
     "duplicateSystemRestricted": "自動化ワークフローを複製できるのは、ワークスペースのオーナーと管理者のみです。",
     "enabled": "ワークフローを有効にしました",
     "disabled": "ワークフローを無効にしました",
+    "paused": "ワークフローの受付を一時停止しました",
+    "resumed": "ワークフローの受付を再開しました",
     "archived": "ワークフローをアーカイブしました",
     "restored": "ワークフローを無効状態で復元しました",
     "archive": "アーカイブ",
@@ -365,6 +369,9 @@
     "lifecycleFailed": "ワークフローの状態を変更できませんでした。",
     "draftOnly": "下書きのみ",
     "disabledBadge": "無効",
+    "pausedBadge": "一時停止",
+    "pause": "受付を一時停止",
+    "resume": "受付を再開",
     "runtimeOwner": {
       "legacy": "旧ランタイム",
       "canonical": "標準ランタイム"

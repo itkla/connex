@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPl
 class WorkflowOffboardingServiceTest {
 
     @Mock private WorkflowMapper workflowMapper;
+    @Mock private WorkflowOperationsMapper workflowOperationsMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;
     @Mock private RuleMapper ruleMapper;
     @Mock private WorkspaceMapper workspaceMapper;
@@ -119,7 +121,11 @@ class WorkflowOffboardingServiceTest {
 
     private WorkflowOffboardingService service() {
         return new WorkflowOffboardingService(
-            workflowMapper, workflowVersionMapper, ruleMapper, workspaceMapper);
+            workflowMapper,
+            workflowOperationsMapper,
+            workflowVersionMapper,
+            ruleMapper,
+            workspaceMapper);
     }
 
     private static Workflow workflow(

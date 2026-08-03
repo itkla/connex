@@ -238,17 +238,21 @@
   </select>
 
   <select id="findDueRunForUpdate" resultType="WorkflowRun">
-    SELECT <include refid="runColumns"/> FROM workflow_run
-    WHERE workspace_id = #{workspaceId}
-      AND cancel_requested_at IS NULL
+    SELECT wr.* FROM workflow_run wr
+    JOIN workflow w
+      ON w.workspace_id = wr.workspace_id
+     AND w.id = wr.workflow_id
+    WHERE wr.workspace_id = #{workspaceId}
+      AND w.intake_paused_at IS NULL
+      AND wr.cancel_requested_at IS NULL
       AND (
-        status = 'queued'
-        OR (status = 'waiting' AND resume_at &lt;= CURRENT_TIMESTAMP(6))
-        OR (status = 'running' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+        wr.status = 'queued'
+        OR (wr.status = 'waiting' AND wr.resume_at &lt;= CURRENT_TIMESTAMP(6))
+        OR (wr.status = 'running' AND wr.lease_until &lt; CURRENT_TIMESTAMP(6))
       )
     ORDER BY
-      CASE WHEN status = 'waiting' THEN resume_at ELSE started_at END,
-      id
+      CASE WHEN wr.status = 'waiting' THEN wr.resume_at ELSE wr.started_at END,
+      wr.id
     LIMIT 1
     FOR UPDATE SKIP LOCKED
   </select>
@@ -299,6 +303,12 @@
       AND id = #{id}
       AND dispatch_count &lt; #{maxDispatches}
       AND cancel_requested_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = workflow_run.workspace_id
+          AND w.id = workflow_run.workflow_id
+          AND w.intake_paused_at IS NULL
+      )
       AND (
         status = 'queued'
         OR (status = 'waiting' AND resume_at &lt;= CURRENT_TIMESTAMP(6))

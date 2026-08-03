@@ -336,6 +336,8 @@
     "subtitle": "Build, preview, publish, and inspect relationship workflows without leaving Connex.",
     "accessDeniedTitle": "Workflow access required",
     "newWorkflow": "New workflow",
+    "operations": "Operations",
+    "recipes": "Recipes",
     "activeTab": "Active",
     "archivedTab": "Archived",
     "visibilityLabel": "Workflow visibility",
@@ -356,6 +358,8 @@
     "duplicateSystemRestricted": "Only workspace owners and admins can duplicate Automation workflows.",
     "enabled": "Workflow enabled",
     "disabled": "Workflow disabled",
+    "paused": "Workflow intake paused",
+    "resumed": "Workflow intake resumed",
     "archived": "Workflow archived",
     "restored": "Workflow restored as disabled",
     "archive": "Archive",
@@ -365,6 +369,9 @@
     "lifecycleFailed": "The workflow state could not be changed.",
     "draftOnly": "Draft only",
     "disabledBadge": "Disabled",
+    "pausedBadge": "Paused",
+    "pause": "Pause intake",
+    "resume": "Resume intake",
     "runtimeOwner": {
       "legacy": "Legacy runtime",
       "canonical": "Canonical runtime"

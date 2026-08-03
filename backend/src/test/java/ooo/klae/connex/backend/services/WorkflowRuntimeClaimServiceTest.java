@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
@@ -203,6 +205,9 @@ class WorkflowRuntimeClaimServiceTest {
         assertEquals("queued", run.getValue().getStatus());
         assertEquals(7, run.getValue().getWorkspaceId());
         verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
+        InOrder lockOrder = inOrder(workflowTriggerOutboxMapper, workflowMapper);
+        lockOrder.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
+        lockOrder.verify(workflowMapper).getByIdForUpdate(7, 11);
     }
 
     @Test

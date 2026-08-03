@@ -38,6 +38,7 @@ import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMe
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
+import { useActionSelection } from '@/app/hooks/useActions';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
@@ -144,6 +145,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
     const reduce = useReducedMotion() ?? false;
+    const [activeSavedViewId, setActiveSavedViewId] = useState<number | null>(null);
 
     const {
         displayMode,
@@ -249,6 +251,50 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     }, [filterSignature]);
     const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
     const allMatchingActive = selectedIds.size > 0 && matchedSignature === filterSignature;
+    const workflowSelection = useMemo(() => {
+        if (selectedIds.size === 0) return null;
+        const canResolveFilter = allMatchingActive
+            && !showArchived
+            && !hasSegments
+            && !filterParams.noIndustry;
+        const canResolveSegment = allMatchingActive
+            && hasSegments
+            && !showArchived
+            && query.trim() === ''
+            && Object.keys(filterParams).length === 0;
+        const scope = allMatchingActive && activeSavedViewId !== null
+            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
+            : canResolveSegment
+                ? { kind: 'smart_segment' as const, definition: evaluable }
+            : canResolveFilter
+            ? {
+                kind: 'filter_match' as const,
+                filter: {
+                    query: query.trim() || undefined,
+                    industry: filterParams.industry,
+                    memberScope: filterParams.scope,
+                    memberIds: filterParams.memberIds,
+                },
+            }
+            : { kind: 'explicit_selection' as const, recordIds: selectedCompanyIds };
+        return {
+            type: 'company' as const,
+            ids: selectedIds,
+            sourceSurface: activeSavedViewId !== null ? 'saved_view' as const : 'record_list' as const,
+            scope,
+        };
+    }, [
+        activeSavedViewId,
+        allMatchingActive,
+        evaluable,
+        filterParams,
+        hasSegments,
+        query,
+        selectedCompanyIds,
+        selectedIds,
+        showArchived,
+    ]);
+    useActionSelection(workflowSelection);
     const selectAllRequestRef = useRef(0);
     const [selectingAll, setSelectingAll] = useState(false);
     const clearSelection = useCallback(() => {
@@ -879,6 +925,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
+                        onActiveScopeChange={setActiveSavedViewId}
                         defaultView={defaultView}
                         unavailable={savedViewsUnavailable}
                     />

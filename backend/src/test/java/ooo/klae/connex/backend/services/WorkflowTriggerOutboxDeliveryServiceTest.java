@@ -90,6 +90,8 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             ruleEngineService,
             claimService,
             outboxMapper);
+        order.verify(outboxMapper).ensureWorkspaceGate(7);
+        order.verify(outboxMapper).getOwnedForUpdate(7, 31L, "lease");
         order.verify(workflowMapper).getById(7, 11);
         order.verify(versionMapper).getById(7, 11, 23L);
         order.verify(ruleMapper).getById(7, 29);

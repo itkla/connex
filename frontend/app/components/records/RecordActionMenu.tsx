@@ -119,7 +119,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
         const groups: (MenuItemDescriptor | null)[][] = [
             includeRecordActions ? [peek, ...REGISTRY_VIEW.map(registry)] : [],
             includeRecordActions && includeCreateActions ? REGISTRY_CREATE.map(registry) : [],
-            includeRecordActions ? [quickEdit, registry('record.copy-link')] : [],
+            includeRecordActions ? [quickEdit, registry('record.run-workflow'), registry('record.copy-link')] : [],
             [remove],
         ];
         return groups.map((group) => group.filter((item): item is MenuItemDescriptor => item !== null)).filter((group) => group.length > 0);

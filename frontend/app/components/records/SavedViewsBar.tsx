@@ -115,6 +115,7 @@ export default function SavedViewsBar({
     initialViews,
     currentConfig,
     onApply,
+    onActiveScopeChange,
     defaultView,
     unavailable = false,
 }: {
@@ -122,6 +123,7 @@ export default function SavedViewsBar({
     initialViews: SavedView[];
     currentConfig: SavedViewConfig;
     onApply: (config: SavedViewConfig) => void;
+    onActiveScopeChange?: (savedViewId: number | null) => void;
     defaultView?: SavedView | null;
     /**
      * Set when the saved-view list could not be loaded. The bar then says so instead of rendering its
@@ -146,6 +148,10 @@ export default function SavedViewsBar({
     const activeView = explicitView ?? matchedView;
     const modified = explicitView != null && canonical(explicitView.config) !== currentKey;
     const canSaveNew = !matchedView && !isEmpty(currentConfig);
+
+    useEffect(() => {
+        onActiveScopeChange?.(activeView && !modified ? activeView.id : null);
+    }, [activeView, modified, onActiveScopeChange]);
 
     const applyView = (view: SavedView | null) => {
         setActiveId(view?.id ?? null);

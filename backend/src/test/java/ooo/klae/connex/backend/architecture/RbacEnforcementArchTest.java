@@ -24,6 +24,10 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRunOperationService;
+import ooo.klae.connex.backend.services.WorkflowInterventionService;
+import ooo.klae.connex.backend.services.WorkflowManualRunService;
+import ooo.klae.connex.backend.services.WorkflowOperationsService;
+import ooo.klae.connex.backend.services.WorkflowRecipeService;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.services.WorkflowSimulationService;
@@ -130,7 +134,7 @@ class RbacEnforcementArchTest {
                 violations.add(method.getName());
             }
         }
-        assertEquals(12, lifecycleMethodCount,
+        assertEquals(14, lifecycleMethodCount,
             "Workflow lifecycle surface changed without updating the RBAC guard");
         assertTrue(violations.isEmpty(),
             "Every workflow lifecycle method must require RULE_MANAGE: " + violations);
@@ -142,7 +146,11 @@ class RbacEnforcementArchTest {
             WorkflowRuntimeOwnershipService.class, 2,
             WorkflowRunReadService.class, 2,
             WorkflowRunOperationService.class, 2,
-            WorkflowSimulationService.class, 1);
+            WorkflowSimulationService.class, 1,
+            WorkflowOperationsService.class, 3,
+            WorkflowInterventionService.class, 2,
+            WorkflowManualRunService.class, 4,
+            WorkflowRecipeService.class, 4);
         List<String> violations = new ArrayList<>();
         for (Map.Entry<Class<?>, Integer> surface : surfaces.entrySet()) {
             int publicMethods = 0;

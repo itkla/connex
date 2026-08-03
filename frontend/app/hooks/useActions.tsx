@@ -294,7 +294,13 @@ export function ActionProvider({ user, children }: { user: User | null; children
             pendingRef.current.add(id);
             setPendingIds(new Set(pendingRef.current));
             try {
-                await action.execute(currentContext, { router, openOverlay, closeOverlay, translate });
+                await action.execute(currentContext, {
+                    router,
+                    openOverlay,
+                    closeOverlay,
+                    source: options?.source ?? "programmatic",
+                    translate,
+                });
                 return { status: "completed" };
             } catch (error) {
                 const message = error instanceof ApiError ? error.message : translate("feedback.runFailed");

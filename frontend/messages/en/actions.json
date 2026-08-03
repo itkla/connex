@@ -67,7 +67,8 @@
     "record": {
       "open": "Open record",
       "openNewTab": "Open in new tab",
-      "copyLink": "Copy link to this record"
+      "copyLink": "Copy link to this record",
+      "runWorkflow": "Run workflow"
     },
     "workspace": {
       "themeLight": "Light theme",
@@ -88,6 +89,9 @@
       "exportCurrentProducts": "Export current product view"
     },
     "description": {
+      "record": {
+        "runWorkflow": "Freeze this exact record scope and start a new workflow run."
+      },
       "utility": {
         "exportCurrentCompanies": "Download all companies matching this view's search, filters, and segment.",
         "exportCurrentContacts": "Download all contacts matching this view's search and filters.",

@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.dto.WorkflowRunOperationDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -29,6 +30,7 @@ public class WorkflowRunOperationService {
         "succeeded", "failed", "skipped", "cancelled", "intervention_required");
 
     private final WorkflowMapper workflowMapper;
+    private final WorkflowOperationsMapper workflowOperationsMapper;
     private final WorkflowRunMapper runMapper;
     private final WorkflowRuntimeProperties properties;
     private final WorkspaceService workspaceService;
@@ -68,6 +70,8 @@ public class WorkflowRunOperationService {
             throw new ConflictException("Workflow run cannot be cancelled in its current state");
         }
         if (changed) {
+            workflowOperationsMapper.resolveOpenInterventionsForRun(
+                workspaceId, run.getId(), "cancelled");
             auditService.recordStrict(
                 "workflow.run.cancel",
                 "workflow",
@@ -111,6 +115,8 @@ public class WorkflowRunOperationService {
                 workspaceId, run.getId(), run.getCurrentNodeId()) != 1) {
             throw new IllegalStateException("Workflow retry was not scheduled");
         }
+        workflowOperationsMapper.resolveOpenInterventionsForRun(
+            workspaceId, run.getId(), "resolved");
         auditService.recordStrict(
             "workflow.run.retry",
             "workflow",

@@ -89,6 +89,20 @@ public class WorkflowService {
     @Transactional
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowDto create(WorkflowCreateRequest request) {
+        return createWithPrincipal(
+            request, workspaceService.getCurrentUserId(), "legacy");
+    }
+
+    WorkflowDto createForRecipe(
+            WorkflowCreateRequest request,
+            int runAsUserId) {
+        return createWithPrincipal(request, runAsUserId, "canonical");
+    }
+
+    private WorkflowDto createWithPrincipal(
+            WorkflowCreateRequest request,
+            int runAsUserId,
+            String runtimeOwner) {
         if (request == null) {
             throw new BadRequestException("Workflow request is required");
         }
@@ -105,8 +119,8 @@ public class WorkflowService {
             workspaceId,
             actorId,
             draft.executionMode(),
-            Set.of(actorId),
-            "user".equals(draft.executionMode()) ? Set.of(actorId) : Set.of());
+            new TreeSet<>(List.of(actorId, runAsUserId)),
+            "user".equals(draft.executionMode()) ? Set.of(runAsUserId) : Set.of());
 
         Workflow workflow = new Workflow();
         workflow.setWorkspaceId(workspaceId);
@@ -114,12 +128,13 @@ public class WorkflowService {
         workflow.setName(draft.name());
         workflow.setDescription(draft.description());
         workflow.setEnabled(false);
-        workflow.setRuntimeOwner("legacy");
+        workflow.setRuntimeOwner(runtimeOwner);
         workflow.setArchivedAt(null);
         workflow.setDraftRevision(0);
         workflow.setDraftRecordType(draft.recordType());
         workflow.setDraftExecutionMode(draft.executionMode());
-        workflow.setDraftRunAsUserId("user".equals(draft.executionMode()) ? actorId : null);
+        workflow.setDraftRunAsUserId(
+            "user".equals(draft.executionMode()) ? runAsUserId : null);
         workflow.setDraftDefinitionJson(draft.definitionJson());
         workflow.setDraftCanvasJson(draft.canvasJson());
         workflow.setActiveVersionId(null);
@@ -444,6 +459,20 @@ public class WorkflowService {
         return setArchived(id, false);
     }
 
+    /** Pauses durable intake claims without invalidating the retained backlog. */
+    @Transactional
+    @RequirePermission(Permission.RULE_MANAGE)
+    public WorkflowDto pause(int id) {
+        return setIntakePaused(id, true);
+    }
+
+    /** Resumes durable intake claims without changing the workflow runtime generation. */
+    @Transactional
+    @RequirePermission(Permission.RULE_MANAGE)
+    public WorkflowDto resume(int id) {
+        return setIntakePaused(id, false);
+    }
+
     /** Lists immutable versions newest first without inventing lifecycle pagination. */
     @Transactional(readOnly = true)
     @RequirePermission(Permission.RULE_MANAGE)
@@ -534,6 +563,35 @@ public class WorkflowService {
             enabled ? "Workflow enabled" : "Workflow disabled",
             auditService.singleChange("enabled", !enabled, enabled));
         return toDto(workflow);
+    }
+
+    private WorkflowDto setIntakePaused(int id, boolean paused) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        MutationDiscovery discovery = discoverMutation(workspaceId, id, false);
+        requireMutable(discovery.workflow());
+        LockedPrincipals principals = principalLockService.lockUserMutation(
+            workspaceId, actorId, discovery.principalIds(), Set.of());
+        Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
+        requireMutable(workflow);
+        requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
+        principals.requireCurrentReferences(workflowPrincipalIds(workflow));
+        boolean currentlyPaused = workflow.getIntakePausedAt() != null;
+        if (currentlyPaused != paused
+                && workflowMapper.updateIntakePause(
+                    workspaceId, id, paused, actorId) != 1) {
+            throw new ConflictException("Workflow intake state changed concurrently");
+        }
+        if (currentlyPaused != paused) {
+            auditService.recordStrict(
+                paused ? "workflow.pause" : "workflow.resume",
+                ENTITY_TYPE,
+                id,
+                workflowLabel(id),
+                paused ? "Workflow intake paused" : "Workflow intake resumed",
+                Map.of("paused", paused));
+        }
+        return toDto(requireWorkflow(workspaceId, id));
     }
 
     private WorkflowDto setArchived(int id, boolean archived) {
@@ -1080,6 +1138,8 @@ public class WorkflowService {
             workflow.isEnabled(),
             workflow.getRuntimeOwner(),
             workflow.getArchivedAt(),
+            workflow.getIntakePausedAt(),
+            workflow.getIntakePausedById(),
             workflow.getDraftRevision(),
             draft.recordType(),
             draft.executionMode(),
@@ -1112,6 +1172,8 @@ public class WorkflowService {
             workflow.isEnabled(),
             workflow.getRuntimeOwner(),
             workflow.getArchivedAt(),
+            workflow.getIntakePausedAt(),
+            workflow.getIntakePausedById(),
             workflow.getDraftRevision(),
             workflow.getRecordType(),
             workflow.getExecutionMode(),

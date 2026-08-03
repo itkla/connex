@@ -24,6 +24,7 @@ public class WorkflowRuntimeClaimTransaction {
     private final WorkflowTriggerOutboxMapper outboxMapper;
     private final WorkflowRunMapper runMapper;
     private final WorkflowRuntimeProperties properties;
+    private final WorkflowInterventionRecorder interventionRecorder;
 
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
@@ -147,5 +148,6 @@ public class WorkflowRuntimeClaimTransaction {
                 finishedAt) != 1) {
             throw new IllegalStateException("Exhausted workflow run was not finalized");
         }
+        interventionRecorder.record(run, "dispatch_limit");
     }
 }

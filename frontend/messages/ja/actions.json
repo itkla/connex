@@ -67,7 +67,8 @@
     "record": {
       "open": "レコードを開く",
       "openNewTab": "新しいタブで開く",
-      "copyLink": "このレコードのリンクをコピー"
+      "copyLink": "このレコードのリンクをコピー",
+      "runWorkflow": "ワークフローを実行"
     },
     "workspace": {
       "themeLight": "ライトテーマ",
@@ -88,6 +89,9 @@
       "exportCurrentProducts": "現在の商品ビューをエクスポート"
     },
     "description": {
+      "record": {
+        "runWorkflow": "この正確なレコード範囲を固定し、新しいワークフロー実行を開始します。"
+      },
       "utility": {
         "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
         "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",

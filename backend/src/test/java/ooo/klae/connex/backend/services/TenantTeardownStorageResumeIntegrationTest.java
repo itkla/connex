@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -9,10 +10,12 @@ import static org.mockito.Mockito.verify;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,10 +37,16 @@ class TenantTeardownStorageResumeIntegrationTest extends AbstractServiceTest {
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private ScheduledAnnotationBeanPostProcessor scheduledTasks;
     @MockitoBean private ObjectStorage objectStorage;
 
     private Organization organization;
     private Workspace lifecycleWorkspace;
+
+    @BeforeEach
+    void stopScheduledBackgroundWork() {
+        scheduledTasks.getScheduledTasks().forEach(task -> task.cancel(false));
+    }
 
     @AfterEach
     void cleanCommittedRoots() {
@@ -78,7 +87,6 @@ class TenantTeardownStorageResumeIntegrationTest extends AbstractServiceTest {
         createRoots();
         String objectKey = seedManagedAttachment();
         doThrow(new ObjectStorageException("provider unavailable"))
-            .doNothing()
             .when(objectStorage)
             .delete(objectKey);
 
@@ -100,6 +108,7 @@ class TenantTeardownStorageResumeIntegrationTest extends AbstractServiceTest {
             lifecycleWorkspace.getId()));
 
         Thread.sleep(1_100);
+        doNothing().when(objectStorage).delete(objectKey);
         teardownService.teardownWorkspace(
             organization.getId(),
             lifecycleWorkspace.getId(),

@@ -20,6 +20,8 @@ public class Workflow {
     private boolean enabled;
     private String runtimeOwner = "legacy";
     private LocalDateTime archivedAt;
+    private LocalDateTime intakePausedAt;
+    private Integer intakePausedById;
     private long runtimeGeneration;
     private int draftRevision;
     private String draftRecordType;
@@ -32,4 +34,5 @@ public class Workflow {
     private Integer updatedById;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private boolean operationsUserAffected;
 }

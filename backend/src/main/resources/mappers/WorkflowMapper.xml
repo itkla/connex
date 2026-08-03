@@ -5,7 +5,7 @@
 
   <sql id="workflowColumns">
     id, workspace_id, legacy_rule_id, name, description, enabled, runtime_owner,
-    archived_at, runtime_generation, draft_revision,
+    archived_at, intake_paused_at, intake_paused_by_id, runtime_generation, draft_revision,
     draft_record_type, draft_execution_mode, draft_run_as_user_id,
     draft_definition_json, draft_canvas_json, active_version_id,
     created_by_id, updated_by_id, created_at, updated_at
@@ -32,6 +32,8 @@
            w.enabled,
            w.runtime_owner,
            w.archived_at,
+           w.intake_paused_at,
+           w.intake_paused_by_id,
            w.draft_revision,
            w.draft_record_type AS record_type,
            w.draft_execution_mode AS execution_mode,
@@ -108,10 +110,35 @@
   </select>
 
   <select id="findAffectedByUserAnywhere" resultType="Workflow">
-    SELECT <include refid="workflowColumns"/> FROM workflow w
+    SELECT <include refid="workflowColumns"/>,
+      (w.intake_paused_by_id = #{userId}
+        OR EXISTS (
+          SELECT 1 FROM workflow_recipe_origin origin
+          WHERE origin.workspace_id = w.workspace_id
+            AND origin.workflow_id = w.id
+            AND origin.installed_by_id = #{userId}
+        )
+        OR EXISTS (
+          SELECT 1 FROM workflow_invocation invocation
+          WHERE invocation.workspace_id = w.workspace_id
+            AND invocation.workflow_id = w.id
+            AND invocation.requested_by_id = #{userId}
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM workflow_intervention intervention
+          JOIN workflow_run wr
+            ON wr.workspace_id = intervention.workspace_id
+           AND wr.id = intervention.workflow_run_id
+          WHERE intervention.workspace_id = w.workspace_id
+            AND wr.workflow_id = w.id
+            AND intervention.owner_user_id = #{userId}
+        )) AS operations_user_affected
+    FROM workflow w
     WHERE w.created_by_id = #{userId}
        OR w.updated_by_id = #{userId}
        OR w.draft_run_as_user_id = #{userId}
+       OR w.intake_paused_by_id = #{userId}
        OR EXISTS (
          SELECT 1 FROM workflow_version v
          WHERE v.workspace_id = w.workspace_id
@@ -126,6 +153,28 @@
          WHERE r.workspace_id = w.workspace_id
            AND r.id = w.legacy_rule_id
            AND (r.created_by_id = #{userId} OR r.run_as_user_id = #{userId})
+       )
+       OR EXISTS (
+         SELECT 1 FROM workflow_recipe_origin origin
+         WHERE origin.workspace_id = w.workspace_id
+           AND origin.workflow_id = w.id
+           AND origin.installed_by_id = #{userId}
+       )
+       OR EXISTS (
+         SELECT 1 FROM workflow_invocation invocation
+         WHERE invocation.workspace_id = w.workspace_id
+           AND invocation.workflow_id = w.id
+           AND invocation.requested_by_id = #{userId}
+       )
+       OR EXISTS (
+         SELECT 1
+         FROM workflow_intervention intervention
+         JOIN workflow_run wr
+           ON wr.workspace_id = intervention.workspace_id
+          AND wr.id = intervention.workflow_run_id
+         WHERE intervention.workspace_id = w.workspace_id
+           AND wr.workflow_id = w.id
+           AND intervention.owner_user_id = #{userId}
        )
     ORDER BY w.workspace_id, w.id
   </select>
@@ -313,6 +362,18 @@
       AND archived_at IS NOT NULL
   </update>
 
+  <update id="updateIntakePause">
+    UPDATE workflow
+    SET intake_paused_at = CASE WHEN #{paused} THEN CURRENT_TIMESTAMP(6) ELSE NULL END,
+        intake_paused_by_id = CASE WHEN #{paused} THEN #{updatedById} ELSE NULL END,
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND archived_at IS NULL
+      AND ((#{paused} AND intake_paused_at IS NULL)
+        OR (NOT #{paused} AND intake_paused_at IS NOT NULL))
+  </update>
+
   <update id="compareAndSwapRuntimeOwner">
     UPDATE workflow
     SET runtime_owner = #{runtimeOwner}, updated_by_id = #{updatedById}
@@ -347,6 +408,7 @@
       AND w.runtime_owner = 'canonical'
       AND w.enabled = TRUE
       AND w.archived_at IS NULL
+      AND w.intake_paused_at IS NULL
       AND v.trigger_type = #{triggerType}
     ORDER BY w.id
   </select>
@@ -360,6 +422,7 @@
      AND v.id = w.active_version_id
     WHERE w.enabled = TRUE
       AND w.archived_at IS NULL
+      AND w.intake_paused_at IS NULL
       AND v.trigger_type = 'schedule'
     ORDER BY w.workspace_id
   </select>

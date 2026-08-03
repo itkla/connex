@@ -120,7 +120,9 @@ class TenantScopeArchTest {
      * The {@code *Anywhere} writes are the account-offboarding erasures (#440
      * increment 3): they replace the dropped cross-plane foreign keys, are
      * identity-scoped ({@code #{userId}}), and deliberately span every workspace —
-     * including ones the departing user has already left.
+     * including ones the departing user has already left. The workflow-operations
+     * sweep conditionally clears only pause, recipe, invocation, and intervention
+     * principal columns equal to that exact user id.
      */
     private static final Set<String> EXEMPT_WRITES = Set.of(
         "ooo.klae.connex.backend.mappers.AuditLogMapper.insert",
@@ -142,6 +144,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.CampaignMapper.clearCampaignUserReferencesAnywhere",
         "ooo.klae.connex.backend.mappers.CampaignMapper.clearSnapshotCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.ConsentMapper.clearEventCreatorsAnywhere",
+        "ooo.klae.connex.backend.mappers.WorkflowOperationsMapper.clearUserReferencesAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearCompanyShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPersonShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPipelineShareGrantedByAnywhere",

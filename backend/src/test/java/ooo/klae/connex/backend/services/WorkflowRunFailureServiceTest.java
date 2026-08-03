@@ -29,13 +29,14 @@ class WorkflowRunFailureServiceTest {
     @Mock private WorkflowRunMapper workflowRunMapper;
     @Mock private WorkflowActionRetryPolicy retryPolicy;
     @Mock private WorkflowRuntimeProperties properties;
+    @Mock private WorkflowInterventionRecorder interventionRecorder;
 
     private WorkflowRunFailureService service;
 
     @BeforeEach
     void setUp() {
         service = new WorkflowRunFailureService(
-            workflowRunMapper, retryPolicy, properties);
+            workflowRunMapper, interventionRecorder, retryPolicy, properties);
         WorkflowRun run = new WorkflowRun();
         run.setWorkspaceId(7);
         run.setId(31L);

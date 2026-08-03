@@ -50,6 +50,7 @@ public class WorkflowRuntimeClaimService {
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public CanonicalClaim claimEntity(
             int workflowId, WorkflowTriggerDispatch.EntityChange dispatch) {
+        workflowTriggerOutboxMapper.ensureWorkspaceGate(dispatch.workspaceId());
         Workflow workflow = workflowMapper.getByIdForUpdate(dispatch.workspaceId(), workflowId);
         if (!canonicalOwnerCanClaim(workflow)) {
             return CanonicalClaim.rejectedClaim();
@@ -110,6 +111,7 @@ public class WorkflowRuntimeClaimService {
             long expectedVersionId,
             WorkflowTriggerDispatch.ScheduleTick dispatch,
             int recordId) {
+        workflowTriggerOutboxMapper.ensureWorkspaceGate(dispatch.workspaceId());
         Workflow workflow = workflowMapper.getByIdForUpdate(dispatch.workspaceId(), workflowId);
         if (!canonicalOwnerCanClaim(workflow)
                 || workflow.getActiveVersionId() == null
@@ -186,6 +188,38 @@ public class WorkflowRuntimeClaimService {
             recordId,
             key,
             outbox.getId(),
+            "queued");
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public CanonicalClaim claimManual(
+            int workspaceId,
+            int workflowId,
+            long expectedVersionId,
+            long invocationId,
+            int recordId) {
+        workflowTriggerOutboxMapper.ensureWorkspaceGate(workspaceId);
+        Workflow workflow = workflowMapper.getByIdForUpdate(workspaceId, workflowId);
+        if (!canonicalOwnerCanClaim(workflow)
+                || workflow.getActiveVersionId() == null
+                || workflow.getActiveVersionId() != expectedVersionId) {
+            return CanonicalClaim.rejectedClaim();
+        }
+        WorkflowVersion version = activeVersion(workflow);
+        CompiledWorkflow compiled = compiled(workflow, version);
+        String triggerKey = Long.toString(invocationId);
+        String key = "manual:" + invocationId + ":" + recordId;
+        return claimCanonical(
+            workflow,
+            version,
+            compiled,
+            "manual",
+            "manual",
+            triggerKey,
+            version.getRecordType(),
+            recordId,
+            key,
+            null,
             "queued");
     }
 
@@ -290,9 +324,6 @@ public class WorkflowRuntimeClaimService {
         run.setStartedAt(LocalDateTime.now());
         try {
             workflowRunMapper.insertRun(run);
-            if ("queued".equals(initialStatus)) {
-                workflowTriggerOutboxMapper.ensureWorkspaceGate(workflow.getWorkspaceId());
-            }
             return new CanonicalClaim(run, true, false, false);
         } catch (DuplicateKeyException exception) {
             WorkflowRun replay = workflowRunMapper.getByDedupe(
@@ -335,6 +366,7 @@ public class WorkflowRuntimeClaimService {
         return workflow != null
             && workflow.isEnabled()
             && workflow.getArchivedAt() == null
+            && workflow.getIntakePausedAt() == null
             && workflow.getActiveVersionId() != null
             && workflow.getActiveVersionId() == outbox.getWorkflowVersionId()
             && workflow.getRuntimeGeneration() == outbox.getWorkflowRuntimeGeneration();
@@ -433,6 +465,7 @@ public class WorkflowRuntimeClaimService {
             && workflow.isEnabled()
             && "canonical".equals(workflow.getRuntimeOwner())
             && workflow.getArchivedAt() == null
+            && workflow.getIntakePausedAt() == null
             && workflow.getActiveVersionId() != null;
     }
 
@@ -456,6 +489,7 @@ public class WorkflowRuntimeClaimService {
             || (workflow.getWorkspaceId() == workspaceId
                 && "legacy".equals(workflow.getRuntimeOwner())
                 && workflow.getArchivedAt() == null
+                && workflow.getIntakePausedAt() == null
                 && Objects.equals(workflow.getLegacyRuleId(), rule.getId()));
     }
 

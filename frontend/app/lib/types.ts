@@ -2925,6 +2925,8 @@ export type RuleRequest = {
 
 export type WorkflowRuntimeOwner = "legacy" | "canonical";
 
+export type WorkflowRetrySafety = "transactional" | "deduplicated" | "none";
+
 export type WorkflowExecutionMode = "user" | "system";
 
 export type WorkflowNodeType = "TRIGGER" | "CONDITION" | "ACTION" | "DELAY" | "END";
@@ -2997,6 +2999,8 @@ export type WorkflowDto = {
     enabled: boolean;
     runtimeOwner: WorkflowRuntimeOwner;
     archivedAt: string | null;
+    intakePausedAt: string | null;
+    intakePausedById: number | null;
     draftRevision: number;
     recordType: string | null;
     executionMode: WorkflowExecutionMode;
@@ -3199,6 +3203,11 @@ export type WorkflowRunSummary = {
         recordType: string | null;
         recordId: number | null;
     } | null;
+    runtimeState: {
+        waitKind: string | null;
+        resumeAt: string | null;
+        cancellationRequested: boolean;
+    } | null;
     startedAt: string;
     finishedAt: string | null;
     durationMs: number | null;
@@ -3212,6 +3221,7 @@ export type WorkflowStepRun = {
     nodeType: WorkflowRuntimeNodeType;
     status: Exclude<WorkflowRunStatus, "intervention_required">;
     attempts: number;
+    retrySafety: WorkflowRetrySafety;
     selectedOutcome: WorkflowEdgeOutcome | null;
     selectedEdgeId: string | null;
     nextNodeId: string | null;
@@ -3242,6 +3252,242 @@ export type WorkflowRunDetail = Omit<WorkflowRunSummary, "version"> & {
 export type WorkflowRunPage = {
     items: WorkflowRunSummary[];
     nextCursor: string | null;
+};
+
+export type WorkflowRunOperation = {
+    runKey: string;
+    status: WorkflowRunStatus;
+    cancellationRequested: boolean;
+};
+
+export type WorkflowIntervention = {
+    id: number;
+    runKey: string;
+    stepNodeId: string | null;
+    category: string;
+    reasonCode: string;
+    ownerUserId: number | null;
+    status: string;
+    sourceVersion: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type WorkflowOperationsSummary = {
+    workflowCount: number;
+    healthyCount: number;
+    pausedCount: number;
+    disabledCount: number;
+    interventionRequiredCount: number;
+    queuedCount: number;
+    waitingCount: number;
+    overdueCount: number;
+    openInterventionCount: number;
+    recentFailureCount: number;
+};
+
+export type WorkflowOperationsRunItem = {
+    workflowId: number;
+    workflowName: string;
+    recipeKey: string | null;
+    run: WorkflowRunSummary;
+    failureCategory: string | null;
+    intervention: WorkflowIntervention | null;
+};
+
+export type WorkflowOperationsRunPage = {
+    items: WorkflowOperationsRunItem[];
+    nextCursor: string | null;
+};
+
+export type WorkflowDefinitionChange = {
+    fromVersion: number | null;
+    toVersion: number;
+    publishedAt: string;
+    publishedById: number | null;
+    addedNodeIds: string[];
+    removedNodeIds: string[];
+    changedNodeIds: string[];
+};
+
+export type WorkflowOperationsDetail = {
+    recipeKey: string | null;
+    workflow: {
+        id: number;
+        name: string;
+        enabled: boolean;
+        archivedAt: string | null;
+        intakePausedAt: string | null;
+        intakePausedById: number | null;
+        runtimeOwner: WorkflowRuntimeOwner;
+    };
+    health: {
+        state: string;
+        signals: string[];
+    };
+    activeVersion: {
+        id: number;
+        number: number;
+        definitionHash: string;
+        publishedAt: string;
+        publishedById: number | null;
+    } | null;
+    recentDefinitionChanges: WorkflowDefinitionChange[];
+    backlog: {
+        queuedCount: number;
+        oldestQueuedAt: string | null;
+        waitingCount: number;
+        dueNowCount: number;
+        overdueCount: number;
+        nextResumeAt: string | null;
+        recentFailureCount: number;
+    };
+    openInterventions: WorkflowIntervention[];
+};
+
+export type WorkflowManualSourceSurface =
+    | "record"
+    | "record_list"
+    | "saved_view"
+    | "search"
+    | "command_palette";
+
+export type WorkflowManualFilter = {
+    query?: string;
+    companies?: string[];
+    titles?: string[];
+    industry?: string[];
+    noCompany?: boolean;
+    currency?: string;
+    pipelineIds?: number[];
+    stageIds?: number[];
+    companyIds?: number[];
+    statuses?: string[];
+    risks?: string[];
+    memberScope?: string;
+    memberIds?: number[];
+};
+
+export type WorkflowManualResolvedScope =
+    | { kind: "single_record"; recordId: number }
+    | { kind: "page_selection" | "explicit_selection"; recordIds: number[] }
+    | { kind: "filter_match"; filter: WorkflowManualFilter }
+    | { kind: "smart_segment"; definition: SegmentDefinition }
+    | { kind: "saved_view"; savedViewId: number }
+    | { kind: "search_snapshot"; query: string };
+
+export type WorkflowManualScope = WorkflowManualResolvedScope | {
+    kind: "command_palette";
+    resolvedScope: WorkflowManualResolvedScope;
+};
+
+export type WorkflowManualPrepareRequest = {
+    sourceSurface: WorkflowManualSourceSurface;
+    scope: WorkflowManualScope;
+};
+
+export type WorkflowManualExpectedSkips = {
+    permission: number;
+    staleState: number;
+    missingReference: number;
+    limit: number;
+    unsupportedContext: number;
+};
+
+export type WorkflowManualPreparation = {
+    invocationId: number;
+    workflowId: number;
+    workflowName: string;
+    workflowVersionId: number;
+    versionNumber: number;
+    definitionHash: string;
+    executionMode: WorkflowExecutionMode;
+    actorUserId: number | null;
+    scopeKind: WorkflowManualScope["kind"];
+    resolvedScopeKind: WorkflowManualResolvedScope["kind"];
+    sourceSurface: WorkflowManualSourceSurface;
+    recordType: string;
+    scopeToken: string;
+    scopeHash: string;
+    expiresAt: string;
+    exactCount: number;
+    readyCount: number;
+    expectedSkips: WorkflowManualExpectedSkips;
+    samples: Array<{ recordId: number; label: string }>;
+    actions: Array<{ nodeId: string; actionType: string; retrySafety: WorkflowRetrySafety }>;
+    confirmable: boolean;
+    blockers: string[];
+};
+
+export type WorkflowInvocationRecord = {
+    recordId: number;
+    status: string;
+    reasonCode: string | null;
+    runKey: string | null;
+};
+
+export type WorkflowInvocationResult = {
+    invocationId: number;
+    status: string;
+    exactCount: number;
+    queuedCount: number;
+    runningCount: number;
+    waitingCount: number;
+    succeededCount: number;
+    failedCount: number;
+    interventionRequiredCount: number;
+    cancelledCount: number;
+    skippedCount: number;
+    createdAt: string;
+    confirmedAt: string | null;
+    completedAt: string | null;
+    records: WorkflowInvocationRecord[];
+};
+
+export type WorkflowRecipeAction = {
+    actionType: string;
+    retrySafety: WorkflowRetrySafety;
+};
+
+export type WorkflowRecipe = {
+    recipeKey: string;
+    recipeVersion: number;
+    schemaVersion: number;
+    titleKey: string;
+    descriptionKey: string;
+    sourceEvent: string;
+    actorModel: string;
+    dataRead: string[];
+    dataWritten: string[];
+    requiredParameters: string[];
+    requiredPermissions: string[];
+    lockedFields: string[];
+    editableFields: string[];
+    sideEffects: string[];
+    actions: WorkflowRecipeAction[];
+    disableBehavior: string;
+    removeBehavior: string;
+};
+
+export type WorkflowRecipeParameters = Record<string, string | number | boolean | null>;
+
+export type WorkflowRecipePreview = {
+    recipe: WorkflowRecipe;
+    previewHash: string;
+    definition: WorkflowDefinition;
+    canvas: WorkflowCanvas;
+    unresolvedParameters: string[];
+    validation: WorkflowValidation;
+    plannedActions: Array<{ nodeId: string; actionType: string; retrySafety: WorkflowRetrySafety }>;
+    exampleResult: WorkflowSimulation | null;
+    writesCreated: false;
+};
+
+export type WorkflowRecipeInstallResult = {
+    recipeKey: string;
+    recipeVersion: number;
+    templateHash: string;
+    workflow: WorkflowDto;
 };
 
 export type Share = {

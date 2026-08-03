@@ -114,6 +114,7 @@
       AND (w.id IS NULL OR (
         w.runtime_owner = 'legacy'
         AND w.archived_at IS NULL
+        AND w.intake_paused_at IS NULL
       ))
     ORDER BY r.id
   </select>
@@ -131,6 +132,7 @@
         AND (w.id IS NULL OR (
           w.runtime_owner = 'legacy'
           AND w.archived_at IS NULL
+          AND w.intake_paused_at IS NULL
         ))
       UNION
       SELECT w.workspace_id
@@ -143,6 +145,7 @@
         AND w.enabled = TRUE
         AND w.runtime_owner = 'canonical'
         AND w.archived_at IS NULL
+        AND w.intake_paused_at IS NULL
     ) scheduled_workspaces
     ORDER BY workspace_id
   </select>

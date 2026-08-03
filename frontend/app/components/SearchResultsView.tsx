@@ -1,14 +1,18 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { BoltIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { PageShell } from "@/app/components/PageShell";
 import { buildSearchGroups } from "@/app/lib/search/resultGroups";
 import type { SearchResults } from "@/app/lib/types";
+import { useActions, useRegisterActions } from "@/app/hooks/useActions";
+import type { AppAction } from "@/app/lib/actions/types";
+import { Button } from "@/components/ui/button";
 
 export default function SearchResultsView({
     query,
@@ -18,6 +22,29 @@ export default function SearchResultsView({
     results: SearchResults;
 }) {
     const t = useTranslations("CommonSearchBar");
+    const to = useTranslations("WorkflowOperations");
+    const { run } = useActions();
+
+    const actions = useMemo<readonly AppAction[]>(() => [{
+        id: "record.run-search-workflow",
+        group: "record",
+        labelKey: "record.runWorkflow",
+        descriptionKey: "description.record.runWorkflow",
+        icon: BoltIcon,
+        order: 21,
+        execute: (_context, helpers) => {
+            const resolvedScope = { kind: "search_snapshot" as const, query };
+            helpers.openOverlay({
+                kind: "workflow-manual-run",
+                sourceSurface: helpers.source === "palette" ? "command_palette" : "search",
+                recordType: null,
+                scope: helpers.source === "palette"
+                    ? { kind: "command_palette", resolvedScope }
+                    : resolvedScope,
+            });
+        },
+    }], [query]);
+    useRegisterActions(actions);
 
     const groups = buildSearchGroups(results, t);
     const hasResults = groups.length > 0;
@@ -25,7 +52,17 @@ export default function SearchResultsView({
     return (
         <PageShell tier="wide">
                 <Rise delay={0}>
-                    <PageHeader className="px-4 sm:px-6" variant="compact" title={t("resultsHeading", { query })} />
+                    <PageHeader
+                        className="px-4 sm:px-6"
+                        variant="compact"
+                        title={t("resultsHeading", { query })}
+                        actions={(
+                            <Button variant="outline" onClick={() => void run("record.run-search-workflow", { source: "menu" })}>
+                                <BoltIcon className="size-4" />
+                                {to("manual.title")}
+                            </Button>
+                        )}
+                    />
                 </Rise>
 
                 {!hasResults ? (

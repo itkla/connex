@@ -51,6 +51,7 @@ class WorkflowTriggerOutboxMapperXmlTest {
 
         String due = sql(configuration, "findDueIdForUpdate", Map.of("workspaceId", 7));
         assertTrue(due.endsWith("FOR UPDATE SKIP LOCKED"));
+        assertTrue(due.contains("w.intake_paused_at IS NULL"));
         String complete = sql(configuration, "complete", Map.of(
             "workspaceId", 7, "id", 31L, "leaseOwner", "owner"));
         assertTrue(complete.contains("lease_owner = ?"));
@@ -62,6 +63,13 @@ class WorkflowTriggerOutboxMapperXmlTest {
             "delaySeconds", 30L,
             "errorCode", "failure"));
         assertTrue(release.contains("lease_until >= CURRENT_TIMESTAMP(6)"));
+        String lease = sql(configuration, "lease", Map.of(
+            "workspaceId", 7,
+            "id", 31L,
+            "leaseOwner", "owner",
+            "leaseSeconds", 120L,
+            "maxAttempts", 8));
+        assertTrue(lease.contains("w.intake_paused_at IS NULL"));
         String schedulePage = sql(configuration, "saveSchedulePage", Map.of(
             "workspaceId", 7,
             "id", 31L,

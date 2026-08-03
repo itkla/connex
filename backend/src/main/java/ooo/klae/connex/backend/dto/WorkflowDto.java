@@ -10,6 +10,8 @@ public record WorkflowDto(
     boolean enabled,
     String runtimeOwner,
     LocalDateTime archivedAt,
+    LocalDateTime intakePausedAt,
+    Integer intakePausedById,
     int draftRevision,
     String recordType,
     String executionMode,

@@ -250,6 +250,10 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("deal", 160));
         raw.add(direct("stage", 170));
         raw.add(direct("pipeline_share", 180));
+        raw.add(direct("workflow_intervention", 181));
+        raw.add(direct("workflow_invocation_record", 182));
+        raw.add(direct("workflow_invocation", 183));
+        raw.add(direct("workflow_recipe_origin", 184));
         raw.add(direct("pipeline", 190));
         raw.add(direct("workflow_step_attempt", 194));
         raw.add(direct("workflow_step_run", 195));

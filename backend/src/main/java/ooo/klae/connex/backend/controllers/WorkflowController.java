@@ -111,6 +111,16 @@ public class WorkflowController {
         return workflowService.restore(id);
     }
 
+    @PostMapping("/{id}/pause")
+    public WorkflowDto pause(@PathVariable int id) {
+        return workflowService.pause(id);
+    }
+
+    @PostMapping("/{id}/resume")
+    public WorkflowDto resume(@PathVariable int id) {
+        return workflowService.resume(id);
+    }
+
     @PostMapping("/{id}/runtime/canonical")
     public WorkflowDto cutOverToCanonical(
             @PathVariable int id,

@@ -3716,6 +3716,173 @@ export function getWorkflowRun(id: number, runKey: string, init: RequestInit = {
     );
 }
 
+export function cancelWorkflowRun(id: number, runKey: string, init: RequestInit = {}) {
+    return postJson<Types.WorkflowRunOperation>(
+        `/api/workflows/${id}/runs/${encodeURIComponent(runKey)}/cancel`,
+        {},
+        init,
+    );
+}
+
+export function retryWorkflowRun(id: number, runKey: string, init: RequestInit = {}) {
+    return postJson<Types.WorkflowRunOperation>(
+        `/api/workflows/${id}/runs/${encodeURIComponent(runKey)}/retry`,
+        {},
+        init,
+    );
+}
+
+export function getWorkflowOperationsSummary(init: RequestInit = {}) {
+    return getJson<Types.WorkflowOperationsSummary>("/api/workflow-operations/summary", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function getWorkflowOperationsRuns(
+    filters: { status?: string; failureCategory?: string; ownerId?: number; limit?: number; cursor?: string },
+    init: RequestInit = {},
+) {
+    const query = new URLSearchParams();
+    if (filters.status) query.set("status", filters.status);
+    if (filters.failureCategory) query.set("failureCategory", filters.failureCategory);
+    if (filters.ownerId != null) query.set("ownerId", String(filters.ownerId));
+    query.set("limit", String(filters.limit ?? 50));
+    if (filters.cursor) query.set("cursor", filters.cursor);
+    return getJson<Types.WorkflowOperationsRunPage>(`/api/workflow-operations/runs?${query}`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function getWorkflowOperations(id: number, init: RequestInit = {}) {
+    return getJson<Types.WorkflowOperationsDetail>(`/api/workflows/${id}/operations`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function pauseWorkflow(id: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>(`/api/workflows/${id}/pause`, {}, init);
+}
+
+export function resumeWorkflow(id: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>(`/api/workflows/${id}/resume`, {}, init);
+}
+
+export function assignWorkflowIntervention(
+    interventionId: number,
+    ownerUserId: number | null,
+    expectedSourceVersion: number,
+    init: RequestInit = {},
+) {
+    return putJson<Types.WorkflowIntervention>(
+        `/api/workflow-interventions/${interventionId}/owner`,
+        { ownerUserId, expectedSourceVersion },
+        init,
+    );
+}
+
+export function resolveWorkflowIntervention(
+    interventionId: number,
+    expectedSourceVersion: number,
+    init: RequestInit = {},
+) {
+    return postJson<Types.WorkflowIntervention>(
+        `/api/workflow-interventions/${interventionId}/resolve`,
+        { expectedSourceVersion },
+        init,
+    );
+}
+
+export function prepareWorkflowManualRun(
+    workflowId: number,
+    payload: Types.WorkflowManualPrepareRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.WorkflowManualPreparation>(
+        `/api/workflows/${workflowId}/manual-runs/prepare`,
+        payload,
+        init,
+    );
+}
+
+export function confirmWorkflowManualRun(
+    workflowId: number,
+    scopeToken: string,
+    scopeHash: string,
+    idempotencyKey: string,
+    init: RequestInit = {},
+) {
+    const headers = new Headers(init.headers);
+    headers.set("Idempotency-Key", idempotencyKey);
+    return postJson<Types.WorkflowInvocationResult>(
+        `/api/workflows/${workflowId}/manual-runs`,
+        { scopeToken, scopeHash },
+        { ...init, headers },
+    );
+}
+
+export function getWorkflowManualRun(workflowId: number, invocationId: number, init: RequestInit = {}) {
+    return getJson<Types.WorkflowInvocationResult>(
+        `/api/workflows/${workflowId}/manual-runs/${invocationId}`,
+        { cache: "no-store", ...init },
+    );
+}
+
+export function cancelWorkflowManualRun(workflowId: number, invocationId: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowInvocationResult>(
+        `/api/workflows/${workflowId}/manual-runs/${invocationId}/cancel`,
+        {},
+        init,
+    );
+}
+
+export function getWorkflowRecipes(init: RequestInit = {}) {
+    return getJson<Types.WorkflowRecipe[]>("/api/workflow-recipes", { cache: "no-store", ...init });
+}
+
+export function getWorkflowRecipe(recipeKey: string, init: RequestInit = {}) {
+    return getJson<Types.WorkflowRecipe>(`/api/workflow-recipes/${encodeURIComponent(recipeKey)}`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function previewWorkflowRecipe(
+    recipeKey: string,
+    payload: {
+        name?: string;
+        description?: string;
+        parameters: Types.WorkflowRecipeParameters;
+        exampleRecordId?: number;
+    },
+    init: RequestInit = {},
+) {
+    return postJson<Types.WorkflowRecipePreview>(
+        `/api/workflow-recipes/${encodeURIComponent(recipeKey)}/preview`,
+        payload,
+        init,
+    );
+}
+
+export function installWorkflowRecipe(
+    recipeKey: string,
+    payload: {
+        previewHash: string;
+        name?: string;
+        description?: string;
+        parameters: Types.WorkflowRecipeParameters;
+    },
+    init: RequestInit = {},
+) {
+    return postJson<Types.WorkflowRecipeInstallResult>(
+        `/api/workflow-recipes/${encodeURIComponent(recipeKey)}/install`,
+        payload,
+        init,
+    );
+}
+
 export function getPermissionCatalog(init: RequestInit = {}) {
     return getJson<string[]>(`/api/permissions`, { cache: "no-store", ...init });
 }

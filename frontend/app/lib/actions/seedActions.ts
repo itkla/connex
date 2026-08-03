@@ -247,6 +247,36 @@ export const SEED_ACTIONS: readonly AppAction[] = [
     },
 
     {
+        id: "record.run-workflow",
+        group: "record",
+        labelKey: "record.runWorkflow",
+        descriptionKey: "description.record.runWorkflow",
+        icon: BoltIcon,
+        order: 20,
+        isAvailable: (context) => {
+            const recordType = context.record?.type ?? context.selection?.type;
+            return recordType === undefined
+                ? context.workspace !== null
+                : recordType === "person" || recordType === "company" || recordType === "deal";
+        },
+        execute: (context, helpers) => {
+            const resolvedScope = context.record && typeof context.record.id === "number"
+                ? { kind: "single_record" as const, recordId: context.record.id }
+                : context.selection?.scope ?? null;
+            const recordType = context.record?.type ?? context.selection?.type ?? null;
+            const sourceSurface = context.record ? "record" : context.selection?.sourceSurface ?? "record_list";
+            const scope = helpers.source === "palette" && resolvedScope
+                ? { kind: "command_palette" as const, resolvedScope }
+                : resolvedScope;
+            helpers.openOverlay({
+                kind: "workflow-manual-run",
+                sourceSurface: helpers.source === "palette" ? "command_palette" : sourceSurface,
+                recordType,
+                scope,
+            });
+        },
+    },
+    {
         id: "record.open",
         group: "record",
         labelKey: "record.open",

@@ -16,6 +16,8 @@ public class WorkflowListView {
     private boolean enabled;
     private String runtimeOwner;
     private LocalDateTime archivedAt;
+    private LocalDateTime intakePausedAt;
+    private Integer intakePausedById;
     private int draftRevision;
     private String recordType;
     private String executionMode;
