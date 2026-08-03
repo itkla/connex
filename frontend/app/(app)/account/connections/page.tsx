@@ -13,6 +13,7 @@ import {
     parseCaptureRouteState,
     providerCaptureEnabled,
 } from "@/app/lib/connectedCapture";
+import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function toSearchParams(
@@ -29,6 +30,17 @@ function toSearchParams(
     return params;
 }
 
+/**
+ * Self-owned provider connections, plus the workspace capture policy for members who administer it.
+ *
+ * Canonicalizing the query string is how a route state the viewer may not reach is refused, and it
+ * is destructive: the deep link is rewritten away, so the reader has nothing left to retry. That is
+ * only an honest answer to a permission check that actually returned one. When the effective
+ * permissions could not be read at all, the deep link is preserved and the panel reports the failed
+ * lookup instead — the administrator who followed a link to the policy panel during a blip can
+ * retry it where they are, rather than going back to find the link again. Access still fails
+ * closed either way: the permission list stays empty, so every gated affordance stays hidden.
+ */
 export default async function AccountConnectionsPage({
     searchParams,
 }: {
@@ -43,12 +55,14 @@ export default async function AccountConnectionsPage({
         ? await getEffectivePermissionsResultFromCookie(cookie)
         : { ok: true as const, data: [] };
     const effectivePermissions = permissionsResult.ok ? permissionsResult.data : [];
+    const permissionsStatus: PermissionsStatus = permissionsResult.ok ? "resolved" : "unavailable";
     const currentSearchParams = toSearchParams(await searchParams);
     const routeState = parseCaptureRouteState(currentSearchParams);
     const routeUnavailable = routeState.provider
         && !providerCaptureEnabled(capabilities, routeState.provider);
     const workspacePolicyForbidden = routeState.panel === "workspace-policy"
-        && !effectivePermissions.includes("WORKSPACE_SETTINGS");
+        && checkPermission(permissionsStatus, new Set(effectivePermissions), "WORKSPACE_SETTINGS")
+            === "denied";
     const canonicalHref = captureConnectionsHref(
         currentSearchParams,
         routeUnavailable || workspacePolicyForbidden
@@ -75,6 +89,7 @@ export default async function AccountConnectionsPage({
             <ConnectionsPanel
                 capabilities={capabilities}
                 effectivePermissions={effectivePermissions}
+                permissionsStatus={permissionsStatus}
             />
         </Suspense>
     );
