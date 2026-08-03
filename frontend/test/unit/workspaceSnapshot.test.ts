@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { adoptWorkspaces } from "@/app/hooks/useWorkspace";
+import type { Workspace } from "@/app/lib/types";
+
 const PROVIDER = "app/hooks/useWorkspace.tsx";
 const MEMBERS_PANEL = "app/components/settings/MembersPanel.tsx";
 const APP_LAYOUT = "app/(app)/layout.tsx";
@@ -28,7 +31,7 @@ describe("the workspace snapshot follows the server, not only the first render",
 
     it("adopts a later payload instead of ignoring it", () => {
         expect(seeding()).toMatch(
-            /if \(!switching && publishedWorkspaces !== initialWorkspaces\) \{\s*setPublishedWorkspaces\(initialWorkspaces\);\s*setWorkspaces\(initialWorkspaces\);\s*\}/,
+            /if \(publishedWorkspaces !== initialWorkspaces\) \{\s*setPublishedWorkspaces\(initialWorkspaces\);\s*setWorkspaces\(adoptWorkspaces\(workspaces, publishedWorkspaces, initialWorkspaces\)\);\s*\}/,
         );
     });
 
@@ -42,20 +45,63 @@ describe("the workspace snapshot follows the server, not only the first render",
         );
     });
 
-    it("holds adoption while a switch or create is running, so neither is clobbered", () => {
-        const guarded = seeding();
-
-        expect(guarded).toContain("if (!switching && ");
-        expect(guarded.indexOf("const [switching, setSwitching]")).toBeLessThan(
-            guarded.indexOf("if (!switching && "),
-        );
+    it("does not gate adoption on an operation being idle, which only defers the same overwrite", () => {
+        expect(seeding()).not.toContain("if (!switching &&");
     });
 
-    it("leaves the active workspace client-owned, because only this provider ever moves it", () => {
+    it("does not adopt the active workspace, and does not claim it cannot diverge", () => {
         const provider = source(PROVIDER);
 
         expect(seeding()).not.toContain("setActiveWorkspaceId(initialActiveId)");
-        expect(provider).toContain("const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId)");
+        expect(provider).toContain(
+            "const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId)",
+        );
+        expect(provider).toContain("known gap rather than an\n * invariant");
+        expect(provider).not.toMatch(/props can only ever echo a decision/);
+    });
+});
+
+describe("a payload cannot erase a workspace the server has not seen yet", () => {
+    function workspace(id: number, name = `W${id}`): Workspace {
+        return { id, name, slug: name.toLowerCase(), role: "owner", orgId: 1, orgName: "Acme", orgRole: "owner" };
+    }
+
+    const a = workspace(1, "Alpha");
+    const b = workspace(2, "Beta");
+    const created = workspace(3, "Created");
+
+    it("takes the server's list when it has nothing local to preserve", () => {
+        expect(adoptWorkspaces([a], [a], [a, b])).toEqual([a, b]);
+    });
+
+    it("takes the server's version of a workspace, so a changed role actually lands", () => {
+        const demoted = { ...a, role: "member" as const };
+
+        expect(adoptWorkspaces([a], [a], [demoted])).toEqual([demoted]);
+    });
+
+    it("keeps a just-created workspace an older payload does not mention", () => {
+        expect(adoptWorkspaces([a, created], [a], [a])).toEqual([a, created]);
+    });
+
+    it("drops a workspace the viewer left, rather than resurrecting it", () => {
+        expect(adoptWorkspaces([a, b], [a, b], [a])).toEqual([a]);
+    });
+
+    it("still drops it when the viewer left one and created another in the same window", () => {
+        expect(adoptWorkspaces([a, b, created], [a, b], [a])).toEqual([a, created]);
+    });
+
+    it("never leaves the active workspace missing from the list it was created in", () => {
+        const adopted = adoptWorkspaces([a, created], [a], [a]);
+
+        expect(adopted.some((entry) => entry.id === created.id)).toBe(true);
+    });
+
+    it("returns the payload itself when nothing was held back, so identity settles", () => {
+        const arriving = [a, b];
+
+        expect(adoptWorkspaces([a], [a], arriving)).toBe(arriving);
     });
 });
 

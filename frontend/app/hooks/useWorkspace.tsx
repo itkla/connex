@@ -19,6 +19,38 @@ type WorkspaceContextValue = {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 /**
+ * Merges a freshly arrived server payload over the currently held workspaces.
+ *
+ * The payload wins, except for workspaces the server has never mentioned. {@link
+ * WorkspaceContextValue.create} appends the workspace it just created before the refresh that will
+ * report it, so a server render that began earlier can arrive with the creation missing. Dropping
+ * it there would not merely flicker: the active workspace is already the new one, so it would name
+ * a workspace absent from the list and `activeWorkspace` would resolve to null, leaving the shell
+ * with no active workspace until some later refresh happened to repair it.
+ *
+ * Absence is only treated as an addition when the previously consumed payload did not mention the
+ * workspace either. A workspace that was in the last payload and is gone from this one was removed
+ * — the viewer left it, or lost their membership — and must not be resurrected.
+ *
+ * @param held - the workspaces currently published to the tree
+ * @param consumed - the payload those were last reconciled against
+ * @param arriving - the payload just received from the server
+ * @returns the workspaces to publish
+ */
+export function adoptWorkspaces(
+    held: readonly Workspace[],
+    consumed: readonly Workspace[],
+    arriving: Workspace[],
+): Workspace[] {
+    const consumedIds = new Set(consumed.map((workspace) => workspace.id));
+    const arrivingIds = new Set(arriving.map((workspace) => workspace.id));
+    const unacknowledged = held.filter(
+        (workspace) => !arrivingIds.has(workspace.id) && !consumedIds.has(workspace.id),
+    );
+    return unacknowledged.length === 0 ? arriving : [...arriving, ...unacknowledged];
+}
+
+/**
  * Publishes the viewer's workspaces and which one is active to client components.
  *
  * The workspace list is kept in step with the app shell's server-side read rather than frozen at
@@ -31,17 +63,17 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
  *
  * Adopting the payload during render rather than from an effect is deliberate: an effect would
  * commit one frame of exactly that stale chrome before correcting it, which is the defect in
- * miniature.
+ * miniature. {@link adoptWorkspaces} settles what a payload may overwrite.
  *
- * Which workspace is active stays client-owned and is not adopted from props. It changes only
- * through {@link WorkspaceContextValue.switchTo} and {@link WorkspaceContextValue.create}, both of
- * which set the session cookie the server render reads back, so props can only ever echo a decision
- * made here — or, if a superseded render resolves late, contradict a newer one. The role staleness
- * this sync exists to fix lives entirely in the list.
- *
- * Adoption is held while an operation is running, so a payload landing mid-switch or mid-create
- * cannot drop a workspace that was only just created. Nothing is lost by waiting: `switching` is
- * state, so releasing it re-renders and the deferred payload is adopted then.
+ * Which workspace is active is **not** adopted from props, and that is a known gap rather than an
+ * invariant — see #1021. Four endpoints move it by writing the session cookie without going through
+ * this provider (accepting an invite, accepting an invite link, accepting a pending membership, and
+ * leaving a workspace, each followed by a bare `router.refresh()`), so the cookie and the payload
+ * can name a workspace this provider does not. Syncing it from props is not the fix: a server
+ * render that began before {@link WorkspaceContextValue.switchTo} set the cookie can resolve after
+ * it, and the payload carries no generation to order two in-flight renders by, so adopting it
+ * blindly trades a stale active workspace for a non-deterministic one. The role staleness this
+ * sync does address lives entirely in the list.
  *
  * @param initialWorkspaces - the viewer's workspaces as of the current server render
  * @param initialActiveId - the workspace the session cookie selects, or null when none is
@@ -64,9 +96,9 @@ export function WorkspaceProvider({
     const activeWorkspaceIdRef = useRef(initialActiveId);
     const switchingRef = useRef(false);
 
-    if (!switching && publishedWorkspaces !== initialWorkspaces) {
+    if (publishedWorkspaces !== initialWorkspaces) {
         setPublishedWorkspaces(initialWorkspaces);
-        setWorkspaces(initialWorkspaces);
+        setWorkspaces(adoptWorkspaces(workspaces, publishedWorkspaces, initialWorkspaces));
     }
 
     const runInWorkspace = useCallback(async (
