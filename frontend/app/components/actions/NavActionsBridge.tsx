@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import {
     ClipboardDocumentListIcon,
+    Cog6ToothIcon,
     FlagIcon,
     InboxIcon,
     MegaphoneIcon,
@@ -36,6 +37,18 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 order: 75,
                 execute: (_context, helpers) => {
                     helpers.router.push("/overview/reports/goals");
+                },
+            });
+        }
+        if (navAccess.diagnostics) {
+            gated.push({
+                id: "navigate.diagnostics",
+                group: "navigate",
+                labelKey: "navigate.diagnostics",
+                icon: Cog6ToothIcon,
+                order: 81,
+                execute: (_context, helpers) => {
+                    helpers.router.push("/settings/diagnostics");
                 },
             });
         }
@@ -77,7 +90,13 @@ export default function NavActionsBridge({ navAccess }: Props): null {
             });
         }
         return gated;
-    }, [navAccess.goals, navAccess.campaigns, navAccess.captureReviews, navAccess.auditLog]);
+    }, [
+        navAccess.goals,
+        navAccess.diagnostics,
+        navAccess.campaigns,
+        navAccess.captureReviews,
+        navAccess.auditLog,
+    ]);
 
     useRegisterActions(actions);
     return null;

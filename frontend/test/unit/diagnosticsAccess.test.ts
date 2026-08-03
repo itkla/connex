@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_CAPABILITIES } from "@/app/lib/api";
+import { NO_NAV_ACCESS, resolveNavAccess } from "@/app/lib/navAccess";
+
 const PANEL = "app/components/diagnostics/DiagnosticsPanel.tsx";
+const NAV_BRIDGE = "app/components/actions/NavActionsBridge.tsx";
+const SEED_ACTIONS = "app/lib/actions/seedActions.ts";
+const SETTINGS_TABS = "app/components/settings/SettingsTabs.tsx";
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
@@ -80,5 +86,32 @@ describe("diagnostics denial", () => {
         for (const locale of ["en", "ja"] as const) {
             expect(source(`messages/${locale}/workspace.json`)).not.toContain("WORKSPACE_SETTINGS");
         }
+    });
+});
+
+describe("diagnostics is offered exactly where its permission holds", () => {
+    it("offers diagnostics to a viewer holding WORKSPACE_SETTINGS", () => {
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, ["WORKSPACE_SETTINGS"]).diagnostics).toBe(true);
+    });
+
+    it("offers it to a custom role holding the permission without being an administrator", () => {
+        const permissions = ["PERSON_READ", "WORKSPACE_SETTINGS"];
+
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, permissions).diagnostics).toBe(true);
+    });
+
+    it("hides it from a member without the permission the endpoints enforce", () => {
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, ["PERSON_READ"]).diagnostics).toBe(false);
+    });
+
+    it("fails closed when permissions could not be resolved", () => {
+        expect(NO_NAV_ACCESS.diagnostics).toBe(false);
+        expect(resolveNavAccess(DEFAULT_CAPABILITIES, []).diagnostics).toBe(false);
+    });
+
+    it("gates the palette entry and the settings tab on that same resolved access", () => {
+        expect(source(NAV_BRIDGE)).toContain("if (navAccess.diagnostics) {");
+        expect(source(SEED_ACTIONS)).not.toContain("/settings/diagnostics");
+        expect(source(SETTINGS_TABS)).toContain('usePermission("WORKSPACE_SETTINGS")');
     });
 });

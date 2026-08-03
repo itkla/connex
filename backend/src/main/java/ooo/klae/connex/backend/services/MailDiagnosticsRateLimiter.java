@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Clock;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,13 +24,16 @@ public class MailDiagnosticsRateLimiter {
 
     private final int maxPerWindow;
     private final long windowMillis;
+    private final Clock clock;
     private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
 
     public MailDiagnosticsRateLimiter(
             @Value("${connex.mail.diagnostics.max-test-sends:3}") int maxPerWindow,
-            @Value("${connex.mail.diagnostics.test-send-window-seconds:300}") long windowSeconds) {
+            @Value("${connex.mail.diagnostics.test-send-window-seconds:300}") long windowSeconds,
+            Clock clock) {
         this.maxPerWindow = maxPerWindow;
         this.windowMillis = windowSeconds * 1000L;
+        this.clock = clock;
     }
 
     /**
@@ -54,10 +59,18 @@ public class MailDiagnosticsRateLimiter {
     /**
      * Drops windows whose period has elapsed, bounding memory growth.
      *
-     * @param nowMillis current epoch time in milliseconds
+     * <p>Nothing else prunes the map: an elapsed window is only replaced when that same actor tests
+     * the same workspace again, so without this sweep the map retains one entry for every
+     * administrator and workspace pair that has ever run a test send.
      */
-    public void evictStale(long nowMillis) {
-        windows.entrySet().removeIf(entry -> nowMillis - entry.getValue().start >= windowMillis);
+    @Scheduled(fixedDelayString = "${connex.mail.diagnostics.eviction-delay-ms:300000}")
+    public void evictStale() {
+        long now = clock.millis();
+        windows.entrySet().removeIf(entry -> now - entry.getValue().start >= windowMillis);
+    }
+
+    int trackedWindows() {
+        return windows.size();
     }
 
     private static final class Window {

@@ -46,7 +46,7 @@ public class TenantDiagnosticsController {
     /** Sends a diagnostic email only to the authenticated administrator's stored address. */
     @PostMapping("/api/workspaces/{id}/mail/diagnostics/test-send")
     public MailDiagnosticTestDto testMail(@PathVariable int id) {
-        int actorId = authService.getCurrentPrincipal().getId();
+        int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(id, actorId, Permission.WORKSPACE_SETTINGS);
         return mailDiagnosticsService.testSend(id, actorId);
     }
