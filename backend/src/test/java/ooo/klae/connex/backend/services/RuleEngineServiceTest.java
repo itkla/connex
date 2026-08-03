@@ -280,6 +280,10 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertTrue(firedFor(rule.getId(), big.getId()));
         assertFalse(firedFor(rule.getId(), small.getId()));
+        assertTrue(ruleMapper.getExecutionsByRule(
+            workspace.getId(), rule.getId(), 50).stream()
+            .anyMatch(execution -> execution.getTriggerEntityId() == small.getId()
+                && "skipped".equals(execution.getStatus())));
     }
 
     @Test

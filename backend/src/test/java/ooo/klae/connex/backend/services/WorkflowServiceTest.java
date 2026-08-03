@@ -12,6 +12,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +50,7 @@ import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
+import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -57,6 +60,7 @@ import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
+import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -71,6 +75,7 @@ class WorkflowServiceTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
     @Mock private WorkflowDefinitionValidator workflowDefinitionValidator;
+    @Mock private WorkflowRuntimeProperties runtimeProperties;
 
     private WorkflowDraftCanonicalizer canonicalizer;
     private LegacyWorkflowGraphConverter graphConverter;
@@ -91,7 +96,9 @@ class WorkflowServiceTest {
             canonicalizer,
             workflowDefinitionValidator,
             graphConverter,
-            definitionCodec);
+            definitionCodec,
+            new WorkflowVersionProjection(definitionCodec),
+            runtimeProperties);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
         lenient().when(workflowDefinitionValidator.validateForMutation(
@@ -115,6 +122,7 @@ class WorkflowServiceTest {
         assertEquals(0, created.draftRevision());
         assertEquals(41, created.runAsUserId());
         assertFalse(created.enabled());
+        assertEquals("legacy", created.runtimeOwner());
         assertNull(created.activeVersionId());
         assertNull(workflow.getValue().getLegacyRuleId());
         assertEquals(41, workflow.getValue().getCreatedById());
@@ -403,6 +411,46 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.publish"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow published"), eq(Map.of("versionNumber", 1)));
+    }
+
+    @Test
+    void firstPublishUsesCanonicalOwnershipWithoutCreatingALegacyRuleWhenGateIsEnabled() {
+        when(runtimeProperties.enabled()).thenReturn(true);
+        Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
+        when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
+        stubUserMutation(Set.of(41), Set.of(41));
+        WorkflowDefinition definition = canonicalizer.parseDefinition(
+            workflow.getDraftDefinitionJson());
+        CompiledWorkflow compiled = mock(CompiledWorkflow.class);
+        when(workflowDefinitionValidator.validate("deal", "user", definition))
+            .thenReturn(compiled);
+        when(compiled.entryNodeId()).thenReturn("eventSource");
+        when(compiled.node("eventSource")).thenReturn(definition.nodes().stream()
+            .filter(node -> "eventSource".equals(node.id()))
+            .findFirst()
+            .orElseThrow());
+        when(compiled.topologicalOrder()).thenReturn(
+            List.of("eventSource", "notifyOwner", "complete"));
+        when(compiled.node("notifyOwner")).thenReturn(definition.nodes().get(1));
+        when(compiled.node("complete")).thenReturn(definition.nodes().get(2));
+        when(compiled.enrollmentConditionNodeId()).thenReturn(null);
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(88L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(workflowMapper.assignFirstCanonicalPublication(
+            7, 101, 88L, 41, 0)).thenReturn(1);
+
+        WorkflowDto published = service.publish(101, publishRequest(0));
+
+        assertEquals("canonical", published.runtimeOwner());
+        assertEquals(88L, published.activeVersionId());
+        verify(ruleMapper, never()).insert(any());
+        verify(ruleMapper, never()).update(any());
+        verify(workflowMapper).assignFirstCanonicalPublication(
+            7, 101, 88L, 41, 0);
     }
 
     @Test
@@ -859,6 +907,59 @@ class WorkflowServiceTest {
     }
 
     @Test
+    void archiveDisablesLegacyProjectionAndRestoreLeavesWorkflowDisabled() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of());
+        when(ruleMapper.updateEnabled(7, 77, false)).thenReturn(1);
+        when(workflowMapper.archive(7, 101, 41)).thenReturn(1);
+
+        WorkflowDto archived = service.archive(101);
+
+        assertFalse(archived.enabled());
+        assertNotNull(archived.archivedAt());
+        InOrder archiveWrites = inOrder(ruleMapper, workflowMapper);
+        archiveWrites.verify(ruleMapper).updateEnabled(7, 77, false);
+        archiveWrites.verify(workflowMapper).archive(7, 101, 41);
+        verify(auditService).record(
+            eq("workflow.archive"), eq("workflow"), eq(101), eq("Workflow 101"),
+            eq("Workflow archived"), any());
+
+        pair.workflow().setEnabled(false);
+        pair.rule().setEnabled(false);
+        pair.workflow().setArchivedAt(LocalDateTime.of(2026, 8, 2, 12, 0));
+        when(workflowMapper.restore(7, 101, 41)).thenReturn(1);
+
+        WorkflowDto restored = service.restore(101);
+
+        assertFalse(restored.enabled());
+        assertNull(restored.archivedAt());
+        verify(workflowMapper).restore(7, 101, 41);
+        verify(auditService).record(
+            eq("workflow.restore"), eq("workflow"), eq(101), eq("Workflow 101"),
+            eq("Workflow restored"), any());
+    }
+
+    @Test
+    void archivedWorkflowRemainsReadableButRejectsEveryMutableLifecycleOperation() {
+        Workflow archived = workflow("Workflow", "user", 3, 41, null, null, false);
+        archived.setArchivedAt(LocalDateTime.of(2026, 8, 2, 12, 0));
+        when(workflowMapper.getById(7, 101)).thenReturn(archived);
+
+        WorkflowDto readable = service.getById(101);
+
+        assertNotNull(readable.archivedAt());
+        assertThrows(
+            ConflictException.class,
+            () -> service.saveDraft(101, draftRequest("Changed", "user", 3)));
+        assertThrows(ConflictException.class, () -> service.validate(101));
+        assertThrows(
+            ConflictException.class,
+            () -> service.publish(101, publishRequest(3)));
+        assertThrows(ConflictException.class, () -> service.enable(101));
+    }
+
+    @Test
     void legacyBlankDescriptionRemainsReadableAtTheCanonicalBoundary() {
         Workflow workflow = workflow("Workflow", "user", 3, 41, null, null, false);
         workflow.setDescription("   ");
@@ -966,6 +1067,8 @@ class WorkflowServiceTest {
         workflow.setName(draft.name());
         workflow.setDescription(draft.description());
         workflow.setEnabled(enabled);
+        workflow.setRuntimeOwner("legacy");
+        workflow.setArchivedAt(null);
         workflow.setDraftRevision(revision);
         workflow.setDraftRecordType(draft.recordType());
         workflow.setDraftExecutionMode(draft.executionMode());

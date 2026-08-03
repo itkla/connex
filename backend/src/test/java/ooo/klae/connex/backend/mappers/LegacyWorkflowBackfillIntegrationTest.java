@@ -318,7 +318,7 @@ class LegacyWorkflowBackfillIntegrationTest extends AbstractMapperTest {
 
         assertExecutions(rule.getId(), 2);
         assertEquals(2, matchingTasks(person.getId(), taskTitle));
-        assertEquals(1, workflowMapper.listByWorkspace(workspace.getId()).stream()
+        assertEquals(1, workflowMapper.listByWorkspace(workspace.getId(), false).stream()
             .filter(candidate -> candidate.getLegacyRuleId() != null)
             .filter(candidate -> candidate.getLegacyRuleId() == rule.getId())
             .count());

@@ -5,12 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -131,6 +133,7 @@ class LegacyWorkflowBackfillTransactionTest {
         assertEquals("Legacy rule", workflow.getName());
         assertEquals("Description", workflow.getDescription());
         assertFalse(workflow.isEnabled());
+        assertEquals("legacy", workflow.getRuntimeOwner());
         assertEquals(1, workflow.getDraftRevision());
         assertEquals("deal", workflow.getDraftRecordType());
         assertEquals("user", workflow.getDraftExecutionMode());
@@ -272,6 +275,23 @@ class LegacyWorkflowBackfillTransactionTest {
         verify(ruleMapper).updateEnabled(7, 23, false);
         verify(workflowMapper, never()).insert(any());
         verify(workflowVersionMapper, never()).insert(any());
+    }
+
+    @Test
+    void insertFailureRetainsItsCauseWithoutAddingContentToTheMessage() {
+        Rule rule = rule("user", false);
+        RuntimeException cause = new RuntimeException("database detail");
+        rules(7, rule);
+        doThrow(cause).when(workflowMapper).insert(any(Workflow.class));
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> backfill.backfillWorkspace("cnx_a", 7));
+
+        assertEquals(
+            "Legacy workflow backfill failed for catalog=cnx_a workspace=7 rule=23",
+            exception.getMessage());
+        assertSame(cause, exception.getCause());
     }
 
     @Test

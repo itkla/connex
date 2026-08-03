@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowRunMapper">
+
+  <sql id="runColumns">
+    id, workspace_id, workflow_id, workflow_version_id, status, trigger_type,
+    trigger_event, trigger_key, record_type, record_id, dedupe_key, execution_mode,
+    actor_user_id, attribution_user_id, current_node_id, failure_node_id,
+    failure_code, failure_message, started_at, finished_at, updated_at
+  </sql>
+
+  <sql id="viewColumns">
+    wr.id, wr.workspace_id, wr.workflow_id, wr.workflow_version_id, wr.status,
+    wr.trigger_type, wr.trigger_event, wr.trigger_key, wr.record_type, wr.record_id,
+    wr.dedupe_key, wr.execution_mode, wr.actor_user_id, wr.attribution_user_id,
+    wr.current_node_id, wr.failure_node_id, wr.failure_code, wr.failure_message,
+    wr.started_at, wr.finished_at, wr.updated_at,
+    v.version_number, v.definition_hash AS version_definition_hash,
+    v.published_at AS version_published_at
+  </sql>
+
+  <sql id="stepColumns">
+    id, workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
+    attempt_count, selected_outcome, selected_edge_id, next_node_id, failure_code,
+    failure_message, started_at, finished_at
+  </sql>
+
+  <insert id="insertRun" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_run
+      (workspace_id, workflow_id, workflow_version_id, status, trigger_type,
+       trigger_event, trigger_key, record_type, record_id, dedupe_key, execution_mode,
+       actor_user_id, attribution_user_id, current_node_id, started_at)
+    VALUES
+      (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{status}, #{triggerType},
+       #{triggerEvent}, #{triggerKey}, #{recordType}, #{recordId}, #{dedupeKey},
+       #{executionMode}, #{actorUserId}, #{attributionUserId}, #{currentNodeId}, #{startedAt})
+  </insert>
+
+  <select id="getByDedupe" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND dedupe_key = #{dedupeKey}
+  </select>
+
+  <select id="getById" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+  </select>
+
+  <select id="getByIdInWorkspace" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getRunningByTrigger" resultType="WorkflowRun">
+    SELECT <include refid="runColumns"/> FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND trigger_key = #{triggerKey}
+      AND status = 'running'
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="nextSequence" resultType="int">
+    SELECT COALESCE(MAX(sequence_number) + 1, 0)
+    FROM workflow_step_run
+    WHERE workspace_id = #{workspaceId} AND workflow_run_id = #{workflowRunId}
+  </select>
+
+  <insert id="insertStep" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_step_run
+      (workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
+       attempt_count, selected_outcome, selected_edge_id, next_node_id,
+       failure_code, failure_message, started_at, finished_at)
+    VALUES
+      (#{workspaceId}, #{workflowRunId}, #{sequenceNumber}, #{nodeId}, #{nodeType},
+       #{status}, #{attemptCount}, #{selectedOutcome}, #{selectedEdgeId}, #{nextNodeId},
+       #{failureCode}, #{failureMessage}, #{startedAt}, #{finishedAt})
+  </insert>
+
+  <update id="advanceRun">
+    UPDATE workflow_run
+    SET current_node_id = #{nextNodeId}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+  </update>
+
+  <update id="completeRun">
+    UPDATE workflow_run
+    SET status = 'succeeded', current_node_id = NULL, finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+  </update>
+
+  <update id="failRun">
+    UPDATE workflow_run
+    SET status = #{status},
+        failure_node_id = #{expectedNodeId},
+        failure_code = #{failureCode},
+        failure_message = #{failureMessage},
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status IN ('queued', 'running', 'waiting')
+      AND current_node_id = #{expectedNodeId}
+  </update>
+
+  <select id="currentTimestamp" resultType="java.time.LocalDateTime">
+    SELECT CURRENT_TIMESTAMP(6)
+    FROM workflow
+    WHERE workspace_id = #{workspaceId} AND id = #{workflowId}
+  </select>
+
+  <select id="getPage" resultType="WorkflowRunView">
+    SELECT <include refid="viewColumns"/>
+    FROM workflow_run wr
+    JOIN workflow_version v
+      ON v.workspace_id = wr.workspace_id
+     AND v.workflow_id = wr.workflow_id
+     AND v.id = wr.workflow_version_id
+    WHERE wr.workspace_id = #{workspaceId}
+      AND wr.workflow_id = #{workflowId}
+      AND wr.started_at &lt;= #{asOf}
+      <if test="beforeStartedAt != null and beforeId != null">
+        AND (wr.started_at &lt; #{beforeStartedAt}
+          OR (wr.started_at = #{beforeStartedAt} AND wr.id &lt; #{beforeId}))
+      </if>
+    ORDER BY wr.started_at DESC, wr.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getViewById" resultType="WorkflowRunView">
+    SELECT <include refid="viewColumns"/>
+    FROM workflow_run wr
+    JOIN workflow_version v
+      ON v.workspace_id = wr.workspace_id
+     AND v.workflow_id = wr.workflow_id
+     AND v.id = wr.workflow_version_id
+    WHERE wr.workspace_id = #{workspaceId}
+      AND wr.workflow_id = #{workflowId}
+      AND wr.id = #{id}
+  </select>
+
+  <select id="getSteps" resultType="WorkflowStepRun">
+    SELECT <include refid="stepColumns"/> FROM workflow_step_run
+    WHERE workspace_id = #{workspaceId} AND workflow_run_id = #{workflowRunId}
+    ORDER BY sequence_number, id
+  </select>
+
+</mapper>

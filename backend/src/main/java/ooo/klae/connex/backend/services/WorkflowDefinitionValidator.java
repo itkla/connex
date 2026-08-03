@@ -34,7 +34,7 @@ public class WorkflowDefinitionValidator {
 
     private final RuleDefinitionValidator ruleDefinitionValidator;
 
-    CompiledWorkflow validate(
+    public CompiledWorkflow validate(
             String recordType,
             String executionMode,
             WorkflowDefinition definition) {
@@ -48,7 +48,7 @@ public class WorkflowDefinitionValidator {
         return compilation.compiled();
     }
 
-    Set<Permission> validateForMutation(
+    public Set<Permission> validateForMutation(
             String recordType,
             String executionMode,
             WorkflowDefinition definition) {
@@ -106,8 +106,11 @@ public class WorkflowDefinitionValidator {
                 throw new BadRequestException("Workflow contains an unsupported node type");
             }
         }
+        String enrollmentConditionNodeId = scheduleEnrollmentCondition(
+            trigger, nodes, outgoing);
         CompiledWorkflow compiled = new CompiledWorkflow(
-            trigger.id(), nodeTypes, outgoing, topologicalOrder);
+            trigger.id(), nodes, nodeTypes, outgoing, topologicalOrder,
+            enrollmentConditionNodeId);
         return new Compilation(
             compiled,
             trigger.config(),
@@ -201,10 +204,30 @@ public class WorkflowDefinitionValidator {
         if (incomingCount == 0) {
             throw new BadRequestException("Workflow action node must have at least one incoming edge");
         }
-        if (outgoing.size() > 1
-                || outgoing.size() == 1 && !outgoing.containsKey(WorkflowEdge.Outcome.NEXT)) {
-            throw new BadRequestException("Workflow action node may have at most one next edge");
+        if (outgoing.size() != 1 || !outgoing.containsKey(WorkflowEdge.Outcome.NEXT)) {
+            throw new BadRequestException("Workflow action node must have exactly one next edge");
         }
+    }
+
+    private static String scheduleEnrollmentCondition(
+            WorkflowNode.Trigger trigger,
+            Map<String, WorkflowNode> nodes,
+            Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> outgoing) {
+        if (trigger.config() == null
+                || !"schedule".equals(normalize(trigger.config().getType()))) {
+            return null;
+        }
+        WorkflowEdge edge = outgoing.get(trigger.id()).get(WorkflowEdge.Outcome.NEXT);
+        WorkflowNode target = nodes.get(edge.targetNodeId());
+        if (!(target instanceof WorkflowNode.Condition)) {
+            throw new BadRequestException(
+                "Workflow schedule trigger must immediately target its enrollment condition");
+        }
+        return target.id();
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     private static void requireEndConnections(
@@ -273,14 +296,17 @@ public class WorkflowDefinitionValidator {
         return List.copyOf(ordered);
     }
 
-    record CompiledWorkflow(
+    public record CompiledWorkflow(
         String entryNodeId,
+        Map<String, WorkflowNode> nodes,
         Map<String, NodeType> nodeTypes,
         Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> outgoing,
-        List<String> topologicalOrder
+        List<String> topologicalOrder,
+        String enrollmentConditionNodeId
     ) {
 
-        CompiledWorkflow {
+        public CompiledWorkflow {
+            nodes = Collections.unmodifiableMap(new LinkedHashMap<>(nodes));
             nodeTypes = Collections.unmodifiableMap(new LinkedHashMap<>(nodeTypes));
             Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> transitions = new LinkedHashMap<>();
             outgoing.forEach((nodeId, edges) -> transitions.put(
@@ -290,17 +316,25 @@ public class WorkflowDefinitionValidator {
             topologicalOrder = List.copyOf(topologicalOrder);
         }
 
-        NodeType nodeType(String nodeId) {
+        /** Returns the immutable node for a stable node id, or {@code null}. */
+        public WorkflowNode node(String nodeId) {
+            return nodes.get(nodeId);
+        }
+
+        /** Returns the compiled node type for a stable node id, or {@code null}. */
+        public NodeType nodeType(String nodeId) {
             return nodeTypes.get(nodeId);
         }
 
-        WorkflowEdge transition(String nodeId, WorkflowEdge.Outcome outcome) {
+        /** Returns the deterministic transition for one outcome, or {@code null}. */
+        public WorkflowEdge transition(String nodeId, WorkflowEdge.Outcome outcome) {
             Map<WorkflowEdge.Outcome, WorkflowEdge> transitions = outgoing.get(nodeId);
             return transitions == null ? null : transitions.get(outcome);
         }
     }
 
-    enum NodeType {
+    /** Closed schema-v1 executable node categories. */
+    public enum NodeType {
         TRIGGER,
         CONDITION,
         ACTION,

@@ -97,6 +97,7 @@ public class LegacyRuleWorkflowService {
 
     Rule update(int workspaceId, int actorId, int ruleId, RuleRequest request) {
         AggregateDiscovery discovery = discover(workspaceId, ruleId);
+        requireLegacyMutable(discovery.workflow());
         Set<Permission> requiredPermissions = definitionValidator.validateForMutation(request);
         String executionMode = definitionValidator.normalize(request.getExecutionMode());
         Integer discoveredRunAs = requestedRunAs(discovery.activeVersion(), executionMode);
@@ -151,21 +152,17 @@ public class LegacyRuleWorkflowService {
         LockedAggregate aggregate = lockAggregate(discovery, principals, true);
         requireDeletablePair(aggregate);
         Workflow workflow = aggregate.workflow();
-        if (workflowMapper.unlinkLegacyRuleForDeletion(
-                workspaceId,
-                workflow.getId(),
-                actorId,
-                ruleId,
-                workflow.getActiveVersionId(),
-                workflow.getDraftRevision()) != 1) {
-            throw new ConflictException("Rule workflow state changed during deletion");
+        if (workflow.getArchivedAt() != null) {
+            return aggregate.rule();
         }
-        if (workflowMapper.delete(workspaceId, workflow.getId()) != 1) {
-            throw new ConflictException("Rule workflow changed during deletion");
+        if (aggregate.rule().isEnabled()
+                && ruleMapper.updateEnabled(workspaceId, ruleId, false) != 1) {
+            throw new ConflictException("Rule lifecycle changed during archive");
         }
-        if (ruleMapper.delete(workspaceId, ruleId) != 1) {
-            throw new ConflictException("Rule changed during deletion");
+        if (workflowMapper.archive(workspaceId, workflow.getId(), actorId) != 1) {
+            throw new ConflictException("Rule workflow state changed during archive");
         }
+        aggregate.rule().setEnabled(false);
         return aggregate.rule();
     }
 
@@ -442,6 +439,8 @@ public class LegacyRuleWorkflowService {
         workflow.setName(projection.getName());
         workflow.setDescription(projection.getDescription());
         workflow.setEnabled(false);
+        workflow.setRuntimeOwner("legacy");
+        workflow.setArchivedAt(null);
         workflow.setDraftRevision(1);
         workflow.setDraftRecordType(projection.getRecordType());
         workflow.setDraftExecutionMode(projection.getExecutionMode());
@@ -797,6 +796,8 @@ public class LegacyRuleWorkflowService {
             && Objects.equals(expected.getName(), current.getName())
             && Objects.equals(expected.getDescription(), current.getDescription())
             && expected.isEnabled() == current.isEnabled()
+            && Objects.equals(expected.getRuntimeOwner(), current.getRuntimeOwner())
+            && Objects.equals(expected.getArchivedAt(), current.getArchivedAt())
             && expected.getDraftRevision() == current.getDraftRevision()
             && Objects.equals(expected.getDraftRecordType(), current.getDraftRecordType())
             && Objects.equals(expected.getDraftExecutionMode(), current.getDraftExecutionMode())
@@ -840,6 +841,16 @@ public class LegacyRuleWorkflowService {
 
     private static ConflictException inconsistentAggregate() {
         return new ConflictException("Rule workflow state is inconsistent");
+    }
+
+    private static void requireLegacyMutable(Workflow workflow) {
+        if (workflow.getArchivedAt() != null) {
+            throw new ConflictException("Archived workflow cannot be changed through the rule API");
+        }
+        if (!"legacy".equals(workflow.getRuntimeOwner())) {
+            throw new ConflictException(
+                "Canonical-owned workflow cannot be changed through the rule API");
+        }
     }
 
     private record LegacySnapshot(Rule projection, CanonicalDraft draft) { }

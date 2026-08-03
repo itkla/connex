@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
@@ -19,8 +20,10 @@ import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
+import ooo.klae.connex.backend.dto.WorkflowRuntimeOwnerRequest;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
 import ooo.klae.connex.backend.dto.WorkflowVersionDto;
+import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
 
 /** HTTP lifecycle contract for workspace-scoped versioned workflows. */
@@ -30,10 +33,12 @@ import ooo.klae.connex.backend.services.WorkflowService;
 public class WorkflowController {
 
     private final WorkflowService workflowService;
+    private final WorkflowRuntimeOwnershipService runtimeOwnershipService;
 
     @GetMapping
-    public List<WorkflowDto> list() {
-        return workflowService.list();
+    public List<WorkflowDto> list(
+            @RequestParam(defaultValue = "false") boolean archived) {
+        return workflowService.list(archived);
     }
 
     @PostMapping
@@ -75,6 +80,32 @@ public class WorkflowController {
     @PostMapping("/{id}/disable")
     public WorkflowDto disable(@PathVariable int id) {
         return workflowService.disable(id);
+    }
+
+    @PostMapping("/{id}/archive")
+    public WorkflowDto archive(@PathVariable int id) {
+        return workflowService.archive(id);
+    }
+
+    @PostMapping("/{id}/restore")
+    public WorkflowDto restore(@PathVariable int id) {
+        return workflowService.restore(id);
+    }
+
+    @PostMapping("/{id}/runtime/canonical")
+    public WorkflowDto cutOverToCanonical(
+            @PathVariable int id,
+            @Valid @RequestBody WorkflowRuntimeOwnerRequest request) {
+        return runtimeOwnershipService.cutOverToCanonical(
+            id, request.expectedActiveVersionId());
+    }
+
+    @PostMapping("/{id}/runtime/legacy")
+    public WorkflowDto rollBackToLegacy(
+            @PathVariable int id,
+            @Valid @RequestBody WorkflowRuntimeOwnerRequest request) {
+        return runtimeOwnershipService.rollBackToLegacy(
+            id, request.expectedActiveVersionId());
     }
 
     @GetMapping("/{id}/versions")

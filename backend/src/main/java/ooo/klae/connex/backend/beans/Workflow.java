@@ -18,6 +18,8 @@ public class Workflow {
     private String name;
     private String description;
     private boolean enabled;
+    private String runtimeOwner = "legacy";
+    private LocalDateTime archivedAt;
     private int draftRevision;
     private String draftRecordType;
     private String draftExecutionMode;

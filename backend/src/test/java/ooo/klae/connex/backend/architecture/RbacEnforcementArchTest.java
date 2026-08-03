@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
+import ooo.klae.connex.backend.services.WorkflowRunReadService;
+import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -126,9 +128,39 @@ class RbacEnforcementArchTest {
                 violations.add(method.getName());
             }
         }
-        assertEquals(9, lifecycleMethodCount, "Workflow lifecycle surface changed without updating the RBAC guard");
+        assertEquals(11, lifecycleMethodCount,
+            "Workflow lifecycle surface changed without updating the RBAC guard");
         assertTrue(violations.isEmpty(),
             "Every workflow lifecycle method must require RULE_MANAGE: " + violations);
+    }
+
+    @Test
+    void workflowOwnershipAndRunReadsRequireRuleManage() {
+        Map<Class<?>, Integer> surfaces = Map.of(
+            WorkflowRuntimeOwnershipService.class, 2,
+            WorkflowRunReadService.class, 2);
+        List<String> violations = new ArrayList<>();
+        for (Map.Entry<Class<?>, Integer> surface : surfaces.entrySet()) {
+            int publicMethods = 0;
+            for (Method method : surface.getKey().getDeclaredMethods()) {
+                if (!Modifier.isPublic(method.getModifiers())
+                        || method.isSynthetic()
+                        || method.isBridge()) {
+                    continue;
+                }
+                publicMethods++;
+                RequirePermission permission = method.getAnnotation(RequirePermission.class);
+                if (permission == null || permission.value() != Permission.RULE_MANAGE) {
+                    violations.add(surface.getKey().getSimpleName() + "." + method.getName());
+                }
+            }
+            if (publicMethods != surface.getValue()) {
+                violations.add(surface.getKey().getSimpleName()
+                    + " exposes " + publicMethods + " public methods");
+            }
+        }
+        assertTrue(violations.isEmpty(),
+            "Workflow ownership and history reads must require RULE_MANAGE: " + violations);
     }
 
     @Test

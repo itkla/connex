@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
@@ -50,9 +51,6 @@ public interface RuleMapper {
         @Param("id") int id,
         @Param("userId") int userId);
 
-    /** Deletes a rule scoped to the workspace; returns rows affected. */
-    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
-
     /** Enabled rules of a trigger type in a workspace (engine dispatch; called off-thread). */
     List<Rule> getEnabledByTrigger(@Param("workspaceId") int workspaceId, @Param("triggerType") String triggerType);
 
@@ -64,6 +62,24 @@ public interface RuleMapper {
 
     /** Claims a fire by inserting it; the unique {@code (rule_id, dedupe_key)} index enforces idempotency. Populates the id. */
     void insertExecution(RuleExecution execution);
+
+    RuleExecution getExecutionByDedupe(
+        @Param("workspaceId") int workspaceId,
+        @Param("ruleId") int ruleId,
+        @Param("dedupeKey") String dedupeKey);
+
+    RuleExecution getExecutionById(
+        @Param("workspaceId") int workspaceId,
+        @Param("ruleId") int ruleId,
+        @Param("id") int id);
+
+    List<RuleExecution> getExecutionPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("ruleId") int ruleId,
+        @Param("asOf") LocalDateTime asOf,
+        @Param("beforeExecutedAt") LocalDateTime beforeExecutedAt,
+        @Param("beforeId") Integer beforeId,
+        @Param("limit") int limit);
 
     /** Finalizes a claimed execution's outcome. */
     void updateExecution(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("status") String status, @Param("detail") String detail);

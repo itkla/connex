@@ -108,11 +108,15 @@ class WorkflowDefinitionValidatorTest {
                 new WorkflowNode.Trigger("trigger", entityChange()),
                 new WorkflowNode.Condition("condition", condition()),
                 new WorkflowNode.Action("create-task", createTask),
-                new WorkflowNode.Action("change-stage", changeStage)),
+                new WorkflowNode.Action("change-stage", changeStage),
+                new WorkflowNode.End("end-task"),
+                new WorkflowNode.End("end-stage")),
             List.of(
                 edge("trigger-condition", "trigger", "condition", WorkflowEdge.Outcome.NEXT),
                 edge("condition-yes", "condition", "create-task", WorkflowEdge.Outcome.YES),
-                edge("condition-no", "condition", "change-stage", WorkflowEdge.Outcome.NO)));
+                edge("condition-no", "condition", "change-stage", WorkflowEdge.Outcome.NO),
+                edge("task-end", "create-task", "end-task", WorkflowEdge.Outcome.NEXT),
+                edge("stage-end", "change-stage", "end-stage", WorkflowEdge.Outcome.NEXT)));
 
         Set<Permission> permissions = validator.validateForMutation("deal", "system", definition);
 
@@ -171,8 +175,11 @@ class WorkflowDefinitionValidatorTest {
             definition(
                 List.of(
                     new WorkflowNode.Trigger("trigger", entityChange()),
-                    new WorkflowNode.Action("action", notifyAction())),
-                List.of(edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.YES))),
+                    new WorkflowNode.Action("action", notifyAction()),
+                    new WorkflowNode.End("end")),
+                List.of(
+                    edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.YES),
+                    edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT))),
             "Workflow trigger node must have exactly one next edge");
 
         WorkflowNode.Trigger trigger = new WorkflowNode.Trigger("trigger", entityChange());
@@ -180,10 +187,11 @@ class WorkflowDefinitionValidatorTest {
         WorkflowNode.Action action = new WorkflowNode.Action("action", notifyAction());
         assertInvalid(
             definition(
-                List.of(trigger, condition, action),
+                List.of(trigger, condition, action, new WorkflowNode.End("end")),
                 List.of(
                     edge("trigger-condition", "trigger", "condition", WorkflowEdge.Outcome.NEXT),
-                    edge("condition-yes", "condition", "action", WorkflowEdge.Outcome.YES))),
+                    edge("condition-yes", "condition", "action", WorkflowEdge.Outcome.YES),
+                    edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT))),
             "Workflow condition node must have exactly one yes and one no edge");
         assertInvalid(
             definition(
@@ -215,7 +223,15 @@ class WorkflowDefinitionValidatorTest {
                 List.of(
                     edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
                     edge("action-end", "action", "end", WorkflowEdge.Outcome.YES))),
-            "Workflow action node may have at most one next edge");
+            "Workflow action node must have exactly one next edge");
+        assertInvalid(
+            definition(
+                List.of(
+                    new WorkflowNode.Trigger("trigger", entityChange()),
+                    new WorkflowNode.Action("action", notifyAction())),
+                List.of(edge(
+                    "trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT))),
+            "Workflow action node must have exactly one next edge");
         assertInvalid(
             definition(
                 List.of(
@@ -224,7 +240,8 @@ class WorkflowDefinitionValidatorTest {
                     new WorkflowNode.End("end")),
                 List.of(
                     edge("trigger-end", "trigger", "end", WorkflowEdge.Outcome.NEXT),
-                    edge("end-action", "end", "action", WorkflowEdge.Outcome.NEXT))),
+                    edge("end-action", "end", "action", WorkflowEdge.Outcome.NEXT),
+                    edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT))),
             "Workflow end node must not have an outgoing edge");
     }
 
@@ -235,10 +252,12 @@ class WorkflowDefinitionValidatorTest {
                 List.of(
                     new WorkflowNode.Trigger("trigger", entityChange()),
                     new WorkflowNode.Action("reachable", notifyAction()),
+                    new WorkflowNode.End("end"),
                     new WorkflowNode.Action("unreachable-a", notifyAction()),
                     new WorkflowNode.Action("unreachable-b", notifyAction())),
                 List.of(
                     edge("trigger-reachable", "trigger", "reachable", WorkflowEdge.Outcome.NEXT),
+                    edge("reachable-end", "reachable", "end", WorkflowEdge.Outcome.NEXT),
                     edge("unreachable-a-b", "unreachable-a", "unreachable-b", WorkflowEdge.Outcome.NEXT),
                     edge("unreachable-b-a", "unreachable-b", "unreachable-a", WorkflowEdge.Outcome.NEXT))),
             "Workflow contains an unreachable node: unreachable-a");
@@ -272,26 +291,34 @@ class WorkflowDefinitionValidatorTest {
             definition(
                 List.of(
                     new WorkflowNode.Trigger("trigger", null),
-                    new WorkflowNode.Action("action", notifyAction())),
-                List.of(edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT))),
+                    new WorkflowNode.Action("action", notifyAction()),
+                    new WorkflowNode.End("end")),
+                List.of(
+                    edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                    edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT))),
             "Rule trigger is required");
         assertInvalid(
             definition(
                 List.of(
                     new WorkflowNode.Trigger("trigger", entityChange()),
                     new WorkflowNode.Condition("condition", null),
-                    new WorkflowNode.Action("action", notifyAction())),
+                    new WorkflowNode.Action("action", notifyAction()),
+                    new WorkflowNode.End("end")),
                 List.of(
                     edge("trigger-condition", "trigger", "condition", WorkflowEdge.Outcome.NEXT),
                     edge("condition-yes", "condition", "action", WorkflowEdge.Outcome.YES),
-                    edge("condition-no", "condition", "action", WorkflowEdge.Outcome.NO))),
+                    edge("condition-no", "condition", "action", WorkflowEdge.Outcome.NO),
+                    edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT))),
             "Workflow condition config is required");
         assertInvalid(
             definition(
                 List.of(
                     new WorkflowNode.Trigger("trigger", entityChange()),
-                    new WorkflowNode.Action("action", null)),
-                List.of(edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT))),
+                    new WorkflowNode.Action("action", null),
+                    new WorkflowNode.End("end")),
+                List.of(
+                    edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                    edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT))),
             "Rule action config is required");
     }
 
@@ -304,6 +331,47 @@ class WorkflowDefinitionValidatorTest {
 
         Rule withoutCondition = rule(codec, null);
         validator.validate("deal", "user", converter.convert(withoutCondition).definition());
+    }
+
+    @Test
+    void scheduleRequiresImmediateEnrollmentConditionAndAllowsLaterBranches() {
+        WorkflowNode.Trigger trigger = new WorkflowNode.Trigger("trigger", schedule());
+        WorkflowNode.Condition enrollment = new WorkflowNode.Condition(
+            "enrollment", condition());
+        WorkflowNode.Condition later = new WorkflowNode.Condition("later", condition());
+        WorkflowDefinition valid = definition(
+            List.of(
+                trigger,
+                enrollment,
+                later,
+                new WorkflowNode.Action("action", notifyAction()),
+                new WorkflowNode.End("end-no"),
+                new WorkflowNode.End("end-yes")),
+            List.of(
+                edge("trigger-enrollment", "trigger", "enrollment", WorkflowEdge.Outcome.NEXT),
+                edge("enrollment-yes", "enrollment", "later", WorkflowEdge.Outcome.YES),
+                edge("enrollment-no", "enrollment", "end-no", WorkflowEdge.Outcome.NO),
+                edge("later-yes", "later", "action", WorkflowEdge.Outcome.YES),
+                edge("later-no", "later", "end-no", WorkflowEdge.Outcome.NO),
+                edge("action-end", "action", "end-yes", WorkflowEdge.Outcome.NEXT)));
+
+        CompiledWorkflow compiled = validator.validate("deal", "user", valid);
+
+        assertEquals("enrollment", compiled.enrollmentConditionNodeId());
+        assertEquals("end-no",
+            compiled.transition("later", WorkflowEdge.Outcome.NO).targetNodeId());
+
+        WorkflowDefinition missingEnrollment = definition(
+            List.of(
+                trigger,
+                new WorkflowNode.Action("action", notifyAction()),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT)));
+        assertInvalid(
+            missingEnrollment,
+            "Workflow schedule trigger must immediately target its enrollment condition");
     }
 
     private void assertInvalid(WorkflowDefinition definition, String expectedMessage) {
@@ -346,6 +414,13 @@ class WorkflowDefinitionValidatorTest {
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("entity_change");
         trigger.setEvents(List.of("deal.won"));
+        return trigger;
+    }
+
+    private static RuleTrigger schedule() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("schedule");
+        trigger.setCadence("daily");
         return trigger;
     }
 

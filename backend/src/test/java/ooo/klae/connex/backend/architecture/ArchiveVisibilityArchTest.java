@@ -255,11 +255,11 @@ class ArchiveVisibilityArchTest {
                 + "labels every file through them.");
     }
 
-    /** No mapper may retain a hard DELETE against the two archive-backed record tables. */
+    /** No mapper may retain a hard DELETE against an archive-backed product aggregate. */
     @Test
-    void noMapperCanHardDeleteAContactOrCompany() throws Exception {
+    void noMapperCanHardDeleteAnArchiveBackedAggregate() throws Exception {
         Pattern hardDelete = Pattern.compile(
-            "DELETE\\s+FROM\\s+[`\"]?(?:person|company)[`\"]?(?:\\s|$)",
+            "DELETE\\s+FROM\\s+[`\"]?(?:person|company|workflow)[`\"]?(?:\\s|$)",
             Pattern.CASE_INSENSITIVE);
         List<String> violations = new ArrayList<>();
         for (Map.Entry<String, MapperXml> reader : allMapperXml().entrySet()) {
@@ -268,8 +268,18 @@ class ArchiveVisibilityArchTest {
             }
         }
         assertTrue(violations.isEmpty(),
-            "Contacts and companies are archived, never deleted (#854); whole-tenant teardown "
+            "Contacts, companies, and workflows are archived, never deleted; whole-tenant teardown "
                 + "drives its DELETEs from TenantLifecycleRegistry identifiers instead: " + violations);
+    }
+
+    @Test
+    void workflowDefaultListRequiresExplicitArchiveVisibility() throws Exception {
+        MapperXml mapper = allMapperXml().get(
+            "ooo.klae.connex.backend.mappers.WorkflowMapper");
+        assertTrue(mapper != null, "WorkflowMapper must be present");
+        Statement list = mapper.statement("listByWorkspace");
+        assertTrue(list != null && list.sql().contains("archived_at IS"),
+            "Workflow list reads must choose active or archived rows explicitly");
     }
 
     private String reasonFailure(StatementExemption exemption, Statement statement) {

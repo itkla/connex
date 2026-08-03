@@ -12,5 +12,10 @@ public record RuleFireContext(
     int entityId,
     int targetUserId,
     String dedupeSuffix
-) {
+) implements AutomationActionContext {
+
+    @Override
+    public String notificationDedupeKey() {
+        return "rule:" + ruleId + ":" + entityId + ":" + dedupeSuffix;
+    }
 }
