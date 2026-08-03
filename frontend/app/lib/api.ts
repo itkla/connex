@@ -3638,6 +3638,84 @@ export function previewRule(recordType: Types.SavedViewRecordType, condition: Ty
     return postJson<Types.RulePreview>(`/api/rules/preview`, { recordType, condition });
 }
 
+export function getWorkflows(archived = false, init: RequestInit = {}) {
+    return getJson<Types.WorkflowListItem[]>(`/api/workflows?archived=${archived}`, { cache: "no-store", ...init });
+}
+
+export function createWorkflow(payload: Types.WorkflowCreateRequest, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>("/api/workflows", payload, init);
+}
+
+export function getWorkflowById(id: number, init: RequestInit = {}) {
+    return getJson<Types.WorkflowDto>(`/api/workflows/${id}`, { cache: "no-store", ...init });
+}
+
+export function saveWorkflowDraft(id: number, payload: Types.WorkflowDraftRequest, init: RequestInit = {}) {
+    return putJson<Types.WorkflowDto>(`/api/workflows/${id}/draft`, payload, init);
+}
+
+export function validateWorkflow(id: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowValidation>(`/api/workflows/${id}/validate`, {}, init);
+}
+
+export function simulateWorkflow(id: number, expectedRevision: number, recordId: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowSimulation>(`/api/workflows/${id}/simulate`, { expectedRevision, recordId }, init);
+}
+
+export function publishWorkflow(id: number, expectedRevision: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>(`/api/workflows/${id}/publish`, { expectedRevision }, init);
+}
+
+export function enableWorkflow(id: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>(`/api/workflows/${id}/enable`, {}, init);
+}
+
+export function disableWorkflow(id: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>(`/api/workflows/${id}/disable`, {}, init);
+}
+
+export function archiveWorkflow(id: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>(`/api/workflows/${id}/archive`, {}, init);
+}
+
+export function restoreWorkflow(id: number, init: RequestInit = {}) {
+    return postJson<Types.WorkflowDto>(`/api/workflows/${id}/restore`, {}, init);
+}
+
+export function setWorkflowRuntimeOwner(
+    id: number,
+    owner: Types.WorkflowRuntimeOwner,
+    expectedActiveVersionId: number,
+    init: RequestInit = {},
+) {
+    return postJson<Types.WorkflowDto>(
+        `/api/workflows/${id}/runtime/${owner}`,
+        { expectedActiveVersionId },
+        init,
+    );
+}
+
+export function getWorkflowVersions(id: number, init: RequestInit = {}) {
+    return getJson<Types.WorkflowVersion[]>(`/api/workflows/${id}/versions`, { cache: "no-store", ...init });
+}
+
+export function resolveLegacyWorkflow(legacyRuleId: number, init: RequestInit = {}) {
+    return getJson<{ workflowId: number }>(`/api/workflows/legacy-rules/${legacyRuleId}`, { cache: "no-store", ...init });
+}
+
+export function getWorkflowRuns(id: number, limit = 50, cursor?: string, init: RequestInit = {}) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return getJson<Types.WorkflowRunPage>(`/api/workflows/${id}/runs?${query}`, { cache: "no-store", ...init });
+}
+
+export function getWorkflowRun(id: number, runKey: string, init: RequestInit = {}) {
+    return getJson<Types.WorkflowRunDetail>(
+        `/api/workflows/${id}/runs/${encodeURIComponent(runKey)}`,
+        { cache: "no-store", ...init },
+    );
+}
+
 export function getPermissionCatalog(init: RequestInit = {}) {
     return getJson<string[]>(`/api/permissions`, { cache: "no-store", ...init });
 }
@@ -4187,8 +4265,8 @@ export function evaluateSegments(recordType: Types.SavedViewRecordType, definiti
     return postJson<Types.SegmentResult>(`/api/segments/evaluate`, { recordType, definition });
 }
 
-export function getSegmentFields(recordType: Types.SavedViewRecordType) {
-    return getJson<Types.SegmentFields>(`/api/segments/fields?recordType=${recordType}`, { cache: "no-store" });
+export function getSegmentFields(recordType: Types.SavedViewRecordType, init: RequestInit = {}) {
+    return getJson<Types.SegmentFields>(`/api/segments/fields?recordType=${recordType}`, { cache: "no-store", ...init });
 }
 
 export function getSegmentCatalog(recordType: Types.SavedViewRecordType) {

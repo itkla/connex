@@ -1,75 +1,120 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import {
     BoltIcon,
+    ClockIcon,
+    FlagIcon,
     FunnelIcon,
     PlayIcon,
-    PlusIcon,
 } from "@heroicons/react/24/outline";
 
+import type { WorkflowEdgeOutcome, WorkflowNodeType, WorkflowStepRun } from "@/app/lib/types";
+import { WORKFLOW_RUN_STATUS_CLASS, WorkflowRunStatusIcon } from "@/app/components/settings/workflows/workflowRunStatus";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 export type WorkflowNodeData = {
-    kind: "trigger" | "condition" | "action" | "add";
+    nodeType: WorkflowNodeType;
     label: string;
     summary: string;
-    index?: number;
     selected: boolean;
     invalid: boolean;
+    readOnly: boolean;
+    branchLabels: Partial<Record<WorkflowEdgeOutcome, string>>;
+    inputHandleLabel: string;
+    runStep?: WorkflowStepRun;
+    runStatusLabel?: string;
+    runTimingLabel?: string;
+    runFailureLabel?: string;
 };
 
-export type WorkflowFlowNode = Node<WorkflowNodeData, "workflowStep">;
+export type WorkflowFlowNode = Node<WorkflowNodeData, "workflowNode">;
 
-const KIND_ICON = {
-    trigger: PlayIcon,
-    condition: FunnelIcon,
-    action: BoltIcon,
-    add: PlusIcon,
-} as const;
+const NODE_ICON = {
+    TRIGGER: PlayIcon,
+    CONDITION: FunnelIcon,
+    ACTION: BoltIcon,
+    DELAY: ClockIcon,
+    END: FlagIcon,
+} satisfies Record<WorkflowNodeType, typeof PlayIcon>;
 
-/**
- * One step on the linear workflow canvas. Purely presentational — selection and editing happen
- * through the inspector; the node only reflects the draft state it is derived from.
- */
+/** Compact workflow-node summary with semantic branch handles and optional run evidence. */
 function WorkflowNodeImpl({ data }: NodeProps<WorkflowFlowNode>) {
-    const Icon = KIND_ICON[data.kind];
-    const isAdd = data.kind === "add";
+    const Icon = NODE_ICON[data.nodeType];
+    const outcomes: WorkflowEdgeOutcome[] = data.nodeType === "CONDITION"
+        ? ["yes", "no"]
+        : data.nodeType === "END"
+            ? []
+            : ["next"];
     return (
         <div
             className={cn(
-                "w-72 rounded-2xl p-3.5 text-left transition-[box-shadow,border-color,color,transform] duration-150 ease-out active:scale-[0.99]",
-                isAdd
-                    ? "border border-dashed border-border bg-transparent text-muted-foreground hover:border-brand hover:text-foreground"
-                    : "bg-card ring-1 shadow-sm",
-                !isAdd && (data.invalid ? "ring-destructive" : data.selected ? "ring-2 ring-brand" : "ring-border"),
+                "relative w-72 rounded-2xl bg-card p-3.5 text-left shadow-sm ring-1",
+                data.invalid ? "ring-destructive" : data.selected ? "ring-2 ring-brand" : "ring-border",
             )}
+            aria-label={`${data.label}. ${data.summary}`}
         >
-            <Handle type="target" position={Position.Top} className="!size-2 !border-0 !bg-chart-axis" isConnectable={false} />
+            {data.nodeType !== "TRIGGER" ? (
+                <Handle
+                    id="in"
+                    type="target"
+                    position={Position.Top}
+                    className="!size-3 !border-2 !border-card !bg-chart-axis"
+                    isConnectable={!data.readOnly}
+                    aria-label={data.inputHandleLabel}
+                />
+            ) : null}
             <div className="flex items-start gap-2.5">
                 <span
                     className={cn(
                         "grid size-8 shrink-0 place-items-center rounded-lg",
-                        isAdd
-                            ? "bg-muted text-muted-foreground"
-                            : data.kind === "trigger"
-                                ? "bg-brand text-brand-foreground"
-                                : "bg-muted text-foreground",
+                        data.nodeType === "TRIGGER" ? "bg-brand text-brand-foreground" : "bg-muted text-foreground",
                     )}
                 >
                     <Icon aria-hidden className="size-4" />
                 </span>
-                <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-foreground">
-                        {isAdd ? <span className="text-inherit">{data.label}</span> : data.label}
+                <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{data.label}</span>
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground" title={data.summary}>
+                        {data.summary}
                     </span>
-                    {!isAdd && (
-                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">{data.summary}</span>
-                    )}
                 </span>
             </div>
-            <Handle type="source" position={Position.Bottom} className="!size-2 !border-0 !bg-chart-axis" isConnectable={false} />
+            {data.runStep ? (
+                <div className="mt-3 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className={WORKFLOW_RUN_STATUS_CLASS[data.runStep.status]}>
+                            <WorkflowRunStatusIcon status={data.runStep.status} className="size-3" />
+                            {data.runStatusLabel}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{data.runTimingLabel}</span>
+                    </div>
+                    {data.runStep.failure ? (
+                        <span className="block text-xs font-medium text-destructive">{data.runFailureLabel}</span>
+                    ) : null}
+                </div>
+            ) : null}
+            {outcomes.map((outcome, index) => (
+                <div
+                    key={outcome}
+                    className="absolute bottom-0 flex translate-y-full flex-col items-center pt-1"
+                    style={{ left: outcomes.length === 1 ? "50%" : index === 0 ? "35%" : "65%" }}
+                >
+                    <Handle
+                        id={outcome}
+                        type="source"
+                        position={Position.Bottom}
+                        className="!relative !inset-auto !size-3 !translate-x-0 !translate-y-0 !border-2 !border-card !bg-chart-axis"
+                        isConnectable={!data.readOnly}
+                        aria-label={data.branchLabels[outcome]}
+                    />
+                    <span className="mt-0.5 rounded bg-background px-1 text-xs font-medium text-muted-foreground">
+                        {data.branchLabels[outcome]}
+                    </span>
+                </div>
+            ))}
         </div>
     );
 }

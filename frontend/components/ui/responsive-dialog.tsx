@@ -80,7 +80,7 @@ function ResponsiveDialog({ open, onOpenChange, children }: ResponsiveDialogProp
   return (
     <ResponsiveDialogContext.Provider value={isMobile}>
       {isMobile ? (
-        <Drawer open={resolvedOpen} onOpenChange={handleOpenChange} swipeDirection="down">
+        <Drawer open={resolvedOpen} onOpenChange={handleOpenChange} swipeDirection="down" motionClassName="duration-200">
           {children}
         </Drawer>
       ) : (

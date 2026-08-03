@@ -20,9 +20,9 @@ type Props<T> = {
 };
 
 /**
- * Confirms archiving or restoring contacts and companies (issue #854). Archiving replaced deletion
- * for these record types, so the confirm button is a normal primary action rather than a
- * destructive one and the copy states plainly that nothing is lost.
+ * Confirms archiving or restoring a named resource such as a record or workflow. Archiving replaces
+ * deletion for these resources, so the confirm button is a normal primary action and the copy states
+ * plainly that nothing is lost.
  */
 export default function ArchiveRecordDialog<T>({
     open,

@@ -1,6 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function NewWorkflowLoading() {
+export default function WorkflowEditorLoading() {
     return (
         <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-background">
             <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
