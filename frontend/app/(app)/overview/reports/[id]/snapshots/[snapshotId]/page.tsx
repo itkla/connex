@@ -5,10 +5,12 @@ import { getTranslations } from 'next-intl/server';
 import { ArchiveBoxXMarkIcon, LockClosedIcon } from '@heroicons/react/24/outline';
 
 import ReportDocumentBoard from '@/app/components/reports/ReportDocumentBoard';
+import AccessDeniedPage from '@/app/components/AccessDeniedPage';
+import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
 import {
     ApiError,
     getCurrentUserFromCookie,
-    getEffectivePermissionsFromCookie,
+    getEffectivePermissionsResultFromCookie,
     getReport,
     getReportSnapshot,
     getReportSnapshots,
@@ -49,6 +51,14 @@ async function loadSnapshot(
  *
  * Retention prunes scheduled snapshots, so an emailed link outlives its snapshot by design. A
  * pruned snapshot renders a recoverable state pointing at the live report rather than a hard 404.
+ *
+ * Attainment figures need `GOAL_READ`, and the two ways that check can end are answered separately.
+ * A viewer who is genuinely refused gets the route-level 403, matching the live report at
+ * `../../page.tsx`, rather than a redirect that reads as ordinary navigation and leaves them with
+ * nothing to act on. A viewer whose permissions could not be read at all gets the
+ * permissions-unavailable state instead, because this is the destination of a scheduled-delivery
+ * email: bouncing an entitled reader off an emailed link on a transient lookup failure, silently,
+ * is the worst possible answer here. Both still withhold the board.
  */
 export default async function ReportSnapshotPage({
     params,
@@ -65,11 +75,11 @@ export default async function ReportSnapshotPage({
     if (!user) redirect('/auth/login');
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const t = await getTranslations('Reports');
-    const [report, outcome, snapshots, effectivePermissions] = await Promise.all([
+    const [report, outcome, snapshots, permissionsResult] = await Promise.all([
         getReport(id, init).catch(() => null),
         loadSnapshot(id, snapshotId, init),
         getReportSnapshots(id, init).catch((): ReportSnapshotSummary[] => []),
-        getEffectivePermissionsFromCookie(cookie),
+        getEffectivePermissionsResultFromCookie(cookie),
     ]);
     if (!report) notFound();
 
@@ -102,11 +112,13 @@ export default async function ReportSnapshotPage({
         );
     }
 
+    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
+    const effectivePermissions = permissionsResult.data;
     const snapshot = outcome.snapshot;
     const showsAttainment = report.config.widgets.some((widget) => widget.measure === 'attainment')
         || snapshot.computedResult.widgets.some((widget) => widget.measure === 'attainment');
     if (showsAttainment && !effectivePermissions.includes('GOAL_READ')) {
-        redirect('/overview/reports');
+        return <AccessDeniedPage />;
     }
 
     const listed = snapshots.some((summary) => summary.id === snapshot.id);
