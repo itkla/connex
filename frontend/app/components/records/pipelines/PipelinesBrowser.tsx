@@ -488,6 +488,9 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         return map;
     }, [now, pipelines, stagesByPipeline, allDeals, allTasks, allActivities, allNotes, allUsers]);
 
+    const hasActiveFilters = query.trim() !== '';
+    const clearAll = () => setQuery('');
+
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
             <Button variant="outline" size="sm" onClick={openEditSheet}>
@@ -535,8 +538,8 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                     <FilterBar
                         reduce={reduce}
                         chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] as FilterChipData[] : []}
-                        hasActiveFilters={query.trim() !== ''}
-                        onClearAll={() => setQuery('')}
+                        hasActiveFilters={hasActiveFilters}
+                        onClearAll={clearAll}
                         clearAllLabel={tf('clearAll')}
                         search={
                             <SearchField
@@ -591,6 +594,8 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
+                        filtersActive={hasActiveFilters}
+                        onClearFilters={clearAll}
                     />
                 </Rise>
 

@@ -250,7 +250,7 @@ export default function CampaignFormDialog({
 
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_7rem]">
                             <div className="grid gap-1.5">
-                                <Label htmlFor="campaign-budget">{t("budget")}</Label>
+                                <Label htmlFor="campaign-budgetAmount">{t("budget")}</Label>
                                 <div className="group relative">
                                     <BanknotesIcon className={leadIcon} />
                                     <input
@@ -281,7 +281,7 @@ export default function CampaignFormDialog({
                                 )}
                             </div>
                             <div className="grid gap-1.5">
-                                <Label htmlFor="campaign-currency">{t("currency")}</Label>
+                                <Label htmlFor="campaign-budgetCurrency">{t("currency")}</Label>
                                 <input
                                     id="campaign-budgetCurrency"
                                     type="text"

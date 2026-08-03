@@ -729,6 +729,12 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         setFilterState(showArchived ? { [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : {});
         setDefinition(EMPTY_DEFINITION);
     }, [setQuery, setFilterState, showArchived]);
+    const hasActiveFiltersOrScope = hasActiveFilters || showArchived;
+    const clearFiltersAndScope = useCallback(() => {
+        setQuery('');
+        setFilterState({});
+        setDefinition(EMPTY_DEFINITION);
+    }, [setQuery, setFilterState]);
     const resolveTagName = useCallback(
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
@@ -1080,6 +1086,8 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
+                        filtersActive={hasActiveFiltersOrScope}
+                        onClearFilters={clearFiltersAndScope}
                         sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                     />
