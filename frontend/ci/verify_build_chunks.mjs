@@ -51,9 +51,11 @@ function declaredAssets(manifest) {
 function readReferences(manifestPath) {
     const source = readFileSync(manifestPath, "utf8");
     const references = new Map();
+    let routes = 0;
     for (const [, quotedRoute, payload] of source.matchAll(ASSIGNMENT)) {
         const route = JSON.parse(quotedRoute);
         const manifest = JSON.parse(payload.trimEnd().replace(/;$/, ""));
+        routes += 1;
         for (const asset of declaredAssets(manifest)) {
             if (!references.has(asset)) {
                 references.set(asset, new Set());
@@ -61,7 +63,7 @@ function readReferences(manifestPath) {
             references.get(asset).add(route);
         }
     }
-    return references;
+    return { references, routes };
 }
 
 function verify(buildRoot) {
@@ -73,8 +75,14 @@ function verify(buildRoot) {
     }
 
     const routesByAsset = new Map();
+    const unparsed = [];
     for (const manifest of manifests) {
-        for (const [asset, routes] of readReferences(manifest)) {
+        const { references, routes: parsedRoutes } = readReferences(manifest);
+        if (parsedRoutes === 0) {
+            unparsed.push(relative(root, manifest));
+            continue;
+        }
+        for (const [asset, routes] of references) {
             if (!routesByAsset.has(asset)) {
                 routesByAsset.set(asset, new Set());
             }
@@ -82,6 +90,18 @@ function verify(buildRoot) {
                 routesByAsset.get(asset).add(route);
             }
         }
+    }
+
+    if (unparsed.length > 0) {
+        console.error(
+            `${unparsed.length} route manifest(s) declared no route at all — truncated, or Next.js`
+                + ` changed the wrapper this scans for. Every asset they reference is unchecked, so`
+                + ` this is a broken gate rather than a clean build:`,
+        );
+        for (const manifest of unparsed) {
+            console.error(`  ${manifest}`);
+        }
+        return 1;
     }
 
     const missing = [...routesByAsset.keys()]
