@@ -336,17 +336,7 @@ test.describe('stale — a failed refresh must not present stale figures as curr
 });
 
 test.describe('no results — a filtered miss must not read as a broken page', () => {
-    /**
-     * The seeded `small` profile carries 50 contacts, so this row is a *filtered* miss, not a
-     * first-run empty workspace. It is labelled `no-results` for that reason: the run-info caveats
-     * record that the first-run empty state is not covered, rather than letting a filtered miss stand
-     * in for it.
-     *
-     * The two are distinguishable in the DOM: `ContactsBrowser` passes `filtersActive`, so
-     * `RecordsRenderView` renders the muted no-results state with a clear-filters escape hatch
-     * rather than the brand first-run state that would claim the workspace is empty.
-     */
-    test('a search that matches nothing renders an empty state', async ({ browser }) => {
+    test('a search that matches nothing renders the no-results state with an escape hatch, not the first-run empty', async ({ browser }) => {
         const context = await matrixContext(browser, { ...DESKTOP, role: 'owner' });
         blockExternalRequests(context);
         const page = await context.newPage();
@@ -379,7 +369,9 @@ test.describe('no results — a filtered miss must not read as a broken page', (
         expect(emptyStates, 'a search with no matches must render an empty state, not a blank page').toBeGreaterThan(0);
         expect(
             clearFilters,
-            'a filtered miss must offer a way back to the unfiltered list',
+            'the seeded profile holds contacts, so this is a filtered miss and must render the muted '
+            + 'no-results state with a clear-filters escape hatch — the brand first-run state carries no '
+            + 'action and would claim the workspace is empty',
         ).toBeGreaterThan(0);
         expect(
             await page.locator(NOT_FOUND_MARKER).count(),
