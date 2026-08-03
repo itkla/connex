@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
 
+import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import CapturePolicyDialog from "@/app/components/account/connected-capture/CapturePolicyDialog";
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
 import CapturePurgeDialog, {
@@ -36,6 +38,7 @@ import {
     parseCaptureRouteState,
     providerCaptureEnabled,
 } from "@/app/lib/connectedCapture";
+import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type {
     CaptureOverview,
@@ -96,15 +99,49 @@ type LifecycleTarget = {
     mode: CaptureLifecycleMode;
 };
 
+function WorkspacePolicyUnavailable() {
+    const t = useTranslations("PermissionsUnavailable");
+    const router = useRouter();
+    const [isRetrying, startTransition] = useTransition();
+
+    return (
+        <PermissionsUnavailable
+            variant="inline"
+            title={t("title")}
+            body={t("sectionBody")}
+            action={(
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => startTransition(() => router.refresh())}
+                    disabled={isRetrying}
+                >
+                    <ArrowPathIcon
+                        data-icon="inline-start"
+                        className={isRetrying ? "animate-spin motion-reduce:animate-none" : undefined}
+                    />
+                    {isRetrying ? t("retrying") : t("retry")}
+                </Button>
+            )}
+        />
+    );
+}
+
 /**
  * Manages self-owned provider connections and the active workspace's explicit capture policy.
+ *
+ * @param capabilities the instance's connected-capture switches
+ * @param effectivePermissions the viewer's effective permission keys, empty when the lookup failed
+ * @param permissionsStatus whether that lookup succeeded, so a refusal can say which one it is
  */
 export default function ConnectionsPanel({
     capabilities,
     effectivePermissions,
+    permissionsStatus,
 }: {
     capabilities: InstanceCapabilities;
     effectivePermissions: string[];
+    permissionsStatus: PermissionsStatus;
 }) {
     const t = useTranslations("AccountConnections");
     const tPolicy = useTranslations("AccountCapturePolicy");
@@ -125,7 +162,11 @@ export default function ConnectionsPanel({
     );
     const anyCaptureEnabled = PROVIDERS.some((provider) =>
         providerCaptureEnabled(capabilities, provider));
-    const canManageWorkspacePolicy = effectivePermissions.includes("WORKSPACE_SETTINGS");
+    const workspacePolicyCheck = useMemo(
+        () => checkPermission(permissionsStatus, new Set(effectivePermissions), "WORKSPACE_SETTINGS"),
+        [effectivePermissions, permissionsStatus],
+    );
+    const canManageWorkspacePolicy = workspacePolicyCheck === "granted";
     const canCreatePeople = effectivePermissions.includes("PERSON_CREATE");
 
     const [connections, setConnections] = useState<ProviderConnection[] | null>(null);
@@ -520,6 +561,10 @@ export default function ConnectionsPanel({
                     })}
                 </div>
             )}
+
+            {routeState.panel === "workspace-policy" && workspacePolicyCheck === "unavailable" ? (
+                <WorkspacePolicyUnavailable />
+            ) : null}
 
             <p className="max-w-2xl px-6 text-xs text-muted-foreground">{t("privacyNote")}</p>
 
