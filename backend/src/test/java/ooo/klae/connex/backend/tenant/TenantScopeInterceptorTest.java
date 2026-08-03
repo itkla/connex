@@ -1,10 +1,28 @@
 package ooo.klae.connex.backend.tenant;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
+
+import org.apache.ibatis.cache.CacheKey;
+import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.mapping.BoundSql;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.session.RowBounds;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -16,6 +34,15 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 class TenantScopeInterceptorTest {
 
     private static final String NS = "ooo.klae.connex.backend.mappers.";
+
+    /**
+     * {@link Executor} methods that take a {@link MappedStatement} without
+     * executing it: cache-key derivation, a local-cache probe, and nested-select
+     * deferral. Everything else that accepts a mapped statement reaches the
+     * database and must be intercepted.
+     */
+    private static final Set<String> NON_EXECUTING_EXECUTOR_METHODS =
+        Set.of("createCacheKey", "isCached", "deferLoad");
 
     private final TenantContext tenantContext = new TenantContext();
     private final TenantScopeInterceptor interceptor = new TenantScopeInterceptor(tenantContext, true, false);
@@ -116,6 +143,82 @@ class TenantScopeInterceptorTest {
     void allowsExemptAuditInsertWhenUnresolved() {
         bindRequest();
         assertDoesNotThrow(() -> interceptor.enforce(NS + "AuditLogMapper.insert"));
+    }
+
+    @Test
+    void bothTenancyPluginsInterceptEveryStatementExecutingExecutorMethod() {
+        for (String name : NON_EXECUTING_EXECUTOR_METHODS) {
+            assertTrue(
+                Arrays.stream(Executor.class.getDeclaredMethods())
+                    .anyMatch(method -> method.getName().equals(name)),
+                "the non-executing exclusion " + name + " no longer exists on Executor");
+        }
+        assertInterceptsEveryStatementExecutingExecutorMethod(TenantScopeInterceptor.class);
+        assertInterceptsEveryStatementExecutingExecutorMethod(ControlCatalogRoutingInterceptor.class);
+    }
+
+    @Test
+    void pluginWiringBlocksEveryStatementExecutingMethodWhenUnresolved() throws Exception {
+        bindRequest();
+        Executor delegate = mock(Executor.class);
+        MappedStatement statement = mock(MappedStatement.class);
+        when(statement.getId()).thenReturn(NS + "TenantLifecycleMapper.streamRows");
+        Executor wrapped = (Executor) interceptor.plugin(delegate);
+        Object parameter = new Object();
+
+        assertThrows(ForbiddenException.class,
+            () -> wrapped.update(statement, parameter));
+        assertThrows(ForbiddenException.class,
+            () -> wrapped.query(statement, parameter, RowBounds.DEFAULT, Executor.NO_RESULT_HANDLER));
+        assertThrows(ForbiddenException.class,
+            () -> wrapped.query(statement, parameter, RowBounds.DEFAULT, Executor.NO_RESULT_HANDLER,
+                new CacheKey(), mock(BoundSql.class)));
+        assertThrows(ForbiddenException.class,
+            () -> wrapped.queryCursor(statement, parameter, RowBounds.DEFAULT));
+        verifyNoInteractions(delegate);
+    }
+
+    @Test
+    void pluginWiringLetsAResolvedCursorStatementReachTheExecutor() throws Exception {
+        bindRequest();
+        tenantContext.set(1, 1, 1, "org_admin", null);
+        Executor delegate = mock(Executor.class);
+        MappedStatement statement = mock(MappedStatement.class);
+        when(statement.getId()).thenReturn(NS + "TenantLifecycleMapper.streamRows");
+        Executor wrapped = (Executor) interceptor.plugin(delegate);
+        Object parameter = new Object();
+
+        assertDoesNotThrow(() -> wrapped.queryCursor(statement, parameter, RowBounds.DEFAULT));
+
+        verify(delegate).queryCursor(statement, parameter, RowBounds.DEFAULT);
+    }
+
+    private static void assertInterceptsEveryStatementExecutingExecutorMethod(Class<?> interceptorType) {
+        Set<String> executing = new TreeSet<>();
+        for (Method method : Executor.class.getDeclaredMethods()) {
+            Class<?>[] parameters = method.getParameterTypes();
+            if (parameters.length > 0
+                    && parameters[0] == MappedStatement.class
+                    && !NON_EXECUTING_EXECUTOR_METHODS.contains(method.getName())) {
+                executing.add(signatureKey(method.getName(), parameters));
+            }
+        }
+        Set<String> intercepted = new TreeSet<>();
+        for (Signature signature : interceptorType.getAnnotation(Intercepts.class).value()) {
+            if (signature.type() == Executor.class) {
+                intercepted.add(signatureKey(signature.method(), signature.args()));
+            }
+        }
+        assertEquals(executing, intercepted,
+            interceptorType.getSimpleName()
+                + " must intercept exactly the statement-executing Executor methods; a MyBatis "
+                + "upgrade that adds or removes one needs an explicit decision here");
+    }
+
+    private static String signatureKey(String method, Class<?>[] parameters) {
+        return Arrays.stream(parameters)
+            .map(Class::getName)
+            .collect(Collectors.joining(",", method + "(", ")"));
     }
 
     private void bindRequest() {

@@ -29,6 +29,12 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
  * {@code TenantWorkScope} catalog override, so a future async path that
  * forgets to route fails loudly instead of silently reading the default
  * catalog (#485).
+ *
+ * <p>The signatures below must cover <em>every</em> statement-executing method
+ * on {@link Executor}, including {@code queryCursor} — the streaming reads
+ * behind the whole-tenant export (#995). A method left out is not a weaker
+ * check but no check at all, so {@code TenantScopeInterceptorTest} asserts the
+ * coverage reflectively and fails the build when a MyBatis upgrade adds one.
  */
 @Intercepts({
     @Signature(type = Executor.class, method = "update",
@@ -36,7 +42,9 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
     @Signature(type = Executor.class, method = "query",
         args = { MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class }),
     @Signature(type = Executor.class, method = "query",
-        args = { MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class, CacheKey.class, BoundSql.class })
+        args = { MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class, CacheKey.class, BoundSql.class }),
+    @Signature(type = Executor.class, method = "queryCursor",
+        args = { MappedStatement.class, Object.class, RowBounds.class })
 })
 @RequiredArgsConstructor
 public class TenantScopeInterceptor implements Interceptor {
