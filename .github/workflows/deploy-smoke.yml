@@ -181,10 +181,19 @@ jobs:
           CONNEX_DEPLOYMENT_PROFILE=on-prem CONNEX_MAIL_MANAGED=true \
             java -jar "$WAR" > /tmp/boot-on-prem-managed.log 2>&1 &
           PID=$!
+          # The profile check throws after Tomcat has already bound :8080, so a forbidden
+          # instance answers /api/version for a moment before dying. Liveness is therefore
+          # checked first, and a process that answers must still be alive after a settle
+          # interval to count as booted — otherwise a refusal inside that window reads as
+          # a successful boot and this assertion silently inverts.
           REFUSED=0
           for _ in $(seq 1 90); do
-            if curl -sf http://localhost:8080/api/version > /dev/null 2>&1; then break; fi
             if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; break; fi
+            if curl -sf http://localhost:8080/api/version > /dev/null 2>&1; then
+              sleep 10
+              if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; fi
+              break
+            fi
             sleep 2
           done
           if [ "$REFUSED" != 1 ]; then
