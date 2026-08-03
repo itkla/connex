@@ -136,10 +136,10 @@
         "importCompanies": "会社をインポート, 企業, csv, アップロード, 一括",
         "importContacts": "連絡先をインポート, コンタクト, 人, 担当者, csv, アップロード, 一括",
         "importDeals": "案件をインポート, 取引, 商談, csv, アップロード, 一括",
-        "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, 企業, csv, 現在のビュー, フィルター, セグメント",
-        "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, コンタクト, 人, 担当者, csv, 現在のビュー, フィルター",
-        "exportCurrentDeals": "案件をエクスポート, 取引をダウンロード, 商談, csv, 現在のビュー, フィルター",
-        "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 現在のビュー, フィルター"
+        "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, 企業, csv, 現在のビュー, フィルター, 絞り込み, セグメント",
+        "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, コンタクト, 人, 担当者, csv, 現在のビュー, フィルター, 絞り込み",
+        "exportCurrentDeals": "案件をエクスポート, 取引をダウンロード, 商談, csv, 現在のビュー, フィルター, 絞り込み",
+        "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 現在のビュー, フィルター, 絞り込み"
       }
     }
   }
