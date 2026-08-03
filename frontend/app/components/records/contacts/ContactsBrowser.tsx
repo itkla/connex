@@ -249,6 +249,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         setQuery('');
         setFilterState(showArchived ? { [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : {});
     }, [setQuery, setFilterState, showArchived]);
+    const hasActiveFiltersOrScope = hasActiveFilters || showArchived;
+    const clearFiltersAndScope = useCallback(() => {
+        setQuery('');
+        setFilterState({});
+    }, [setQuery, setFilterState]);
     const effectiveOwnerValues = ownerScope.mode === 'me'
         ? [MEMBER_SCOPE_ME]
         : ownerScope.mode === 'unassigned'
@@ -930,8 +935,8 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         entityLabel="contact"
                         selectionActions={selectionActions}
                         loading={loading}
-                        filtersActive={hasActiveFilters}
-                        onClearFilters={clearAll}
+                        filtersActive={hasActiveFiltersOrScope}
+                        onClearFilters={clearFiltersAndScope}
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                         sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
                     />
