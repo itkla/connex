@@ -3544,7 +3544,7 @@ export function declineWorkspace(id: number) {
 
 export function leaveWorkspace(id: number) {
     return withClientRequestIdentityReset(
-        () => postJson<void>(`/api/workspaces/${id}/leave`, {}),
+        () => postJson<Types.WorkspaceSelection>(`/api/workspaces/${id}/leave`, {}),
         "workspace",
     );
 }

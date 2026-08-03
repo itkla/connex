@@ -32,7 +32,7 @@ import SectionHeader from "@/app/components/dashboard/SectionHeader";
 export default function MembershipPanel() {
     const t = useTranslations("AccountInvites");
     const router = useRouter();
-    const { workspaces, activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace, adoptActiveWorkspace } = useWorkspace();
 
     const [pending, setPending] = useState<Workspace[]>([]);
     const [loading, setLoading] = useState(true);
@@ -61,7 +61,8 @@ export default function MembershipPanel() {
     const accept = async (workspace: Workspace) => {
         setBusyId(workspace.id);
         try {
-            await acceptWorkspace(workspace.id);
+            const accepted = await acceptWorkspace(workspace.id);
+            adoptActiveWorkspace(accepted.id);
             setPending((prev) => prev.filter((w) => w.id !== workspace.id));
             toastSuccess(t("accepted", { workspace: workspace.name }));
             router.refresh();
@@ -89,10 +90,10 @@ export default function MembershipPanel() {
         if (!activeWorkspaceId || leaving) return;
         setLeaving(true);
         try {
-            await leaveWorkspace(activeWorkspaceId);
-            const remaining = workspaces.filter((w) => w.id !== activeWorkspaceId);
+            const selection = await leaveWorkspace(activeWorkspaceId);
+            adoptActiveWorkspace(selection.activeWorkspaceId);
             toastSuccess(t("left"));
-            router.replace(remaining.length > 0 ? "/dashboard" : "/onboarding");
+            router.replace(selection.activeWorkspaceId !== null ? "/dashboard" : "/onboarding");
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("leaveFailed"));
