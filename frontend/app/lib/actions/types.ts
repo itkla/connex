@@ -50,10 +50,27 @@ export type ActiveSelection = {
 };
 
 /**
+ * Coarse capability keys the action registry gates on today. They follow the backend's `ENTITY_ACTION`
+ * catalog spelling so the vocabulary stays consistent when a real effective-permissions endpoint
+ * replaces the role-derived approximation behind them.
+ */
+export const WORKSPACE_CAPABILITIES = ["ORGANIZATION_VIEW", "WORKSPACE_MANAGE", "MEMBER_MANAGE"] as const;
+
+/** A capability the client can approximate from the coarse role signals it already has. */
+export type WorkspaceCapability = (typeof WORKSPACE_CAPABILITIES)[number];
+
+/**
  * Coarse permission predicate. Today it is backed by a role-derived policy table; the signature is
  * the contract, so it keeps working unchanged when a real effective-permissions endpoint replaces it.
+ *
+ * The key space is closed to {@link WorkspaceCapability} rather than open to any string, because a
+ * gate that cannot recognize its own key has no honest answer to give. Left open, a newly added
+ * permission or a plain typo resolves to no rule at all and the action is offered to everyone, which
+ * the backend then refuses — an affordance the product cannot keep. Closing it makes that a compile
+ * error. An action needing no capability says so by omitting {@link AppAction.isAvailable} entirely,
+ * never by passing a key nothing recognizes.
  */
-export type PermissionCheck = (permission: string) => boolean;
+export type PermissionCheck = (permission: WorkspaceCapability) => boolean;
 
 /**
  * The read-only snapshot passed to {@link AppAction.isAvailable} and {@link AppAction.execute}. It is
