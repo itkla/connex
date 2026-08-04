@@ -15,6 +15,7 @@ import { SlashCommand } from "./editor/SlashCommand";
 import { buildSlashCommands } from "./editor/slashCommands";
 import { Callout } from "./editor/Callout";
 import { Toggle, ToggleSummary } from "./editor/Toggle";
+import { NoteText, NoteUnderline } from "./editor/NoteUnderline";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 
@@ -61,7 +62,16 @@ export default function RichNoteEditor({
         immediatelyRender: false,
         autofocus: autofocus ? "end" : false,
         extensions: [
-            StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+            StarterKit.configure({
+                heading: { levels: [1, 2, 3] },
+                text: false,
+                underline: false,
+                link: {
+                    openOnClick: false,
+                    enableClickSelection: true,
+                    defaultProtocol: "https",
+                },
+            }),
             Placeholder.configure({ placeholder: t("placeholder") }),
             TaskList,
             TaskItem.configure({ nested: true }),
@@ -76,6 +86,8 @@ export default function RichNoteEditor({
             Callout.configure({ cycleLabel: t("calloutCycleAria") }),
             ToggleSummary,
             Toggle.configure({ expandLabel: t("toggleExpand"), collapseLabel: t("toggleCollapse") }),
+            NoteText,
+            NoteUnderline,
             SlashCommand.configure({ commands: buildSlashCommands(t) }),
         ],
         editorProps: {
@@ -106,8 +118,20 @@ export default function RichNoteEditor({
     const labels = {
         bold: t("bold"),
         italic: t("italic"),
+        underline: t("underline"),
         strike: t("strike"),
         code: t("code"),
+        link: t("link"),
+        linkTitle: t("linkTitle"),
+        linkDescription: t("linkDescription"),
+        linkLabel: t("linkLabel"),
+        linkPlaceholder: t("linkPlaceholder"),
+        linkInvalid: t("linkInvalid"),
+        linkApply: t("linkApply"),
+        unlink: t("unlink"),
+        clearFormatting: t("clearFormatting"),
+        undo: t("undo"),
+        redo: t("redo"),
         h1: t("heading1"),
         h2: t("heading2"),
         h3: t("heading3"),
