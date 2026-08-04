@@ -26,13 +26,6 @@ public class WorkflowRuntimeRetentionService {
             workspaceId,
             now.minus(properties.completedOutboxRetention()),
             limit);
-        int remaining = limit - completed;
-        if (remaining <= 0) {
-            return completed;
-        }
-        return completed + outboxMapper.purgeDeadBefore(
-            workspaceId,
-            now.minus(properties.deadOutboxRetention()),
-            remaining);
+        return completed;
     }
 }

@@ -50,6 +50,7 @@ public class WorkflowRuntimeClaimService {
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public CanonicalClaim claimEntity(
             int workflowId, WorkflowTriggerDispatch.EntityChange dispatch) {
+        workflowTriggerOutboxMapper.ensureWorkspaceGate(dispatch.workspaceId());
         Workflow workflow = workflowMapper.getByIdForUpdate(dispatch.workspaceId(), workflowId);
         if (!canonicalOwnerCanClaim(workflow)) {
             return CanonicalClaim.rejectedClaim();
@@ -69,10 +70,15 @@ public class WorkflowRuntimeClaimService {
             dispatch.triggerKey(),
             dispatch.occurredAt(),
             trigger.getThrottleMinutes());
+        String legacyKey = dedupeKey.legacyEntityChange(
+            dispatch.recordId(),
+            dispatch.event(),
+            dispatch.occurredAt(),
+            trigger.getThrottleMinutes());
         return claimCanonical(
             workflow, version, compiled, "entity_change", dispatch.event(),
             dispatch.triggerKey(), dispatch.recordType(), dispatch.recordId(), key,
-            null, "queued");
+            legacyKey, null, "queued");
     }
 
     @Transactional(readOnly = true)
@@ -110,6 +116,7 @@ public class WorkflowRuntimeClaimService {
             long expectedVersionId,
             WorkflowTriggerDispatch.ScheduleTick dispatch,
             int recordId) {
+        workflowTriggerOutboxMapper.ensureWorkspaceGate(dispatch.workspaceId());
         Workflow workflow = workflowMapper.getByIdForUpdate(dispatch.workspaceId(), workflowId);
         if (!canonicalOwnerCanClaim(workflow)
                 || workflow.getActiveVersionId() == null
@@ -127,10 +134,11 @@ public class WorkflowRuntimeClaimService {
         String key = dedupeKey.schedule(
             dedupeIdentity(workflow), version.getRecordType(), recordId,
             normalize(dispatch.cadence()), dispatch.bucketKey());
+        String legacyKey = dedupeKey.legacySchedule(recordId, dispatch.bucketKey());
         return claimCanonical(
             workflow, version, compiled, "schedule", normalize(dispatch.cadence()),
             dispatch.bucketKey(), version.getRecordType(), recordId, key,
-            null, "queued");
+            legacyKey, null, "queued");
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -149,6 +157,7 @@ public class WorkflowRuntimeClaimService {
         WorkflowNode.Trigger triggerNode = entryTrigger(compiled);
         RuleTrigger trigger = triggerNode.config();
         String key;
+        String legacyKey;
         if ("entity_change".equals(outbox.getTriggerType())) {
             if (outbox.getOccurredAt() == null
                     || !entityOutboxMatches(version, trigger, outbox, recordId)) {
@@ -162,6 +171,11 @@ public class WorkflowRuntimeClaimService {
                 outbox.getTriggerKey(),
                 outbox.getOccurredAt().toInstant(java.time.ZoneOffset.UTC),
                 trigger.getThrottleMinutes());
+            legacyKey = dedupeKey.legacyEntityChange(
+                recordId,
+                outbox.getTriggerEvent(),
+                outbox.getOccurredAt().toInstant(java.time.ZoneOffset.UTC),
+                trigger.getThrottleMinutes());
         } else if ("schedule".equals(outbox.getTriggerType())) {
             if (!scheduleOutboxMatches(version, trigger, outbox)) {
                 return CanonicalClaim.rejectedClaim();
@@ -172,6 +186,7 @@ public class WorkflowRuntimeClaimService {
                 recordId,
                 normalize(outbox.getTriggerEvent()),
                 outbox.getTriggerKey());
+            legacyKey = dedupeKey.legacySchedule(recordId, outbox.getTriggerKey());
         } else {
             return CanonicalClaim.rejectedClaim();
         }
@@ -185,7 +200,41 @@ public class WorkflowRuntimeClaimService {
             outbox.getRecordType(),
             recordId,
             key,
+            legacyKey,
             outbox.getId(),
+            "queued");
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public CanonicalClaim claimManual(
+            int workspaceId,
+            int workflowId,
+            long expectedVersionId,
+            long invocationId,
+            int recordId) {
+        workflowTriggerOutboxMapper.ensureWorkspaceGate(workspaceId);
+        Workflow workflow = workflowMapper.getByIdForUpdate(workspaceId, workflowId);
+        if (!canonicalOwnerCanClaim(workflow)
+                || workflow.getActiveVersionId() == null
+                || workflow.getActiveVersionId() != expectedVersionId) {
+            return CanonicalClaim.rejectedClaim();
+        }
+        WorkflowVersion version = activeVersion(workflow);
+        CompiledWorkflow compiled = compiled(workflow, version);
+        String triggerKey = Long.toString(invocationId);
+        String key = "manual:" + invocationId + ":" + recordId;
+        return claimCanonical(
+            workflow,
+            version,
+            compiled,
+            "manual",
+            "manual",
+            triggerKey,
+            version.getRecordType(),
+            recordId,
+            key,
+            null,
+            null,
             "queued");
     }
 
@@ -229,8 +278,13 @@ public class WorkflowRuntimeClaimService {
         String key = dedupeKey.entityChange(
             rule.getId(), dispatch.recordType(), dispatch.recordId(), dispatch.event(),
             dispatch.triggerKey(), dispatch.occurredAt(), trigger.getThrottleMinutes());
+        String legacyKey = dedupeKey.legacyEntityChange(
+            dispatch.recordId(),
+            dispatch.event(),
+            dispatch.occurredAt(),
+            trigger.getThrottleMinutes());
         return claimLegacy(
-            workflow, rule, dispatch.recordType(), dispatch.recordId(), key);
+            workflow, rule, dispatch.recordType(), dispatch.recordId(), key, legacyKey);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -246,7 +300,9 @@ public class WorkflowRuntimeClaimService {
         String key = dedupeKey.schedule(
             rule.getId(), rule.getRecordType(), recordId,
             normalize(dispatch.cadence()), dispatch.bucketKey());
-        return claimLegacy(workflow, rule, rule.getRecordType(), recordId, key);
+        String legacyKey = dedupeKey.legacySchedule(recordId, dispatch.bucketKey());
+        return claimLegacy(
+            workflow, rule, rule.getRecordType(), recordId, key, legacyKey);
     }
 
     private CanonicalClaim claimCanonical(
@@ -259,12 +315,19 @@ public class WorkflowRuntimeClaimService {
             String recordType,
             int recordId,
             String key,
+            String legacyKey,
             Long triggerOutboxId,
             String initialStatus) {
-        if (workflow.getLegacyRuleId() != null
-                && ruleMapper.getExecutionByDedupe(
-                    workflow.getWorkspaceId(), workflow.getLegacyRuleId(), key) != null) {
-            return CanonicalClaim.replayedWithoutRun();
+        if (workflow.getLegacyRuleId() != null) {
+            RuleExecution current = ruleMapper.getExecutionByDedupe(
+                workflow.getWorkspaceId(), workflow.getLegacyRuleId(), key);
+            RuleExecution legacy = legacyKey == null || current != null
+                ? null
+                : ruleMapper.getExecutionByDedupe(
+                    workflow.getWorkspaceId(), workflow.getLegacyRuleId(), legacyKey);
+            if (current != null || legacy != null) {
+                return CanonicalClaim.replayedWithoutRun();
+            }
         }
         WorkflowRun existing = workflowRunMapper.getByDedupe(
             workflow.getWorkspaceId(), workflow.getId(), key);
@@ -290,9 +353,6 @@ public class WorkflowRuntimeClaimService {
         run.setStartedAt(LocalDateTime.now());
         try {
             workflowRunMapper.insertRun(run);
-            if ("queued".equals(initialStatus)) {
-                workflowTriggerOutboxMapper.ensureWorkspaceGate(workflow.getWorkspaceId());
-            }
             return new CanonicalClaim(run, true, false, false);
         } catch (DuplicateKeyException exception) {
             WorkflowRun replay = workflowRunMapper.getByDedupe(
@@ -335,6 +395,7 @@ public class WorkflowRuntimeClaimService {
         return workflow != null
             && workflow.isEnabled()
             && workflow.getArchivedAt() == null
+            && workflow.getIntakePausedAt() == null
             && workflow.getActiveVersionId() != null
             && workflow.getActiveVersionId() == outbox.getWorkflowVersionId()
             && workflow.getRuntimeGeneration() == outbox.getWorkflowRuntimeGeneration();
@@ -345,7 +406,8 @@ public class WorkflowRuntimeClaimService {
             Rule rule,
             String recordType,
             int recordId,
-            String key) {
+            String key,
+            String legacyKey) {
         int workspaceId = rule.getWorkspaceId();
         if (workflow != null && workflowRunMapper.getByDedupe(
                 workspaceId, workflow.getId(), key) != null) {
@@ -353,6 +415,10 @@ public class WorkflowRuntimeClaimService {
         }
         RuleExecution existing = ruleMapper.getExecutionByDedupe(
             workspaceId, rule.getId(), key);
+        if (existing == null && legacyKey != null) {
+            existing = ruleMapper.getExecutionByDedupe(
+                workspaceId, rule.getId(), legacyKey);
+        }
         if (existing != null) {
             return LegacyClaim.replayedClaim();
         }
@@ -433,6 +499,7 @@ public class WorkflowRuntimeClaimService {
             && workflow.isEnabled()
             && "canonical".equals(workflow.getRuntimeOwner())
             && workflow.getArchivedAt() == null
+            && workflow.getIntakePausedAt() == null
             && workflow.getActiveVersionId() != null;
     }
 
@@ -456,6 +523,7 @@ public class WorkflowRuntimeClaimService {
             || (workflow.getWorkspaceId() == workspaceId
                 && "legacy".equals(workflow.getRuntimeOwner())
                 && workflow.getArchivedAt() == null
+                && workflow.getIntakePausedAt() == null
                 && Objects.equals(workflow.getLegacyRuleId(), rule.getId()));
     }
 

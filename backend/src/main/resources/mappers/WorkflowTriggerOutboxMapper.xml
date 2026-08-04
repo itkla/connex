@@ -24,6 +24,7 @@
     WHERE w.workspace_id = #{workspaceId}
       AND w.enabled = TRUE
       AND w.archived_at IS NULL
+      AND w.intake_paused_at IS NULL
       AND v.trigger_type = 'entity_change'
       AND v.record_type = #{recordType}
       AND JSON_CONTAINS(v.trigger_config, JSON_QUOTE(#{triggerEvent}), '$.events') = 1
@@ -44,6 +45,7 @@
     WHERE w.workspace_id = #{workspaceId}
       AND w.enabled = TRUE
       AND w.archived_at IS NULL
+      AND w.intake_paused_at IS NULL
       AND v.trigger_type = 'schedule'
       AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(v.trigger_config, '$.cadence'))) = #{cadence}
     ORDER BY w.id
@@ -99,15 +101,19 @@
   </select>
 
   <select id="findDueIdForUpdate" resultType="long">
-    SELECT id
-    FROM workflow_trigger_outbox
-    WHERE workspace_id = #{workspaceId}
-      AND available_at &lt;= CURRENT_TIMESTAMP(6)
+    SELECT o.id
+    FROM workflow_trigger_outbox o
+    JOIN workflow w
+      ON w.workspace_id = o.workspace_id
+     AND w.id = o.workflow_id
+    WHERE o.workspace_id = #{workspaceId}
+      AND w.intake_paused_at IS NULL
+      AND o.available_at &lt;= CURRENT_TIMESTAMP(6)
       AND (
-        status = 'pending'
-        OR (status = 'leased' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+        o.status = 'pending'
+        OR (o.status = 'leased' AND o.lease_until &lt; CURRENT_TIMESTAMP(6))
       )
-    ORDER BY available_at, id
+    ORDER BY o.available_at, o.id
     LIMIT 1
     FOR UPDATE SKIP LOCKED
   </select>
@@ -141,6 +147,12 @@
       AND id = #{id}
       AND delivery_attempt_count &lt; #{maxAttempts}
       AND available_at &lt;= CURRENT_TIMESTAMP(6)
+      AND EXISTS (
+        SELECT 1 FROM workflow w
+        WHERE w.workspace_id = workflow_trigger_outbox.workspace_id
+          AND w.id = workflow_trigger_outbox.workflow_id
+          AND w.intake_paused_at IS NULL
+      )
       AND (
         status = 'pending'
         OR (status = 'leased' AND lease_until &lt; CURRENT_TIMESTAMP(6))
@@ -209,6 +221,16 @@
       AND lease_until &gt;= CURRENT_TIMESTAMP(6)
   </update>
 
+  <update id="resolveDeadForWorkflow">
+    UPDATE workflow_trigger_outbox
+    SET status = 'invalidated',
+        last_error_code = NULL,
+        completed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND status = 'dead'
+  </update>
+
   <update id="releaseForRetry">
     UPDATE workflow_trigger_outbox
     SET status = 'pending',
@@ -242,15 +264,6 @@
     DELETE FROM workflow_trigger_outbox
     WHERE workspace_id = #{workspaceId}
       AND status IN ('completed', 'invalidated')
-      AND completed_at &lt; #{cutoff}
-    ORDER BY id
-    LIMIT #{limit}
-  </delete>
-
-  <delete id="purgeDeadBefore">
-    DELETE FROM workflow_trigger_outbox
-    WHERE workspace_id = #{workspaceId}
-      AND status = 'dead'
       AND completed_at &lt; #{cutoff}
     ORDER BY id
     LIMIT #{limit}

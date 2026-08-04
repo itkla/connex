@@ -15,7 +15,9 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RuleAction;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 
 /**
@@ -34,6 +36,7 @@ public class RuleActionExecutor {
     private final DealService dealService;
     private final NoteService noteService;
     private final NotificationDelivery notificationDelivery;
+    private final TagMapper tagMapper;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -93,6 +96,12 @@ public class RuleActionExecutor {
     }
 
     private void removeTag(RuleAction action, AutomationActionContext ctx) {
+        if (tagMapper.getTagById(ctx.workspaceId(), action.getTagId()) == null) {
+            throw new WorkflowExecutionException(
+                WorkflowDiagnosticCode.ACTION_TAG_UNAVAILABLE.value(),
+                "The workflow action is no longer executable.",
+                true);
+        }
         switch (ctx.recordType()) {
             case "company" -> companyService.removeTag(ctx.entityId(), action.getTagId());
             case "person" -> personService.removeTag(ctx.entityId(), action.getTagId());

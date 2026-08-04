@@ -25,12 +25,14 @@ import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.dto.WorkflowRunOperationDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowRunOperationServiceTest {
 
     @Mock private WorkflowMapper workflowMapper;
+    @Mock private WorkflowOperationsMapper workflowOperationsMapper;
     @Mock private WorkflowRunMapper runMapper;
     @Mock private WorkflowRuntimeProperties properties;
     @Mock private WorkspaceService workspaceService;
@@ -42,7 +44,12 @@ class WorkflowRunOperationServiceTest {
     @BeforeEach
     void setUp() {
         service = new WorkflowRunOperationService(
-            workflowMapper, runMapper, properties, workspaceService, auditService);
+            workflowMapper,
+            workflowOperationsMapper,
+            runMapper,
+            properties,
+            workspaceService,
+            auditService);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         Workflow workflow = new Workflow();
         workflow.setId(11);

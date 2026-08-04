@@ -14,6 +14,8 @@ public record WorkflowListItemDto(
     boolean enabled,
     String runtimeOwner,
     LocalDateTime archivedAt,
+    LocalDateTime intakePausedAt,
+    Integer intakePausedById,
     int draftRevision,
     String recordType,
     String executionMode,

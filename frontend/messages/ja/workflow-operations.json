@@ -1,0 +1,387 @@
+{
+  "WorkflowOperations": {
+    "title": "自動化オペレーション",
+    "description": "正常なワークフロー、待機中の処理、人による対応が必要な箇所を確認します。",
+    "workflowsAction": "ワークフロー",
+    "recipesAction": "レシピ",
+    "retry": "再試行",
+    "access": {
+      "title": "ワークフロー権限が必要です",
+      "body": "このワークスペースの自動化を管理する権限がありません。"
+    },
+    "errors": {
+      "title": "自動化の運用状況を読み込めませんでした",
+      "body": "欠けた指標を 0 として扱っていません。現在の状態をもう一度読み込んでください。",
+      "mutationTitle": "操作を完了できませんでした",
+      "mutationBody": "読み込み済みの証跡は保持されています。再試行を判断する前に最新の状態へ更新してください。"
+    },
+    "summary": {
+      "title": "現在の状態",
+      "workflows": "ワークフロー",
+      "healthy": "正常",
+      "attention": "要対応",
+      "paused": "一時停止",
+      "queued": "キュー待ち",
+      "overdue": "期限超過"
+    },
+    "triggerDiagnostics": {
+      "title": "トリガー配信の対応が必要です",
+      "description": "これらのトリガーはレコード登録前に失敗しました。固定診断コードは、後続の配信が成功するまで表示されます。",
+      "outcome": "この {triggerType} トリガーでは実行が開始されませんでした。"
+    },
+    "filters": {
+      "statusLabel": "実行ステータスで絞り込む",
+      "failureLabel": "失敗カテゴリで絞り込む",
+      "allStatuses": "すべてのステータス",
+      "allFailures": "すべての失敗カテゴリ"
+    },
+    "runs": {
+      "title": "最近の実行",
+      "description": "正規実行と移行済み履歴は明示的な実行キーで区別され、ID が混同されることはありません。",
+      "emptyTitle": "条件に一致する実行はありません",
+      "emptyBody": "ステータスまたは失敗カテゴリを変更して、他の履歴を確認してください。",
+      "loadMore": "さらに読み込む",
+      "loadingMore": "読み込み中",
+      "runMeta": "{runKey} · バージョン {version}",
+      "failureCategory": "失敗カテゴリ: {category}",
+      "recipeOrigin": "レシピ由来"
+    },
+    "failureCategory": {
+      "actor": "実行者",
+      "permission": "権限",
+      "reference": "レコード参照",
+      "retry": "再試行上限",
+      "configuration": "設定",
+      "execution": "実行"
+    },
+    "intervention": {
+      "open": "対応待ち",
+      "title": "人による対応が必要です",
+      "owner": "担当者",
+      "unassigned": "未割り当て",
+      "resolve": "解決済みにする"
+    },
+    "detail": {
+      "back": "オペレーションに戻る",
+      "missingTitle": "実行記録を表示できません",
+      "missingBody": "この実行キーはワークスペースに存在しないか、現在の権限では表示できません。",
+      "started": "開始: {date}",
+      "showOnWorkflow": "ワークフロー上で表示",
+      "newRun": "新しい実行を開始",
+      "retryDistinctionTitle": "再試行と新しい実行は別の操作です",
+      "retryDistinctionBody": "再試行は固定されたバージョンで現在の失敗アクションを再開します。新しい実行は現在の有効バージョンでレコードを登録します。"
+    },
+    "path": {
+      "title": "実行されたパス",
+      "description": "各行はノードの結果として保存された記録です。通知履歴から推測していません。",
+      "legacyTitle": "概要のみの旧形式記録",
+      "legacyBody": "移行済みの旧形式実行には正規ステップがないため、Connex はパスを生成しません。",
+      "outcome": "選択された分岐: {outcome}",
+      "attempts": "{count} 回試行"
+    },
+    "nodeType": {
+      "trigger": "トリガー",
+      "condition": "条件",
+      "action": "アクション",
+      "delay": "待機",
+      "end": "終了"
+    },
+    "health": {
+      "title": "ワークフローの状態",
+      "noSignals": "警告はありません",
+      "activeVersion": "有効バージョン",
+      "version": "バージョン {number}",
+      "none": "未公開",
+      "runtimeOwner": "実行ランタイム",
+      "state": {
+        "healthy": "正常",
+        "paused": "一時停止",
+        "disabled": "無効",
+        "archived": "アーカイブ済み",
+        "intervention_required": "要対応",
+        "backlogged": "処理待ち",
+        "degraded": "注意"
+      },
+      "signal": {
+        "intake_paused": "新規受付を一時停止し、バックログを保持しています。",
+        "workflow_disabled": "新しい実行は停止中です。進行中の処理は継続します。",
+        "workflow_archived": "ワークフローはアーカイブ済みで、履歴は保持されています。",
+        "open_intervention": "人による対応が必要な実行があります。",
+        "queued_backlog": "実行キューで待機している処理があります。",
+        "waiting_backlog": "待機時間の終了を待っている処理があります。",
+        "overdue_backlog": "期限を超過したキューまたは待機中の処理があります。",
+        "recent_failure": "最近の実行が失敗しました。"
+      }
+    },
+    "runtimeOwner": {
+      "legacy": "旧ランタイム",
+      "canonical": "正規ランタイム"
+    },
+    "backlog": {
+      "title": "バックログ",
+      "queued": "キュー待ち",
+      "waiting": "待機中",
+      "dueNow": "実行時刻到来",
+      "overdue": "期限超過",
+      "nextResume": "次回再開予定: {date}",
+      "oldestQueued": "最も古いキュー待ち: {date}",
+      "recentFailures": "最近の失敗 {count} 件"
+    },
+    "changes": {
+      "title": "最近の定義変更",
+      "description": "変更不能な公開バージョンから、パスの変更内容を確認できます。",
+      "empty": "公開バージョンの変更履歴はありません。",
+      "initial": "初回バージョン {version}",
+      "version": "バージョン {from} から {to}",
+      "counts": "追加 {added} · 変更 {changed} · 削除 {removed}"
+    },
+    "controls": {
+      "title": "運用コントロール",
+      "pause": "受付を一時停止",
+      "resume": "受付を再開",
+      "disable": "ワークフローを無効化",
+      "cancelRun": "実行をキャンセル",
+      "cancellationRequested": "キャンセル要求済み",
+      "retryStep": "失敗アクションを再試行",
+      "pauseHelp": "一時停止は新規受付を保留し、バックログを保持します。",
+      "disableHelp": "無効化は新しい実行を止め、進行中の実行は継続します。アーカイブは別の操作です。"
+    },
+    "reason": {
+      "actor_unavailable": "設定された実行者を利用できません。",
+      "actor_inactive": "設定された実行者は現在無効です。",
+      "permission_denied": "現在のユーザーにはこの操作の権限がありません。",
+      "action_permission_missing": "アクション実行者に必要な権限がありません。",
+      "reference_unavailable": "設定された参照先を利用できません。",
+      "record_unavailable": "対象レコードが存在しないか、表示権限がありません。",
+      "retry_exhausted": "制限された再試行回数に達しました。",
+      "retry_not_safe": "このアクションは安全に再試行できると分類されていません。",
+      "execution_failed": "アクションを完了できませんでした。",
+      "unknown": "安全な診断情報はありますが、このクライアント版には対応する翻訳がありません。"
+    },
+    "retrySafety": {
+      "transactional": "トランザクション再試行",
+      "deduplicated": "重複防止付き再試行",
+      "none": "安全な再試行なし"
+    },
+    "manual": {
+      "title": "ワークフローを実行",
+      "description": "正確なレコード範囲を固定し、内容を確認してから永続的な実行を確定します。",
+      "distinctionTitle": "新しい実行を作成します",
+      "distinctionBody": "失敗したアクションの再試行とは別です。選択したワークフローの現在の有効バージョンを使用します。",
+      "workflowLabel": "ワークフロー",
+      "workflowPlaceholder": "ワークフローを選択",
+      "noWorkflows": "このレコード種別に一致する公開済みの正規ワークフローはありません。",
+      "recordIdLabel": "レコード ID",
+      "scopeTitle": "正確な対象範囲",
+      "scope": {
+        "single_record": "選択した 1 件のレコード",
+        "page_selection": "選択した {count} 件のレコード",
+        "explicit_selection": "明示的に選択した {count} 件のレコード",
+        "filter_match": "サーバーが解決したフィルターに一致するすべてのレコード",
+        "smart_segment": "スマートセグメントに一致するすべてのレコード",
+        "saved_view": "保存済みビュー内のすべてのレコード",
+        "search_snapshot": "検索スナップショット内のすべてのレコード",
+        "command_palette": "解決済みの対象範囲を内包するコマンドパレット範囲"
+      },
+      "review": "対象範囲を確認",
+      "preparing": "対象範囲を準備中",
+      "confirm": "新しい実行を確定",
+      "confirming": "確定中",
+      "close": "閉じる",
+      "refresh": "結果を更新",
+      "cancel": "残りのレコードをキャンセル",
+      "version": "固定バージョン {number}",
+      "exactCount": "対象 {count} 件",
+      "readyCount": "実行可能 {count} 件",
+      "actor": "実行者",
+      "systemActor": "限定されたシステム実行者",
+      "expires": "確認期限",
+      "actionsTitle": "予定アクションと再試行分類",
+      "unknownAction": "ワークフローアクション",
+      "expectedSkipsTitle": "予想されるスキップ",
+      "samplesTitle": "対象範囲の限定サンプル",
+      "blockersTitle": "確定前に解消が必要な項目",
+      "confirmedTitle": "実行を確定しました",
+      "confirmedBody": "固定された {count} 件の対象範囲を受け付けました。",
+      "partialNote": "一部のレコードはスキップまたは失敗しました。レコード別の結果はこの実行依頼に保持されます。",
+      "recordIssuesTitle": "通常完了しなかったレコード",
+      "viewRun": "実行を表示",
+      "moreRecordIssues": "他 {count} 件のレコード結果が実行依頼に保持されています。",
+      "errors": {
+        "title": "実行を準備できませんでした",
+        "workflows": "ワークフローを読み込めませんでした。",
+        "prepare": "正確な対象範囲を固定できませんでした。ワークフローと対象範囲を確認して再試行してください。",
+        "confirm": "対象範囲の期限切れまたは変更が考えられます。もう一度準備してから確定してください。",
+        "result": "現在の実行結果を読み込めませんでした。",
+        "cancel": "残りの実行対象をキャンセルできませんでした。"
+      }
+    },
+    "status": {
+      "queued": "キュー待ち",
+      "running": "実行中",
+      "waiting": "待機中",
+      "succeeded": "成功",
+      "failed": "失敗",
+      "intervention_required": "要対応",
+      "cancelled": "キャンセル済み",
+      "skipped": "スキップ"
+    },
+    "expectedSkip": {
+      "permission": "権限",
+      "staleState": "古い状態",
+      "missingReference": "参照先なし",
+      "limit": "上限",
+      "unsupportedContext": "未対応のコンテキスト"
+    },
+    "blocker": {
+      "workflow_archived": "ワークフローはアーカイブ済みです。",
+      "workflow_disabled": "ワークフローは無効です。",
+      "workflow_paused": "ワークフローの受付は一時停止中です。",
+      "workflow_not_canonical": "このワークフローは正規ランタイムの管理対象ではありません。",
+      "workflow_version_changed": "有効なワークフローバージョンが変更されました。",
+      "scope_expired": "準備した対象範囲の期限が切れました。",
+      "scope_hash_mismatch": "準備した対象範囲が確認用ハッシュと一致しません。",
+      "record_not_visible": "現在のユーザーが表示できないレコードがあります。",
+      "record_not_found": "存在しないレコードがあります。",
+      "record_type_mismatch": "対象範囲に別のレコード種別が含まれています。",
+      "scope_too_large": "正確な対象範囲が 1,000 件の上限を超えています。",
+      "scope_empty": "正確な対象範囲にレコードがありません。",
+      "scope_not_supported": "選択したワークフローではこの対象範囲を利用できません。",
+      "nested_command_scope": "コマンドパレット範囲の中に別のコマンドパレット範囲を含めることはできません。",
+      "action_permission_missing": "アクション実行者に必要な権限がありません。",
+      "actor_unavailable": "設定された実行者を利用できません。",
+      "actor_inactive": "設定された実行者は無効です。",
+      "configuration_missing": "必要なワークフロー設定がありません。",
+      "definition_invalid": "有効なワークフロー定義が無効です。"
+    },
+    "recipes": {
+      "title": "ワークフローレシピ",
+      "description": "実行者、権限、参照データ、副作用をすべて開示した 3 つの決定的なパターンから始められます。",
+      "back": "ワークフローに戻る",
+      "backToRecipes": "レシピに戻る",
+      "emptyTitle": "利用できるレシピはありません",
+      "emptyBody": "現在、厳選レシピの登録はありません。",
+      "errorTitle": "レシピを読み込めませんでした",
+      "errorBody": "厳選レシピをもう一度読み込んでください。",
+      "missingTitle": "レシピを利用できません",
+      "missingBody": "このレシピキーは現在の登録にありません。",
+      "version": "レシピバージョン {version}",
+      "deterministic": "決定的",
+      "source": "発生元イベント: {source}",
+      "configure": "確認して設定",
+      "configureTitle": "必要な設定",
+      "configureBody": "編集可能な値を決定的なテンプレートに適用します。固定されたトリガーとグラフ項目はここでは変更できません。",
+      "nameLabel": "ワークフロー名",
+      "exampleRecordLabel": "サンプルレコード ID（任意）",
+      "exampleRecordHelp": "指定すると、ワークフローを実行せずに表示権限のある 1 件のレコードを評価します。",
+      "previewOnlyTitle": "プレビューのみで、ワークフローは実行されません",
+      "previewOnlyBody": "プレビューはワークフロー、バージョン、実行、ステップ、アウトボックス、監査、タスク、メモ、アクティビティ、タグ、通知、レコード変更を作成しません。",
+      "preview": "レシピをプレビュー",
+      "previewing": "プレビュー中",
+      "previewReady": "プレビューの準備ができました",
+      "zeroWrites": "サーバーから writesCreated: false が返されました。",
+      "nodes": "ノード",
+      "actions": "アクション",
+      "unresolved": "未設定の必須項目が {count} 件あります。",
+      "validationBlocked": "生成された定義は公開できる状態ではありません。",
+      "install": "無効状態でワークフローを作成",
+      "installing": "ワークフローを作成中",
+      "installHelp": "レシピとテンプレートのバージョン帰属を持つ無効状態の正規ワークフローを作成します。確認後に有効化してください。",
+      "actionErrorTitle": "レシピ操作に失敗しました",
+      "actionErrorBody": "成功したものとして扱っていません。設定を確認して再試行してください。",
+      "disclosureTitle": "このレシピの動作",
+      "disclosureBody": "これらの開示情報はレシピ契約の一部で、作成後も帰属情報として保持されます。",
+      "sourceLabel": "発生元イベント",
+      "actorLabel": "実行者",
+      "dataRead": "参照するデータ",
+      "dataWritten": "変更するデータ",
+      "permissions": "必要な権限",
+      "lockedFields": "固定項目",
+      "editableFields": "編集可能項目",
+      "sideEffects": "副作用",
+      "retryBehaviour": "アクション別の再試行",
+      "disableRemove": "無効化と削除",
+      "disableBehavior": "無効化は新しい実行を止め、進行中の実行は継続します",
+      "removeBehavior": "削除はアーカイブとして扱い、バージョンと実行履歴を保持します",
+      "items": {
+        "person-job-change-follow-up": {
+          "title": "転職後のフォローアップ",
+          "description": "連絡先の勤務先情報が変わったとき、設定した担当者に期限付きのフォローアップタスクを作成します。"
+        },
+        "deal-won-handoff": {
+          "title": "成約案件の引き継ぎ",
+          "description": "案件が成約したとき、引き継ぎ内容を記録し、設定した担当者にフォローアップタスクを作成します。"
+        },
+        "cooling-company-review": {
+          "title": "関係が冷えた会社の確認",
+          "description": "スケジュールに従い、関係温度の条件を満たす会社を登録して確認タスクを作成します。"
+        }
+      }
+    },
+    "sourceEvent": {
+      "person": {
+        "job_changed": "連絡先の勤務先変更"
+      },
+      "deal": {
+        "won": "案件の成約"
+      },
+      "schedule": {
+        "daily": "関係温度の日次確認"
+      }
+    },
+    "actorModel": {
+      "user": "設定されたワークスペースユーザー"
+    },
+    "data": {
+      "person": "連絡先",
+      "company": "会社",
+      "deal": "案件",
+      "task": "タスク",
+      "activity": "アクティビティ",
+      "note": "メモ",
+      "tag": "タグ",
+      "owner": "担当者",
+      "stage": "ステージ",
+      "notification": "通知"
+    },
+    "sideEffect": {
+      "create_task": "タスクを作成",
+      "log_activity": "アクティビティを記録",
+      "add_tag": "タグを追加",
+      "remove_tag": "タグを削除",
+      "create_note": "メモを作成",
+      "assign_owner": "担当者を割り当て",
+      "change_stage": "ステージを変更",
+      "notify": "通知を作成"
+    },
+    "recipeField": {
+      "sourceEvent": "発生元イベント",
+      "recordType": "レコード種別",
+      "actionTypes": "アクション種別",
+      "retryBehavior": "再試行動作",
+      "actorUserId": "実行者",
+      "targetUserId": "タスク担当者",
+      "taskTitle": "タスク名",
+      "activityNote": "アクティビティ内容",
+      "dueInDays": "期限のオフセット",
+      "coolingDays": "関係温度のしきい値"
+    },
+    "parameter": {
+      "actorUserId": "実行者",
+      "targetUserId": "タスク担当者",
+      "taskTitle": "タスク名",
+      "activityNote": "アクティビティ内容",
+      "dueInDays": "期限までの日数",
+      "coolingDays": "関係温度のしきい値（日数）",
+      "userPlaceholder": "ワークスペースメンバーを選択"
+    },
+    "permission": {
+      "TASK_CREATE": "タスクを作成",
+      "ACTIVITY_CREATE": "アクティビティを記録",
+      "NOTE_CREATE": "メモを作成",
+      "DEAL_UPDATE": "案件を更新",
+      "COMPANY_UPDATE": "会社を更新",
+      "PERSON_UPDATE": "連絡先を更新"
+    }
+  }
+}

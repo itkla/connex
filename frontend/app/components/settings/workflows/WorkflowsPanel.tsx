@@ -11,6 +11,8 @@ import {
     DocumentDuplicateIcon,
     EllipsisHorizontalIcon,
     PencilSquareIcon,
+    PauseCircleIcon,
+    PlayCircleIcon,
     PlusIcon,
 } from "@heroicons/react/24/outline";
 
@@ -26,7 +28,9 @@ import {
     disableWorkflow,
     enableWorkflow,
     getWorkflows,
+    pauseWorkflow,
     restoreWorkflow,
+    resumeWorkflow,
 } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type { WorkflowListItem } from "@/app/lib/types";
@@ -111,10 +115,24 @@ export default function WorkflowsPanel() {
         pendingId,
     }, updatePanelState] = useReducer(workflowsPanelReducer, INITIAL_WORKFLOWS_PANEL_STATE);
     const scopeRef = useRef({ activeWorkspaceId, switching });
+    const lifetimeRef = useRef(false);
 
     useLayoutEffect(() => {
         scopeRef.current = { activeWorkspaceId, switching };
     }, [activeWorkspaceId, switching]);
+
+    useEffect(() => {
+        lifetimeRef.current = true;
+        return () => {
+            lifetimeRef.current = false;
+        };
+    }, []);
+
+    const isPanelActive = (workspaceId: number) => (
+        lifetimeRef.current
+        && scopeRef.current.activeWorkspaceId === workspaceId
+        && !scopeRef.current.switching
+    );
 
     useEffect(() => {
         if (!activeWorkspaceId || switching) return;
@@ -169,10 +187,10 @@ export default function WorkflowsPanel() {
             const init = { headers: { "X-Workspace-Id": String(workspaceId) } };
             if (nextEnabled) await enableWorkflow(workflow.id, init);
             else await disableWorkflow(workflow.id, init);
-            if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+            if (!isPanelActive(workspaceId)) return;
             toastSuccess(t(nextEnabled ? "enabled" : "disabled"));
         } catch {
-            if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+            if (!isPanelActive(workspaceId)) return;
             updatePanelState((current) => ({
                 workflows: current.workflows.map((item) => (
                     item.id === workflow.id ? { ...item, enabled: workflow.enabled } : item
@@ -180,7 +198,7 @@ export default function WorkflowsPanel() {
             }));
             toastError(t("lifecycleFailed"));
         } finally {
-            if (scopeRef.current.activeWorkspaceId === workspaceId) updatePanelState({ pendingId: null });
+            if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
     };
 
@@ -191,11 +209,11 @@ export default function WorkflowsPanel() {
         try {
             if (archived) {
                 await restoreWorkflow(archiveTarget.id, { headers: { "X-Workspace-Id": String(workspaceId) } });
-                if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+                if (!isPanelActive(workspaceId)) return;
                 toastSuccess(t("restored"));
             } else {
                 await archiveWorkflow(archiveTarget.id, { headers: { "X-Workspace-Id": String(workspaceId) } });
-                if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+                if (!isPanelActive(workspaceId)) return;
                 toastSuccess(t("archived"));
             }
             updatePanelState((current) => ({
@@ -203,10 +221,36 @@ export default function WorkflowsPanel() {
                 archiveTarget: null,
             }));
         } catch {
-            if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+            if (!isPanelActive(workspaceId)) return;
             toastError(t("lifecycleFailed"));
         } finally {
-            if (scopeRef.current.activeWorkspaceId === workspaceId) updatePanelState({ pendingId: null });
+            if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
+        }
+    };
+
+    const togglePaused = async (workflow: WorkflowListItem) => {
+        const workspaceId = activeWorkspaceId;
+        if (workflow.archivedAt || workspaceId == null || switching) return;
+        updatePanelState({ pendingId: workflow.id });
+        try {
+            const init = { headers: { "X-Workspace-Id": String(workspaceId) } };
+            const updated = workflow.intakePausedAt
+                ? await resumeWorkflow(workflow.id, init)
+                : await pauseWorkflow(workflow.id, init);
+            if (!isPanelActive(workspaceId)) return;
+            updatePanelState((current) => ({
+                workflows: current.workflows.map((item) => item.id === workflow.id ? {
+                    ...item,
+                    intakePausedAt: updated.intakePausedAt,
+                    intakePausedById: updated.intakePausedById,
+                } : item),
+            }));
+            toastSuccess(t(workflow.intakePausedAt ? "resumed" : "paused"));
+        } catch {
+            if (!isPanelActive(workspaceId)) return;
+            toastError(t("lifecycleFailed"));
+        } finally {
+            if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
     };
 
@@ -220,10 +264,18 @@ export default function WorkflowsPanel() {
                 title={t("title")}
                 description={t("subtitle")}
                 actions={(
-                    <Button onClick={() => router.push("/workflows/new")} variant="brand" disabled={switching}>
-                        <PlusIcon className="size-4" />
-                        {t("newWorkflow")}
-                    </Button>
+                    <>
+                        <Button onClick={() => router.push("/workflows/operations")} variant="outline" disabled={switching}>
+                            {t("operations")}
+                        </Button>
+                        <Button onClick={() => router.push("/workflows/recipes")} variant="outline" disabled={switching}>
+                            {t("recipes")}
+                        </Button>
+                        <Button onClick={() => router.push("/workflows/new")} variant="brand" disabled={switching}>
+                            <PlusIcon className="size-4" />
+                            {t("newWorkflow")}
+                        </Button>
+                    </>
                 )}
             />
 
@@ -285,6 +337,12 @@ export default function WorkflowsPanel() {
                                             </Badge>
                                             {!workflow.enabled && !archived ? (
                                                 <Badge variant="outline" className="text-muted-foreground">{t("disabledBadge")}</Badge>
+                                            ) : null}
+                                            {workflow.intakePausedAt && !archived ? (
+                                                <Badge variant="outline" className="border-risk-low/40 bg-risk-low/10 text-foreground">
+                                                    <PauseCircleIcon className="size-3" />
+                                                    {t("pausedBadge")}
+                                                </Badge>
                                             ) : null}
                                             {workflow.executionMode === "system" ? (
                                                 <Badge variant="secondary" className="gap-1 text-muted-foreground">
@@ -348,6 +406,14 @@ export default function WorkflowsPanel() {
                                                 <ClockIcon className="size-4" />
                                                 {t("runs.view")}
                                             </DropdownMenuItem>
+                                            {!archived ? (
+                                                <DropdownMenuItem disabled={busy} onSelect={() => void togglePaused(workflow)}>
+                                                    {workflow.intakePausedAt
+                                                        ? <PlayCircleIcon className="size-4" />
+                                                        : <PauseCircleIcon className="size-4" />}
+                                                    {t(workflow.intakePausedAt ? "resume" : "pause")}
+                                                </DropdownMenuItem>
+                                            ) : null}
                                             <DropdownMenuItem disabled={busy} onSelect={() => updatePanelState({ archiveTarget: workflow })}>
                                                 {archived ? <ArrowUturnLeftIcon className="size-4" /> : <ArchiveBoxIcon className="size-4" />}
                                                 {t(archived ? "restore" : "archive")}

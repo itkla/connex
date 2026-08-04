@@ -1,0 +1,387 @@
+{
+  "WorkflowOperations": {
+    "title": "Automation operations",
+    "description": "See what is healthy, what is waiting, and where a person needs to step in.",
+    "workflowsAction": "Workflows",
+    "recipesAction": "Recipes",
+    "retry": "Try again",
+    "access": {
+      "title": "Workflow access required",
+      "body": "You do not have permission to manage automation in this workspace."
+    },
+    "errors": {
+      "title": "Automation operations could not be loaded",
+      "body": "No metrics have been assumed. Try loading the current operational state again.",
+      "mutationTitle": "The operation did not complete",
+      "mutationBody": "The loaded evidence remains available. Refresh it before deciding whether to try the operation again."
+    },
+    "summary": {
+      "title": "Current health",
+      "workflows": "Workflows",
+      "healthy": "Healthy",
+      "attention": "Needs attention",
+      "paused": "Paused",
+      "queued": "Queued",
+      "overdue": "Overdue"
+    },
+    "triggerDiagnostics": {
+      "title": "Trigger delivery needs attention",
+      "description": "These triggers failed before record enrollment. The fixed diagnostic code remains visible until a later delivery succeeds.",
+      "outcome": "No run was started for this {triggerType} trigger."
+    },
+    "filters": {
+      "statusLabel": "Filter by run status",
+      "failureLabel": "Filter by failure category",
+      "allStatuses": "All statuses",
+      "allFailures": "All failure categories"
+    },
+    "runs": {
+      "title": "Recent runs",
+      "description": "Canonical and migrated history use explicit run keys, so their identifiers are never confused.",
+      "emptyTitle": "No runs match these filters",
+      "emptyBody": "Change the status or failure filter to review other automation history.",
+      "loadMore": "Load more",
+      "loadingMore": "Loading more",
+      "runMeta": "{runKey} · version {version}",
+      "failureCategory": "Failure category: {category}",
+      "recipeOrigin": "Recipe origin"
+    },
+    "failureCategory": {
+      "actor": "Actor",
+      "permission": "Permission",
+      "reference": "Record reference",
+      "retry": "Retry limit",
+      "configuration": "Configuration",
+      "execution": "Execution"
+    },
+    "intervention": {
+      "open": "Open intervention",
+      "title": "Intervention required",
+      "owner": "Owner",
+      "unassigned": "Unassigned",
+      "resolve": "Mark resolved"
+    },
+    "detail": {
+      "back": "Back to operations",
+      "missingTitle": "Run evidence unavailable",
+      "missingBody": "This run key does not exist in this workspace or is no longer visible to you.",
+      "started": "Started {date}",
+      "showOnWorkflow": "Show on workflow",
+      "newRun": "Start a new run",
+      "retryDistinctionTitle": "Retry and new run are different operations",
+      "retryDistinctionBody": "Retry resumes the current failed action against its pinned version. A new run enrolls a record against the current active version."
+    },
+    "path": {
+      "title": "Executed path",
+      "description": "Each row is stored evidence for one node outcome. No step is inferred from notifications.",
+      "legacyTitle": "Summary-only legacy evidence",
+      "legacyBody": "Migrated legacy runs do not have canonical step rows, so Connex does not invent a path for them.",
+      "outcome": "Branch taken: {outcome}",
+      "attempts": "{count, plural, one {# attempt} other {# attempts}}"
+    },
+    "nodeType": {
+      "trigger": "Trigger",
+      "condition": "Condition",
+      "action": "Action",
+      "delay": "Delay",
+      "end": "End"
+    },
+    "health": {
+      "title": "Workflow health",
+      "noSignals": "No warning signals",
+      "activeVersion": "Active version",
+      "version": "Version {number}",
+      "none": "Not published",
+      "runtimeOwner": "Runtime owner",
+      "state": {
+        "healthy": "Healthy",
+        "paused": "Paused",
+        "disabled": "Disabled",
+        "archived": "Archived",
+        "intervention_required": "Intervention required",
+        "backlogged": "Backlogged",
+        "degraded": "Degraded"
+      },
+      "signal": {
+        "intake_paused": "New intake is paused while the backlog is preserved.",
+        "workflow_disabled": "New runs are disabled. In-flight work continues.",
+        "workflow_archived": "The workflow is archived and retains its history.",
+        "open_intervention": "At least one run needs a person to intervene.",
+        "queued_backlog": "Runs are waiting in the execution queue.",
+        "waiting_backlog": "Runs are waiting for a delay to finish.",
+        "overdue_backlog": "At least one queued or waiting run is overdue.",
+        "recent_failure": "A recent run failed."
+      }
+    },
+    "runtimeOwner": {
+      "legacy": "Legacy",
+      "canonical": "Canonical"
+    },
+    "backlog": {
+      "title": "Backlog",
+      "queued": "Queued",
+      "waiting": "Waiting",
+      "dueNow": "Due now",
+      "overdue": "Overdue",
+      "nextResume": "Next scheduled resume: {date}",
+      "oldestQueued": "Oldest queued run: {date}",
+      "recentFailures": "{count, plural, =0 {No recent failures} one {# recent failure} other {# recent failures}}"
+    },
+    "changes": {
+      "title": "Recent definition changes",
+      "description": "Immutable published versions show how the path changed over time.",
+      "empty": "No published version changes are available.",
+      "initial": "Initial version {version}",
+      "version": "Version {from} to {to}",
+      "counts": "{added} added · {changed} changed · {removed} removed"
+    },
+    "controls": {
+      "title": "Operational controls",
+      "pause": "Pause intake",
+      "resume": "Resume intake",
+      "disable": "Disable workflow",
+      "cancelRun": "Cancel run",
+      "cancellationRequested": "Cancellation requested",
+      "retryStep": "Retry failed action",
+      "pauseHelp": "Pause holds new intake and preserves its backlog.",
+      "disableHelp": "Disable stops new runs while in-flight runs continue. Archive remains a separate product action."
+    },
+    "reason": {
+      "actor_unavailable": "The configured actor is unavailable.",
+      "actor_inactive": "The configured actor is no longer active.",
+      "permission_denied": "The caller no longer has permission for this operation.",
+      "action_permission_missing": "The action actor is missing a required permission.",
+      "reference_unavailable": "A configured reference is unavailable.",
+      "record_unavailable": "The target record is unavailable or not visible.",
+      "retry_exhausted": "The bounded retry limit was reached.",
+      "retry_not_safe": "This action is not classified as retry-safe.",
+      "execution_failed": "The action could not complete.",
+      "unknown": "A support-safe diagnostic is available, but no localized detail is defined for this client version."
+    },
+    "retrySafety": {
+      "transactional": "Transactional retry",
+      "deduplicated": "Deduplicated retry",
+      "none": "No safe retry"
+    },
+    "manual": {
+      "title": "Run workflow",
+      "description": "Freeze an exact record scope, review it, then confirm one durable invocation.",
+      "distinctionTitle": "This creates a new run",
+      "distinctionBody": "This is separate from retrying a failed action. The selected workflow uses its current active version.",
+      "workflowLabel": "Workflow",
+      "workflowPlaceholder": "Choose a workflow",
+      "noWorkflows": "No published canonical workflow matches this record type.",
+      "recordIdLabel": "Record ID",
+      "scopeTitle": "Exact scope",
+      "scope": {
+        "single_record": "One selected record",
+        "page_selection": "{count, plural, one {# selected record} other {# selected records}}",
+        "explicit_selection": "{count, plural, one {# explicitly selected record} other {# explicitly selected records}}",
+        "filter_match": "All records matching the server-resolved filter",
+        "smart_segment": "All records matching the smart segment",
+        "saved_view": "All records in the saved view",
+        "search_snapshot": "All records in the search snapshot",
+        "command_palette": "Command palette scope with a resolved nested scope"
+      },
+      "review": "Review exact scope",
+      "preparing": "Preparing scope",
+      "confirm": "Confirm new run",
+      "confirming": "Confirming",
+      "close": "Close",
+      "refresh": "Refresh result",
+      "cancel": "Cancel remaining records",
+      "version": "Pinned version {number}",
+      "exactCount": "{count, plural, one {# record} other {# records}}",
+      "readyCount": "{count, plural, one {# ready} other {# ready}}",
+      "actor": "Execution actor",
+      "systemActor": "Narrow system actor",
+      "expires": "Confirmation expires",
+      "actionsTitle": "Planned actions and retry classification",
+      "unknownAction": "Workflow action",
+      "expectedSkipsTitle": "Expected skips",
+      "samplesTitle": "Bounded scope sample",
+      "blockersTitle": "Resolve these blockers before confirming",
+      "confirmedTitle": "Invocation confirmed",
+      "confirmedBody": "Connex accepted the frozen scope of {count, plural, one {# record} other {# records}}.",
+      "partialNote": "Some records were skipped or failed. The per-record result remains attached to this invocation.",
+      "recordIssuesTitle": "Records not completed normally",
+      "viewRun": "View run",
+      "moreRecordIssues": "{count, plural, one {# more record is retained in the invocation} other {# more records are retained in the invocation}}.",
+      "errors": {
+        "title": "The run could not be prepared",
+        "workflows": "Workflows could not be loaded.",
+        "prepare": "The exact scope could not be frozen. Review the workflow and scope, then try again.",
+        "confirm": "The scope may have expired or changed. Prepare it again before confirming.",
+        "result": "The current invocation result could not be loaded.",
+        "cancel": "The remaining invocation records could not be cancelled."
+      }
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "waiting": "Waiting",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "intervention_required": "Needs intervention",
+      "cancelled": "Cancelled",
+      "skipped": "Skipped"
+    },
+    "expectedSkip": {
+      "permission": "Permission",
+      "staleState": "Stale state",
+      "missingReference": "Missing reference",
+      "limit": "Limit",
+      "unsupportedContext": "Unsupported context"
+    },
+    "blocker": {
+      "workflow_archived": "The workflow is archived.",
+      "workflow_disabled": "The workflow is disabled.",
+      "workflow_paused": "Workflow intake is paused.",
+      "workflow_not_canonical": "The canonical runtime does not own this workflow.",
+      "workflow_version_changed": "The active workflow version changed.",
+      "scope_expired": "The prepared scope expired.",
+      "scope_hash_mismatch": "The prepared scope no longer matches its confirmation hash.",
+      "record_not_visible": "At least one record is not visible to the current caller.",
+      "record_not_found": "At least one record no longer exists.",
+      "record_type_mismatch": "The scope contains a different record type.",
+      "scope_too_large": "The exact scope exceeds the 1,000-record limit.",
+      "scope_empty": "The exact scope contains no records.",
+      "scope_not_supported": "This scope is not supported for the selected workflow.",
+      "nested_command_scope": "A command palette scope cannot contain another command palette scope.",
+      "action_permission_missing": "The action actor is missing a required permission.",
+      "actor_unavailable": "The configured actor is unavailable.",
+      "actor_inactive": "The configured actor is inactive.",
+      "configuration_missing": "Required workflow configuration is missing.",
+      "definition_invalid": "The active workflow definition is invalid."
+    },
+    "recipes": {
+      "title": "Workflow recipes",
+      "description": "Start from three deterministic patterns with every actor, permission, data touch, and side effect disclosed.",
+      "back": "Back to workflows",
+      "backToRecipes": "Back to recipes",
+      "emptyTitle": "No recipes available",
+      "emptyBody": "The curated recipe register is currently empty.",
+      "errorTitle": "Recipes could not be loaded",
+      "errorBody": "Try loading the curated register again.",
+      "missingTitle": "Recipe unavailable",
+      "missingBody": "This recipe key is not available in the current register.",
+      "version": "Recipe version {version}",
+      "deterministic": "Deterministic",
+      "source": "Source event: {source}",
+      "configure": "Review and configure",
+      "configureTitle": "Required configuration",
+      "configureBody": "Editable values are applied to the deterministic template. Locked trigger and graph fields cannot be changed here.",
+      "nameLabel": "Workflow name",
+      "exampleRecordLabel": "Example record ID (optional)",
+      "exampleRecordHelp": "When provided, preview evaluates one permission-visible record without running the workflow.",
+      "previewOnlyTitle": "Preview only, no workflow will run",
+      "previewOnlyBody": "Preview creates no workflow, version, run, step, outbox, audit, task, note, activity, tag, notification, or record mutation.",
+      "preview": "Preview recipe",
+      "previewing": "Previewing",
+      "previewReady": "Preview is ready",
+      "zeroWrites": "The server reported writesCreated: false.",
+      "nodes": "Nodes",
+      "actions": "Actions",
+      "unresolved": "{count, plural, one {# required value is unresolved} other {# required values are unresolved}}.",
+      "validationBlocked": "The generated definition is not ready to publish.",
+      "install": "Create disabled workflow",
+      "installing": "Creating workflow",
+      "installHelp": "Installation creates a disabled canonical workflow with recipe and template version attribution. Enable it only after review.",
+      "actionErrorTitle": "Recipe operation failed",
+      "actionErrorBody": "No success has been assumed. Review the configuration and try again.",
+      "disclosureTitle": "What this recipe does",
+      "disclosureBody": "These disclosures are part of the recipe contract and remain attributable after installation.",
+      "sourceLabel": "Source event",
+      "actorLabel": "Actor",
+      "dataRead": "Data read",
+      "dataWritten": "Data written",
+      "permissions": "Permissions",
+      "lockedFields": "Locked fields",
+      "editableFields": "Editable fields",
+      "sideEffects": "Side effects",
+      "retryBehaviour": "Per-action retry",
+      "disableRemove": "Disable and remove",
+      "disableBehavior": "Disable stops new runs while in-flight runs continue",
+      "removeBehavior": "Remove archives the workflow and retains versions and run history",
+      "items": {
+        "person-job-change-follow-up": {
+          "title": "Follow up after a job change",
+          "description": "When a contact's employment changes, create a bounded follow-up task for the configured owner."
+        },
+        "deal-won-handoff": {
+          "title": "Hand off a won deal",
+          "description": "When a deal is won, log the handoff context and create a follow-up task for the configured owner."
+        },
+        "cooling-company-review": {
+          "title": "Review a cooling company",
+          "description": "On a schedule, enroll companies that meet the cooling predicate and create a review task."
+        }
+      }
+    },
+    "sourceEvent": {
+      "person": {
+        "job_changed": "Contact employment changed"
+      },
+      "deal": {
+        "won": "Deal won"
+      },
+      "schedule": {
+        "daily": "Daily cooling review"
+      }
+    },
+    "actorModel": {
+      "user": "Configured workspace user"
+    },
+    "data": {
+      "person": "Contact",
+      "company": "Company",
+      "deal": "Deal",
+      "task": "Task",
+      "activity": "Activity",
+      "note": "Note",
+      "tag": "Tag",
+      "owner": "Owner",
+      "stage": "Stage",
+      "notification": "Notification"
+    },
+    "sideEffect": {
+      "create_task": "Create task",
+      "log_activity": "Log activity",
+      "add_tag": "Add tag",
+      "remove_tag": "Remove tag",
+      "create_note": "Create note",
+      "assign_owner": "Assign owner",
+      "change_stage": "Change stage",
+      "notify": "Create notification"
+    },
+    "recipeField": {
+      "sourceEvent": "Source event",
+      "recordType": "Record type",
+      "actionTypes": "Action types",
+      "retryBehavior": "Retry behavior",
+      "actorUserId": "Execution actor",
+      "targetUserId": "Task owner",
+      "taskTitle": "Task title",
+      "activityNote": "Activity note",
+      "dueInDays": "Due date offset",
+      "coolingDays": "Cooling threshold"
+    },
+    "parameter": {
+      "actorUserId": "Execution actor",
+      "targetUserId": "Task owner",
+      "taskTitle": "Task title",
+      "activityNote": "Activity note",
+      "dueInDays": "Due in days",
+      "coolingDays": "Cooling threshold in days",
+      "userPlaceholder": "Choose a workspace member"
+    },
+    "permission": {
+      "TASK_CREATE": "Create tasks",
+      "ACTIVITY_CREATE": "Log activities",
+      "NOTE_CREATE": "Create notes",
+      "DEAL_UPDATE": "Update deals",
+      "COMPANY_UPDATE": "Update companies",
+      "PERSON_UPDATE": "Update contacts"
+    }
+  }
+}

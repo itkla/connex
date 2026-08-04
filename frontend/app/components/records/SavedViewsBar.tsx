@@ -56,6 +56,7 @@ import {
     hasSegmentConditions,
     normalizeSegmentDefinition,
 } from "@/app/lib/segmentDefinition";
+import { savedViewConfigKey } from "@/app/lib/savedViewConfig";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { publishSavedViewMutation } from "@/app/lib/saved-view-events";
 import { parseSavedViewToken, savedViewRecordPath, savedViewToken } from "@/app/lib/savedViewLink";
@@ -64,28 +65,6 @@ import { useWorkspace } from "@/app/hooks/useWorkspace";
 import type { SavedView, SavedViewConfig, SavedViewRecordType } from "@/app/lib/types";
 
 const EMPTY_CONFIG: SavedViewConfig = { filters: {}, query: "", sortKey: null, sortDirection: "asc" };
-
-/** Canonical string for a config, so two configs compare equal regardless of key/value order. */
-function canonical(config: SavedViewConfig | null | undefined): string {
-    const filters = config?.filters ?? {};
-    const sorted: Record<string, string[]> = {};
-    for (const key of Object.keys(filters).sort()) {
-        const values = filters[key];
-        if (values && values.length > 0) sorted[key] = [...values].sort();
-    }
-    const normalizedSegments = normalizeSegmentDefinition(config?.segments);
-    const evaluableSegments = normalizedSegments ? evaluableSegmentDefinition(normalizedSegments) : null;
-    const segments = evaluableSegments && hasSegmentConditions(evaluableSegments)
-        ? JSON.stringify(evaluableSegments)
-        : "";
-    return JSON.stringify({
-        filters: sorted,
-        query: (config?.query ?? "").trim(),
-        sortKey: config?.sortKey ?? null,
-        sortDirection: config?.sortDirection ?? "asc",
-        segments,
-    });
-}
 
 /** A config is "empty" (= the All view) when it carries no filters, no search, and no sort. */
 function isEmpty(config: SavedViewConfig | null | undefined): boolean {
@@ -115,13 +94,15 @@ export default function SavedViewsBar({
     initialViews,
     currentConfig,
     onApply,
+    onActiveScopeChange,
     defaultView,
     unavailable = false,
 }: {
     recordType: SavedViewRecordType;
     initialViews: SavedView[];
     currentConfig: SavedViewConfig;
-    onApply: (config: SavedViewConfig) => void;
+    onApply: (config: SavedViewConfig, savedViewId: number | null) => void;
+    onActiveScopeChange?: (config: SavedViewConfig, savedViewId: number) => void;
     defaultView?: SavedView | null;
     /**
      * Set when the saved-view list could not be loaded. The bar then says so instead of rendering its
@@ -140,16 +121,16 @@ export default function SavedViewsBar({
     const [dialog, setDialog] = useState<{ mode: "create" | "rename"; view?: SavedView } | null>(null);
     const [switchPrompt, setSwitchPrompt] = useState<{ workspaceId: number; sv: string } | null>(null);
 
-    const currentKey = canonical(currentConfig);
+    const currentKey = savedViewConfigKey(currentConfig);
     const explicitView = activeId !== null ? (views.find((view) => view.id === activeId) ?? null) : null;
-    const matchedView = views.find((view) => canonical(view.config) === currentKey) ?? null;
+    const matchedView = views.find((view) => savedViewConfigKey(view.config) === currentKey) ?? null;
     const activeView = explicitView ?? matchedView;
-    const modified = explicitView != null && canonical(explicitView.config) !== currentKey;
+    const modified = explicitView != null && savedViewConfigKey(explicitView.config) !== currentKey;
     const canSaveNew = !matchedView && !isEmpty(currentConfig);
 
     const applyView = (view: SavedView | null) => {
         setActiveId(view?.id ?? null);
-        onApply(view ? view.config : EMPTY_CONFIG);
+        onApply(view ? view.config : EMPTY_CONFIG, view?.id ?? null);
         writeSavedViewToUrl(pathname, view ? savedViewToken(view) : null);
     };
 
@@ -172,14 +153,14 @@ export default function SavedViewsBar({
             }
             setViews((prev) => upsertView(prev, view));
             setActiveId(view.id);
-            apply(view.config);
+            apply(view.config, view.id);
             writeSavedViewToUrl(path, savedViewToken(view));
         };
         const applyDefault = () => {
             if (!fallback || listUnavailable) return;
             setViews((prev) => upsertView(prev, fallback));
             setActiveId(fallback.id);
-            apply(fallback.config);
+            apply(fallback.config, fallback.id);
             writeSavedViewToUrl(path, savedViewToken(fallback));
         };
         const clearAndFallBack = () => {
@@ -244,7 +225,7 @@ export default function SavedViewsBar({
                 }
                 setViews((prev) => upsertView(prev, view));
                 setActiveId(view.id);
-                onApplyRef.current(view.config);
+                onApplyRef.current(view.config, view.id);
                 writeSavedViewToUrl(pathname, savedViewToken(view));
             })
             .catch(() => {
@@ -298,6 +279,7 @@ export default function SavedViewsBar({
                 config,
             });
             setViews((prev) => prev.map((view) => (view.id === saved.id ? saved : view)));
+            onActiveScopeChange?.(saved.config, saved.id);
             toastSuccess(t("saved"));
         } catch (err) {
             toastError(err instanceof ApiError ? err.message : t("saveFailed"));
@@ -383,6 +365,7 @@ export default function SavedViewsBar({
                 const created = await createSavedView({ recordType, name, config: currentConfig, position: views.length });
                 setViews((prev) => [...prev, created]);
                 setActiveId(created.id);
+                onActiveScopeChange?.(created.config, created.id);
                 writeSavedViewToUrl(pathname, savedViewToken(created));
             }
             setDialog(null);

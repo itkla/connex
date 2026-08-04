@@ -31,6 +31,7 @@ public class WorkflowRuntimeScheduler {
     private final WorkflowRuntimeClaimTransaction claimTransaction;
     private final WorkflowTriggerOutboxWorker outboxWorker;
     private final WorkflowRunWorker runWorker;
+    private final WorkflowManualRunRecoveryService manualRunRecoveryService;
     private final WorkflowRuntimeRetentionService retentionService;
     private final WorkflowRuntimeProperties properties;
     private final PlacementRegistry placementRegistry;
@@ -120,7 +121,7 @@ public class WorkflowRuntimeScheduler {
     }
 
     private int processWorkspace(int workspaceId, int budget) {
-        int processed = 0;
+        int processed = manualRunRecoveryService.dispatchPending(workspaceId, budget);
         for (; processed < budget; processed++) {
             WorkflowWorkClaim claim = claimTransaction.claimNext(workspaceId);
             if (claim == null) {

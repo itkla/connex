@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ExclamationTriangleIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
@@ -25,6 +25,7 @@ import {
     getPipelines,
     getSegmentFields,
     getStagesByPipelineId,
+    getWorkflowRun,
 } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import type {
@@ -76,6 +77,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkspaceRules");
     const router = useRouter();
+    const searchParams = useSearchParams();
     const isNarrow = useSyncExternalStore(
         subscribeToNarrowEditor,
         narrowEditorSnapshot,
@@ -84,6 +86,10 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
     const { activeWorkspaceId, switching } = useWorkspace();
     const { canRunAsSystem, members } = useWorkflowWorkspaceAccess();
     const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem });
+    const loadedWorkflow = editor.workflow;
+    const inspectRun = editor.inspectRun;
+    const requestedRunKey = searchParams.get("runKey");
+    const inspectedRunKeyRef = useRef<string | null>(null);
     const [mode, setMode] = useState<AuthoringMode>("canvas");
     const [inspectorOpen, setInspectorOpen] = useState(false);
     const [simulationOpen, setSimulationOpen] = useState(false);
@@ -98,6 +104,27 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
         workspaceId: number;
         value: Omit<RuleBuilderOptions, "owners">;
     } | null>(null);
+
+    useEffect(() => {
+        if (
+            !requestedRunKey
+            || !/^canonical-[1-9]\d*$/.test(requestedRunKey)
+            || !activeWorkspaceId
+            || !loadedWorkflow
+            || inspectedRunKeyRef.current === requestedRunKey
+        ) return;
+        const controller = new AbortController();
+        inspectedRunKeyRef.current = requestedRunKey;
+        void getWorkflowRun(loadedWorkflow.id, requestedRunKey, {
+            signal: controller.signal,
+            headers: { "X-Workspace-Id": String(activeWorkspaceId) },
+        }).then((run) => {
+            if (!controller.signal.aborted) inspectRun(run);
+        }).catch(() => {
+            if (!controller.signal.aborted) toastError(t("runs.detailFailed"));
+        });
+        return () => controller.abort();
+    }, [activeWorkspaceId, inspectRun, loadedWorkflow, requestedRunKey, t]);
 
     useEffect(() => {
         if (!activeWorkspaceId) return;

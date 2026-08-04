@@ -77,6 +77,10 @@ public interface WorkflowTriggerOutboxMapper {
         @Param("recordScanAfterId") int recordScanAfterId,
         @Param("completed") boolean completed);
 
+    int resolveDeadForWorkflow(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId);
+
     int releaseForRetry(
         @Param("workspaceId") int workspaceId,
         @Param("id") long id,
@@ -95,8 +99,4 @@ public interface WorkflowTriggerOutboxMapper {
         @Param("cutoff") LocalDateTime cutoff,
         @Param("limit") int limit);
 
-    int purgeDeadBefore(
-        @Param("workspaceId") int workspaceId,
-        @Param("cutoff") LocalDateTime cutoff,
-        @Param("limit") int limit);
 }

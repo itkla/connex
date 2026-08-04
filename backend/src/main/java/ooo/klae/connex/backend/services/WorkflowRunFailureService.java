@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 public class WorkflowRunFailureService {
 
     private final WorkflowRunMapper workflowRunMapper;
+    private final WorkflowInterventionRecorder interventionRecorder;
     private final WorkflowActionRetryPolicy retryPolicy;
     private final WorkflowRuntimeProperties properties;
 
@@ -79,6 +80,9 @@ public class WorkflowRunFailureService {
                 finishedAt) != 1) {
             throw new IllegalStateException("Workflow failure checkpoint was not advanced");
         }
+        if (classified.interventionRequired()) {
+            interventionRecorder.record(run, classified.code());
+        }
         return true;
     }
 
@@ -120,6 +124,9 @@ public class WorkflowRunFailureService {
                 classified.message(),
                 finishedAt) != 1) {
             throw new IllegalStateException("Workflow failure checkpoint was not advanced");
+        }
+        if (classified.interventionRequired()) {
+            interventionRecorder.record(run, classified.code());
         }
         return classified.interventionRequired()
             ? FailureResult.INTERVENTION_REQUIRED : FailureResult.FAILED;
@@ -175,6 +182,7 @@ public class WorkflowRunFailureService {
                 finishedAt) != 1) {
             throw new IllegalStateException("Workflow action failure was not finalized");
         }
+        interventionRecorder.record(run, code);
         return FailureResult.INTERVENTION_REQUIRED;
     }
 

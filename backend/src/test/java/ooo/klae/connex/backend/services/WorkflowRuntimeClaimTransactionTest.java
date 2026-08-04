@@ -26,13 +26,14 @@ class WorkflowRuntimeClaimTransactionTest {
     @Mock private WorkflowTriggerOutboxMapper outboxMapper;
     @Mock private WorkflowRunMapper runMapper;
     @Mock private WorkflowRuntimeProperties properties;
+    @Mock private WorkflowInterventionRecorder interventionRecorder;
 
     private WorkflowRuntimeClaimTransaction service;
 
     @BeforeEach
     void setUp() {
         service = new WorkflowRuntimeClaimTransaction(
-            outboxMapper, runMapper, properties);
+            outboxMapper, runMapper, properties, interventionRecorder);
         lenient().when(properties.maxTriggerDeliveryAttempts()).thenReturn(8);
         lenient().when(properties.maxOutboxLeasesPerWorkspace()).thenReturn(2);
         lenient().when(properties.maxActiveRunsPerWorkspace()).thenReturn(4);

@@ -13,6 +13,7 @@ import {
 import { useTheme } from "next-themes";
 import { useTranslations } from "next-intl";
 import { PlusIcon } from "@heroicons/react/24/outline";
+import { useReducedMotion } from "motion/react";
 
 import WorkflowNode, { type WorkflowFlowNode } from "@/app/components/settings/workflows/WorkflowNode";
 import type {
@@ -25,6 +26,7 @@ import type { WorkflowEditorDocument } from "@/app/components/settings/workflows
 import {
     isScheduleEnrollmentNode,
     isScheduleEnrollmentBranch,
+    shouldFitWorkflowCanvasOnOpen,
     workflowNodeOutcomes,
 } from "@/app/components/settings/workflows/workflowGraph";
 import { Button } from "@/components/ui/button";
@@ -39,6 +41,7 @@ import {
 
 const NODE_TYPES = { workflowNode: WorkflowNode };
 const INSERT_TYPES: Array<Exclude<WorkflowNodeType, "TRIGGER">> = ["CONDITION", "ACTION", "DELAY", "END"];
+const FIT_VIEW_DURATION_MS = 200;
 
 function isOutcome(value: string | null | undefined): value is WorkflowEdgeOutcome {
     return value === "next" || value === "yes" || value === "no";
@@ -89,6 +92,7 @@ export default function WorkflowCanvasEditor({
     const t = useTranslations("WorkspaceWorkflows");
     const { resolvedTheme } = useTheme();
     const { getNode, setCenter } = useReactFlow();
+    const reduceMotion = useReducedMotion() ?? false;
     const invalidNodeIds = useMemo(
         () => new Set(diagnostics.flatMap((diagnostic) => diagnostic.nodeId ? [diagnostic.nodeId] : [])),
         [diagnostics],
@@ -99,6 +103,7 @@ export default function WorkflowCanvasEditor({
     );
     const selectedNode = document.definition.nodes.find((node) => node.id === selectedNodeId);
     const selectedOutcomes = selectedNode ? workflowNodeOutcomes(selectedNode) : [];
+    const fitViewOnOpen = shouldFitWorkflowCanvasOnOpen(document.definition, document.canvas);
     const insertTypes = selectedNode?.id === document.definition.entryNodeId
         && selectedNode.type === "TRIGGER"
         && selectedNode.config.type === "schedule"
@@ -203,9 +208,9 @@ export default function WorkflowCanvasEditor({
     }, [document.definition.edges, onConnectBranch]);
 
     return (
-        <div className="relative h-full min-h-[32rem] overflow-hidden rounded-2xl border border-border bg-muted/20">
+        <div className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-2xl border border-border bg-muted/20">
             {!readOnly ? (
-                <div className="absolute left-3 top-3 z-10">
+                <div className="flex shrink-0 items-center border-b border-border bg-background/80 px-3 py-2">
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="outline" size="sm" disabled={!selectedNode || selectedOutcomes.length === 0}>
@@ -234,48 +239,54 @@ export default function WorkflowCanvasEditor({
                     </DropdownMenu>
                 </div>
             ) : null}
-            <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                nodeTypes={NODE_TYPES}
-                defaultViewport={document.canvas.viewport}
-                colorMode={resolvedTheme === "dark" ? "dark" : "light"}
-                onNodeClick={(_, node) => onSelectNode(node.id)}
-                onNodeDragStop={(_, node) => onMoveNode(node.id, node.position)}
-                onNodesDelete={(deleted) => deleted.forEach((node) => onDeleteNode(node.id))}
-                onEdgesDelete={(deleted) => deleted.forEach((edge) => {
-                    const semantic = document.definition.edges.find((candidate) => candidate.id === edge.id);
-                    if (semantic) onDisconnectBranch(semantic.sourceNodeId, semantic.outcome);
-                })}
-                onMoveEnd={(_, viewport) => onMoveViewport(viewport)}
-                onConnect={onConnect}
-                onReconnect={onReconnect}
-                nodesConnectable={!readOnly}
-                nodesDraggable={!readOnly}
-                edgesReconnectable={!readOnly}
-                elementsSelectable
-                multiSelectionKeyCode={null}
-                deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
-                panOnScroll
-                fitView={document.definition.nodes.some((node) => !document.canvas.positions[node.id])}
-                fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
-                proOptions={{ hideAttribution: false }}
-                ariaLabelConfig={{
-                    "node.a11yDescription.default": t("canvasA11y.nodeDescription"),
-                    "node.a11yDescription.keyboardDisabled": t("canvasA11y.nodeKeyboardDisabled"),
-                    "node.a11yDescription.ariaLiveMessage": ({ x, y }) => t("canvasA11y.nodeMoved", { x, y }),
-                    "edge.a11yDescription.default": t("canvasA11y.edgeDescription"),
-                    "controls.ariaLabel": t("canvasA11y.controls"),
-                    "controls.zoomIn.ariaLabel": t("canvasA11y.zoomIn"),
-                    "controls.zoomOut.ariaLabel": t("canvasA11y.zoomOut"),
-                    "controls.fitView.ariaLabel": t("canvasA11y.fitView"),
-                    "controls.interactive.ariaLabel": t("canvasA11y.interactive"),
-                    "minimap.ariaLabel": t("canvasA11y.minimap"),
-                    "handle.ariaLabel": t("canvasA11y.handle"),
-                }}
-            >
-                <Controls position="bottom-right" showInteractive={false} />
-            </ReactFlow>
+            <div className="relative min-h-0 flex-1">
+                <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    nodeTypes={NODE_TYPES}
+                    defaultViewport={document.canvas.viewport}
+                    colorMode={resolvedTheme === "dark" ? "dark" : "light"}
+                    onNodeClick={(_, node) => onSelectNode(node.id)}
+                    onNodeDragStop={(_, node) => onMoveNode(node.id, node.position)}
+                    onNodesDelete={(deleted) => deleted.forEach((node) => onDeleteNode(node.id))}
+                    onEdgesDelete={(deleted) => deleted.forEach((edge) => {
+                        const semantic = document.definition.edges.find((candidate) => candidate.id === edge.id);
+                        if (semantic) onDisconnectBranch(semantic.sourceNodeId, semantic.outcome);
+                    })}
+                    onMoveEnd={(_, viewport) => onMoveViewport(viewport)}
+                    onConnect={onConnect}
+                    onReconnect={onReconnect}
+                    nodesConnectable={!readOnly}
+                    nodesDraggable={!readOnly}
+                    edgesReconnectable={!readOnly}
+                    elementsSelectable
+                    multiSelectionKeyCode={null}
+                    deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
+                    panOnScroll
+                    fitView={fitViewOnOpen}
+                    fitViewOptions={{
+                        padding: 0.25,
+                        maxZoom: 1,
+                        duration: reduceMotion ? 0 : FIT_VIEW_DURATION_MS,
+                    }}
+                    proOptions={{ hideAttribution: false }}
+                    ariaLabelConfig={{
+                        "node.a11yDescription.default": t("canvasA11y.nodeDescription"),
+                        "node.a11yDescription.keyboardDisabled": t("canvasA11y.nodeKeyboardDisabled"),
+                        "node.a11yDescription.ariaLiveMessage": ({ x, y }) => t("canvasA11y.nodeMoved", { x, y }),
+                        "edge.a11yDescription.default": t("canvasA11y.edgeDescription"),
+                        "controls.ariaLabel": t("canvasA11y.controls"),
+                        "controls.zoomIn.ariaLabel": t("canvasA11y.zoomIn"),
+                        "controls.zoomOut.ariaLabel": t("canvasA11y.zoomOut"),
+                        "controls.fitView.ariaLabel": t("canvasA11y.fitView"),
+                        "controls.interactive.ariaLabel": t("canvasA11y.interactive"),
+                        "minimap.ariaLabel": t("canvasA11y.minimap"),
+                        "handle.ariaLabel": t("canvasA11y.handle"),
+                    }}
+                >
+                    <Controls position="bottom-right" showInteractive={false} />
+                </ReactFlow>
+            </div>
         </div>
     );
 }

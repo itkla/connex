@@ -126,6 +126,9 @@ class WorkflowRunMapperXmlTest {
             "maxDispatches", 256));
         assertFalse(lease.contains("wait_kind = NULL"));
         assertFalse(lease.contains("resume_at = NULL"));
+        assertTrue(lease.contains("w.intake_paused_at IS NULL"));
+        assertTrue(sql(configuration, "findDueRunForUpdate", Map.of("workspaceId", 7))
+            .contains("w.intake_paused_at IS NULL"));
     }
 
     private static Configuration configuration() throws Exception {

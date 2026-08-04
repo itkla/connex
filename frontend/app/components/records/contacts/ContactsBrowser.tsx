@@ -36,6 +36,8 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
+import { useActionSelection } from '@/app/hooks/useActions';
+import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
@@ -95,7 +97,6 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
     const reduce = useReducedMotion() ?? false;
-
     const {
         displayMode,
         effectiveDisplayMode,
@@ -290,7 +291,6 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
     const selectedContactIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
-
     const selectAllMatching = useCallback(async () => {
         const requestId = selectAllRequestRef.current + 1;
         selectAllRequestRef.current = requestId;
@@ -696,14 +696,41 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection }),
         [filterState, query, sortKey, sortDirection],
     );
+    const { activeSavedViewId, setActiveSavedView } = useSavedViewScope(savedViews, currentConfig);
     const applyView = useCallback(
-        (config: SavedViewConfig) => {
+        (config: SavedViewConfig, savedViewId: number | null) => {
             setFilterState(config.filters ?? {});
             applyQuery(config.query ?? '');
             applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
+            setActiveSavedView(config, savedViewId);
         },
-        [setFilterState, applyQuery, applySort],
+        [setFilterState, applyQuery, applySort, setActiveSavedView],
     );
+    const workflowSelection = useMemo(() => {
+        if (selectedIds.size === 0) return null;
+        const scope = allMatchingActive && activeSavedViewId !== null
+            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
+            : allMatchingActive && !showArchived
+            ? {
+                kind: 'filter_match' as const,
+                filter: {
+                    query: query.trim() || undefined,
+                    companies: filterParams.companies,
+                    titles: filterParams.titles,
+                    noCompany: filterParams.noCompany,
+                    memberScope: filterParams.scope,
+                    memberIds: filterParams.memberIds,
+                },
+            }
+            : { kind: 'page_selection' as const, recordIds: selectedContactIds };
+        return {
+            type: 'person' as const,
+            ids: selectedIds,
+            sourceSurface: activeSavedViewId !== null ? 'saved_view' as const : 'record_list' as const,
+            scope,
+        };
+    }, [activeSavedViewId, allMatchingActive, filterParams, query, selectedContactIds, selectedIds, showArchived]);
+    useActionSelection(workflowSelection);
 
     const { density, setDensity } = useRecordDensity();
     const mergedColumns = useMemo(() => [...columns, ...customColumns], [columns, customColumns]);
@@ -746,6 +773,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
+                        onActiveScopeChange={setActiveSavedView}
                         defaultView={defaultView}
                         unavailable={savedViewsUnavailable}
                     />

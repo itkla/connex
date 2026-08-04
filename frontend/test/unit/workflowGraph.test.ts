@@ -10,6 +10,7 @@ import {
     ensureScheduleEnrollment,
     insertWorkflowNode,
     removeWorkflowNode,
+    shouldFitWorkflowCanvasOnOpen,
     topologicalWorkflowNodes,
     workflowDelayDiagnostics,
 } from "@/app/components/settings/workflows/workflowGraph";
@@ -87,6 +88,18 @@ describe("canonical workflow graph editing", () => {
         expect(workflowDocumentIsDirty(history)).toBe(false);
         expect(topologicalWorkflowNodes(history.present.definition).map((node) => node.id))
             .toEqual(["trigger", "condition", "action", "end"]);
+    });
+
+    it("fits an unsaved default viewport while preserving a deliberate saved viewport", () => {
+        expect(shouldFitWorkflowCanvasOnOpen(migratedDefinition, {
+            ...migratedCanvas,
+            viewport: { x: 0, y: 0, zoom: 1 },
+        })).toBe(true);
+        expect(shouldFitWorkflowCanvasOnOpen(migratedDefinition, migratedCanvas)).toBe(false);
+        expect(shouldFitWorkflowCanvasOnOpen(migratedDefinition, {
+            positions: { trigger: migratedCanvas.positions.trigger },
+            viewport: migratedCanvas.viewport,
+        })).toBe(true);
     });
 
     it("inserts a condition with stable yes and no branches while preserving the previous target", () => {

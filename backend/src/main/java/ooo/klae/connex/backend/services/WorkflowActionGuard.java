@@ -45,7 +45,7 @@ public class WorkflowActionGuard {
                 Map.of("permission", required.name()));
         }
         String type = normalize(action.getType());
-        if ("add_tag".equals(type)
+        if (("add_tag".equals(type) || "remove_tag".equals(type))
                 && tagMapper.getTagById(workspaceId, action.getTagId()) == null) {
             return diagnostic(
                 WorkflowDiagnosticCode.ACTION_TAG_UNAVAILABLE,

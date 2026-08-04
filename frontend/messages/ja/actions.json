@@ -67,7 +67,8 @@
     "record": {
       "open": "レコードを開く",
       "openNewTab": "新しいタブで開く",
-      "copyLink": "このレコードのリンクをコピー"
+      "copyLink": "このレコードのリンクをコピー",
+      "runWorkflow": "ワークフローを実行"
     },
     "workspace": {
       "themeLight": "ライトテーマ",
@@ -88,6 +89,9 @@
       "exportCurrentProducts": "現在の商品ビューをエクスポート"
     },
     "description": {
+      "record": {
+        "runWorkflow": "この正確なレコード範囲を固定し、新しいワークフロー実行を開始します。"
+      },
       "utility": {
         "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
         "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",
@@ -123,7 +127,7 @@
       "create": {
         "company": "会社, 企業, 組織, 取引先, アカウント",
         "person": "連絡先, コンタクト, 人, 担当者, リード",
-        "deal": "案件, 取引, 商談",
+        "deal": "案件, 商談",
         "task": "タスク, todo, やること, リマインダー",
         "note": "メモ, ノート",
         "activity": "アクティビティ, ログ, 通話, 会議, メール"
@@ -135,10 +139,10 @@
       "utility": {
         "importCompanies": "会社をインポート, 企業, csv, アップロード, 一括",
         "importContacts": "連絡先をインポート, コンタクト, 人, 担当者, csv, アップロード, 一括",
-        "importDeals": "案件をインポート, 取引, 商談, csv, アップロード, 一括",
+        "importDeals": "案件をインポート, 商談, csv, アップロード, 一括",
         "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, 企業, csv, 現在のビュー, フィルター, 絞り込み, セグメント",
         "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, コンタクト, 人, 担当者, csv, 現在のビュー, フィルター, 絞り込み",
-        "exportCurrentDeals": "案件をエクスポート, 取引をダウンロード, 商談, csv, 現在のビュー, フィルター, 絞り込み",
+        "exportCurrentDeals": "案件をエクスポート, 案件をダウンロード, 商談, csv, 現在のビュー, フィルター, 絞り込み",
         "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 現在のビュー, フィルター, 絞り込み"
       }
     }

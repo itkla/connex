@@ -1,0 +1,543 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowOperationsMapper">
+
+  <sql id="invocationColumns">
+    id, workspace_id, workflow_id, workflow_version_id, requested_by_id,
+    scope_kind, resolved_scope_kind, source_surface, record_type, scope_token_hash,
+    scope_hash, confirmation_key, scope_contract_json, exact_count, ready_count,
+    skipped_count, status, expires_at, confirmed_at, completed_at, created_at, updated_at
+  </sql>
+
+  <sql id="invocationRecordColumns">
+    workspace_id, invocation_id, ordinal, record_id, preview_status,
+    preview_reason_code, execution_status, execution_failure_category,
+    workflow_run_id, created_at, updated_at
+  </sql>
+
+  <sql id="interventionColumns">
+    id, workspace_id, workflow_run_id, workflow_step_run_id, intervention_key,
+    category, reason_code, owner_user_id, status, source_version, resolved_at,
+    created_at, updated_at
+  </sql>
+
+  <select id="getSummary" resultType="WorkflowOperationsSummaryView">
+    SELECT
+      COUNT(*) AS workflow_count,
+      SUM(
+        w.enabled = TRUE
+        AND w.intake_paused_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM workflow_intervention wi
+          JOIN workflow_run ir
+            ON ir.workspace_id = wi.workspace_id
+           AND ir.id = wi.workflow_run_id
+          WHERE wi.workspace_id = w.workspace_id
+            AND ir.workflow_id = w.id
+            AND wi.status = 'open'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM workflow_run fr
+          WHERE fr.workspace_id = w.workspace_id
+            AND fr.workflow_id = w.id
+            AND fr.status IN ('failed', 'intervention_required')
+            AND fr.finished_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM workflow_trigger_outbox dead
+          WHERE dead.workspace_id = w.workspace_id
+            AND dead.workflow_id = w.id
+            AND dead.status = 'dead'
+        )
+      ) AS healthy_count,
+      SUM(w.intake_paused_at IS NOT NULL) AS paused_count,
+      SUM(w.enabled = FALSE) AS disabled_count,
+      SUM(
+        EXISTS (
+          SELECT 1
+          FROM workflow_intervention wi
+          JOIN workflow_run ir
+            ON ir.workspace_id = wi.workspace_id
+           AND ir.id = wi.workflow_run_id
+          WHERE wi.workspace_id = w.workspace_id
+            AND ir.workflow_id = w.id
+            AND wi.status = 'open'
+        )
+        OR EXISTS (
+          SELECT 1 FROM workflow_trigger_outbox dead
+          WHERE dead.workspace_id = w.workspace_id
+            AND dead.workflow_id = w.id
+            AND dead.status = 'dead'
+        )
+      ) AS intervention_required_count,
+      COALESCE((
+        SELECT COUNT(*) FROM workflow_run qr
+        WHERE qr.workspace_id = #{workspaceId} AND qr.status = 'queued'
+      ), 0) AS queued_count,
+      COALESCE((
+        SELECT COUNT(*) FROM workflow_run wr
+        WHERE wr.workspace_id = #{workspaceId} AND wr.status = 'waiting'
+      ), 0) AS waiting_count,
+      COALESCE((
+        SELECT COUNT(*) FROM workflow_run overdue
+        WHERE overdue.workspace_id = #{workspaceId}
+          AND (
+            (overdue.status = 'queued'
+              AND overdue.started_at &lt; DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE))
+            OR (overdue.status = 'waiting'
+              AND overdue.resume_at &lt; DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE))
+          )
+      ), 0) AS overdue_count,
+      COALESCE((
+        SELECT COUNT(*) FROM workflow_intervention oi
+        WHERE oi.workspace_id = #{workspaceId} AND oi.status = 'open'
+      ), 0) + COALESCE((
+        SELECT COUNT(*) FROM workflow_trigger_outbox dead
+        WHERE dead.workspace_id = #{workspaceId} AND dead.status = 'dead'
+      ), 0) AS open_intervention_count,
+      COALESCE((
+        SELECT COUNT(*) FROM workflow_run recent
+        WHERE recent.workspace_id = #{workspaceId}
+          AND recent.status IN ('failed', 'intervention_required')
+          AND recent.finished_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+      ), 0) + COALESCE((
+        SELECT COUNT(*) FROM workflow_trigger_outbox dead
+        WHERE dead.workspace_id = #{workspaceId}
+          AND dead.status = 'dead'
+          AND dead.completed_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+      ), 0) AS recent_failure_count
+    FROM workflow w
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.archived_at IS NULL
+  </select>
+
+  <select id="getDeadTriggerDiagnostics" resultType="WorkflowTriggerDiagnosticView">
+    SELECT dead.id AS outbox_id,
+           dead.workflow_id,
+           workflow.name AS workflow_name,
+           dead.trigger_type,
+           dead.last_error_code AS reason_code,
+           dead.completed_at AS failed_at
+    FROM workflow_trigger_outbox dead
+    JOIN workflow
+      ON workflow.workspace_id = dead.workspace_id
+     AND workflow.id = dead.workflow_id
+    WHERE dead.workspace_id = #{workspaceId}
+      AND dead.status = 'dead'
+      AND dead.last_error_code IS NOT NULL
+    ORDER BY dead.completed_at DESC, dead.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getBacklog" resultType="WorkflowBacklogView">
+    SELECT
+      SUM(status = 'queued') AS queued_count,
+      MIN(CASE WHEN status = 'queued' THEN started_at END) AS oldest_queued_at,
+      SUM(status = 'waiting') AS waiting_count,
+      SUM(status = 'waiting' AND resume_at &lt;= CURRENT_TIMESTAMP(6)) AS due_now_count,
+      SUM(
+        (status = 'queued' AND started_at &lt; DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE))
+        OR (status = 'waiting'
+          AND resume_at &lt; DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE))
+      ) AS overdue_count,
+      MIN(CASE WHEN status = 'waiting' THEN resume_at END) AS next_resume_at,
+      SUM(
+        status IN ('failed', 'intervention_required')
+        AND finished_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+      ) AS recent_failure_count
+    FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+  </select>
+
+  <select id="getOperationsRuns" resultType="WorkflowOperationsRunView">
+    SELECT wr.*,
+           w.name AS workflow_name,
+           origin.recipe_key,
+           v.version_number,
+           v.definition_hash AS version_definition_hash,
+           v.published_at AS version_published_at,
+           wi.id AS intervention_id,
+           wi.workflow_step_run_id AS intervention_step_run_id,
+           isr.node_id AS intervention_step_node_id,
+           wi.category AS intervention_category,
+           wi.reason_code AS intervention_reason_code,
+           wi.owner_user_id AS intervention_owner_user_id,
+           wi.status AS intervention_status,
+           wi.source_version AS intervention_source_version,
+           wi.created_at AS intervention_created_at,
+           wi.updated_at AS intervention_updated_at
+    FROM workflow_run wr
+    JOIN workflow w
+      ON w.workspace_id = wr.workspace_id
+     AND w.id = wr.workflow_id
+    JOIN workflow_version v
+      ON v.workspace_id = wr.workspace_id
+     AND v.workflow_id = wr.workflow_id
+     AND v.id = wr.workflow_version_id
+    LEFT JOIN workflow_recipe_origin origin
+      ON origin.workspace_id = wr.workspace_id
+     AND origin.workflow_id = wr.workflow_id
+    LEFT JOIN workflow_intervention wi
+      ON wi.workspace_id = wr.workspace_id
+     AND wi.workflow_run_id = wr.id
+     AND wi.status = 'open'
+    LEFT JOIN workflow_step_run isr
+      ON isr.workspace_id = wi.workspace_id
+     AND isr.workflow_run_id = wi.workflow_run_id
+     AND isr.id = wi.workflow_step_run_id
+    WHERE wr.workspace_id = #{workspaceId}
+      <if test="status != null">
+        AND wr.status = #{status}
+      </if>
+      <if test="failureCategory != null">
+        AND COALESCE(wi.category,
+          CASE
+            WHEN wr.failure_code IS NULL THEN NULL
+            WHEN wr.failure_code IN ('actor_unavailable', 'actor_inactive') THEN 'actor'
+            WHEN wr.failure_code IN ('permission_denied', 'action_permission_missing') THEN 'permission'
+            WHEN wr.failure_code IN ('reference_unavailable', 'record_unavailable') THEN 'reference'
+            WHEN wr.failure_code IN ('retry_exhausted', 'retry_not_safe') THEN 'retry'
+            WHEN wr.failure_code = 'transient_database_failure' THEN 'retry'
+            WHEN wr.failure_code IN ('configuration_invalid', 'invalid_action_config',
+                                     'definition_corrupt', 'definition_invalid')
+              THEN 'configuration'
+            ELSE 'execution'
+          END) = #{failureCategory}
+      </if>
+      <if test="ownerId != null">
+        AND wi.owner_user_id = #{ownerId}
+      </if>
+      <if test="beforeStartedAt != null and beforeId != null">
+        AND (wr.started_at &lt; #{beforeStartedAt}
+          OR (wr.started_at = #{beforeStartedAt} AND wr.id &lt; #{beforeId}))
+      </if>
+    ORDER BY wr.started_at DESC, wr.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <insert id="insertRecipeOrigin">
+    INSERT INTO workflow_recipe_origin
+      (workspace_id, workflow_id, recipe_key, recipe_version, template_hash, installed_by_id)
+    VALUES
+      (#{workspaceId}, #{workflowId}, #{recipeKey}, #{recipeVersion},
+       #{templateHash}, #{installedById})
+  </insert>
+
+  <select id="getRecipeOrigin" resultType="WorkflowRecipeOrigin">
+    SELECT workspace_id, workflow_id, recipe_key, recipe_version, template_hash,
+           installed_by_id, installed_at
+    FROM workflow_recipe_origin
+    WHERE workspace_id = #{workspaceId} AND workflow_id = #{workflowId}
+  </select>
+
+  <insert id="insertInvocation" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_invocation
+      (workspace_id, workflow_id, workflow_version_id, requested_by_id,
+       scope_kind, resolved_scope_kind, source_surface, record_type,
+       scope_token_hash, scope_hash, confirmation_key, scope_contract_json,
+       exact_count, ready_count, skipped_count, status, expires_at)
+    VALUES
+      (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{requestedById},
+       #{scopeKind}, #{resolvedScopeKind}, #{sourceSurface}, #{recordType},
+       #{scopeTokenHash}, #{scopeHash}, #{confirmationKey}, #{scopeContractJson},
+       #{exactCount}, #{readyCount}, #{skippedCount}, #{status}, #{expiresAt})
+  </insert>
+
+  <insert id="insertInvocationRecords">
+    INSERT INTO workflow_invocation_record
+      (workspace_id, invocation_id, ordinal, record_id, preview_status,
+       preview_reason_code, execution_status, execution_failure_category,
+       workflow_run_id)
+    VALUES
+    <foreach collection="records" item="record" separator=",">
+      (#{workspaceId}, #{invocationId}, #{record.ordinal}, #{record.recordId},
+       #{record.previewStatus}, #{record.previewReasonCode}, #{record.executionStatus},
+       #{record.executionFailureCategory}, #{record.workflowRunId})
+    </foreach>
+  </insert>
+
+  <select id="getInvocation" resultType="WorkflowInvocation">
+    SELECT <include refid="invocationColumns"/>
+    FROM workflow_invocation
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+  </select>
+
+  <select id="getInvocationByTokenForUpdate" resultType="WorkflowInvocation">
+    SELECT <include refid="invocationColumns"/>
+    FROM workflow_invocation
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND scope_token_hash = #{tokenHash}
+    FOR UPDATE
+  </select>
+
+  <select id="getInvocationForUpdate" resultType="WorkflowInvocation">
+    SELECT <include refid="invocationColumns"/>
+    FROM workflow_invocation
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getInvocationRecords" resultType="WorkflowInvocationRecord">
+    SELECT wir.workspace_id, wir.invocation_id, wir.ordinal, wir.record_id,
+           wir.preview_status, wir.preview_reason_code,
+           COALESCE(wr.status, wir.execution_status) AS execution_status,
+           CASE
+             WHEN wr.failure_code IN ('actor_unavailable', 'actor_inactive') THEN 'actor'
+             WHEN wr.failure_code IN ('permission_denied', 'action_permission_missing') THEN 'permission'
+             WHEN wr.failure_code IN ('reference_unavailable', 'record_unavailable') THEN 'reference'
+             WHEN wr.failure_code IN ('retry_exhausted', 'retry_not_safe',
+                                      'transient_database_failure') THEN 'retry'
+             WHEN wr.failure_code IN ('configuration_invalid', 'invalid_action_config',
+                                      'definition_corrupt', 'definition_invalid')
+               THEN 'configuration'
+             WHEN wr.failure_code IS NOT NULL THEN 'execution'
+             ELSE wir.execution_failure_category
+           END AS execution_failure_category,
+           wir.workflow_run_id, wir.created_at, wir.updated_at
+    FROM workflow_invocation_record wir
+    LEFT JOIN workflow_run wr
+      ON wr.workspace_id = wir.workspace_id
+     AND wr.id = wir.workflow_run_id
+    WHERE wir.workspace_id = #{workspaceId} AND wir.invocation_id = #{invocationId}
+    ORDER BY wir.ordinal
+  </select>
+
+  <select id="getPendingInvocationDispatches" resultType="WorkflowInvocationDispatch">
+    SELECT invocation.workspace_id,
+           invocation.workflow_id,
+           invocation.workflow_version_id,
+           invocation.id AS invocation_id,
+           record.record_id
+    FROM workflow_invocation invocation
+    JOIN workflow_invocation_record record
+      ON record.workspace_id = invocation.workspace_id
+     AND record.invocation_id = invocation.id
+    WHERE invocation.workspace_id = #{workspaceId}
+      AND invocation.status IN ('confirmed', 'running')
+      AND invocation.completed_at IS NULL
+      AND record.preview_status = 'ready'
+      AND record.execution_status = 'pending'
+      AND record.workflow_run_id IS NULL
+    ORDER BY invocation.confirmed_at, invocation.id, record.ordinal
+    LIMIT #{limit}
+  </select>
+
+  <update id="confirmInvocation">
+    UPDATE workflow_invocation
+    SET status = 'confirmed', confirmation_key = #{confirmationKey},
+        confirmed_at = #{confirmedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND requested_by_id = #{requestedById}
+      AND status = 'prepared'
+      AND expires_at &gt;= #{confirmedAt}
+      AND confirmation_key IS NULL
+  </update>
+
+  <update id="linkInvocationRun">
+    UPDATE workflow_invocation_record
+    SET workflow_run_id = #{workflowRunId}, execution_status = 'queued',
+        execution_failure_category = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND invocation_id = #{invocationId}
+      AND record_id = #{recordId}
+      AND preview_status = 'ready'
+      AND workflow_run_id IS NULL
+      AND execution_status = 'pending'
+  </update>
+
+  <update id="markInvocationRecordSkipped">
+    UPDATE workflow_invocation_record
+    SET execution_status = 'skipped', execution_failure_category = #{category}
+    WHERE workspace_id = #{workspaceId}
+      AND invocation_id = #{invocationId}
+      AND record_id = #{recordId}
+      AND execution_status = 'pending'
+  </update>
+
+  <update id="refreshInvocationRecords">
+    UPDATE workflow_invocation_record wir
+    JOIN workflow_run wr
+      ON wr.workspace_id = wir.workspace_id
+     AND wr.id = wir.workflow_run_id
+    SET wir.execution_status = wr.status,
+        wir.execution_failure_category = CASE
+          WHEN wr.failure_code IN ('actor_unavailable', 'actor_inactive') THEN 'actor'
+          WHEN wr.failure_code IN ('permission_denied', 'action_permission_missing') THEN 'permission'
+          WHEN wr.failure_code IN ('reference_unavailable', 'record_unavailable') THEN 'reference'
+          WHEN wr.failure_code IN ('retry_exhausted', 'retry_not_safe',
+                                   'transient_database_failure') THEN 'retry'
+          WHEN wr.failure_code IN ('configuration_invalid', 'invalid_action_config',
+                                   'definition_corrupt', 'definition_invalid')
+            THEN 'configuration'
+          WHEN wr.failure_code IS NULL THEN NULL
+          ELSE 'execution'
+        END
+    WHERE wir.workspace_id = #{workspaceId}
+      AND wir.invocation_id = #{invocationId}
+  </update>
+
+  <update id="updateInvocationStatus">
+    UPDATE workflow_invocation
+    SET status = #{status}, completed_at = #{completedAt}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="completeInvocationIfActive">
+    UPDATE workflow_invocation
+    SET status = #{status}, completed_at = #{completedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status IN ('confirmed', 'running')
+      AND completed_at IS NULL
+  </update>
+
+  <update id="markInvocationRunning">
+    UPDATE workflow_invocation
+    SET status = 'running'
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status IN ('confirmed', 'running')
+  </update>
+
+  <update id="cancelInvocation">
+    UPDATE workflow_invocation
+    SET status = 'cancelled', completed_at = #{completedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status IN ('prepared', 'confirmed', 'running')
+  </update>
+
+  <update id="cancelPendingInvocationRecords">
+    UPDATE workflow_invocation_record
+    SET execution_status = 'cancelled', execution_failure_category = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND invocation_id = #{invocationId}
+      AND workflow_run_id IS NULL
+      AND execution_status = 'pending'
+  </update>
+
+  <insert id="upsertIntervention" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_intervention
+      (workspace_id, workflow_run_id, workflow_step_run_id, intervention_key,
+       category, reason_code, owner_user_id, status, source_version)
+    VALUES
+      (#{workspaceId}, #{workflowRunId}, #{workflowStepRunId}, #{interventionKey},
+       #{category}, #{reasonCode}, #{ownerUserId}, 'open', 0)
+    ON DUPLICATE KEY UPDATE
+      id = LAST_INSERT_ID(id),
+      workflow_step_run_id = VALUES(workflow_step_run_id),
+      category = VALUES(category),
+      reason_code = VALUES(reason_code),
+      status = 'open',
+      resolved_at = NULL,
+      source_version = source_version + 1
+  </insert>
+
+  <select id="getIntervention" resultType="WorkflowIntervention">
+    SELECT wi.id, wi.workspace_id, wi.workflow_run_id, wi.workflow_step_run_id,
+           step.node_id AS step_node_id, wi.intervention_key, wi.category,
+           wi.reason_code, wi.owner_user_id, wi.status, wi.source_version,
+           wi.resolved_at, wi.created_at, wi.updated_at
+    FROM workflow_intervention wi
+    LEFT JOIN workflow_step_run step
+      ON step.workspace_id = wi.workspace_id
+     AND step.workflow_run_id = wi.workflow_run_id
+     AND step.id = wi.workflow_step_run_id
+    WHERE wi.workspace_id = #{workspaceId} AND wi.id = #{id}
+  </select>
+
+  <select id="getInterventionForUpdate" resultType="WorkflowIntervention">
+    SELECT <include refid="interventionColumns"/>
+    FROM workflow_intervention
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getOpenInterventionsByWorkflow" resultType="WorkflowIntervention">
+    SELECT wi.id, wi.workspace_id, wi.workflow_run_id, wi.workflow_step_run_id,
+           step.node_id AS step_node_id,
+           wi.intervention_key, wi.category, wi.reason_code, wi.owner_user_id,
+           wi.status, wi.source_version, wi.resolved_at, wi.created_at, wi.updated_at
+    FROM workflow_intervention wi
+    JOIN workflow_run wr
+      ON wr.workspace_id = wi.workspace_id
+     AND wr.id = wi.workflow_run_id
+    LEFT JOIN workflow_step_run step
+      ON step.workspace_id = wi.workspace_id
+     AND step.workflow_run_id = wi.workflow_run_id
+     AND step.id = wi.workflow_step_run_id
+    WHERE wi.workspace_id = #{workspaceId}
+      AND wr.workflow_id = #{workflowId}
+      AND wi.status = 'open'
+    ORDER BY wi.updated_at DESC, wi.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <update id="updateInterventionOwner">
+    UPDATE workflow_intervention
+    SET owner_user_id = #{ownerUserId}, source_version = source_version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'open'
+      AND source_version = #{expectedSourceVersion}
+  </update>
+
+  <update id="resolveIntervention">
+    UPDATE workflow_intervention
+    SET status = #{status}, resolved_at = CURRENT_TIMESTAMP(6),
+        source_version = source_version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'open'
+      AND source_version = #{expectedSourceVersion}
+  </update>
+
+  <update id="resolveOpenInterventionsForRun">
+    UPDATE workflow_intervention
+    SET status = #{status}, resolved_at = CURRENT_TIMESTAMP(6),
+        source_version = source_version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND status = 'open'
+  </update>
+
+  <update id="clearUserReferencesAnywhere">
+    UPDATE workflow w
+    LEFT JOIN workflow_recipe_origin origin
+      ON origin.workspace_id = w.workspace_id
+     AND origin.workflow_id = w.id
+     AND origin.installed_by_id = #{userId}
+    LEFT JOIN workflow_invocation invocation
+      ON invocation.workspace_id = w.workspace_id
+     AND invocation.workflow_id = w.id
+     AND invocation.requested_by_id = #{userId}
+    LEFT JOIN workflow_run wr
+      ON wr.workspace_id = w.workspace_id
+     AND wr.workflow_id = w.id
+    LEFT JOIN workflow_intervention intervention
+      ON intervention.workspace_id = wr.workspace_id
+     AND intervention.workflow_run_id = wr.id
+     AND intervention.owner_user_id = #{userId}
+    SET w.intake_paused_by_id = IF(w.intake_paused_by_id = #{userId}, NULL, w.intake_paused_by_id),
+        origin.installed_by_id = IF(
+          origin.installed_by_id = #{userId}, NULL, origin.installed_by_id),
+        invocation.requested_by_id = IF(
+          invocation.requested_by_id = #{userId}, NULL, invocation.requested_by_id),
+        intervention.owner_user_id = IF(
+          intervention.owner_user_id = #{userId}, NULL, intervention.owner_user_id)
+    WHERE w.intake_paused_by_id = #{userId}
+       OR origin.installed_by_id = #{userId}
+       OR invocation.requested_by_id = #{userId}
+       OR intervention.owner_user_id = #{userId}
+  </update>
+
+</mapper>

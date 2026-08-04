@@ -46,7 +46,6 @@ public class WorkflowRuntimeProperties {
     private final Duration retryBase;
     private final Duration retryMaximum;
     private final Duration completedOutboxRetention;
-    private final Duration deadOutboxRetention;
     private final int maxRetentionDeletesPerWorkspace;
 
     public WorkflowRuntimeProperties(
@@ -83,8 +82,6 @@ public class WorkflowRuntimeProperties {
             @Value("${connex.workflows.runtime.retry-maximum:PT15M}") Duration retryMaximum,
             @Value("${connex.workflows.runtime.completed-outbox-retention:P7D}")
             Duration completedOutboxRetention,
-            @Value("${connex.workflows.runtime.dead-outbox-retention:P30D}")
-            Duration deadOutboxRetention,
             @Value("${connex.workflows.runtime.max-retention-deletes-per-workspace:100}")
             int maxRetentionDeletesPerWorkspace) {
         this.enabled = enabled;
@@ -128,7 +125,6 @@ public class WorkflowRuntimeProperties {
             retryMaximum, retryBase, MAX_RETRY_DELAY, "retry-maximum");
         this.completedOutboxRetention = positive(
             completedOutboxRetention, "completed-outbox-retention");
-        this.deadOutboxRetention = positive(deadOutboxRetention, "dead-outbox-retention");
         this.maxRetentionDeletesPerWorkspace = bounded(
             maxRetentionDeletesPerWorkspace,
             1,
@@ -210,10 +206,6 @@ public class WorkflowRuntimeProperties {
 
     public Duration completedOutboxRetention() {
         return completedOutboxRetention;
-    }
-
-    public Duration deadOutboxRetention() {
-        return deadOutboxRetention;
     }
 
     public int maxRetentionDeletesPerWorkspace() {

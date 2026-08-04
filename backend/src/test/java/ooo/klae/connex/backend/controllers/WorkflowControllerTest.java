@@ -403,8 +403,8 @@ class WorkflowControllerTest {
         assertEquals(
             Set.of(
                 "list", "create", "get", "saveDraft", "validate", "publish", "enable",
-                "disable", "archive", "restore", "cutOverToCanonical", "rollBackToLegacy",
-                "versions", "simulate", "resolveLegacyRule"),
+                "disable", "archive", "restore", "pause", "resume", "cutOverToCanonical",
+                "rollBackToLegacy", "versions", "simulate", "resolveLegacyRule"),
             methodNames);
 
         verifyNoInteractions(workflowService);
@@ -497,6 +497,8 @@ class WorkflowControllerTest {
             enabled,
             "legacy",
             null,
+            null,
+            null,
             3,
             "deal",
             "user",
@@ -519,6 +521,8 @@ class WorkflowControllerTest {
             null,
             false,
             "legacy",
+            null,
+            null,
             null,
             3,
             "deal",

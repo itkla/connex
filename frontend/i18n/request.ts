@@ -11,6 +11,7 @@ const namespaces = [
     "actions",
     "auth",
     "workspace",
+    "workflow-operations",
     "organization",
     "account",
     "dashboard",

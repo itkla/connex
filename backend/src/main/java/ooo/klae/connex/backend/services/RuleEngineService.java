@@ -140,11 +140,6 @@ public class RuleEngineService {
 
     private void processEntityRule(
             Rule rule, WorkflowTriggerDispatch.EntityChange dispatch) {
-        if ("person".equals(dispatch.recordType())
-                && personMapper.getProcessablePersonIds(
-                    dispatch.workspaceId(), List.of(dispatch.recordId())).isEmpty()) {
-            return;
-        }
         if (!dispatch.recordType().equals(rule.getRecordType())) {
             return;
         }
@@ -164,8 +159,18 @@ public class RuleEngineService {
         if (!claim.started() || claim.execution() == null) {
             return;
         }
+        if ("person".equals(dispatch.recordType())
+                && personMapper.getProcessablePersonIds(
+                    dispatch.workspaceId(), List.of(dispatch.recordId())).isEmpty()) {
+            finishExecution(
+                claim.execution(),
+                "failed",
+                "record_unavailable",
+                "The trigger record is unavailable.");
+            return;
+        }
         if (!conditionMatches(rule, dispatch.workspaceId(), dispatch.recordId())) {
-            finishExecution(claim.execution(), "skipped", null);
+            finishExecution(claim.execution(), "skipped", null, null);
             return;
         }
         fireClaimed(
@@ -245,7 +250,11 @@ public class RuleEngineService {
         RuleExecution execution = claim.execution();
         Principal principal = resolvePrincipal(rule, workspaceId);
         if (principal == null) {
-            finishExecution(execution, "failed", "The configured automation actor is unavailable.");
+            finishExecution(
+                execution,
+                "failed",
+                "actor_unavailable",
+                "The configured automation actor is unavailable.");
             return;
         }
         List<RuleAction> actions = List.of(read(rule.getActionsJson(), RuleAction[].class));
@@ -272,19 +281,28 @@ public class RuleEngineService {
                 }
                 return null;
             });
-            finishExecution(execution, failures.isEmpty() ? "matched" : "partial",
+            finishExecution(execution, failures.isEmpty() ? "matched" : "partial", null,
                 failures.isEmpty() ? null : String.join("; ", failures));
         } catch (Exception e) {
             log.warn(
                 "Rule execution failed ruleId={} recordType={} recordId={} exceptionClass={}",
                 rule.getId(), recordType, entityId, e.getClass().getSimpleName());
-            finishExecution(execution, "failed", "Rule execution failed.");
+            finishExecution(
+                execution, "failed", "execution_failed", "Rule execution failed.");
         }
     }
 
-    private void finishExecution(RuleExecution execution, String status, String detail) {
+    private void finishExecution(
+            RuleExecution execution,
+            String status,
+            String code,
+            String message) {
         try {
-            ruleMapper.updateExecution(execution.getWorkspaceId(), execution.getId(), status, writeDetail(detail));
+            ruleMapper.updateExecution(
+                execution.getWorkspaceId(),
+                execution.getId(),
+                status,
+                writeDetail(code, message));
         } catch (Exception e) {
             log.warn(
                 "Rule execution finalization failed executionId={} exceptionClass={}",
@@ -316,13 +334,22 @@ public class RuleEngineService {
         return objectMapper.readValue(json, type);
     }
 
-    private String writeDetail(String message) {
-        if (message == null) {
+    private String writeDetail(String code, String message) {
+        if (code == null && message == null) {
             return null;
         }
         try {
-            String trimmed = message.length() > 480 ? message.substring(0, 480) : message;
-            return objectMapper.writeValueAsString(Map.of("message", trimmed));
+            String trimmed = message == null
+                ? null
+                : message.substring(0, Math.min(message.length(), 480));
+            if (code == null) {
+                return objectMapper.writeValueAsString(Map.of("message", trimmed));
+            }
+            if (trimmed == null) {
+                return objectMapper.writeValueAsString(Map.of("code", code));
+            }
+            return objectMapper.writeValueAsString(
+                Map.of("code", code, "message", trimmed));
         } catch (Exception e) {
             return null;
         }

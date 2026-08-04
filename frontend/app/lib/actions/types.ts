@@ -1,7 +1,13 @@
 import type { ComponentType } from "react";
 import type { useRouter } from "next/navigation";
 
-import type { User, Workspace } from "@/app/lib/types";
+import type {
+    User,
+    WorkflowManualResolvedScope,
+    WorkflowManualScope,
+    WorkflowManualSourceSurface,
+    Workspace,
+} from "@/app/lib/types";
 import type { SelectionId } from "@/app/components/records/types";
 
 /**
@@ -39,6 +45,8 @@ export type ActiveRecordRef = {
 export type ActiveSelection = {
     type: RecordType;
     ids: ReadonlySet<SelectionId>;
+    sourceSurface: WorkflowManualSourceSurface;
+    scope: WorkflowManualResolvedScope;
 };
 
 /**
@@ -124,7 +132,14 @@ export type OverlayRequest =
     | { kind: "create-deal"; defaults?: CreateDefaults }
     | { kind: "import-companies" }
     | { kind: "import-contacts" }
-    | { kind: "import-deals" };
+    | { kind: "import-deals" }
+    | {
+        kind: "workflow-manual-run";
+        sourceSurface: WorkflowManualSourceSurface;
+        recordType: RecordType | null;
+        scope: WorkflowManualScope | null;
+        workflowId?: number;
+    };
 
 /**
  * The imperative capabilities handed to {@link AppAction.execute}. Kept out of {@link ActionContext}
@@ -134,6 +149,7 @@ export type ActionHelpers = {
     router: ReturnType<typeof useRouter>;
     openOverlay: (request: OverlayRequest) => void;
     closeOverlay: () => void;
+    source: ActionSource;
     /** Translates a key within the `Actions` next-intl namespace. */
     translate: (key: string, values?: Record<string, string | number>) => string;
 };

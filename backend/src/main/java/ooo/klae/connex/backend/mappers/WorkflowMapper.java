@@ -102,6 +102,12 @@ public interface WorkflowMapper {
         @Param("id") int id,
         @Param("updatedById") int updatedById);
 
+    int updateIntakePause(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("paused") boolean paused,
+        @Param("updatedById") int updatedById);
+
     int compareAndSwapRuntimeOwner(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,

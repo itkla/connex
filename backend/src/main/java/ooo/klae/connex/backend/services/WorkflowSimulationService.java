@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
+import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.dto.WorkflowSimulateRequest;
@@ -68,6 +69,22 @@ public class WorkflowSimulationService {
             throw new ConflictException("Workflow draft revision does not match");
         }
         CanonicalDraft draft = persistedDraft(workflow);
+        WorkflowDefinition definition = canonicalizer.parseDefinition(draft.definitionJson());
+        return simulateDraft(
+            draft,
+            definition,
+            workflow.getDraftRunAsUserId(),
+            workflow.getCreatedById(),
+            request.recordId());
+    }
+
+    WorkflowSimulationDto simulateDraft(
+            CanonicalDraft draft,
+            WorkflowDefinition definition,
+            Integer runAsUserId,
+            Integer createdById,
+            int recordId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
         if ("system".equals(draft.executionMode())
                 && !workspaceService.isBuiltInAdmin(
                     workspaceId, workspaceService.getCurrentUserId())) {
@@ -79,7 +96,7 @@ public class WorkflowSimulationService {
             validated = definitionValidator.validateForMutationAndCompile(
                 draft.recordType(),
                 draft.executionMode(),
-                canonicalizer.parseDefinition(draft.definitionJson()));
+                definition);
         } catch (WorkflowDefinitionValidationException exception) {
             return blocked(List.of(), exception.diagnostic());
         }
@@ -88,8 +105,8 @@ public class WorkflowSimulationService {
             principal = principalService.resolveDraft(
                 workspaceId,
                 draft.executionMode(),
-                workflow.getDraftRunAsUserId(),
-                workflow.getCreatedById());
+                runAsUserId,
+                createdById);
         } catch (WorkflowExecutionException exception) {
             return blocked(
                 List.of(),
@@ -97,22 +114,22 @@ public class WorkflowSimulationService {
         }
         try {
             recordGuard.requireAccessible(
-                workspaceId, draft.recordType(), request.recordId());
+                workspaceId, draft.recordType(), recordId);
         } catch (WorkflowExecutionException exception) {
             return blocked(
                 List.of(),
                 diagnostic(WorkflowDiagnosticCode.RECORD_UNAVAILABLE, null, null));
         }
         return traverse(
-            workflow,
+            workspaceId,
             draft,
             validated.compiled(),
             principal,
-            request.recordId());
+            recordId);
     }
 
     private WorkflowSimulationDto traverse(
-            Workflow workflow,
+            int workspaceId,
             CanonicalDraft draft,
             CompiledWorkflow compiled,
             WorkflowExecutionPrincipal principal,
@@ -150,7 +167,7 @@ public class WorkflowSimulationService {
             }
             if (node instanceof WorkflowNode.Action action) {
                 WorkflowDiagnosticDto blocker = actionGuard.blocker(
-                    workflow.getWorkspaceId(),
+                    workspaceId,
                     principal.actorUserId(),
                     draft.recordType(),
                     recordId,
@@ -168,7 +185,7 @@ public class WorkflowSimulationService {
                 }
             }
             WorkflowNodeDecisionContext context = new WorkflowNodeDecisionContext(
-                workflow.getWorkspaceId(),
+                workspaceId,
                 principal.attributionUserId(),
                 triggerType,
                 draft.recordType(),

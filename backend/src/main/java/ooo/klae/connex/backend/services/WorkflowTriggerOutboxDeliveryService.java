@@ -45,6 +45,7 @@ public class WorkflowTriggerOutboxDeliveryService {
         propagation = Propagation.REQUIRES_NEW,
         isolation = Isolation.READ_COMMITTED)
     public DeliveryResult deliver(int workspaceId, long outboxId, String leaseOwner) {
+        outboxMapper.ensureWorkspaceGate(workspaceId);
         WorkflowTriggerOutbox outbox = outboxMapper.getOwnedForUpdate(
             workspaceId, outboxId, leaseOwner);
         if (outbox == null) {
@@ -144,6 +145,10 @@ public class WorkflowTriggerOutboxDeliveryService {
             leaseOwner,
             afterId,
             completed));
+        if (completed) {
+            outboxMapper.resolveDeadForWorkflow(
+                outbox.getWorkspaceId(), outbox.getWorkflowId());
+        }
     }
 
     private void lockDispatchPrincipals(

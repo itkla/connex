@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
@@ -36,6 +37,7 @@ public class WorkflowOffboardingService {
         .thenComparingInt(Rule::getId);
 
     private final WorkflowMapper workflowMapper;
+    private final WorkflowOperationsMapper workflowOperationsMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
     private final RuleMapper ruleMapper;
     private final WorkspaceMapper workspaceMapper;
@@ -97,6 +99,7 @@ public class WorkflowOffboardingService {
             workflow.getWorkspaceId(), workflow.getId(), userId));
         rules.values().forEach(rule -> ruleMapper.redactUserReferences(
             rule.getWorkspaceId(), rule.getId(), userId));
+        workflowOperationsMapper.clearUserReferencesAnywhere(userId);
     }
 
     private Map<WorkflowKey, Workflow> lockWorkflows(List<Workflow> discovered) {
@@ -161,7 +164,9 @@ public class WorkflowOffboardingService {
         for (Workflow candidate : plan.workflows()) {
             Workflow current = workflows.get(
                 new WorkflowKey(candidate.getWorkspaceId(), candidate.getId()));
-            if (current == null || !workflowAffected(userId, current, versions, rules)) {
+            if (current == null
+                    || !(workflowAffected(userId, current, versions, rules)
+                        || candidate.isOperationsUserAffected())) {
                 throw new ConflictException("Workflow principal references changed during account offboarding");
             }
         }
