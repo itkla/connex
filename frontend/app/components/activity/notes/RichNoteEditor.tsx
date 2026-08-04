@@ -17,6 +17,7 @@ import { buildSlashCommands } from "./editor/slashCommands";
 import { Callout } from "./editor/Callout";
 import { Toggle, ToggleSummary } from "./editor/Toggle";
 import { NoteText, NoteUnderline } from "./editor/NoteUnderline";
+import { createMarkdownTableExtensions } from "./editor/MarkdownTable";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 
@@ -76,6 +77,7 @@ export default function RichNoteEditor({
             Placeholder.configure({ placeholder: t("placeholder") }),
             TaskList,
             TaskItem.configure({ nested: true }),
+            ...createMarkdownTableExtensions(),
             Markdown.configure({
                 html: false,
                 breaks: true,
@@ -142,6 +144,12 @@ export default function RichNoteEditor({
         taskList: t("taskList"),
         blockquote: t("blockquote"),
         codeBlock: t("codeBlock"),
+        tableInsert: t("tableInsert"),
+        tableAddRow: t("tableAddRow"),
+        tableAddColumn: t("tableAddColumn"),
+        tableDeleteRow: t("tableDeleteRow"),
+        tableDeleteColumn: t("tableDeleteColumn"),
+        tableDelete: t("tableDelete"),
     };
 
     return (
