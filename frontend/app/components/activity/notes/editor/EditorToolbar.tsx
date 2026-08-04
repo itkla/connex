@@ -3,9 +3,12 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import type { Editor } from "@tiptap/core";
 import {
+    BetweenHorizontalEnd,
+    BetweenVerticalEnd,
     Bold,
     BrushCleaning,
     Code,
+    Columns3,
     Heading1,
     Heading2,
     Heading3,
@@ -16,9 +19,12 @@ import {
     ListOrdered,
     ListTodo,
     Redo2,
+    Rows3,
     SquareCode,
     Strikethrough,
+    Table2,
     TextQuote,
+    Trash2,
     Underline,
     Undo2,
     type LucideIcon,
@@ -36,6 +42,10 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { normalizeEditorLinkHref } from "./editorLinks";
+import {
+    DEFAULT_MARKDOWN_TABLE_OPTIONS,
+    canDeleteMarkdownTableRow,
+} from "./MarkdownTable";
 
 export type ToolbarLabels = {
     bold: string;
@@ -63,6 +73,12 @@ export type ToolbarLabels = {
     taskList: string;
     blockquote: string;
     codeBlock: string;
+    tableInsert: string;
+    tableAddRow: string;
+    tableAddColumn: string;
+    tableDeleteRow: string;
+    tableDeleteColumn: string;
+    tableDelete: string;
 };
 
 type Props = { editor: Editor | null; labels: ToolbarLabels; compact?: boolean };
@@ -233,6 +249,9 @@ export function EditorToolbar({ editor, labels, compact = false }: Props) {
 
     if (!editor) return null;
 
+    const inTable = editor.isActive("table");
+    const canInsertTable = !inTable && editor.can().insertTable(DEFAULT_MARKDOWN_TABLE_OPTIONS);
+
     const divider = (key: string) => (
         <span key={key} className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
     );
@@ -261,6 +280,17 @@ export function EditorToolbar({ editor, labels, compact = false }: Props) {
             <ToolbarButton label={labels.blockquote} active={editor.isActive("blockquote")} onClick={() => editor.chain().focus().toggleBlockquote().run()} icon={TextQuote} />
             <ToolbarButton label={labels.codeBlock} active={editor.isActive("codeBlock")} onClick={() => editor.chain().focus().toggleCodeBlock().run()} icon={SquareCode} />
             <ToolbarButton label={labels.clearFormatting} onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} icon={BrushCleaning} />
+            {divider("d5")}
+            <ToolbarButton label={labels.tableInsert} disabled={!canInsertTable} onClick={() => editor.chain().focus().insertTable(DEFAULT_MARKDOWN_TABLE_OPTIONS).run()} icon={Table2} />
+            {inTable ? (
+                <>
+                    <ToolbarButton label={labels.tableAddRow} disabled={!editor.can().addRowAfter()} onClick={() => editor.chain().focus().addRowAfter().run()} icon={BetweenHorizontalEnd} />
+                    <ToolbarButton label={labels.tableAddColumn} disabled={!editor.can().addColumnAfter()} onClick={() => editor.chain().focus().addColumnAfter().run()} icon={BetweenVerticalEnd} />
+                    <ToolbarButton label={labels.tableDeleteRow} disabled={!canDeleteMarkdownTableRow(editor)} onClick={() => editor.chain().focus().deleteRow().run()} icon={Rows3} />
+                    <ToolbarButton label={labels.tableDeleteColumn} disabled={!editor.can().deleteColumn()} onClick={() => editor.chain().focus().deleteColumn().run()} icon={Columns3} />
+                    <ToolbarButton label={labels.tableDelete} disabled={!editor.can().deleteTable()} onClick={() => editor.chain().focus().deleteTable().run()} icon={Trash2} />
+                </>
+            ) : null}
         </div>
     );
 }

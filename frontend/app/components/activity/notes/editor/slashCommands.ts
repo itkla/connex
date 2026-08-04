@@ -11,9 +11,12 @@ import {
     type LucideIcon,
     Minus,
     SquareCode,
+    Table2,
     TextQuote,
     Type,
 } from "lucide-react";
+
+import { DEFAULT_MARKDOWN_TABLE_OPTIONS } from "./MarkdownTable";
 
 export type SlashCommandItem = {
     id: string;
@@ -121,6 +124,20 @@ export function buildSlashCommands(t: Translate): SlashCommandItem[] {
             icon: Minus,
             run: (editor, range) =>
                 editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
+        },
+        {
+            id: "table",
+            title: t("tableInsert"),
+            subtitle: t("slashTableHint"),
+            keywords: ["table", "grid", "rows", "columns"],
+            icon: Table2,
+            run: (editor, range) =>
+                editor
+                    .chain()
+                    .focus()
+                    .deleteRange(range)
+                    .insertTable(DEFAULT_MARKDOWN_TABLE_OPTIONS)
+                    .run(),
         },
         {
             id: "callout",

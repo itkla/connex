@@ -325,6 +325,30 @@
   .note-prose :where(hr) {
     @apply my-6 border-border;
   }
+  .note-prose :where(.tableWrapper) {
+    @apply my-4 max-w-full overflow-x-auto rounded-lg border border-border;
+  }
+  .note-prose :where(table) {
+    @apply w-full min-w-xl border-collapse text-sm;
+  }
+  .note-prose :where(th, td) {
+    @apply min-w-32 border-r border-b border-border px-3 py-2 align-top;
+  }
+  .note-prose :where(th) {
+    @apply bg-muted/60 text-left font-medium;
+  }
+  .note-prose :where(th:last-child, td:last-child) {
+    @apply border-r-0;
+  }
+  .note-prose :where(tr:last-child td) {
+    @apply border-b-0;
+  }
+  .note-prose :where(th p, td p) {
+    @apply my-0;
+  }
+  .note-prose :where(.selectedCell) {
+    @apply bg-brand/10;
+  }
   .note-prose :where(ul[data-type="taskList"]) {
     @apply my-2 list-none pl-0.5;
   }
