@@ -1,950 +1,535 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import AccessDenied from "@/app/components/AccessDenied";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { ReactFlowProvider } from "@xyflow/react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useTheme } from "next-themes";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import {
-    ReactFlow,
-    ReactFlowProvider,
-    Background,
-    Controls,
-    type Edge,
-    type NodeMouseHandler,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import {
-    ArrowDownIcon,
-    ArrowUpIcon,
-    BoltIcon,
-    CheckIcon,
-    ChevronLeftIcon,
-    FunnelIcon,
-    PlayIcon,
-    PlusIcon,
-    TrashIcon,
-    UserIcon,
-} from "@heroicons/react/24/outline";
-import { Loader2Icon } from "lucide-react";
+import { ExclamationTriangleIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import AccessDenied from "@/app/components/AccessDenied";
+import WorkflowCanvasEditor from "@/app/components/settings/workflows/WorkflowCanvasEditor";
+import WorkflowConflictDialog from "@/app/components/settings/workflows/WorkflowConflictDialog";
+import WorkflowInspector from "@/app/components/settings/workflows/WorkflowInspector";
+import WorkflowLifecycleBar from "@/app/components/settings/workflows/WorkflowLifecycleBar";
+import WorkflowOutlineEditor from "@/app/components/settings/workflows/WorkflowOutlineEditor";
+import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
+import WorkflowSimulationDialog from "@/app/components/settings/workflows/WorkflowSimulationDialog";
+import WorkflowValidationSummary from "@/app/components/settings/workflows/WorkflowValidationSummary";
+import WorkflowVersionsDialog from "@/app/components/settings/workflows/WorkflowVersionsDialog";
+import { useWorkflowEditor } from "@/app/components/settings/workflows/useWorkflowEditor";
+import { useWorkflowWorkspaceAccess } from "@/app/components/settings/workflows/useWorkflowWorkspaceAccess";
+import { workflowDelayDiagnostics } from "@/app/components/settings/workflows/workflowGraph";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-import {
-    createRule,
-    getActiveWorkspaceMembers,
     getCompanies,
     getPipelines,
-    getRuleById,
     getSegmentFields,
     getStagesByPipelineId,
-    previewRule,
-    updateRule,
 } from "@/app/lib/api";
-import { useWorkspace } from "@/app/hooks/useWorkspace";
-import { toastError, toastSuccess } from "@/app/lib/toast";
-import { easeOut } from "@/app/lib/motion";
-import SegmentBuilder, { EMPTY_DEFINITION } from "@/app/components/records/SegmentBuilder";
-import WorkflowNode, { type WorkflowFlowNode } from "@/app/components/settings/workflows/WorkflowNode";
-import {
-    CADENCES,
-    RECORD_TYPES,
-    SCHEDULE_RECORD_TYPES,
-    SEGMENT_RECORD_TYPES,
-    actionsFor,
-    defaultAction,
-    eventsFor,
-} from "@/app/components/settings/workflows/vocabulary";
+import { toastError } from "@/app/lib/toast";
 import type {
-    Rule,
-    RuleAction,
     RuleBuilderOptions,
-    RulePreview,
-    RuleRequest,
-    RuleTrigger,
-    SavedViewRecordType,
-    SegmentDefinition,
     SegmentFields,
+    WorkflowDiagnostic,
+    WorkflowDiagnosticCode,
+    WorkflowEdgeOutcome,
 } from "@/app/lib/types";
+import { Button } from "@/components/ui/button";
+import {
+    Drawer,
+    DrawerClose,
+    DrawerContent,
+    DrawerDescription,
+    DrawerHeader,
+    DrawerTitle,
+} from "@/components/ui/drawer";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
-type Selection = "trigger" | "condition" | `action-${number}`;
+type AuthoringMode = "canvas" | "outline";
+const NARROW_EDITOR_QUERY = "(max-width: 1023px)";
 
-const NODE_TYPES = { workflowStep: WorkflowNode };
+function subscribeToNarrowEditor(onChange: () => void): () => void {
+    const media = globalThis.matchMedia(NARROW_EDITOR_QUERY);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+}
 
-const LIST_URL = "/workflows";
+function narrowEditorSnapshot(): boolean {
+    return globalThis.matchMedia(NARROW_EDITOR_QUERY).matches;
+}
 
-/**
- * Full-page linear workflow editor over the existing rules engine. The single source of truth is
- * the draft rule state; the canvas is a derived projection used for orientation and selection,
- * while all editing happens in the inspector — which keeps the surface fully keyboard-operable
- * and lets the same steps render as a plain outline below the {@code lg} breakpoint.
- */
-export default function WorkflowEditor({ ruleId }: { ruleId?: number }) {
+function narrowEditorServerSnapshot(): boolean {
+    return false;
+}
+
+/** Full-height canonical workflow editor with peer canvas and outline authoring renderers. */
+export default function WorkflowEditor({ workflowId }: { workflowId?: number }) {
     return (
         <ReactFlowProvider>
-            <EditorBody ruleId={ruleId} />
+            <WorkflowEditorBody workflowId={workflowId} />
         </ReactFlowProvider>
     );
 }
 
-function EditorBody({ ruleId }: { ruleId?: number }) {
+function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkspaceRules");
     const router = useRouter();
-    const { resolvedTheme } = useTheme();
-    const reduce = useReducedMotion() ?? false;
-    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
-    const canRunAsSystem = activeWorkspace?.role === "owner" || activeWorkspace?.role === "admin";
-
-    const [loading, setLoading] = useState(true);
-    const [missing, setMissing] = useState(false);
-    const [accessDenied, setAccessDenied] = useState(false);
-    const [fields, setFields] = useState<SegmentFields | null>(null);
-    const [options, setOptions] = useState<RuleBuilderOptions | null>(null);
-    const [editing, setEditing] = useState<Rule | null>(null);
-
-    const [name, setName] = useState("");
-    const [enabled, setEnabled] = useState(true);
-    const [recordType, setRecordType] = useState("deal");
-    const [triggerType, setTriggerType] = useState("entity_change");
-    const [events, setEvents] = useState<string[]>([]);
-    const [cadence, setCadence] = useState("daily");
-    const [targetStageId, setTargetStageId] = useState<number | undefined>(undefined);
-    const [throttle, setThrottle] = useState("");
-    const [condition, setCondition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
-    const [actions, setActions] = useState<RuleAction[]>([defaultAction("deal")]);
-    const [executionMode, setExecutionMode] = useState<"user" | "system">("user");
-
-    const [selection, setSelection] = useState<Selection>("trigger");
-    const [error, setError] = useState<string | null>(null);
-    const [invalidStep, setInvalidStep] = useState<Selection | null>(null);
-    const [preview, setPreview] = useState<RulePreview | null>(null);
-    const [previewing, setPreviewing] = useState(false);
-    const [saving, setSaving] = useState(false);
+    const isNarrow = useSyncExternalStore(
+        subscribeToNarrowEditor,
+        narrowEditorSnapshot,
+        narrowEditorServerSnapshot,
+    );
+    const { activeWorkspaceId, switching } = useWorkspace();
+    const { canRunAsSystem, members } = useWorkflowWorkspaceAccess();
+    const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem });
+    const [mode, setMode] = useState<AuthoringMode>("canvas");
+    const [inspectorOpen, setInspectorOpen] = useState(false);
+    const [simulationOpen, setSimulationOpen] = useState(false);
+    const [versionsOpen, setVersionsOpen] = useState(false);
+    const [runsOpen, setRunsOpen] = useState(false);
+    const [fieldsState, setFieldsState] = useState<{
+        workspaceId: number;
+        recordType: "company" | "person" | "deal";
+        fields: SegmentFields;
+    } | null>(null);
+    const [referenceOptions, setReferenceOptions] = useState<{
+        workspaceId: number;
+        value: Omit<RuleBuilderOptions, "owners">;
+    } | null>(null);
 
     useEffect(() => {
         if (!activeWorkspaceId) return;
-        let cancelled = false;
-        (async () => {
-            setLoading(true);
-            setAccessDenied(false);
-            setMissing(false);
-            if (ruleId != null) {
-                try {
-                    const rule = await getRuleById(ruleId);
-                    if (cancelled) return;
-                    setEditing(rule);
-                    setName(rule.name);
-                    setEnabled(rule.enabled);
-                    setRecordType(rule.recordType);
-                    setTriggerType(rule.trigger.type);
-                    setEvents(rule.trigger.events ?? []);
-                    setCadence(rule.trigger.cadence ?? "daily");
-                    setTargetStageId(rule.trigger.targetStageId);
-                    setThrottle(rule.trigger.throttleMinutes ? String(rule.trigger.throttleMinutes) : "");
-                    setCondition(rule.condition ?? EMPTY_DEFINITION);
-                    setActions(rule.actions.length ? rule.actions : [defaultAction(rule.recordType)]);
-                    setExecutionMode(rule.executionMode);
-                } catch (err) {
-                    if (!cancelled) {
-                        if (err instanceof Error && "status" in err && (err as { status?: number }).status === 403) {
-                            setAccessDenied(true);
-                        } else {
-                            setMissing(true);
-                        }
-                        setLoading(false);
-                    }
-                    return;
-                }
-            }
-            if (!cancelled) setLoading(false);
-            try {
-                const loadedFields = await getSegmentFields("company");
-                if (!cancelled) setFields(loadedFields);
-            } catch {
-                if (!cancelled) toastError(tr("fieldsLoadFailed"));
-            }
-            const [pipelines, members, companies] = await Promise.all([
-                getPipelines().catch(() => []),
-                getActiveWorkspaceMembers().catch(() => []),
-                getCompanies().catch(() => []),
-            ]);
-            if (cancelled) return;
-            const stageLists = await Promise.all(
-                pipelines.map((pipeline) =>
-                    getStagesByPipelineId(pipeline.id)
-                        .then((stages) => stages.map((stage) => ({ id: stage.id, name: stage.name, pipeline: pipeline.name })))
-                        .catch(() => []),
-                ),
-            );
-            if (!cancelled) {
-                setOptions({
+        const workspaceHeaders = { "X-Workspace-Id": String(activeWorkspaceId) };
+        const controller = new AbortController();
+        let active = true;
+        void Promise.all([
+            getPipelines({ signal: controller.signal, headers: workspaceHeaders }).catch(() => []),
+            getCompanies({ signal: controller.signal, headers: workspaceHeaders }).catch(() => []),
+        ]).then(async ([pipelines, companies]) => {
+            if (!active || controller.signal.aborted) return;
+            const stageLists = await Promise.all(pipelines.map((pipeline) => (
+                getStagesByPipelineId(pipeline.id, { signal: controller.signal, headers: workspaceHeaders })
+                    .then((stages) => stages.map((stage) => ({ id: stage.id, name: stage.name, pipeline: pipeline.name })))
+                    .catch(() => [])
+            )));
+            if (!active || controller.signal.aborted) return;
+            setReferenceOptions({
+                workspaceId: activeWorkspaceId,
+                value: {
                     stages: stageLists.flat(),
-                    owners: members.map((member) => ({ id: member.id, name: member.displayName || member.username })),
                     companies: companies.map((company) => ({ id: company.id, name: company.name })),
-                });
-            }
-        })();
+                },
+            });
+        });
         return () => {
-            cancelled = true;
+            active = false;
+            controller.abort();
         };
-    }, [activeWorkspaceId, ruleId, tr]);
+    }, [activeWorkspaceId]);
 
-    const supportsCondition = SEGMENT_RECORD_TYPES.includes(recordType);
-    const supportsSchedule = SCHEDULE_RECORD_TYPES.includes(recordType);
-    const isSchedule = triggerType === "schedule";
-    const hasCondition = (condition.conditions?.length ?? 0) > 0 || (condition.groups?.length ?? 0) > 0;
-    const canFilterStage = recordType === "deal" && !isSchedule;
+    const options = useMemo<RuleBuilderOptions | null>(() => (
+        referenceOptions?.workspaceId === activeWorkspaceId
+            ? {
+                ...referenceOptions.value,
+                owners: members.map((member) => ({ id: member.id, name: member.displayName || member.username })),
+            }
+            : null
+    ), [activeWorkspaceId, members, referenceOptions]);
 
-    const changeRecordType = (next: string) => {
-        setRecordType(next);
-        setEvents([]);
-        setTargetStageId(undefined);
-        setPreview(null);
-        setCondition(EMPTY_DEFINITION);
-        if (!SCHEDULE_RECORD_TYPES.includes(next)) {
-            setTriggerType("entity_change");
-        }
-        setActions((prev) => prev.map((action) => (actionsFor(next).includes(action.type) ? action : defaultAction(next))));
-        if (!SEGMENT_RECORD_TYPES.includes(next) && selection === "condition") {
-            setSelection("trigger");
-        }
-    };
+    useEffect(() => {
+        const recordType = editor.document.recordType;
+        if ((recordType !== "company" && recordType !== "person" && recordType !== "deal") || activeWorkspaceId == null) return;
+        const controller = new AbortController();
+        void getSegmentFields(recordType, {
+            signal: controller.signal,
+            headers: { "X-Workspace-Id": String(activeWorkspaceId) },
+        })
+            .then((loaded) => {
+                if (!controller.signal.aborted) {
+                    setFieldsState({ workspaceId: activeWorkspaceId, recordType, fields: loaded });
+                }
+            })
+            .catch(() => {
+                if (!controller.signal.aborted) {
+                    toastError(t("fieldsLoadFailed"));
+                }
+            });
+        return () => controller.abort();
+    }, [activeWorkspaceId, editor.document.recordType, t]);
 
-    const toggleEvent = (event: string) =>
-        setEvents((prev) => (prev.includes(event) ? prev.filter((value) => value !== event) : [...prev, event]));
+    const fields = fieldsState?.workspaceId === activeWorkspaceId
+        && fieldsState.recordType === editor.document.recordType
+        ? fieldsState.fields
+        : null;
 
-    const setAction = (index: number, action: RuleAction) =>
-        setActions((prev) => prev.map((existing, i) => (i === index ? action : existing)));
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (editor.readOnly) return;
+            const target = event.target;
+            if (target instanceof HTMLElement && (
+                target.isContentEditable
+                || target.tagName === "INPUT"
+                || target.tagName === "TEXTAREA"
+                || target.tagName === "SELECT"
+            )) return;
+            const modifier = event.metaKey || event.ctrlKey;
+            if (!modifier || event.key.toLowerCase() !== "z") {
+                if (event.ctrlKey && event.key.toLowerCase() === "y") {
+                    event.preventDefault();
+                    editor.redo();
+                }
+                return;
+            }
+            event.preventDefault();
+            if (event.shiftKey) editor.redo();
+            else editor.undo();
+        };
+        globalThis.addEventListener("keydown", onKeyDown);
+        return () => globalThis.removeEventListener("keydown", onKeyDown);
+    }, [editor]);
 
-    const addAction = () => {
-        setActions((prev) => [...prev, defaultAction(recordType)]);
-        setSelection(`action-${actions.length}`);
-    };
+    const selectNode = useCallback((nodeId: string) => {
+        editor.setSelectedNodeId(nodeId);
+        editor.setFocusFieldPath(null);
+        if (isNarrow) setInspectorOpen(true);
+    }, [editor, isNarrow]);
 
-    const removeAction = (index: number) => {
-        if (actions.length <= 1) return;
-        setActions((prev) => prev.filter((_, i) => i !== index));
-        setSelection(index > 0 ? `action-${index - 1}` : "trigger");
-    };
-
-    const moveAction = (index: number, direction: -1 | 1) => {
-        const target = index + direction;
-        if (target < 0 || target >= actions.length) return;
-        setActions((prev) => {
-            const next = [...prev];
-            [next[index], next[target]] = [next[target], next[index]];
-            return next;
-        });
-        setSelection(`action-${target}`);
-    };
-
-    const runPreview = async () => {
-        setPreviewing(true);
-        setPreview(null);
-        try {
-            setPreview(await previewRule(recordType as SavedViewRecordType, condition));
-        } catch {
-            setError(tr("previewFailed"));
-        } finally {
-            setPreviewing(false);
-        }
-    };
-
-    const triggerSummary = isSchedule
-        ? tr("summarySchedule", { cadence: tr(`cadence.${cadence}`) })
-        : events.length
-            ? events.map((event) => tr(`event.${event}`)).join(", ")
-            : tr("previewAnyChange");
-
-    const conditionSummary = hasCondition
-        ? t("conditionSummarySet", { count: (condition.conditions?.length ?? 0) + (condition.groups?.length ?? 0) })
-        : isSchedule
-            ? t("conditionSummaryRequired")
-            : t("conditionSummaryAny");
-
-    const actionSummary = useCallback(
-        (action: RuleAction) =>
-            action.title?.trim() || action.body?.trim() || action.activityType?.trim() || tr(`action.${action.type}`),
-        [tr],
+    const nodeById = useMemo(
+        () => new Map(editor.document.definition.nodes.map((node) => [node.id, node])),
+        [editor.document.definition.nodes],
     );
-
-    const steps = useMemo(() => {
-        const list: { key: Selection; label: string; summary: string }[] = [
-            { key: "trigger", label: tr(`record.${recordType}`), summary: triggerSummary },
+    const nodeLabel = useCallback((nodeId: string) => {
+        const node = nodeById.get(nodeId);
+        if (!node) return t("unknownNode");
+        if (node.type === "ACTION") return tr(`action.${node.config.type}`);
+        return t(`nodeType.${node.type.toLowerCase()}`);
+    }, [nodeById, t, tr]);
+    const nodeSummary = useCallback((nodeId: string) => {
+        const node = nodeById.get(nodeId);
+        if (!node) return t("unknownNode");
+        switch (node.type) {
+            case "TRIGGER":
+                return node.config.type === "schedule"
+                    ? t("summary.schedule", { cadence: tr(`cadence.${node.config.cadence ?? "daily"}`) })
+                    : node.config.events?.length
+                        ? tr("summaryEntity", {
+                            record: tr(`record.${editor.document.recordType ?? "deal"}`),
+                            events: node.config.events.map((event) => tr(`event.${event}`)).join(", "),
+                        })
+                        : t("summary.anyChange");
+            case "CONDITION": {
+                const count = node.config.conditions.length + (node.config.groups?.length ?? 0);
+                return count > 0 ? t("conditionSummarySet", { count }) : t("conditionSummaryEmpty");
+            }
+            case "ACTION":
+                return node.config.title?.trim()
+                    || node.config.body?.trim()
+                    || node.config.activityType?.trim()
+                    || tr(`action.${node.config.type}`);
+            case "DELAY": {
+                const seconds = node.config.durationSeconds;
+                if (seconds > 0 && seconds % 86_400 === 0) return t("summary.delayDays", { value: seconds / 86_400 });
+                if (seconds > 0 && seconds % 3_600 === 0) return t("summary.delayHours", { value: seconds / 3_600 });
+                if (seconds > 0 && seconds % 60 === 0) return t("summary.delayMinutes", { value: seconds / 60 });
+                return t("summary.delaySeconds", { value: seconds });
+            }
+            case "END":
+                return t("summary.end");
+        }
+    }, [editor.document.recordType, nodeById, t, tr]);
+    const branchLabel = useCallback((outcome: WorkflowEdgeOutcome) => t(`branch.${outcome}`), [t]);
+    const diagnosticMessage = useCallback((diagnostic: {
+        code: WorkflowDiagnosticCode;
+        params: Record<string, string>;
+    }) => t(`diagnostics.${diagnostic.code}`, diagnostic.params), [t]);
+    const localDiagnostics = useMemo(
+        () => workflowDelayDiagnostics(editor.document.definition),
+        [editor.document.definition],
+    );
+    const visibleDiagnostics = useMemo(() => {
+        const authoritative = editor.validation?.errors ?? [];
+        const keys = new Set(localDiagnostics.map((diagnostic) => `${diagnostic.code}:${diagnostic.nodeId}:${diagnostic.fieldPath}`));
+        return [
+            ...localDiagnostics,
+            ...authoritative.filter((diagnostic) => !keys.has(`${diagnostic.code}:${diagnostic.nodeId}:${diagnostic.fieldPath}`)),
         ];
-        if (supportsCondition) {
-            list.push({ key: "condition", label: t("conditionStep"), summary: conditionSummary });
+    }, [editor.validation?.errors, localDiagnostics]);
+    const visibleValidation = editor.validation
+        ? {
+            ...editor.validation,
+            valid: editor.validation.valid && localDiagnostics.length === 0,
+            canPublish: editor.validation.canPublish && localDiagnostics.length === 0,
+            errors: visibleDiagnostics,
         }
-        actions.forEach((action, index) => {
-            list.push({ key: `action-${index}`, label: tr(`action.${action.type}`), summary: actionSummary(action) });
-        });
-        return list;
-    }, [tr, t, recordType, triggerSummary, supportsCondition, conditionSummary, actions, actionSummary]);
+        : localDiagnostics.length > 0
+            ? {
+                draftRevision: editor.workflow?.draftRevision ?? -1,
+                valid: false,
+                canPublish: false,
+                systemAuthoringAllowed: canRunAsSystem,
+                requiredPermissions: [],
+                missingPermissions: [],
+                errors: localDiagnostics,
+            }
+            : null;
 
-    const nodes = useMemo<WorkflowFlowNode[]>(() => {
-        const stepNodes: WorkflowFlowNode[] = steps.map((step, index) => ({
-            id: step.key,
-            type: "workflowStep",
-            position: { x: 0, y: index * 128 },
-            draggable: false,
-            data: {
-                kind: step.key === "trigger" ? "trigger" : step.key === "condition" ? "condition" : "action",
-                label: step.label,
-                summary: step.summary,
-                selected: selection === step.key,
-                invalid: invalidStep === step.key,
-            },
-        }));
-        stepNodes.push({
-            id: "add-step",
-            type: "workflowStep",
-            position: { x: 0, y: steps.length * 128 },
-            draggable: false,
-            data: { kind: "add", label: t("addStep"), summary: "", selected: false, invalid: false },
-        });
-        return stepNodes;
-    }, [steps, selection, invalidStep, t]);
-
-    const edges = useMemo<Edge[]>(() => {
-        const ids = [...steps.map((step) => step.key), "add-step"];
-        return ids.slice(0, -1).map((id, index) => ({
-            id: `e-${id}`,
-            source: id,
-            target: ids[index + 1],
-            type: "smoothstep",
-            selectable: false,
-            style: { stroke: "var(--color-chart-grid)", strokeWidth: 1.5 },
-        }));
-    }, [steps]);
-
-    const onNodeClick = useCallback<NodeMouseHandler>((_, node) => {
-        if (node.id === "add-step") {
-            setActions((prev) => [...prev, defaultAction(recordType)]);
-            setSelection(`action-${actions.length}` as Selection);
-            return;
-        }
-        setSelection(node.id as Selection);
-    }, [recordType, actions.length]);
-
-    const validate = (): RuleRequest | null => {
-        setError(null);
-        setInvalidStep(null);
-        if (executionMode === "system" && !canRunAsSystem) {
-            setError(tr("systemRunAsRestricted"));
-            setSelection("trigger");
-            return null;
-        }
-        if (!name.trim()) {
-            setError(tr("nameRequired"));
-            return null;
-        }
-        if (!isSchedule && events.length === 0) {
-            setError(tr("eventsRequired"));
-            setInvalidStep("trigger");
-            setSelection("trigger");
-            return null;
-        }
-        const conditionPayload = supportsCondition && hasCondition ? condition : undefined;
-        if (isSchedule && !conditionPayload) {
-            setError(tr("conditionRequired"));
-            setInvalidStep("condition");
-            setSelection("condition");
-            return null;
-        }
-        for (let index = 0; index < actions.length; index += 1) {
-            const action = actions[index];
-            const fail = (key: string) => {
-                setError(tr(key));
-                setInvalidStep(`action-${index}`);
-                setSelection(`action-${index}`);
-            };
-            if ((action.type === "create_task" || action.type === "notify") && !action.title?.trim()) {
-                fail("actionTitleRequired");
-                return null;
-            }
-            if (action.type === "log_activity" && !action.activityType?.trim()) {
-                fail("actionActivityTypeRequired");
-                return null;
-            }
-            if ((action.type === "add_tag" || action.type === "remove_tag") && !action.tagId) {
-                fail("actionTagRequired");
-                return null;
-            }
-            if (action.type === "create_note" && !action.body?.trim()) {
-                fail("actionNoteRequired");
-                return null;
-            }
-            if (action.type === "assign_owner" && !action.targetUserId) {
-                fail("actionOwnerRequired");
-                return null;
-            }
-            if (action.type === "change_stage" && !action.targetStageId) {
-                fail("actionStageRequired");
-                return null;
-            }
-        }
-        const throttleMinutes = Number(throttle);
-        const trigger: RuleTrigger = isSchedule
-            ? { type: "schedule", cadence }
-            : {
-                  type: "entity_change",
-                  events,
-                  ...(canFilterStage && targetStageId ? { targetStageId } : {}),
-                  ...(throttle && throttleMinutes > 0 ? { throttleMinutes } : {}),
-              };
-        return {
-            name: name.trim(),
-            description: editing?.description,
-            enabled,
-            recordType,
-            trigger,
-            condition: conditionPayload,
-            actions: actions.map((action) =>
-                action.type === "create_task" && action.dueInDays == null ? { ...action, dueInDays: 3 } : action,
-            ),
-            executionMode,
-        };
+    const rendererProps = {
+        document: editor.document,
+        selectedNodeId: editor.selectedNodeId,
+        diagnostics: visibleDiagnostics,
+        run: editor.run,
+        readOnly: editor.readOnly,
+        focusNodeId: editor.selectedNodeId,
+        nodeLabel,
+        nodeSummary,
+        branchLabel,
+        onSelectNode: selectNode,
+        onConnectBranch: editor.connectBranch,
+        onDisconnectBranch: editor.disconnectBranch,
+        onInsertNode: editor.insertNode,
+        onDeleteNode: editor.deleteNode,
     };
 
-    const save = async () => {
-        const payload = validate();
-        if (!payload) return;
-        setSaving(true);
-        try {
-            if (editing) {
-                await updateRule(editing.id, payload);
-                toastSuccess(t("updated"));
-            } else {
-                await createRule(payload);
-                toastSuccess(t("created"));
-            }
-            router.push(LIST_URL);
-            router.refresh();
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
-            setSaving(false);
-        }
-    };
+    const inspector = (
+        <WorkflowInspector
+            document={editor.document}
+            selectedNodeId={editor.selectedNodeId}
+            fields={fields}
+            options={options}
+            diagnostics={visibleDiagnostics}
+            readOnly={editor.readOnly}
+            canRunAsSystem={canRunAsSystem}
+            focusFieldPath={editor.focusFieldPath}
+            focusRequestId={editor.focusRequestId}
+            diagnosticMessage={(diagnostic) => diagnosticMessage(diagnostic)}
+            onNodeChange={editor.changeNode}
+            onMetadataChange={editor.changeMetadata}
+            onCommitTransient={editor.commitTransient}
+        />
+    );
 
-    if (accessDenied) {
-        return (
-            <AccessDenied variant="inline" body={tr("noAccess")} />
-        );
+    if (editor.accessDenied) {
+        return <AccessDenied variant="page" title={t("accessDeniedTitle")} body={tr("noAccess")} />;
     }
-    if (missing) {
+    if (editor.missing) {
         return (
-            <div className="rounded-2xl border border-border bg-card px-4 py-10 text-center">
-                <p className="text-sm text-muted-foreground">{t("notFound")}</p>
-                <Button variant="outline" size="sm" className="mt-3" onClick={() => router.push(LIST_URL)}>
-                    {t("backToList")}
-                </Button>
-            </div>
-        );
-    }
-    if (loading) {
-        return (
-            <div className="space-y-4">
-                <Skeleton className="h-10 w-full max-w-xl" />
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-                    <Skeleton className="hidden h-[480px] rounded-2xl lg:block" />
-                    <Skeleton className="h-[480px] rounded-2xl" />
+            <div className="grid min-h-[calc(100dvh-4rem)] place-items-center bg-background px-4 text-center">
+                <div>
+                    <p className="text-sm text-muted-foreground">{t("notFound")}</p>
+                    <Button variant="outline" size="sm" className="mt-3" onClick={() => router.push("/workflows")}>
+                        {t("backToList")}
+                    </Button>
                 </div>
             </div>
         );
     }
+    if (editor.loadError) {
+        return (
+            <div className="grid min-h-[calc(100dvh-4rem)] place-items-center bg-background px-4 text-center">
+                <div className="max-w-sm">
+                    <ExclamationTriangleIcon className="mx-auto size-8 text-destructive" />
+                    <p className="mt-3 text-sm font-medium text-foreground">{t("editorLoadFailedTitle")}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{t("editorLoadFailedBody")}</p>
+                    <Button variant="outline" size="sm" className="mt-4" onClick={editor.retryLoad}>
+                        {t("retry")}
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+    if (editor.loading || switching) return <EditorSkeleton />;
 
     return (
-        <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center gap-3">
-                <Button variant="ghost" size="icon-sm" aria-label={t("backToList")} onClick={() => router.push(LIST_URL)}>
-                    <ChevronLeftIcon className="size-4" />
-                </Button>
-                <Input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder={tr("ruleNamePlaceholder")}
-                    aria-label={tr("ruleName")}
-                    maxLength={128}
-                    className="h-9 w-full max-w-md flex-1"
+        <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-background">
+            <WorkflowLifecycleBar
+                name={editor.history.present.name}
+                revision={editor.workflow?.draftRevision ?? -1}
+                activeVersionNumber={editor.activeVersionNumber}
+                hasActiveVersion={editor.workflow?.activeVersionId != null}
+                enabled={editor.workflow?.enabled ?? false}
+                runtimeOwner={editor.workflow?.runtimeOwner ?? "legacy"}
+                executionMode={editor.history.present.executionMode}
+                archived={editor.workflow?.archivedAt != null}
+                dirty={editor.dirty}
+                validation={editor.validation}
+                canUndo={editor.history.past.length > 0 || editor.history.transientBase != null}
+                canRedo={editor.history.future.length > 0}
+                busyAction={editor.busyAction}
+                readOnly={editor.readOnly}
+                onBack={() => router.push("/workflows")}
+                onNameChange={editor.changeName}
+                onNameCommit={editor.commitTransient}
+                onUndo={editor.undo}
+                onRedo={editor.redo}
+                onSave={() => void editor.save()}
+                onValidate={() => void editor.validate()}
+                onPublish={() => void editor.publish()}
+                onToggleEnabled={() => void editor.toggleEnabled()}
+                onOpenSimulation={() => setSimulationOpen(true)}
+                onOpenVersions={() => {
+                    editor.loadVersions();
+                    setVersionsOpen(true);
+                }}
+                onOpenRuns={() => setRunsOpen(true)}
+            />
+
+            {visibleValidation ? (
+                <WorkflowValidationSummary
+                    validation={visibleValidation}
+                    diagnosticMessage={(diagnostic: WorkflowDiagnostic) => diagnosticMessage(diagnostic)}
+                    onSelectDiagnostic={(diagnostic) => {
+                        editor.selectDiagnostic(diagnostic);
+                        if (isNarrow) setInspectorOpen(true);
+                    }}
                 />
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Switch checked={enabled} onCheckedChange={setEnabled} aria-label={t("enabledLabel")} />
-                    {t("enabledLabel")}
-                </label>
-                <Button variant="brand" onClick={save} disabled={saving} className="ml-auto">
-                    {saving ? <Loader2Icon className="size-4 animate-spin" /> : t("save")}
-                </Button>
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            ) : null}
 
-            <div className="relative grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
-                <div className="hidden h-[calc(100dvh-13rem)] min-h-[480px] overflow-hidden rounded-2xl border border-border bg-muted/20 lg:block">
-                    <ReactFlow
-                        nodes={nodes}
-                        edges={edges}
-                        nodeTypes={NODE_TYPES}
-                        onNodeClick={onNodeClick}
-                        colorMode={resolvedTheme === "dark" ? "dark" : "light"}
-                        fitView
-                        fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
-                        nodesDraggable={false}
-                        nodesConnectable={false}
-                        panOnScroll
-                        proOptions={{ hideAttribution: false }}
-                    >
-                        <Background gap={24} />
-                        <Controls position="bottom-right" showInteractive={false} />
-                    </ReactFlow>
+            {editor.inspection ? (
+                <div className="flex flex-wrap items-center gap-2 border-b border-brand/30 bg-brand-light px-4 py-2 text-sm text-foreground">
+                    <EyeIcon className="size-4" />
+                    <span className="font-medium">
+                        {editor.inspection.kind === "run"
+                            ? t("inspection.run", { runKey: editor.inspection.run.runKey })
+                            : t("inspection.version", { number: editor.inspection.version.versionNumber })}
+                    </span>
+                    <span className="text-muted-foreground">{t("inspection.readOnly")}</span>
+                    <Button variant="ghost" size="xs" className="ml-auto" onClick={editor.exitInspection}>
+                        <XMarkIcon className="size-3.5" />
+                        {t("inspection.exit")}
+                    </Button>
                 </div>
+            ) : null}
 
-                <ol
-                    className="flex flex-col gap-2 lg:sr-only lg:focus-within:not-sr-only lg:focus-within:absolute lg:focus-within:left-3 lg:focus-within:top-3 lg:focus-within:z-20 lg:focus-within:w-80 lg:focus-within:rounded-2xl lg:focus-within:border lg:focus-within:border-border lg:focus-within:bg-card lg:focus-within:p-3 lg:focus-within:shadow-lg"
-                    aria-label={t("outlineLabel")}
-                >
-                    {steps.map((step) => (
-                        <li key={step.key}>
-                            <button
-                                type="button"
-                                onClick={() => setSelection(step.key)}
-                                aria-current={selection === step.key ? "step" : undefined}
-                                className={cn(
-                                    "flex w-full items-center gap-2.5 rounded-xl bg-card p-3 text-left ring-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                    invalidStep === step.key
-                                        ? "ring-destructive"
-                                        : selection === step.key
-                                            ? "ring-2 ring-brand"
-                                            : "ring-border hover:bg-muted/40",
-                                )}
-                            >
-                                <StepIcon step={step.key} />
-                                <span className="min-w-0">
-                                    <span className="block truncate text-sm font-medium text-foreground">{step.label}</span>
-                                    <span className="block truncate text-xs text-muted-foreground">{step.summary}</span>
-                                </span>
-                            </button>
-                        </li>
-                    ))}
-                    <li>
-                        <Button type="button" variant="ghost" size="sm" onClick={addAction} className="gap-1 text-brand hover:text-brand-hover">
-                            <PlusIcon className="size-4" />
-                            {t("addStep")}
-                        </Button>
-                    </li>
-                </ol>
-
-                <aside className="rounded-2xl border border-border bg-card p-4 lg:sticky lg:top-24">
-                    <AnimatePresence mode="wait" initial={false}>
-                    <motion.div
-                        key={selection === "trigger" || selection === "condition" ? selection : "action"}
-                        initial={reduce ? false : { opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={reduce ? { opacity: 1 } : { opacity: 0 }}
-                        transition={{ duration: 0.15, ease: easeOut }}
-                    >
-                    {selection === "trigger" && (
-                        <TriggerInspector
-                            t={t}
-                            tr={tr}
-                            recordType={recordType}
-                            triggerType={triggerType}
-                            events={events}
-                            cadence={cadence}
-                            targetStageId={targetStageId}
-                            throttle={throttle}
-                            supportsSchedule={supportsSchedule}
-                            canFilterStage={canFilterStage}
-                            options={options}
-                            canRunAsSystem={canRunAsSystem}
-                            executionMode={executionMode}
-                            onRecordType={changeRecordType}
-                            onTriggerType={setTriggerType}
-                            onToggleEvent={toggleEvent}
-                            onCadence={setCadence}
-                            onStage={setTargetStageId}
-                            onThrottle={setThrottle}
-                            onExecutionMode={setExecutionMode}
-                        />
-                    )}
-                    {selection === "condition" && supportsCondition && (
-                        <div className="space-y-3">
-                            <InspectorTitle title={t("conditionStep")} hint={isSchedule ? tr("conditionRequiredLabel") : tr("conditionLabel")} />
-                            <SegmentBuilder
-                                definition={condition}
-                                fields={fields}
-                                onChange={(next) => {
-                                    setCondition(next);
-                                    setPreview(null);
-                                }}
-                                recordType={recordType}
-                                options={options}
-                                advanced
-                            />
-                            {hasCondition && (
-                                <Button type="button" variant="ghost" size="sm" onClick={runPreview} disabled={previewing} className="text-muted-foreground hover:text-foreground">
-                                    {previewing ? tr("previewing") : tr("previewButton")}
-                                </Button>
-                            )}
-                            {preview && (
-                                <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
-                                    <p className="font-medium text-foreground">{tr("previewCount", { count: preview.matchCount })}</p>
-                                    {preview.sample.length > 0 && (
-                                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                                            {preview.sample.map((record) => record.label).join(", ")}
-                                        </p>
+            <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex items-center gap-1 border-b border-border px-4 py-2">
+                    {!isNarrow ? (
+                        <div role="group" aria-label={t("authoringModeLabel")} className="flex rounded-full bg-muted p-0.5 ring-1 ring-border/60">
+                            {(["canvas", "outline"] satisfies AuthoringMode[]).map((value) => (
+                                <button
+                                    key={value}
+                                    type="button"
+                                    aria-pressed={mode === value}
+                                    onClick={() => setMode(value)}
+                                    className={cn(
+                                        "h-8 rounded-full px-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                        mode === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                                     )}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    {selection.startsWith("action-") && (
-                        <ActionInspector
-                            t={t}
-                            tr={tr}
-                            index={Number(selection.slice("action-".length))}
-                            actions={actions}
-                            recordType={recordType}
-                            fields={fields}
-                            options={options}
-                            onChange={setAction}
-                            onRemove={removeAction}
-                            onMove={moveAction}
-                        />
-                    )}
-                    </motion.div>
-                    </AnimatePresence>
-                </aside>
-            </div>
-        </div>
-    );
-}
-
-function StepIcon({ step }: { step: Selection }) {
-    const Icon = step === "trigger" ? PlayIcon : step === "condition" ? FunnelIcon : BoltIcon;
-    return (
-        <span className={cn(
-            "grid size-8 shrink-0 place-items-center rounded-lg",
-            step === "trigger" ? "bg-brand text-brand-foreground" : "bg-muted text-foreground",
-        )}>
-            <Icon aria-hidden className="size-4" />
-        </span>
-    );
-}
-
-function InspectorTitle({ title, hint }: { title: string; hint?: string }) {
-    return (
-        <div>
-            <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-            {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-        </div>
-    );
-}
-
-type Translator = ReturnType<typeof useTranslations>;
-
-function TriggerInspector({
-    t, tr, recordType, triggerType, events, cadence, targetStageId, throttle,
-    supportsSchedule, canFilterStage, options, canRunAsSystem, executionMode,
-    onRecordType, onTriggerType, onToggleEvent, onCadence, onStage, onThrottle, onExecutionMode,
-}: {
-    t: Translator;
-    tr: Translator;
-    recordType: string;
-    triggerType: string;
-    events: string[];
-    cadence: string;
-    targetStageId?: number;
-    throttle: string;
-    supportsSchedule: boolean;
-    canFilterStage: boolean;
-    options: RuleBuilderOptions | null;
-    canRunAsSystem: boolean;
-    executionMode: "user" | "system";
-    onRecordType: (value: string) => void;
-    onTriggerType: (value: string) => void;
-    onToggleEvent: (event: string) => void;
-    onCadence: (value: string) => void;
-    onStage: (value: number | undefined) => void;
-    onThrottle: (value: string) => void;
-    onExecutionMode: (value: "user" | "system") => void;
-}) {
-    const isSchedule = triggerType === "schedule";
-    return (
-        <div className="space-y-4">
-            <InspectorTitle title={t("triggerStep")} hint={t("triggerHint")} />
-            <div className="flex flex-wrap items-center gap-2">
-                <Select value={recordType} onValueChange={onRecordType}>
-                    <SelectTrigger size="sm" aria-label={tr("recordType")} className="w-32"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                        {RECORD_TYPES.map((type) => (
-                            <SelectItem key={type} value={type}>{tr(`record.${type}`)}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-                {supportsSchedule && (
-                    <Select value={triggerType} onValueChange={onTriggerType}>
-                        <SelectTrigger size="sm" aria-label={tr("triggerKind")} className="w-44"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="entity_change">{tr("kindEntityChange")}</SelectItem>
-                            <SelectItem value="schedule">{tr("kindSchedule")}</SelectItem>
-                        </SelectContent>
-                    </Select>
-                )}
-            </div>
-            {isSchedule ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span>{tr("everyPrefix")}</span>
-                    <Select value={cadence} onValueChange={onCadence}>
-                        <SelectTrigger size="sm" aria-label={tr("cadenceLabel")} className="w-32"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                            {CADENCES.map((value) => (
-                                <SelectItem key={value} value={value}>{tr(`cadence.${value}`)}</SelectItem>
+                                >
+                                    {t(`authoringMode.${value}`)}
+                                </button>
                             ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-            ) : (
-                <>
-                    <div className="flex flex-wrap gap-1.5">
-                        {eventsFor(recordType).map((event) => {
-                            const on = events.includes(event);
-                            return (
-                                <button
-                                    key={event}
-                                    type="button"
-                                    aria-pressed={on}
-                                    onClick={() => onToggleEvent(event)}
-                                    className={cn(
-                                        "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ring-1 transition active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                        on
-                                            ? "bg-brand/15 text-foreground ring-brand"
-                                            : "bg-muted text-muted-foreground ring-border hover:text-foreground",
-                                    )}
-                                >
-                                    {on && <CheckIcon aria-hidden className="size-3 text-brand" />}
-                                    {tr(`event.${event}`)}
-                                </button>
-                            );
-                        })}
-                    </div>
-                    {canFilterStage && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <span>{tr("stageFilterLabel")}</span>
-                            <Select
-                                value={targetStageId ? String(targetStageId) : "any"}
-                                onValueChange={(value) => onStage(value === "any" ? undefined : Number(value))}
-                            >
-                                <SelectTrigger size="sm" aria-label={tr("stageFilterLabel")} className="w-44"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="any">{tr("anyStage")}</SelectItem>
-                                    {(options?.stages ?? []).map((stage) => (
-                                        <SelectItem key={stage.id} value={String(stage.id)}>{stage.pipeline} · {stage.name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
                         </div>
+                    ) : (
+                        <span className="text-sm font-medium text-foreground">{t("authoringMode.outline")}</span>
                     )}
-                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <span>{tr("throttlePrefix")}</span>
-                        <Input
-                            type="number"
-                            min={1}
-                            value={throttle}
-                            onChange={(event) => onThrottle(event.target.value)}
-                            placeholder={tr("throttleOff")}
-                            aria-label={tr("throttleLabel")}
-                            className="h-9 w-20"
-                        />
-                        <span>{tr("throttleSuffix")}</span>
-                    </div>
-                </>
-            )}
+                    {editor.readOnly && !editor.inspection ? (
+                        <span className="ml-auto text-xs text-muted-foreground">
+                            {editor.workflow?.archivedAt ? t("archivedReadOnly") : t("systemAuthoringRestricted")}
+                        </span>
+                    ) : null}
+                </div>
 
-            <div className="space-y-2 border-t border-border pt-4">
-                <Label>{tr("runAsLabel")}</Label>
-                {canRunAsSystem ? (
-                    <div role="radiogroup" aria-label={tr("runAsLabel")} className="grid gap-2">
-                        {(["user", "system"] as const).map((mode) => {
-                            const Icon = mode === "system" ? BoltIcon : UserIcon;
-                            const selected = executionMode === mode;
-                            return (
-                                <button
-                                    key={mode}
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={selected}
-                                    onClick={() => onExecutionMode(mode)}
-                                    className={cn(
-                                        "flex items-start gap-2.5 rounded-xl p-3 text-left ring-1 transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                        selected ? "bg-brand/5 ring-brand" : "bg-card ring-border hover:bg-muted/40",
-                                    )}
-                                >
-                                    <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")} />
-                                    <span className="min-w-0">
-                                        <span className="block text-sm font-medium text-foreground">{tr(`runAs.${mode}.title`)}</span>
-                                        <span className="block text-xs text-muted-foreground">{tr(`runAs.${mode}.hint`)}</span>
-                                    </span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <p className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                        <UserIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-                        {tr("runAs.user.hint")}
-                    </p>
-                )}
+                <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_24rem]">
+                    <section className="min-h-0 overflow-y-auto p-3 sm:p-4">
+                        {!isNarrow && mode === "canvas" ? (
+                            <WorkflowCanvasEditor
+                                {...rendererProps}
+                                runStatusLabel={(status) => t(`runs.status.${status}`)}
+                                onMoveNode={editor.moveNode}
+                                onMoveViewport={editor.moveViewport}
+                            />
+                        ) : (
+                            <WorkflowOutlineEditor {...rendererProps} />
+                        )}
+                    </section>
+                    <aside className="hidden min-h-0 overflow-y-auto border-l border-border bg-card lg:block">
+                        {!isNarrow ? inspector : null}
+                    </aside>
+                </div>
             </div>
+
+            <Drawer
+                open={isNarrow && inspectorOpen}
+                onOpenChange={setInspectorOpen}
+                swipeDirection="right"
+                motionClassName="duration-200"
+            >
+                <DrawerContent showCloseButton={false} className="w-full gap-0 transition-transform duration-200 sm:max-w-sm">
+                    <DrawerHeader className="border-b border-border">
+                        <div className="flex items-center gap-2 pr-8">
+                            <DrawerTitle>{t("inspectorTitle")}</DrawerTitle>
+                            <DrawerClose
+                                render={<Button className="ml-auto" variant="ghost" size="icon-sm" aria-label={t("close")} />}
+                            >
+                                <XMarkIcon className="size-4" />
+                            </DrawerClose>
+                        </div>
+                        <DrawerDescription>{editor.selectedNodeId ? nodeLabel(editor.selectedNodeId) : t("selectNodePrompt")}</DrawerDescription>
+                    </DrawerHeader>
+                    <div className="min-h-0 flex-1 overflow-y-auto">{isNarrow ? inspector : null}</div>
+                </DrawerContent>
+            </Drawer>
+
+            <WorkflowConflictDialog
+                open={editor.conflictOpen}
+                document={editor.conflict?.document ?? editor.history.present}
+                conflicts={editor.conflict?.conflicts ?? []}
+                onCancel={editor.dismissConflict}
+                onResolve={editor.resolveConflict}
+            />
+            <WorkflowSimulationDialog
+                open={simulationOpen}
+                records={editor.simulationRecords}
+                loading={editor.simulationLoading}
+                result={editor.simulation}
+                diagnosticMessage={diagnosticMessage}
+                onOpenChange={setSimulationOpen}
+                onSearch={editor.searchSimulationRecords}
+                onClear={editor.clearSimulation}
+                onSimulate={(recordId) => void editor.runSimulation(recordId)}
+            />
+            <WorkflowVersionsDialog
+                open={versionsOpen}
+                versions={editor.versions}
+                activeVersionId={editor.workflow?.activeVersionId ?? null}
+                loading={editor.versionsLoading}
+                onOpenChange={setVersionsOpen}
+                onInspect={(version) => {
+                    editor.inspectVersion(version);
+                    setVersionsOpen(false);
+                }}
+            />
+            {runsOpen && editor.workflow && activeWorkspaceId ? (
+                <WorkflowRunsDialog
+                    open
+                    onOpenChange={setRunsOpen}
+                    workflowId={editor.workflow.id}
+                    workflowName={editor.workflow.name}
+                    workspaceId={activeWorkspaceId}
+                    onSelectRun={(run) => {
+                        editor.inspectRun(run);
+                        setRunsOpen(false);
+                    }}
+                />
+            ) : null}
         </div>
     );
 }
 
-function ActionInspector({
-    t, tr, index, actions, recordType, fields, options, onChange, onRemove, onMove,
-}: {
-    t: Translator;
-    tr: Translator;
-    index: number;
-    actions: RuleAction[];
-    recordType: string;
-    fields: SegmentFields | null;
-    options: RuleBuilderOptions | null;
-    onChange: (index: number, action: RuleAction) => void;
-    onRemove: (index: number) => void;
-    onMove: (index: number, direction: -1 | 1) => void;
-}) {
-    const action = actions[index];
-    if (!action) return null;
+function EditorSkeleton() {
     return (
-        <div className="space-y-4">
-            <div className="flex items-start justify-between gap-2">
-                <InspectorTitle title={t("actionStep", { step: index + 1 })} />
-                <div className="flex items-center gap-1">
-                    <Button type="button" variant="ghost" size="icon-sm" aria-label={t("moveUp")} disabled={index === 0} onClick={() => onMove(index, -1)}>
-                        <ArrowUpIcon className="size-4" />
-                    </Button>
-                    <Button type="button" variant="ghost" size="icon-sm" aria-label={t("moveDown")} disabled={index === actions.length - 1} onClick={() => onMove(index, 1)}>
-                        <ArrowDownIcon className="size-4" />
-                    </Button>
-                    <Button type="button" variant="ghost" size="icon-sm" aria-label={tr("removeAction")} disabled={actions.length <= 1} onClick={() => onRemove(index)} className="text-muted-foreground">
-                        <TrashIcon className="size-4" />
-                    </Button>
-                </div>
+        <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-background">
+            <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+                <Skeleton className="size-8 rounded-md" />
+                <Skeleton className="h-9 w-64 max-w-full" />
+                <Skeleton className="ml-auto h-9 w-32" />
             </div>
-            <Select value={action.type} onValueChange={(type) => onChange(index, { type })}>
-                <SelectTrigger size="sm" aria-label={tr("actionType")} className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                    {actionsFor(recordType).map((type) => (
-                        <SelectItem key={type} value={type}>{tr(`action.${type}`)}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-            {(action.type === "create_task" || action.type === "notify") && (
-                <Input
-                    value={action.title ?? ""}
-                    onChange={(event) => onChange(index, { ...action, title: event.target.value })}
-                    placeholder={tr("actionTitlePlaceholder")}
-                    aria-label={tr("actionTitlePlaceholder")}
-                    maxLength={255}
-                    className="h-9"
-                />
-            )}
-            {action.type === "notify" && (
-                <Input
-                    value={action.body ?? ""}
-                    onChange={(event) => onChange(index, { ...action, body: event.target.value })}
-                    placeholder={tr("actionBodyPlaceholder")}
-                    aria-label={tr("actionBodyPlaceholder")}
-                    maxLength={2000}
-                    className="h-9"
-                />
-            )}
-            {action.type === "create_note" && (
-                <Input
-                    value={action.body ?? ""}
-                    onChange={(event) => onChange(index, { ...action, body: event.target.value })}
-                    placeholder={tr("actionNotePlaceholder")}
-                    aria-label={tr("actionNotePlaceholder")}
-                    maxLength={2000}
-                    className="h-9"
-                />
-            )}
-            {action.type === "create_task" && (
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <span>{tr("dueIn")}</span>
-                    <Input
-                        type="number"
-                        min={1}
-                        value={action.dueInDays ?? 3}
-                        onChange={(event) => onChange(index, { ...action, dueInDays: Math.max(1, Number(event.target.value) || 3) })}
-                        aria-label={tr("dueIn")}
-                        className="h-9 w-16"
-                    />
-                    <span>{tr("days")}</span>
-                </div>
-            )}
-            {action.type === "log_activity" && (
-                <>
-                    <Input
-                        value={action.activityType ?? ""}
-                        onChange={(event) => onChange(index, { ...action, activityType: event.target.value })}
-                        placeholder={tr("activityTypePlaceholder")}
-                        aria-label={tr("activityTypePlaceholder")}
-                        maxLength={32}
-                        className="h-9"
-                    />
-                    <Input
-                        value={action.title ?? ""}
-                        onChange={(event) => onChange(index, { ...action, title: event.target.value })}
-                        placeholder={tr("activitySubjectPlaceholder")}
-                        aria-label={tr("activitySubjectPlaceholder")}
-                        maxLength={255}
-                        className="h-9"
-                    />
-                </>
-            )}
-            {(action.type === "add_tag" || action.type === "remove_tag") && (
-                <Select value={action.tagId ? String(action.tagId) : undefined} onValueChange={(value) => onChange(index, { ...action, tagId: Number(value) })}>
-                    <SelectTrigger size="sm" aria-label={tr("tag")}><SelectValue placeholder={tr("pickTag")} /></SelectTrigger>
-                    <SelectContent>
-                        {(fields?.tags ?? []).map((tag) => (
-                            <SelectItem key={tag.id} value={String(tag.id)}>{tag.name}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-            )}
-            {action.type === "assign_owner" && (
-                <Select value={action.targetUserId ? String(action.targetUserId) : undefined} onValueChange={(value) => onChange(index, { ...action, targetUserId: Number(value) })}>
-                    <SelectTrigger size="sm" aria-label={tr("actionOwner")}><SelectValue placeholder={tr("pickOwner")} /></SelectTrigger>
-                    <SelectContent>
-                        {(options?.owners ?? []).map((owner) => (
-                            <SelectItem key={owner.id} value={String(owner.id)}>{owner.name}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-            )}
-            {action.type === "change_stage" && (
-                <Select value={action.targetStageId ? String(action.targetStageId) : undefined} onValueChange={(value) => onChange(index, { ...action, targetStageId: Number(value) })}>
-                    <SelectTrigger size="sm" aria-label={tr("actionStage")}><SelectValue placeholder={tr("pickStage")} /></SelectTrigger>
-                    <SelectContent>
-                        {(options?.stages ?? []).map((stage) => (
-                            <SelectItem key={stage.id} value={String(stage.id)}>{stage.pipeline} · {stage.name}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-            )}
+            <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_24rem]">
+                <Skeleton className="m-4 hidden rounded-2xl lg:block" />
+                <Skeleton className="m-4 min-h-96 rounded-2xl" />
+            </div>
         </div>
     );
 }
