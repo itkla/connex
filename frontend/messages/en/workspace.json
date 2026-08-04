@@ -468,6 +468,8 @@
     "nodeErrors": "Issues in this node",
     "deleteNode": "Delete {name}",
     "insertNode": "Insert",
+    "selectNodeToInsert": "Select a source node first.",
+    "invalidConnection": "That branch cannot connect to this node.",
     "branchTargetLabel": "Target for {branch} branch",
     "notConnected": "Not connected",
     "disconnectBranch": "Disconnect {branch} branch",
