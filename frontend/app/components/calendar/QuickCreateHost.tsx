@@ -70,7 +70,7 @@ export default function QuickCreateHost({
         <>
             <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
                 <DropdownMenuTrigger asChild>
-                    <Button type="button" variant="brand" size="sm">
+                    <Button type="button" variant="brand" size="sm" className="h-11 sm:h-8">
                         <PlusIcon className="size-4" />
                         {t('quickCreate')}
                     </Button>
