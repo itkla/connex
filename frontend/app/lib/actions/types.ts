@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import type { useRouter } from "next/navigation";
 
 import type {
+    NoteVisibility,
     User,
     WorkflowManualResolvedScope,
     WorkflowManualScope,
@@ -111,6 +112,8 @@ export type TaskDraft = {
 };
 export type NoteDraft = {
     content?: string;
+    title?: string;
+    visibility?: NoteVisibility;
     personId?: number | null;
     dealId?: number | null;
 };

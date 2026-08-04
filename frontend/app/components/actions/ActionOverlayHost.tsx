@@ -433,6 +433,8 @@ export default function ActionOverlayHost({
                         defaultPerson={noteDefaultPerson}
                         defaultDeal={noteDefaultDeal}
                         defaultContent={noteDraft?.content ?? ""}
+                        defaultTitle={noteDraft?.title ?? ""}
+                        defaultVisibility={noteDraft?.visibility}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
                         onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
                         requestInit={requestInit}
