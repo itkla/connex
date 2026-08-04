@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { BoltIcon, CheckCircleIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import {
     cancelWorkflowManualRun,
@@ -21,6 +21,10 @@ import type {
 } from "@/app/lib/types";
 import type { RecordType } from "@/app/lib/actions/types";
 import { isWorkflowManualScopeValid } from "@/app/lib/workflowOperations";
+import {
+    formatWorkflowRunDateTime,
+    normalizeWorkflowRunDateTime,
+} from "@/app/components/settings/workflows/workflowRunStatus";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +49,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 type LauncherPhase = "choose" | "preparing" | "prepared" | "confirming" | "complete";
+
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 function scopeCount(scope: WorkflowManualScope | null): number | null {
     if (!scope) return null;
@@ -290,6 +298,20 @@ export default function WorkflowManualRunLauncher({
 
 function PreparationSummary({ preparation }: { preparation: WorkflowManualPreparation }) {
     const t = useTranslations("WorkflowOperations");
+    const locale = useLocale();
+    const normalizedExpiresAt = useMemo(
+        () => normalizeWorkflowRunDateTime(preparation.expiresAt),
+        [preparation.expiresAt],
+    );
+    const hydrated = useSyncExternalStore(
+        subscribeToHydration,
+        getClientHydrationSnapshot,
+        getServerHydrationSnapshot,
+    );
+    const expiresAtLabel = useMemo(
+        () => hydrated ? formatWorkflowRunDateTime(preparation.expiresAt, locale) : normalizedExpiresAt,
+        [hydrated, locale, normalizedExpiresAt, preparation.expiresAt],
+    );
     const expectedSkips = [
         ["permission", preparation.expectedSkips.permission],
         ["staleState", preparation.expectedSkips.staleState],
@@ -313,7 +335,9 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
                 </div>
                 <div>
                     <dt className="text-muted-foreground">{t("manual.expires")}</dt>
-                    <dd className="font-medium text-foreground">{new Date(preparation.expiresAt).toLocaleString()}</dd>
+                    <dd className="font-medium text-foreground">
+                        <time dateTime={normalizedExpiresAt}>{expiresAtLabel}</time>
+                    </dd>
                 </div>
             </dl>
             <section className="space-y-2">

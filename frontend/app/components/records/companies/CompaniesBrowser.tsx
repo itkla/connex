@@ -39,6 +39,7 @@ import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
 import { useActionSelection } from '@/app/hooks/useActions';
+import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
@@ -145,8 +146,6 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
     const reduce = useReducedMotion() ?? false;
-    const [activeSavedViewId, setActiveSavedViewId] = useState<number | null>(null);
-
     const {
         displayMode,
         effectiveDisplayMode,
@@ -251,50 +250,6 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     }, [filterSignature]);
     const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
     const allMatchingActive = selectedIds.size > 0 && matchedSignature === filterSignature;
-    const workflowSelection = useMemo(() => {
-        if (selectedIds.size === 0) return null;
-        const canResolveFilter = allMatchingActive
-            && !showArchived
-            && !hasSegments
-            && !filterParams.noIndustry;
-        const canResolveSegment = allMatchingActive
-            && hasSegments
-            && !showArchived
-            && query.trim() === ''
-            && Object.keys(filterParams).length === 0;
-        const scope = allMatchingActive && activeSavedViewId !== null
-            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
-            : canResolveSegment
-                ? { kind: 'smart_segment' as const, definition: evaluable }
-            : canResolveFilter
-            ? {
-                kind: 'filter_match' as const,
-                filter: {
-                    query: query.trim() || undefined,
-                    industry: filterParams.industry,
-                    memberScope: filterParams.scope,
-                    memberIds: filterParams.memberIds,
-                },
-            }
-            : { kind: 'explicit_selection' as const, recordIds: selectedCompanyIds };
-        return {
-            type: 'company' as const,
-            ids: selectedIds,
-            sourceSurface: activeSavedViewId !== null ? 'saved_view' as const : 'record_list' as const,
-            scope,
-        };
-    }, [
-        activeSavedViewId,
-        allMatchingActive,
-        evaluable,
-        filterParams,
-        hasSegments,
-        query,
-        selectedCompanyIds,
-        selectedIds,
-        showArchived,
-    ]);
-    useActionSelection(workflowSelection);
     const selectAllRequestRef = useRef(0);
     const [selectingAll, setSelectingAll] = useState(false);
     const clearSelection = useCallback(() => {
@@ -869,17 +824,63 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: showArchived ? EMPTY_DEFINITION : evaluable }),
         [filterState, query, sortKey, sortDirection, evaluable, showArchived],
     );
+    const { activeSavedViewId, setActiveSavedView } = useSavedViewScope(savedViews, currentConfig);
     const applyView = useCallback(
-        (config: SavedViewConfig) => {
+        (config: SavedViewConfig, savedViewId: number | null) => {
             const filters = config.filters ?? {};
             const archived = filters[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
             setFilterState(filters);
             applyQuery(config.query ?? '');
             applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
             setDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
+            setActiveSavedView(config, savedViewId);
         },
-        [setFilterState, applyQuery, applySort],
+        [setFilterState, applyQuery, applySort, setActiveSavedView],
     );
+    const workflowSelection = useMemo(() => {
+        if (selectedIds.size === 0) return null;
+        const canResolveFilter = allMatchingActive
+            && !showArchived
+            && !hasSegments
+            && !filterParams.noIndustry;
+        const canResolveSegment = allMatchingActive
+            && hasSegments
+            && !showArchived
+            && query.trim() === ''
+            && Object.keys(filterParams).length === 0;
+        const scope = allMatchingActive && activeSavedViewId !== null
+            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
+            : canResolveSegment
+                ? { kind: 'smart_segment' as const, definition: evaluable }
+            : canResolveFilter
+            ? {
+                kind: 'filter_match' as const,
+                filter: {
+                    query: query.trim() || undefined,
+                    industry: filterParams.industry,
+                    memberScope: filterParams.scope,
+                    memberIds: filterParams.memberIds,
+                },
+            }
+            : { kind: 'explicit_selection' as const, recordIds: selectedCompanyIds };
+        return {
+            type: 'company' as const,
+            ids: selectedIds,
+            sourceSurface: activeSavedViewId !== null ? 'saved_view' as const : 'record_list' as const,
+            scope,
+        };
+    }, [
+        activeSavedViewId,
+        allMatchingActive,
+        evaluable,
+        filterParams,
+        hasSegments,
+        query,
+        selectedCompanyIds,
+        selectedIds,
+        showArchived,
+    ]);
+    useActionSelection(workflowSelection);
 
     const { density, setDensity } = useRecordDensity();
     const mergedColumns = useMemo(
@@ -925,7 +926,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
-                        onActiveScopeChange={setActiveSavedViewId}
+                        onActiveScopeChange={setActiveSavedView}
                         defaultView={defaultView}
                         unavailable={savedViewsUnavailable}
                     />

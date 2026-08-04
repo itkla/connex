@@ -43,6 +43,7 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
 import { useActionSelection } from '@/app/hooks/useActions';
+import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
@@ -260,7 +261,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
-    const [activeSavedViewId, setActiveSavedViewId] = useState<number | null>(null);
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
@@ -860,35 +860,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [clearSelection, setSelectedIds, setDeleteDialogOpen]);
 
     const selectedDealIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
-    const workflowSelection = useMemo(() => {
-        if (selectedIds.size === 0) return null;
-        const scope = allMatchingActive && activeSavedViewId !== null
-            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
-            : allMatchingActive && !hasSegments
-            ? {
-                kind: 'filter_match' as const,
-                filter: {
-                    query: currentDealFilters.q,
-                    currency: currentDealFilters.currency,
-                    pipelineIds: currentDealFilters.pipelineId,
-                    stageIds: currentDealFilters.stageId,
-                    companyIds: currentDealFilters.companyId,
-                    statuses: currentDealFilters.status,
-                    risks: currentDealFilters.risk,
-                    noCompany: currentDealFilters.noCompany,
-                    memberScope: currentDealFilters.scope,
-                    memberIds: currentDealFilters.memberIds,
-                },
-            }
-            : { kind: 'explicit_selection' as const, recordIds: selectedDealIds };
-        return {
-            type: 'deal' as const,
-            ids: selectedIds,
-            sourceSurface: activeSavedViewId !== null ? 'saved_view' as const : 'record_list' as const,
-            scope,
-        };
-    }, [activeSavedViewId, allMatchingActive, currentDealFilters, hasSegments, selectedDealIds, selectedIds]);
-    useActionSelection(workflowSelection);
     const allSelectedDealsLoaded = selectedDealIds.length > 0 && selectedDealIds.length === selectedDeals.length;
 
     const confirmDelete = async () => {
@@ -1293,8 +1264,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         }),
         [activeFilterState, evaluable, hasSegments, query, sortKey, sortDir],
     );
+    const { activeSavedViewId, setActiveSavedView } = useSavedViewScope(savedViews, currentConfig);
     const applyView = useCallback(
-        (config: SavedViewConfig) => {
+        (config: SavedViewConfig, savedViewId: number | null) => {
             clearSelection();
             setFilterState(normalizeDealFilters(config.filters ?? {}));
             setQuery(config.query ?? '');
@@ -1304,9 +1276,39 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setDefinition(normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
             setSegmentEvaluationRevision((revision) => revision + 1);
             setPage(1);
+            setActiveSavedView(config, savedViewId);
         },
-        [clearSelection, setFilterState, setQuery],
+        [clearSelection, setFilterState, setQuery, setActiveSavedView],
     );
+    const workflowSelection = useMemo(() => {
+        if (selectedIds.size === 0) return null;
+        const scope = allMatchingActive && activeSavedViewId !== null
+            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
+            : allMatchingActive && !hasSegments
+            ? {
+                kind: 'filter_match' as const,
+                filter: {
+                    query: currentDealFilters.q,
+                    currency: currentDealFilters.currency,
+                    pipelineIds: currentDealFilters.pipelineId,
+                    stageIds: currentDealFilters.stageId,
+                    companyIds: currentDealFilters.companyId,
+                    statuses: currentDealFilters.status,
+                    risks: currentDealFilters.risk,
+                    noCompany: currentDealFilters.noCompany,
+                    memberScope: currentDealFilters.scope,
+                    memberIds: currentDealFilters.memberIds,
+                },
+            }
+            : { kind: 'explicit_selection' as const, recordIds: selectedDealIds };
+        return {
+            type: 'deal' as const,
+            ids: selectedIds,
+            sourceSurface: activeSavedViewId !== null ? 'saved_view' as const : 'record_list' as const,
+            scope,
+        };
+    }, [activeSavedViewId, allMatchingActive, currentDealFilters, hasSegments, selectedDealIds, selectedIds]);
+    useActionSelection(workflowSelection);
 
     return (
         <>
@@ -1408,7 +1410,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         initialViews={savedViews}
                         currentConfig={currentConfig}
                         onApply={applyView}
-                        onActiveScopeChange={setActiveSavedViewId}
+                        onActiveScopeChange={setActiveSavedView}
                         defaultView={defaultView}
                         unavailable={savedViewsUnavailable}
                     />

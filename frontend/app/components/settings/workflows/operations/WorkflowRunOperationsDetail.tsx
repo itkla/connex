@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -71,6 +71,73 @@ const OPERATIONS_REASON_CODES = new Set([
     "execution_failed",
 ]);
 
+type OperationsLoadError = "forbidden" | "missing" | "load" | null;
+
+interface OperationsDetailState {
+    run: WorkflowRunDetail | null;
+    operations: WorkflowOperationsDetail | null;
+    users: User[];
+    error: OperationsLoadError;
+    mutationError: boolean;
+    pending: string | null;
+    attempt: number;
+}
+
+type OperationsDetailAction =
+    | {
+        type: "load_succeeded";
+        run: WorkflowRunDetail;
+        operations: WorkflowOperationsDetail;
+        users: User[];
+    }
+    | { type: "load_failed"; error: Exclude<OperationsLoadError, null> }
+    | { type: "mutation_started"; key: string }
+    | { type: "mutation_succeeded" }
+    | { type: "mutation_failed" }
+    | { type: "retry" };
+
+const INITIAL_OPERATIONS_DETAIL_STATE: OperationsDetailState = {
+    run: null,
+    operations: null,
+    users: [],
+    error: null,
+    mutationError: false,
+    pending: null,
+    attempt: 0,
+};
+
+function operationsDetailReducer(
+    state: OperationsDetailState,
+    action: OperationsDetailAction,
+): OperationsDetailState {
+    switch (action.type) {
+        case "load_succeeded":
+            return {
+                ...state,
+                run: action.run,
+                operations: action.operations,
+                users: action.users,
+                error: null,
+                mutationError: false,
+            };
+        case "load_failed":
+            return { ...state, error: action.error };
+        case "mutation_started":
+            return { ...state, pending: action.key };
+        case "mutation_succeeded":
+            return {
+                ...state,
+                mutationError: false,
+                pending: null,
+                attempt: state.attempt + 1,
+            };
+        case "mutation_failed":
+            return { ...state, mutationError: true, pending: null };
+        case "retry":
+            return { ...state, attempt: state.attempt + 1 };
+    }
+}
+
 /** Canonical and legacy run evidence with operational state and bounded intervention controls. */
 export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { workflowId: number; runKey: string }) {
     const t = useTranslations("WorkflowOperations");
@@ -78,13 +145,8 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
     const locale = useLocale();
     const { openOverlay } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
-    const [run, setRun] = useState<WorkflowRunDetail | null>(null);
-    const [operations, setOperations] = useState<WorkflowOperationsDetail | null>(null);
-    const [users, setUsers] = useState<User[]>([]);
-    const [error, setError] = useState<"forbidden" | "missing" | "load" | null>(null);
-    const [mutationError, setMutationError] = useState(false);
-    const [pending, setPending] = useState<string | null>(null);
-    const [attempt, setAttempt] = useState(0);
+    const [state, dispatch] = useReducer(operationsDetailReducer, INITIAL_OPERATIONS_DETAIL_STATE);
+    const { run, operations, users, error, mutationError, pending, attempt } = state;
 
     const headers = useMemo(
         () => activeWorkspaceId == null ? undefined : { "X-Workspace-Id": String(activeWorkspaceId) },
@@ -100,30 +162,31 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
             getUsers({ signal: controller.signal, headers }).catch(() => []),
         ]).then(([loadedRun, loadedOperations, loadedUsers]) => {
             if (controller.signal.aborted) return;
-            setError(null);
-            setMutationError(false);
-            setRun(loadedRun);
-            setOperations(loadedOperations);
-            setUsers(loadedUsers);
+            dispatch({
+                type: "load_succeeded",
+                run: loadedRun,
+                operations: loadedOperations,
+                users: loadedUsers,
+            });
         }).catch((loadError: unknown) => {
             if (controller.signal.aborted) return;
-            if (loadError instanceof ApiError && loadError.status === 403) setError("forbidden");
-            else if (loadError instanceof ApiError && loadError.status === 404) setError("missing");
-            else setError("load");
+            const errorType = loadError instanceof ApiError && loadError.status === 403
+                ? "forbidden"
+                : loadError instanceof ApiError && loadError.status === 404
+                    ? "missing"
+                    : "load";
+            dispatch({ type: "load_failed", error: errorType });
         });
         return () => controller.abort();
     }, [activeWorkspaceId, attempt, headers, runKey, switching, workflowId]);
 
     const mutate = useCallback(async (key: string, operation: () => Promise<void>) => {
-        setPending(key);
+        dispatch({ type: "mutation_started", key });
         try {
             await operation();
-            setMutationError(false);
-            setAttempt((value) => value + 1);
+            dispatch({ type: "mutation_succeeded" });
         } catch {
-            setMutationError(true);
-        } finally {
-            setPending(null);
+            dispatch({ type: "mutation_failed" });
         }
     }, []);
 
@@ -138,7 +201,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
             <EvidenceUnavailable
                 title={t("errors.title")}
                 body={t("errors.body")}
-                action={<Button variant="outline" onClick={() => setAttempt((value) => value + 1)}>{t("retry")}</Button>}
+                action={<Button variant="outline" onClick={() => dispatch({ type: "retry" })}>{t("retry")}</Button>}
             />
         );
     }
