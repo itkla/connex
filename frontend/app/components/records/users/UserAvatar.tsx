@@ -39,7 +39,10 @@ export default function UserAvatar({
         </span>
     );
     return (
-        <div className={cn("shrink-0 overflow-hidden rounded-full ring-1 ring-border", SIZE_CLASS[type])}>
+        <div
+            aria-hidden="true"
+            className={cn("shrink-0 overflow-hidden rounded-full ring-1 ring-border", SIZE_CLASS[type])}
+        >
             <ProtectedMediaImage
                 src={user.profilePictureUrl}
                 alt=""
