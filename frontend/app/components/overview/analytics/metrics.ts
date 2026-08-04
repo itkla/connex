@@ -2,23 +2,16 @@ import { type Deal } from '@/app/lib/types';
 import { fixedOffsetSeconds, parseMysqlDateTime } from '@/app/lib/utils';
 
 export type RollingRangeKey = '30d' | '90d' | '12m';
-export type CalendarRangeKey = 'this-week' | 'this-month' | 'last-month' | 'this-quarter';
-export type RangeKey = RollingRangeKey | CalendarRangeKey;
+export type RangeKey = RollingRangeKey | 'custom';
 export type Granularity = 'day' | 'week' | 'month';
 
 export const ROLLING_RANGE_KEYS: readonly RollingRangeKey[] = ['30d', '90d', '12m'];
-export const CALENDAR_RANGE_KEYS: readonly CalendarRangeKey[] = [
-    'this-week',
-    'this-month',
-    'last-month',
-    'this-quarter',
-];
 
 /** Narrows an arbitrary URL value to a known analytics range key. */
 export function isRangeKey(value: string | null): value is RangeKey {
     return value != null && (
         (ROLLING_RANGE_KEYS as readonly string[]).includes(value)
-        || (CALENDAR_RANGE_KEYS as readonly string[]).includes(value)
+        || value === 'custom'
     );
 }
 
@@ -32,28 +25,34 @@ export function isGranularity(value: string | null): value is Granularity {
  * oversized series (mirrors the server's bucket cap — e.g. no day-grain 12 months).
  */
 export const RANGE_GRANULARITIES: Record<RangeKey, readonly Granularity[]> = {
-    'this-week': ['day'],
-    'this-month': ['day', 'week'],
-    'last-month': ['day', 'week'],
-    'this-quarter': ['day', 'week', 'month'],
     '30d': ['day', 'week'],
     '90d': ['day', 'week', 'month'],
     '12m': ['week', 'month'],
+    custom: ['week', 'month'],
 };
 
 export const DEFAULT_GRANULARITY: Record<RangeKey, Granularity> = {
-    'this-week': 'day',
-    'this-month': 'day',
-    'last-month': 'day',
-    'this-quarter': 'week',
     '30d': 'week',
     '90d': 'week',
     '12m': 'month',
+    custom: 'week',
 };
 
+/** Returns the bounded grains available for a range and its explicit window. */
+export function granularitiesForRange(range: RangeKey, window?: AnalyticsWindow): readonly Granularity[] {
+    if (range !== 'custom' || !window) return RANGE_GRANULARITIES[range];
+    return analyticsWindowDays(window) <= 120
+        ? ['day', 'week', 'month']
+        : RANGE_GRANULARITIES.custom;
+}
+
 /** Returns {@code choice} when the range supports it, otherwise the range's default grain. */
-export function clampGranularity(range: RangeKey, choice: Granularity | null): Granularity {
-    return choice != null && RANGE_GRANULARITIES[range].includes(choice)
+export function clampGranularity(
+    range: RangeKey,
+    choice: Granularity | null,
+    window?: AnalyticsWindow,
+): Granularity {
+    return choice != null && granularitiesForRange(range, window).includes(choice)
         ? choice
         : DEFAULT_GRANULARITY[range];
 }
@@ -255,6 +254,30 @@ export function buildTimeBuckets(range: RollingRangeKey, now: number, locale: st
 /** Inclusive local-date window (ISO {@code yyyy-MM-dd}) an analytics range resolves to. */
 export type AnalyticsWindow = { from: string; to: string };
 
+function parseIsoDate(value: string): Date | null {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+        ? parsed
+        : null;
+}
+
+/** Inclusive number of local calendar days represented by an analytics window. */
+export function analyticsWindowDays(window: AnalyticsWindow): number {
+    const from = parseIsoDate(window.from);
+    const to = parseIsoDate(window.to);
+    if (!from || !to || from.getTime() > to.getTime()) return 0;
+    return Math.floor((to.getTime() - from.getTime()) / DAY) + 1;
+}
+
+/** Parses a complete, ordered custom range within the backend's 731-day window limit. */
+export function parseCustomAnalyticsWindow(from: string | null, to: string | null): AnalyticsWindow | null {
+    if (!from || !to) return null;
+    const window = { from, to };
+    const days = analyticsWindowDays(window);
+    return days >= 1 && days <= 731 ? window : null;
+}
+
 function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
     return new Date(Date.UTC(year, monthIndex, day));
 }
@@ -294,10 +317,14 @@ function mondayOfWeek(anchor: Date): Date {
 
 /**
  * Resolves an analytics range key to its inclusive local-date window in the viewer's
- * timezone. Rolling ranges end today; calendar presets cover their whole calendar
- * period (weeks start Monday, matching the server's ISO-8601 bucketing).
+ * timezone. Rolling ranges end today; a valid custom window passes through unchanged.
  */
-export function resolveAnalyticsWindow(range: RangeKey, now: number, timezone: string): AnalyticsWindow {
+export function resolveAnalyticsWindow(
+    range: RangeKey,
+    now: number,
+    timezone: string,
+    customWindow?: AnalyticsWindow | null,
+): AnalyticsWindow {
     const today = todayAnchor(now, timezone);
     const year = today.getUTCFullYear();
     const month = today.getUTCMonth();
@@ -308,27 +335,9 @@ export function resolveAnalyticsWindow(range: RangeKey, now: number, timezone: s
             return { from: toIsoDate(addDaysUtc(today, -89)), to: toIsoDate(today) };
         case '12m':
             return { from: toIsoDate(utcDateFromParts(year, month - 11, 1)), to: toIsoDate(today) };
-        case 'this-week': {
-            const monday = mondayOfWeek(today);
-            return { from: toIsoDate(monday), to: toIsoDate(addDaysUtc(monday, 6)) };
-        }
-        case 'this-month':
-            return {
-                from: toIsoDate(utcDateFromParts(year, month, 1)),
-                to: toIsoDate(utcDateFromParts(year, month + 1, 0)),
-            };
-        case 'last-month':
-            return {
-                from: toIsoDate(utcDateFromParts(year, month - 1, 1)),
-                to: toIsoDate(utcDateFromParts(year, month, 0)),
-            };
-        case 'this-quarter': {
-            const quarterStart = Math.floor(month / 3) * 3;
-            return {
-                from: toIsoDate(utcDateFromParts(year, quarterStart, 1)),
-                to: toIsoDate(utcDateFromParts(year, quarterStart + 3, 0)),
-            };
-        }
+        case 'custom':
+            return parseCustomAnalyticsWindow(customWindow?.from ?? null, customWindow?.to ?? null)
+                ?? resolveAnalyticsWindow('90d', now, timezone);
     }
 }
 
@@ -356,14 +365,14 @@ export function localIsoDate(now: number, timezone: string): string {
 
 /**
  * Extends a rolling window's end forward by three grain periods so forward-looking
- * series (projected revenue) keep a horizon; calendar presets stay exactly their period.
+ * series keep a horizon; an explicit custom window stays exact.
  */
 export function projectionWindow(
     window: AnalyticsWindow,
     range: RangeKey,
     granularity: Granularity,
 ): AnalyticsWindow {
-    if ((CALENDAR_RANGE_KEYS as readonly string[]).includes(range)) return window;
+    if (range === 'custom') return window;
     let anchor = periodStartAnchor(new Date(`${window.to}T00:00:00Z`), granularity);
     for (let i = 0; i < 3; i++) anchor = nextPeriodAnchor(anchor, granularity);
     const extended = toIsoDate(addDaysUtc(nextPeriodAnchor(anchor, granularity), -1));
