@@ -308,7 +308,8 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/ResetPasswordRequest.java#newPassword",
         "ooo/klae/connex/backend/dto/SsoConnectionRequest.java#oidcClientSecret",
         "ooo/klae/connex/backend/dto/SsoLinkConfirmRequest.java#token",
-        "ooo/klae/connex/backend/dto/SsoLinkConfirmRequest.java#password");
+        "ooo/klae/connex/backend/dto/SsoLinkConfirmRequest.java#password",
+        "ooo/klae/connex/backend/dto/WorkflowManualConfirmRequest.java#scopeToken");
 
     private static final Set<String> APPROVED_SECRET_RESPONSE_FIELDS = Set.of(
         "ooo/klae/connex/backend/dto/CsrfBootstrapDto.java#token",
@@ -321,7 +322,8 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/PasskeyRegistrationRequirementsDto.java#currentPasswordRequired",
         "ooo/klae/connex/backend/dto/PersonDto.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/SecretStoreSecretDiagnosticDto.java#secretId",
-        "ooo/klae/connex/backend/dto/SsoConnectionDto.java#hasClientSecret");
+        "ooo/klae/connex/backend/dto/SsoConnectionDto.java#hasClientSecret",
+        "ooo/klae/connex/backend/dto/WorkflowManualPreparationDto.java#scopeToken");
 
     private static final Map<String, ApprovedSecretSink> APPROVED_SECRET_SINKS = Map.of(
         "ooo/klae/connex/backend/services/LoggingEmailChangeEmailService.java#link",
