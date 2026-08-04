@@ -76,11 +76,13 @@ import FirstRun from '@/app/components/overview/analytics/FirstRun';
 import {
     clampGranularity,
     DEFAULT_GRANULARITY,
+    granularitiesForRange,
     isGranularity,
     isRangeKey,
+    parseCustomAnalyticsWindow,
     projectionWindow,
-    RANGE_GRANULARITIES,
     resolveAnalyticsWindow,
+    type AnalyticsWindow,
     type Granularity,
     type RangeKey,
 } from '@/app/components/overview/analytics/metrics';
@@ -180,17 +182,29 @@ export default function AnalyticsBoard({
     const locale = useLocale();
     const reduce = useReducedMotion();
     const searchParams = useSearchParams();
-    const [range, setRange] = useState<RangeKey>(() => {
-        const initial = searchParams.get('range');
-        return isRangeKey(initial) ? initial : '90d';
+    const [rangeState, setRangeState] = useState<{
+        key: RangeKey;
+        customWindow: AnalyticsWindow | null;
+    }>(() => {
+        const requested = searchParams.get('range');
+        const customWindow = parseCustomAnalyticsWindow(searchParams.get('from'), searchParams.get('to'));
+        const key = isRangeKey(requested) ? requested : '90d';
+        return {
+            key: key === 'custom' && !customWindow ? '90d' : key,
+            customWindow,
+        };
     });
+    const range = rangeState.key;
     const [granularityChoice, setGranularityChoice] = useState<Granularity | null>(() => {
         const initial = searchParams.get('granularity');
         return isGranularity(initial) ? initial : null;
     });
-    const granularity = clampGranularity(range, granularityChoice);
     const [now] = useState(() => Date.now());
-    const analyticsWindow = useMemo(() => resolveAnalyticsWindow(range, now, timezone), [range, now, timezone]);
+    const analyticsWindow = useMemo(
+        () => resolveAnalyticsWindow(range, now, timezone, rangeState.customWindow),
+        [range, rangeState.customWindow, now, timezone],
+    );
+    const granularity = clampGranularity(range, granularityChoice, analyticsWindow);
     const revenueWindow = useMemo(
         () => projectionWindow(analyticsWindow, range, granularity),
         [analyticsWindow, range, granularity],
@@ -245,6 +259,8 @@ export default function AnalyticsBoard({
 
     useOwnedUrlParams({
         range: range === '90d' ? undefined : range,
+        from: range === 'custom' ? analyticsWindow.from : undefined,
+        to: range === 'custom' ? analyticsWindow.to : undefined,
         granularity: granularity === DEFAULT_GRANULARITY[range] ? undefined : granularity,
         currency: selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : undefined,
         owner: effectiveOwnerValues.length ? effectiveOwnerValues.join(',') : undefined,
@@ -425,18 +441,12 @@ export default function AnalyticsBoard({
         { key: '90d', label: t('range90d') },
         { key: '12m', label: t('range12m') },
     ];
-    const rangePresets: { key: RangeKey; label: string }[] = [
-        { key: 'this-week', label: t('rangeThisWeek') },
-        { key: 'this-month', label: t('rangeThisMonth') },
-        { key: 'last-month', label: t('rangeLastMonth') },
-        { key: 'this-quarter', label: t('rangeThisQuarter') },
-    ];
     const granularityLabels: Record<Granularity, string> = {
         day: t('granularityDay'),
         week: t('granularityWeek'),
         month: t('granularityMonth'),
     };
-    const granularityOptions = RANGE_GRANULARITIES[range].map((key) => ({
+    const granularityOptions = granularitiesForRange(range, analyticsWindow).map((key) => ({
         key,
         label: granularityLabels[key],
     }));
@@ -491,10 +501,26 @@ export default function AnalyticsBoard({
                     ) : null}
                     <RangeControl
                         value={range}
-                        onChange={setRange}
+                        onChange={(key) => setRangeState((current) => ({ ...current, key }))}
                         options={rangeOptions}
-                        presets={rangePresets}
-                        presetsLabel={t('rangePresets')}
+                        customRange={{
+                            key: 'custom',
+                            value: analyticsWindow,
+                            locale,
+                            labels: {
+                                custom: t('rangeCustom'),
+                                title: t('rangeCustomTitle'),
+                                description: t('rangeCustomDescription', { timezone }),
+                                start: t('rangeCustomStart'),
+                                end: t('rangeCustomEnd'),
+                                hint: t('rangeCustomHint'),
+                                invalid: t('rangeCustomInvalid'),
+                                tooLong: t('rangeCustomTooLong'),
+                                cancel: t('rangeCustomCancel'),
+                                apply: t('rangeCustomApply'),
+                            },
+                            onApply: (customWindow) => setRangeState({ key: 'custom', customWindow }),
+                        }}
                         label={t('rangeLabel')}
                     />
                     <RangeControl

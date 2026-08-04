@@ -1,43 +1,41 @@
 'use client';
 
 import { motion, useReducedMotion } from 'motion/react';
-import { CheckIcon, ChevronDownIcon } from '@heroicons/react/16/solid';
 
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import CustomRangePopover, {
+    type CustomRangeLabels,
+} from '@/app/components/overview/analytics/CustomRangePopover';
+import type { AnalyticsWindow } from '@/app/components/overview/analytics/metrics';
 
 const SEGMENT_CLASS = 'relative rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors duration-150';
 
 /**
- * Segmented pill control for the analytics board. Renders one pill per {@code options}
- * entry plus, when {@code presets} are given, a trailing dropdown segment listing
- * calendar presets as rows; the active thumb (a shared-layout spring) covers whichever
- * segment holds the current value. Reused for both the time-range and granularity
- * controls via a distinct {@code layoutId} per instance.
+ * Segmented pill control for the analytics board. The active thumb is shared across
+ * its direct options and an optional explicit custom-range segment. Reused for both
+ * the time-range and granularity controls via a distinct {@code layoutId} per instance.
  */
 export default function RangeControl<K extends string>({
     value,
     onChange,
     options,
-    presets,
-    presetsLabel,
+    customRange,
     label,
     layoutId = 'analytics-range-thumb',
 }: {
     value: K;
     onChange: (next: K) => void;
     options: { key: K; label: string }[];
-    presets?: { key: K; label: string }[];
-    presetsLabel?: string;
+    customRange?: {
+        key: K;
+        value: AnalyticsWindow;
+        locale: string;
+        labels: CustomRangeLabels;
+        onApply: (window: AnalyticsWindow) => void;
+    };
     label: string;
     layoutId?: string;
 }) {
     const reduce = useReducedMotion();
-    const activePreset = presets?.find((preset) => preset.key === value);
     const thumb = (
         <motion.span
             layoutId={layoutId}
@@ -68,33 +66,21 @@ export default function RangeControl<K extends string>({
                     </button>
                 );
             })}
-            {presets && presets.length > 0 && (
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <button
-                            type="button"
-                            aria-pressed={activePreset != null}
-                            className={`${SEGMENT_CLASS} ${
-                                activePreset ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                        >
-                            {activePreset && thumb}
-                            <span className="relative z-10 inline-flex items-center gap-1">
-                                {activePreset?.label ?? presetsLabel}
-                                <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-                            </span>
-                        </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        {presets.map((preset) => (
-                            <DropdownMenuItem key={preset.key} onSelect={() => onChange(preset.key)}>
-                                <span className={preset.key === value ? 'font-semibold' : ''}>{preset.label}</span>
-                                {preset.key === value && <CheckIcon className="ml-auto size-4" />}
-                            </DropdownMenuItem>
-                        ))}
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            )}
+            {customRange ? (
+                <CustomRangePopover
+                    active={customRange.key === value}
+                    value={customRange.value}
+                    locale={customRange.locale}
+                    labels={customRange.labels}
+                    className={`${SEGMENT_CLASS} ${
+                        customRange.key === value
+                            ? 'text-foreground'
+                            : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    thumb={thumb}
+                    onApply={customRange.onApply}
+                />
+            ) : null}
         </div>
     );
 }

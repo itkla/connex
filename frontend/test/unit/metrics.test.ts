@@ -7,6 +7,7 @@ import {
     isGranularity,
     isRangeKey,
     localIsoDate,
+    parseCustomAnalyticsWindow,
     periodStartOf,
     projectionWindow,
     resolveAnalyticsWindow,
@@ -41,11 +42,12 @@ function iso(ms: number): string {
 
 describe("isRangeKey / isGranularity", () => {
     it("accepts every documented range key and rejects everything else", () => {
-        for (const key of ["30d", "90d", "12m", "this-week", "this-month", "last-month", "this-quarter"]) {
+        for (const key of ["30d", "90d", "12m", "custom"]) {
             expect(isRangeKey(key)).toBe(true);
         }
         expect(isRangeKey(null)).toBe(false);
         expect(isRangeKey("7d")).toBe(false);
+        expect(isRangeKey("this-month")).toBe(false);
         expect(isRangeKey("")).toBe(false);
     });
 
@@ -61,18 +63,18 @@ describe("isRangeKey / isGranularity", () => {
 describe("clampGranularity", () => {
     it("passes a supported choice through", () => {
         expect(clampGranularity("90d", "month")).toBe("month");
-        expect(clampGranularity("this-month", "week")).toBe("week");
+        expect(clampGranularity("custom", "day", { from: "2026-07-01", to: "2026-07-31" })).toBe("day");
     });
 
     it("falls back to the range default when the choice is unsupported", () => {
         expect(clampGranularity("12m", "day")).toBe("month");
-        expect(clampGranularity("this-week", "month")).toBe("day");
         expect(clampGranularity("30d", "month")).toBe("week");
+        expect(clampGranularity("custom", "day", { from: "2025-01-01", to: "2026-01-01" })).toBe("week");
     });
 
     it("falls back to the range default when the choice is null", () => {
         expect(clampGranularity("30d", null)).toBe("week");
-        expect(clampGranularity("this-quarter", null)).toBe("week");
+        expect(clampGranularity("custom", null)).toBe("week");
     });
 });
 
@@ -83,37 +85,9 @@ describe("resolveAnalyticsWindow", () => {
         expect(resolveAnalyticsWindow("12m", NOW, "UTC")).toEqual({ from: "2025-08-01", to: "2026-07-15" });
     });
 
-    it("starts this-week on Monday and spans seven days", () => {
-        expect(resolveAnalyticsWindow("this-week", NOW, "UTC")).toEqual({ from: "2026-07-13", to: "2026-07-19" });
-        const sundayNoon = Date.UTC(2026, 6, 19, 12, 0, 0);
-        expect(resolveAnalyticsWindow("this-week", sundayNoon, "UTC")).toEqual({
-            from: "2026-07-13",
-            to: "2026-07-19",
-        });
-        const mondayMidnight = Date.UTC(2026, 6, 13, 0, 0, 0);
-        expect(resolveAnalyticsWindow("this-week", mondayMidnight, "UTC")).toEqual({
-            from: "2026-07-13",
-            to: "2026-07-19",
-        });
-    });
-
-    it("covers whole calendar months and quarters", () => {
-        expect(resolveAnalyticsWindow("this-month", NOW, "UTC")).toEqual({ from: "2026-07-01", to: "2026-07-31" });
-        expect(resolveAnalyticsWindow("last-month", NOW, "UTC")).toEqual({ from: "2026-06-01", to: "2026-06-30" });
-        expect(resolveAnalyticsWindow("this-quarter", NOW, "UTC")).toEqual({ from: "2026-07-01", to: "2026-09-30" });
-    });
-
-    it("handles a year boundary for last-month", () => {
-        const january = Date.UTC(2026, 0, 10);
-        expect(resolveAnalyticsWindow("last-month", january, "UTC")).toEqual({
-            from: "2025-12-01",
-            to: "2025-12-31",
-        });
-    });
-
     it("shifts the local date for a legacy fixed-offset timezone", () => {
         const lateUtc = Date.UTC(2026, 6, 15, 20, 0, 0);
-        expect(resolveAnalyticsWindow("this-week", lateUtc, "UTC+9").to).toBe("2026-07-19");
+        expect(resolveAnalyticsWindow("30d", lateUtc, "UTC+9").to).toBe("2026-07-16");
         expect(localIsoDate(lateUtc, "UTC+9")).toBe("2026-07-16");
         expect(localIsoDate(lateUtc, "UTC")).toBe("2026-07-15");
     });
@@ -121,6 +95,34 @@ describe("resolveAnalyticsWindow", () => {
     it("resolves IANA timezones and falls back to UTC for garbage", () => {
         expect(localIsoDate(Date.UTC(2026, 6, 15, 20, 0, 0), "Asia/Tokyo")).toBe("2026-07-16");
         expect(localIsoDate(NOW, "Not/AZone")).toBe("2026-07-15");
+    });
+
+    it("uses a complete valid custom window and falls back deterministically otherwise", () => {
+        const custom = { from: "2026-02-01", to: "2026-03-15" };
+        expect(resolveAnalyticsWindow("custom", NOW, "UTC", custom)).toEqual(custom);
+        expect(resolveAnalyticsWindow("custom", NOW, "UTC", null)).toEqual({
+            from: "2026-04-17",
+            to: "2026-07-15",
+        });
+    });
+});
+
+describe("parseCustomAnalyticsWindow", () => {
+    it("accepts real ordered ISO dates through the 731-day limit", () => {
+        expect(parseCustomAnalyticsWindow("2024-01-01", "2025-12-31")).toEqual({
+            from: "2024-01-01",
+            to: "2025-12-31",
+        });
+    });
+
+    it.each([
+        [null, "2026-07-01"],
+        ["2026-07-01", null],
+        ["2026-02-30", "2026-03-01"],
+        ["2026-07-02", "2026-07-01"],
+        ["2024-01-01", "2026-01-01"],
+    ])("rejects an incomplete or invalid custom window", (from, to) => {
+        expect(parseCustomAnalyticsWindow(from, to)).toBeNull();
     });
 });
 
@@ -138,9 +140,9 @@ describe("periodStartOf", () => {
 });
 
 describe("projectionWindow", () => {
-    it("leaves calendar presets untouched", () => {
+    it("leaves a custom window untouched", () => {
         const window = { from: "2026-07-01", to: "2026-07-31" };
-        expect(projectionWindow(window, "this-month", "week")).toEqual(window);
+        expect(projectionWindow(window, "custom", "week")).toEqual(window);
     });
 
     it("extends rolling ranges to the end of the third following period", () => {
