@@ -39,6 +39,7 @@ import UpNext from './UpNext';
 import SourceNotice, { type CalendarSourceKey, type CalendarTruncation } from './SourceNotice';
 import { temperatureIndex } from './warmth';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 
 const SWIPE_OFFSET = 40;
@@ -401,21 +402,31 @@ export default function CalendarShell({
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <header className="flex flex-col gap-3">
-                        <div className="flex items-end justify-between gap-3">
-                            <div>
-                                <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-                                {periodLabel && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setGoToOpen(true)}
-                                        aria-label={t('goToDate')}
-                                        className="mt-1 rounded text-sm text-muted-foreground tabular-nums outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
-                                    >
-                                        {periodLabel}
-                                    </button>
-                                )}
-                            </div>
+                    <div className="flex flex-col gap-3">
+                        <PageHeader
+                            title={t('title')}
+                            actions={
+                                <QuickCreateHost
+                                    selectedDay={cal.selectedDay}
+                                    persons={persons ?? []}
+                                    deals={deals ?? []}
+                                    currentUserId={currentUserId}
+                                    menuOpen={createOpen}
+                                    onMenuOpenChange={setCreateOpen}
+                                />
+                            }
+                        />
+                        <div className="flex flex-wrap items-center justify-end gap-3">
+                            {periodLabel && (
+                                <button
+                                    type="button"
+                                    onClick={() => setGoToOpen(true)}
+                                    aria-label={t('goToDate')}
+                                    className="mr-auto rounded text-sm text-muted-foreground tabular-nums outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
+                                >
+                                    {periodLabel}
+                                </button>
+                            )}
                             <div className="flex shrink-0 items-center gap-1.5">
                                 <button
                                     type="button"
@@ -450,7 +461,7 @@ export default function CalendarShell({
                             <ViewSwitcher value={cal.view} onChange={cal.setView} />
                             <TypeFilter visibleKinds={cal.visibleKinds} onToggle={cal.toggleKind} />
                         </div>
-                    </header>
+                    </div>
                 </Rise>
 
                 <SourceNotice failed={failedSources} truncated={truncatedSources} warmthFailed={warmthFailed} />
@@ -499,15 +510,6 @@ export default function CalendarShell({
                 onReschedule={handleReschedule}
                 onComplete={handleComplete}
                 rescheduling={openEvent != null && pendingIds.has(openEvent.id)}
-            />
-
-            <QuickCreateHost
-                selectedDay={cal.selectedDay}
-                persons={persons ?? []}
-                deals={deals ?? []}
-                currentUserId={currentUserId}
-                menuOpen={createOpen}
-                onMenuOpenChange={setCreateOpen}
             />
 
             <ActivityDialog

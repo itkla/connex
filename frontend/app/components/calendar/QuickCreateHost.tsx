@@ -15,6 +15,7 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 import { getUsers } from '@/app/lib/api';
 import type { Contact, Deal, User } from '@/app/lib/types';
 import { dayKeyOf } from '@/app/lib/calendar';
@@ -25,9 +26,8 @@ import CalendarNewDealContainer from './CalendarNewDealContainer';
 type CreateKind = 'task' | 'activity' | 'deal' | null;
 
 /**
- * Floating create action for the calendar. A single FAB opens a menu to create a task,
- * activity or deal, each launching the existing create dialog prefilled with the selected
- * day. Users (needed by the task dialog) are fetched lazily on first task-create.
+ * Header create action for the calendar. Its menu opens the existing task, activity, and
+ * deal dialogs prefilled with the selected day. Task users load on first task creation.
  */
 export default function QuickCreateHost({
     selectedDay,
@@ -70,15 +70,12 @@ export default function QuickCreateHost({
         <>
             <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
                 <DropdownMenuTrigger asChild>
-                    <button
-                        type="button"
-                        aria-label={t('quickCreate')}
-                        className="fixed right-6 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] z-30 grid size-14 place-items-center rounded-full bg-brand text-brand-foreground shadow-lg outline-none transition active:scale-95 hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none md:bottom-[calc(env(safe-area-inset-bottom)+1.5rem)]"
-                    >
-                        <PlusIcon className="size-6" />
-                    </button>
+                    <Button type="button" variant="brand" size="sm" className="h-11 sm:h-8">
+                        <PlusIcon className="size-4" />
+                        {t('quickCreate')}
+                    </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" side="top" sideOffset={12}>
+                <DropdownMenuContent align="end" sideOffset={8}>
                     <DropdownMenuItem onSelect={() => setOpenKind('task')}>
                         <ClipboardDocumentCheckIcon className="size-4" />
                         {t('newTask')}
