@@ -451,7 +451,13 @@ export default function AnalyticsBoard({
                 {(hasDeals || hasRelationshipData) && (
                     <div className="flex flex-wrap items-center gap-2">
                     {canScopeByMember && (
-                        <MemberScopeFilter values={ownerValues} onChange={setOwnerValues} members={activeMembers} />
+                        <MemberScopeFilter
+                            values={ownerValues}
+                            onChange={setOwnerValues}
+                            members={activeMembers}
+                            label={t('userFilter')}
+                            ariaLabel={t('userFilterAria')}
+                        />
                     )}
                     {currencyCounts.size > 1 ? (
                         <DropdownMenu>

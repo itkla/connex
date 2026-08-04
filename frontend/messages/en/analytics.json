@@ -3,6 +3,8 @@
     "title": "Analytics",
     "subtitle": "Revenue, pipeline, and team activity at a glance",
     "rangeLabel": "Time range",
+    "userFilter": "User",
+    "userFilterAria": "Filter by user",
     "currency": "Currency",
     "currencyCount": "{count, plural, one {# deal} other {# deals}}",
     "range30d": "30 days",

@@ -3,6 +3,8 @@
     "title": "分析",
     "subtitle": "売上・案件・チーム活動をひと目で",
     "rangeLabel": "期間",
+    "userFilter": "ユーザー",
+    "userFilterAria": "ユーザーで絞り込む",
     "currency": "通貨",
     "currencyCount": "{count} 件",
     "range30d": "30日",
