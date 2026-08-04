@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
+import { motion, useReducedMotion } from "motion/react";
 
 import {
     ApiError,
@@ -31,11 +32,13 @@ import {
     emitNotificationStateChanged,
     onNotificationStateChanged,
 } from "@/app/components/notifications/notificationEvents";
+import { instant, springJiggle } from "@/app/lib/motion";
 
 export default function NotificationBell() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
     const now = useLiveNow();
+    const reduce = useReducedMotion() ?? false;
     const { recipientId, unread, refreshUnread } = useNotifications();
     const { executeInNotificationWorkspace, openNotification } = useNotificationWorkspaceActions();
     const [items, setItems] = useState<Notification[]>([]);
@@ -166,9 +169,11 @@ export default function NotificationBell() {
             void load(open);
         }}>
             <DropdownMenu.Trigger asChild>
-                <button
+                <motion.button
                     type="button"
                     aria-label={unread > 0 ? `${t("bellLabel")} — ${t("unreadCount", { count: unread })}` : t("bellLabel")}
+                    whileTap={reduce ? undefined : { scale: 0.95 }}
+                    transition={reduce ? instant : springJiggle}
                     className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
                     <BellIcon className="size-5" />
@@ -177,7 +182,7 @@ export default function NotificationBell() {
                             {unread > 99 ? "99+" : unread}
                         </span>
                     ) : null}
-                </button>
+                </motion.button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
                 <DropdownMenu.Content

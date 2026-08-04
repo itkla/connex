@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { ChevronUpDownIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { CheckIcon } from "@heroicons/react/20/solid";
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import NewWorkspaceDialog from "@/app/components/NewWorkspaceDialog";
+import { instant, springJiggle } from "@/app/lib/motion";
 
 function Glyph({ name, size = "trigger" }: { name: string; size?: "trigger" | "item" }) {
     const trigger = size === "trigger";
@@ -36,6 +38,7 @@ function Glyph({ name, size = "trigger" }: { name: string; size?: "trigger" | "i
 export default function WorkspaceSwitcher({ compact = false }: { compact?: boolean }) {
     const t = useTranslations("WorkspaceSwitcher");
     const { workspaces, activeWorkspaceId, activeWorkspace, switching, switchTo } = useWorkspace();
+    const reduce = useReducedMotion() ?? false;
 
     const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -47,26 +50,31 @@ export default function WorkspaceSwitcher({ compact = false }: { compact?: boole
     return (
         <>
             <DropdownMenu>
-                <DropdownMenuTrigger
-                    aria-label={t("switchAria")}
-                    disabled={switching}
-                    className={cn(
-                        "group flex items-center rounded-md outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground",
-                        compact ? "justify-center p-1" : "h-12 min-w-0 flex-1 gap-2 overflow-hidden p-2 text-left text-sm",
-                    )}
-                >
-                    <Glyph name={activeWorkspace?.name ?? "?"} />
-                    {!compact && (
-                        <>
-                            <span className="grid flex-1 text-left leading-tight">
-                                <span className="truncate font-medium text-sidebar-foreground">
-                                    {activeWorkspace?.name ?? t("label")}
+                <DropdownMenuTrigger asChild>
+                    <motion.button
+                        type="button"
+                        aria-label={t("switchAria")}
+                        disabled={switching}
+                        whileTap={reduce ? undefined : { scale: 0.95 }}
+                        transition={reduce ? instant : springJiggle}
+                        className={cn(
+                            "group flex items-center rounded-md outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground",
+                            compact ? "justify-center p-1" : "h-12 min-w-0 flex-1 gap-2 overflow-hidden p-2 text-left text-sm",
+                        )}
+                    >
+                        <Glyph name={activeWorkspace?.name ?? "?"} />
+                        {!compact && (
+                            <>
+                                <span className="grid flex-1 text-left leading-tight">
+                                    <span className="truncate font-medium text-sidebar-foreground">
+                                        {activeWorkspace?.name ?? t("label")}
+                                    </span>
+                                    <span className="truncate text-xs text-muted-foreground">{count}</span>
                                 </span>
-                                <span className="truncate text-xs text-muted-foreground">{count}</span>
-                            </span>
-                            <ChevronUpDownIcon className="ml-auto size-4 shrink-0 text-muted-foreground" />
-                        </>
-                    )}
+                                <ChevronUpDownIcon className="ml-auto size-4 shrink-0 text-muted-foreground" />
+                            </>
+                        )}
+                    </motion.button>
                 </DropdownMenuTrigger>
 
                 <DropdownMenuContent
