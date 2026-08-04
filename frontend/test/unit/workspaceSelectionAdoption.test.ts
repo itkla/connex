@@ -111,6 +111,7 @@ function workspaceFixture(id: number, name: string): Workspace {
         id,
         name,
         slug: name.toLowerCase().replaceAll(" ", "-"),
+        timezone: null,
         role: "member",
         orgId: 1,
         orgName: "Acme",
@@ -232,6 +233,38 @@ describe("authoritative workspace selection adoption", () => {
         expect(rendered.readWorkspace().workspaces.filter(({ id }) => id === accepted.id)).toEqual([
             accepted,
         ]);
+
+        await rendered.unmount();
+    });
+
+    it("publishes workspace and organization identity without replacing membership roles", async () => {
+        const active = {
+            ...workspaceFixture(7, "Before"),
+            role: "admin" as const,
+            orgRole: "owner" as const,
+        };
+        const sibling = { ...workspaceFixture(8, "Sibling"), orgRole: "owner" as const };
+        const rendered = await renderInteractiveWorkspaceProvider([active, sibling], active.id);
+
+        await act(async () => {
+            rendered.readWorkspace().publishWorkspaceIdentity({
+                id: active.id,
+                name: "After",
+                slug: active.slug,
+                timezone: "Asia/Tokyo",
+            });
+            rendered.readWorkspace().publishOrganizationIdentity({ id: active.orgId, name: "New organization" });
+        });
+
+        expect(rendered.readWorkspace().activeWorkspace).toMatchObject({
+            name: "After",
+            timezone: "Asia/Tokyo",
+            role: "admin",
+            orgName: "New organization",
+            orgRole: "owner",
+        });
+        expect(rendered.readWorkspace().workspaces.find(({ id }) => id === sibling.id)?.orgName)
+            .toBe("New organization");
 
         await rendered.unmount();
     });

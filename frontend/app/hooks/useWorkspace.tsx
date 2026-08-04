@@ -3,9 +3,13 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import type { Workspace } from "@/app/lib/types";
+import type { OrganizationIdentity, Workspace, WorkspaceIdentity } from "@/app/lib/types";
 import { createWorkspace, switchWorkspace } from "@/app/lib/api";
-import { adoptWorkspaces } from "@/app/lib/workspaceSnapshot";
+import {
+    adoptWorkspaces,
+    applyOrganizationIdentity,
+    applyWorkspaceIdentity,
+} from "@/app/lib/workspaceSnapshot";
 
 type PublishActiveWorkspace = (id: number | null) => void;
 type PublishWorkspace = (workspace: Workspace) => void;
@@ -25,6 +29,10 @@ type WorkspaceContextValue = {
     runSelectionChange: SelectionChangeRunner;
     switchTo: (id: number) => Promise<void>;
     create: (name: string) => Promise<Workspace>;
+    publishWorkspaceIdentity: (
+        identity: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+    ) => void;
+    publishOrganizationIdentity: (identity: Pick<OrganizationIdentity, "id" | "name">) => void;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -92,6 +100,17 @@ export function WorkspaceProvider({
         setWorkspaces((previous) => previous.some(({ id }) => id === workspace.id)
             ? previous.map((held) => held.id === workspace.id ? workspace : held)
             : [...previous, workspace]);
+    }, []);
+
+    const publishWorkspaceIdentity = useCallback((identity: Pick<
+        WorkspaceIdentity,
+        "id" | "name" | "slug" | "timezone"
+    >) => {
+        setWorkspaces((previous) => applyWorkspaceIdentity(previous, identity));
+    }, []);
+
+    const publishOrganizationIdentity = useCallback((identity: Pick<OrganizationIdentity, "id" | "name">) => {
+        setWorkspaces((previous) => applyOrganizationIdentity(previous, identity));
     }, []);
 
     const runSelectionChange = useCallback(async <T,>(
@@ -164,6 +183,8 @@ export function WorkspaceProvider({
             runSelectionChange,
             switchTo,
             create,
+            publishWorkspaceIdentity,
+            publishOrganizationIdentity,
         }),
         [
             workspaces,
@@ -174,6 +195,8 @@ export function WorkspaceProvider({
             runSelectionChange,
             switchTo,
             create,
+            publishWorkspaceIdentity,
+            publishOrganizationIdentity,
         ],
     );
 

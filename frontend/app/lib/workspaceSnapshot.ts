@@ -1,4 +1,4 @@
-import type { Workspace } from "@/app/lib/types";
+import type { OrganizationIdentity, Workspace, WorkspaceIdentity } from "@/app/lib/types";
 
 /**
  * Merges a freshly arrived server payload over the workspaces currently published to the tree.
@@ -30,4 +30,24 @@ export function adoptWorkspaces(
         (workspace) => !arrivingIds.has(workspace.id) && !consumedIds.has(workspace.id),
     );
     return unacknowledged.length === 0 ? arriving : [...arriving, ...unacknowledged];
+}
+
+/** Applies a canonical workspace identity without disturbing the viewer's membership snapshot. */
+export function applyWorkspaceIdentity(
+    workspaces: readonly Workspace[],
+    identity: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+): Workspace[] {
+    return workspaces.map((workspace) => workspace.id === identity.id
+        ? { ...workspace, name: identity.name, slug: identity.slug, timezone: identity.timezone }
+        : workspace);
+}
+
+/** Applies an organization display identity to every workspace belonging to that organization. */
+export function applyOrganizationIdentity(
+    workspaces: readonly Workspace[],
+    identity: Pick<OrganizationIdentity, "id" | "name">,
+): Workspace[] {
+    return workspaces.map((workspace) => workspace.orgId === identity.id
+        ? { ...workspace, orgName: identity.name }
+        : workspace);
 }

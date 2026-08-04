@@ -2791,10 +2791,62 @@ export type Workspace = {
     id: number;
     name: string;
     slug: string;
+    timezone: string | null;
     role: WorkspaceRole;
     orgId: number;
     orgName: string;
     orgRole: OrgRole | null;
+};
+
+export type WorkspaceIdentity = {
+    id: number;
+    orgId: number;
+    name: string;
+    slug: string;
+    timezone: string | null;
+    updatedAt: string;
+};
+
+export type OrganizationIdentity = {
+    id: number;
+    name: string;
+    slug: string;
+    updatedAt: string;
+};
+
+export type OrganizationLayoutAuthorityMember = {
+    userId: number;
+    displayName: string;
+    profilePictureUrl?: string | null;
+    orgRole: OrgRole;
+};
+
+export type OrganizationLayoutWorkspaceMember = {
+    workspaceId: number;
+    userId: number;
+    displayName: string;
+    profilePictureUrl?: string | null;
+    role: string;
+    roleId?: number | null;
+    status: string;
+};
+
+export type OrganizationLayoutWorkspace = {
+    id: number;
+    name: string;
+    slug: string;
+    timezone: string | null;
+    rosterVisible: boolean;
+    memberships: OrganizationLayoutWorkspaceMember[];
+    membershipsTruncated: boolean;
+};
+
+export type OrganizationLayout = {
+    organization: OrganizationIdentity;
+    authorityMemberships: OrganizationLayoutAuthorityMember[];
+    nextAuthorityMemberId: number | null;
+    workspaces: OrganizationLayoutWorkspace[];
+    nextWorkspaceId: number | null;
 };
 
 export type OrgMember = {

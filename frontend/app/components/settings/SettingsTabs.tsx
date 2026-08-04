@@ -9,6 +9,7 @@ import { usePermission } from "@/app/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 
 const TABS = [
+    { key: "tabGeneral", href: "/settings/general" },
     { key: "tabMembers", href: "/settings/members" },
     { key: "tabRoles", href: "/settings/roles" },
     { key: "tabCustomFields", href: "/settings/custom-fields" },
@@ -35,6 +36,7 @@ export default function SettingsTabs({ mailManaged = false }: { mailManaged?: bo
     const canManageSettings = usePermission("WORKSPACE_SETTINGS");
     const tabs = TABS.filter((tab) => {
         if (tab.key === "tabEmail") return !mailManaged;
+        if (tab.key === "tabGeneral") return canManageSettings;
         if (tab.key === "tabDiagnostics") return canManageSettings;
         return true;
     });

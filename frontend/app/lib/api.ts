@@ -3427,6 +3427,21 @@ export function getOrgMembers(orgId: number, init: RequestInit = {}) {
     return getJson<Types.OrgMember[]>(`/api/orgs/${orgId}/members`, { cache: "no-store", ...init });
 }
 
+export function updateOrganizationIdentity(orgId: number, name: string) {
+    return patchJson<Types.OrganizationIdentity>(`/api/orgs/${orgId}`, { name });
+}
+
+export function getOrganizationLayout(
+    orgId: number,
+    params: { afterWorkspaceId?: number; afterAuthorityMemberId?: number; limit?: number } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.OrganizationLayout>(`/api/orgs/${orgId}/layout${buildQuery(params)}`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
 export function addOrgMemberByEmail(orgId: number, email: string, orgRole: Types.OrgRole) {
     return postJson<void>(`/api/orgs/${orgId}/members`, { email, orgRole });
 }
@@ -3518,6 +3533,10 @@ export function createWorkspace(name: string) {
         () => postJson<Types.Workspace>(`/api/workspaces`, { name }),
         "workspace",
     );
+}
+
+export function updateWorkspaceIdentity(id: number, name: string, timezone: string | null) {
+    return patchJson<Types.WorkspaceIdentity>(`/api/workspaces/${id}`, { name, timezone });
 }
 
 export function switchWorkspace(id: number) {

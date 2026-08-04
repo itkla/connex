@@ -18,6 +18,7 @@ function workspace(role: WorkspaceRole, orgRole: OrgRole | null = null): Workspa
         id: 1,
         name: "Acme",
         slug: "acme",
+        timezone: null,
         role,
         orgId: 1,
         orgName: "Acme Inc",

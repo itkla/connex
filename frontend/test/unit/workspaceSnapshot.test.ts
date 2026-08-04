@@ -3,7 +3,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { Workspace } from "@/app/lib/types";
-import { adoptWorkspaces } from "@/app/lib/workspaceSnapshot";
+import {
+    adoptWorkspaces,
+    applyOrganizationIdentity,
+    applyWorkspaceIdentity,
+} from "@/app/lib/workspaceSnapshot";
 
 const PROVIDER = "app/hooks/useWorkspace.tsx";
 const MEMBERS_PANEL = "app/components/settings/MembersPanel.tsx";
@@ -70,7 +74,16 @@ describe("the workspace snapshot follows the server, not only the first render",
 
 describe("a payload cannot erase a workspace the server has not seen yet", () => {
     function workspace(id: number, name = `W${id}`): Workspace {
-        return { id, name, slug: name.toLowerCase(), role: "owner", orgId: 1, orgName: "Acme", orgRole: "owner" };
+        return {
+            id,
+            name,
+            slug: name.toLowerCase(),
+            timezone: null,
+            role: "owner",
+            orgId: 1,
+            orgName: "Acme",
+            orgRole: "owner",
+        };
     }
 
     const a = workspace(1, "Alpha");
@@ -114,6 +127,41 @@ describe("a payload cannot erase a workspace the server has not seen yet", () =>
         const arriving = [a, b];
 
         expect(adoptWorkspaces([a], [a], arriving)).toBe(arriving);
+    });
+});
+
+describe("identity mutations preserve membership state", () => {
+    const workspace: Workspace = {
+        id: 7,
+        name: "Before",
+        slug: "before",
+        timezone: null,
+        role: "admin",
+        orgId: 4,
+        orgName: "Old organization",
+        orgRole: "admin",
+    };
+
+    it("replaces mutable workspace identity without changing the viewer's roles", () => {
+        expect(applyWorkspaceIdentity([workspace], {
+            id: 7,
+            name: "After",
+            slug: "before",
+            timezone: "Asia/Tokyo",
+        })).toEqual([{
+            ...workspace,
+            name: "After",
+            timezone: "Asia/Tokyo",
+        }]);
+    });
+
+    it("updates the organization label across its workspaces only", () => {
+        const other = { ...workspace, id: 8, orgId: 5, orgName: "Other" };
+
+        expect(applyOrganizationIdentity([workspace, other], {
+            id: 4,
+            name: "New organization",
+        })).toEqual([{ ...workspace, orgName: "New organization" }, other]);
     });
 });
 
