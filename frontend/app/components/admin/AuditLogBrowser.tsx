@@ -43,7 +43,8 @@ import {
     formatShortDate,
     parseMysqlDateTime,
 } from "@/app/lib/utils";
-import { type AuditChange, type AuditLogEntry } from "@/app/lib/types";
+import { presentAuditEntry, type AuditMetadataRow } from "@/app/lib/auditPresentation";
+import { type AuditLogEntry } from "@/app/lib/types";
 
 type Tone = "create" | "update" | "delete" | "auth" | "view" | "default";
 
@@ -828,6 +829,18 @@ function PulseStrip({
 
 type Translator = ReturnType<typeof useTranslations>;
 
+function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
+    if (row.value == null) return t("valueUnknown");
+    if (typeof row.value === "boolean") return t(row.value ? "valueYes" : "valueNo");
+    if (row.key === "result") {
+        if (row.value === "success") return t("outcomeSuccess");
+        if (row.value === "failure") return t("outcomeFailed");
+        if (row.value === "attempt") return t("outcomeAttempt");
+        if (row.value === "blocked") return t("outcomeBlocked");
+    }
+    return String(row.value);
+}
+
 function DayMarker({
     label,
     count,
@@ -917,9 +930,15 @@ function AuditRow({
           })
         : t.rich("actionPlain", { actorName, verb: verbText, actor: actorTag });
 
-    const changeEntries: [string, AuditChange][] = entry.changes ? Object.entries(entry.changes) : [];
+    const presentation = presentAuditEntry(entry);
     const errorText = typeof entry.context?.error === "string" ? entry.context.error : null;
+    const metadataRows = presentation.metadata.map((row) => ({
+        label: t(row.labelKey),
+        value: auditMetadataValue(row, t),
+        mono: row.mono,
+    }));
     const detailRows = [
+        ...metadataRows,
         entry.ipAddress && { label: t("metaIp"), value: entry.ipAddress, mono: true },
         entry.userAgent && { label: t("metaUserAgent"), value: entry.userAgent, mono: false },
         entry.requestId && { label: t("metaRequestId"), value: entry.requestId, mono: true },
@@ -1001,14 +1020,14 @@ function AuditRow({
                                     <span className="min-w-0 break-words font-mono">{errorText}</span>
                                 </div>
                             )}
-                            {changeEntries.length > 0 ? (
+                            {presentation.diffs.length > 0 ? (
                                 <dl className="space-y-2">
-                                    {changeEntries.map(([field, delta]) => (
+                                    {presentation.diffs.map((delta) => (
                                         <div
-                                            key={field}
+                                            key={delta.field}
                                             className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1"
                                         >
-                                            <dt className="font-mono text-[11px] text-muted-foreground">{field}</dt>
+                                            <dt className="font-mono text-[11px] text-muted-foreground">{delta.field}</dt>
                                             <dd className="flex min-w-0 items-center gap-1.5">
                                                 <ValueChip value={delta.old} tone="old" empty={t("emptyValue")} />
                                                 <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground/50" />
@@ -1018,7 +1037,9 @@ function AuditRow({
                                     ))}
                                 </dl>
                             ) : (
-                                !errorText && <p className="text-xs text-muted-foreground">{t("noChanges")}</p>
+                                !errorText && metadataRows.length === 0
+                                    ? <p className="text-xs text-muted-foreground">{t("noChanges")}</p>
+                                    : null
                             )}
 
                             {detailRows.length > 0 && (

@@ -2779,8 +2779,8 @@ export type SearchResults = {
 };
 
 export type AuditChange = {
-    old: unknown;
-    new: unknown;
+    old?: unknown;
+    new?: unknown;
 };
 
 export type WorkspaceRole = "owner" | "admin" | "member";
@@ -3628,7 +3628,7 @@ export type AuditLogEntry = {
     targetLabel: string | null;
     outcome: string | null;
     summary: string | null;
-    changes?: Record<string, AuditChange> | null;
+    changes?: Record<string, unknown> | null;
     context?: Record<string, unknown> | null;
     ipAddress?: string | null;
     userAgent?: string | null;
