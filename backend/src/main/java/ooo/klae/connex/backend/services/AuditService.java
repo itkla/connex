@@ -559,7 +559,7 @@ public class AuditService {
         String outcome = sensitiveOutcome(entry, family, metadata);
         entry.setAction(action);
         entry.setEntityType(sensitiveEntityType(entry.getEntityType(), family));
-        entry.setTargetLabel(sensitiveTarget(family, metadata));
+        entry.setTargetLabel(sensitiveTarget(entry.getTargetLabel(), family, metadata));
         entry.setOutcome(outcome);
         entry.setSummary(sensitiveSummary(action, family, outcome));
         entry.setChanges(toProjectedJson(metadata));
@@ -680,9 +680,13 @@ public class AuditService {
         return SECRET_ENTITY_TYPES.contains(entityType) ? entityType : null;
     }
 
-    private static String sensitiveTarget(SensitiveAuditFamily family, Map<String, Object> metadata) {
+    private static String sensitiveTarget(
+            String targetLabel, SensitiveAuditFamily family, Map<String, Object> metadata) {
         if (family == SensitiveAuditFamily.SECRET) {
-            return metadata.get("purpose") instanceof String purpose ? purpose : "secret_store";
+            if (metadata.get("purpose") instanceof String purpose) {
+                return purpose;
+            }
+            return SECRET_PURPOSES.contains(targetLabel) ? targetLabel : "secret_store";
         }
         String provider = metadata.get("provider") instanceof String value ? value : "ai_call";
         return metadata.get("region") instanceof String region ? provider + "/" + region : provider;

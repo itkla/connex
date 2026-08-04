@@ -105,6 +105,13 @@ describe('presentAuditEntry', () => {
             entityType: 'ai_call',
             changes: { provider: { old: null, new: 'vertex' }, model: {} },
         }));
+        const currentFailure = presentAuditEntry(entry({
+            action: 'secret_store.secret.use_failed',
+            entityType: 'organization',
+            targetLabel: 'org.ai.provider_credential',
+            outcome: 'failure',
+            changes: null,
+        }));
 
         expect(missing.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'operation', value: 'secret_store.secret.use_failed' }),
@@ -115,6 +122,9 @@ describe('presentAuditEntry', () => {
             expect.objectContaining({ key: 'provider', value: 'vertex' }),
         ]));
         expect(legacy.metadata.some((row) => row.key === 'model')).toBe(false);
+        expect(currentFailure.metadata).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'target', value: 'org.ai.provider_credential' }),
+        ]));
     });
 
     it('preserves ordinary field diffs and ignores malformed legacy payloads', () => {

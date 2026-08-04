@@ -260,6 +260,24 @@ class AuditServiceTest {
     }
 
     @Test
+    void recentPreservesAControlledSecretPurposeForCurrentFailureRows() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("secret_store.secret.use_failed");
+        entry.setEntityType("organization");
+        entry.setTargetLabel("org.ai.provider_credential");
+        entry.setOutcome("failure");
+        entry.setSummary("Secret use failed");
+        entry.setContext("{\"error\":\"SecretUnavailableException\"}");
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals("org.ai.provider_credential", result.getTargetLabel());
+        assertEquals("Secret use failed", result.getSummary());
+        assertEquals("{\"error\":\"SecretUnavailableException\"}", result.getContext());
+    }
+
+    @Test
     void exportOmitsSensitiveIntegrityPayloadAndRawContent() {
         AuditLog entry = new AuditLog();
         entry.setAction("ai.llm.call");

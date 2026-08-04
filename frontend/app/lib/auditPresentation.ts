@@ -216,7 +216,10 @@ export function auditTargetLabel(
 ): string | null {
     if (entry.action.startsWith('secret_store.')) {
         const purpose = knownString(SECRET_PURPOSES)(entry.changes?.purpose);
-        return typeof purpose === 'string' ? purpose : 'secret_store';
+        if (typeof purpose === 'string') return purpose;
+        return entry.targetLabel != null && SECRET_PURPOSES.has(entry.targetLabel)
+            ? entry.targetLabel
+            : 'secret_store';
     }
     if (entry.entityType === 'ai_call' || entry.action === 'ai.llm.call') {
         const provider = knownString(AI_PROVIDERS)(entry.changes?.provider);
