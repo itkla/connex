@@ -373,7 +373,8 @@ public class WorkflowManualRunService {
         JsonNode config = view.getConfig();
         Set<Integer> matches = new HashSet<>();
         JsonNode segments = config == null ? null : config.get("segments");
-        if (segments != null && !segments.isNull()) {
+        boolean segmentConfigured = segments != null && !segments.isNull();
+        if (segmentConfigured) {
             try {
                 SegmentDefinition definition = objectMapper.treeToValue(
                     segments, SegmentDefinition.class);
@@ -383,15 +384,17 @@ public class WorkflowManualRunService {
             }
         }
         WorkflowManualFilter filter = filterFromSavedView(config);
-        List<Integer> nativeMatches = resolveFilterForRecordType(
-            view.getRecordType(), filter, requesterId);
+        boolean nativeFilterConfigured = hasNativeFilter(filter);
+        List<Integer> nativeMatches = nativeFilterConfigured
+            ? resolveFilterForRecordType(view.getRecordType(), filter, requesterId)
+            : List.of();
         List<Integer> ids;
-        if (matches.isEmpty()) {
-            ids = nativeMatches;
-        } else if (hasNativeFilter(filter)) {
+        if (segmentConfigured && nativeFilterConfigured) {
             ids = nativeMatches.stream().filter(matches::contains).toList();
-        } else {
+        } else if (segmentConfigured) {
             ids = matches.stream().sorted().toList();
+        } else {
+            ids = nativeMatches;
         }
         return resolved("saved_view", ids, scope);
     }

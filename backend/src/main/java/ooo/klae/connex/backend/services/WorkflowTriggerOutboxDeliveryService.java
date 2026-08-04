@@ -145,6 +145,10 @@ public class WorkflowTriggerOutboxDeliveryService {
             leaseOwner,
             afterId,
             completed));
+        if (completed) {
+            outboxMapper.resolveDeadForWorkflow(
+                outbox.getWorkspaceId(), outbox.getWorkflowId());
+        }
     }
 
     private void lockDispatchPrincipals(

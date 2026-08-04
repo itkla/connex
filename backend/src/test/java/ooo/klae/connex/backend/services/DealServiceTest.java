@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -82,6 +83,24 @@ class DealServiceTest extends AbstractServiceTest {
     @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
     @MockitoSpyBean DealMapper dealMapperSpy;
+
+    @Test
+    void removeTagIsIdempotentWhenTagNoLongerExists() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId());
+
+        assertDoesNotThrow(
+            () -> dealService.removeTag(deal.getId(), Integer.MAX_VALUE));
+
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId()));
+    }
 
     @Test
     void aggregateReadsAreAssembledAndIsolatedByWorkspace() {

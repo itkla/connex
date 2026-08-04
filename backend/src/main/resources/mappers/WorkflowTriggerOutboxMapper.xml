@@ -221,6 +221,16 @@
       AND lease_until &gt;= CURRENT_TIMESTAMP(6)
   </update>
 
+  <update id="resolveDeadForWorkflow">
+    UPDATE workflow_trigger_outbox
+    SET status = 'invalidated',
+        last_error_code = NULL,
+        completed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND status = 'dead'
+  </update>
+
   <update id="releaseForRetry">
     UPDATE workflow_trigger_outbox
     SET status = 'pending',
@@ -254,15 +264,6 @@
     DELETE FROM workflow_trigger_outbox
     WHERE workspace_id = #{workspaceId}
       AND status IN ('completed', 'invalidated')
-      AND completed_at &lt; #{cutoff}
-    ORDER BY id
-    LIMIT #{limit}
-  </delete>
-
-  <delete id="purgeDeadBefore">
-    DELETE FROM workflow_trigger_outbox
-    WHERE workspace_id = #{workspaceId}
-      AND status = 'dead'
       AND completed_at &lt; #{cutoff}
     ORDER BY id
     LIMIT #{limit}

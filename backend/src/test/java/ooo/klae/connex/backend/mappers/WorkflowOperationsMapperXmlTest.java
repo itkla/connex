@@ -43,6 +43,24 @@ class WorkflowOperationsMapperXmlTest {
             "invocationId", 31L));
         assertTrue(invocationRecords.contains("'configuration_invalid', 'invalid_action_config'"));
         assertTrue(refreshRecords.contains("'configuration_invalid', 'invalid_action_config'"));
+
+        String summary = sql(configuration, "getSummary", Map.of("workspaceId", 7));
+        assertTrue(summary.contains("dead.status = 'dead'"));
+        assertTrue(summary.contains("workflow_trigger_outbox dead"));
+        String triggerDiagnostics = sql(
+            configuration(),
+            "getDeadTriggerDiagnostics",
+            Map.of("workspaceId", 7, "limit", 50));
+        assertTrue(triggerDiagnostics.contains("dead.workspace_id = ?"));
+        assertTrue(triggerDiagnostics.contains("dead.last_error_code IS NOT NULL"));
+
+        String pendingInvocations = sql(
+            configuration(),
+            "getPendingInvocationDispatches",
+            Map.of("workspaceId", 7, "limit", 4));
+        assertTrue(pendingInvocations.contains("invocation.workspace_id = ?"));
+        assertTrue(pendingInvocations.contains("record.execution_status = 'pending'"));
+        assertTrue(pendingInvocations.contains("record.workflow_run_id IS NULL"));
     }
 
     @Test

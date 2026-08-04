@@ -84,8 +84,17 @@ class WorkflowTriggerOutboxMapperXmlTest {
             "leaseOwner", "owner",
             "errorCode", "failure"));
         assertTrue(dead.contains("lease_until >= CURRENT_TIMESTAMP(6)"));
+        String resolved = sql(configuration, "resolveDeadForWorkflow", Map.of(
+            "workspaceId", 7, "workflowId", 11));
+        assertTrue(resolved.contains("status = 'invalidated'"));
+        assertTrue(resolved.contains("status = 'dead'"));
+        String purge = sql(configuration, "purgeCompletedBefore", Map.of(
+            "workspaceId", 7, "cutoff", now, "limit", 100));
+        assertTrue(purge.contains("status IN ('completed', 'invalidated')"));
+        assertFalse(purge.contains("'dead'"));
         String source = resource("mappers/WorkflowTriggerOutboxMapper.xml");
         assertFalse(source.contains("${"));
+        assertFalse(source.contains("purgeDeadBefore"));
     }
 
     private static WorkflowTriggerOutbox outbox(LocalDateTime now) {

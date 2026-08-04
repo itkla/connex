@@ -9,6 +9,7 @@ import java.util.Map;
 
 import javax.imageio.ImageIO;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -69,6 +70,23 @@ class PersonServiceTest extends AbstractServiceTest {
     @MockitoBean AiRestrictionEpoch aiRestrictionEpoch;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
+
+    @Test
+    void removeTagIsIdempotentWhenTagNoLongerExists() {
+        Person person = newPerson(newCompany());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId());
+
+        assertDoesNotThrow(
+            () -> personService.removeTag(person.getId(), Integer.MAX_VALUE));
+
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId()));
+    }
 
     @Test
     void createAndUpdateReconcileCurrentIdentityHistory() {

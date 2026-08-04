@@ -2,9 +2,12 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.Test;
 
@@ -56,5 +59,21 @@ class WorkflowDedupeKeyTest {
                 7, "deal", 9, "deal.won", "", Instant.now()));
         assertThrows(IllegalArgumentException.class, () ->
             new WorkflowTriggerDispatch.ScheduleTick(7, "daily", "x".repeat(97)));
+    }
+
+    @Test
+    void legacyPlaintextKeysExistOnlyInsideTheBoundedTransitionHorizon() {
+        Instant occurrence = Instant.parse("2026-08-03T12:34:00Z");
+        WorkflowDedupeKey active = new WorkflowDedupeKey(
+            Clock.fixed(Instant.parse("2026-08-10T00:00:00Z"), ZoneOffset.UTC));
+        WorkflowDedupeKey retired = new WorkflowDedupeKey(
+            Clock.fixed(Instant.parse("2026-09-14T00:00:00Z"), ZoneOffset.UTC));
+
+        assertEquals("41:20260803", active.legacySchedule(41, "20260803"));
+        assertEquals(
+            "41:company.updated:t60:" + occurrence.getEpochSecond() / 3600,
+            active.legacyEntityChange(41, "company.updated", occurrence, 60));
+        assertNull(retired.legacySchedule(41, "20260803"));
+        assertNull(retired.legacyEntityChange(41, "company.updated", occurrence, 60));
     }
 }

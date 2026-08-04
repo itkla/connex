@@ -45,19 +45,33 @@
             AND fr.status IN ('failed', 'intervention_required')
             AND fr.finished_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM workflow_trigger_outbox dead
+          WHERE dead.workspace_id = w.workspace_id
+            AND dead.workflow_id = w.id
+            AND dead.status = 'dead'
+        )
       ) AS healthy_count,
       SUM(w.intake_paused_at IS NOT NULL) AS paused_count,
       SUM(w.enabled = FALSE) AS disabled_count,
-      SUM(EXISTS (
-        SELECT 1
-        FROM workflow_intervention wi
-        JOIN workflow_run ir
-          ON ir.workspace_id = wi.workspace_id
-         AND ir.id = wi.workflow_run_id
-        WHERE wi.workspace_id = w.workspace_id
-          AND ir.workflow_id = w.id
-          AND wi.status = 'open'
-      )) AS intervention_required_count,
+      SUM(
+        EXISTS (
+          SELECT 1
+          FROM workflow_intervention wi
+          JOIN workflow_run ir
+            ON ir.workspace_id = wi.workspace_id
+           AND ir.id = wi.workflow_run_id
+          WHERE wi.workspace_id = w.workspace_id
+            AND ir.workflow_id = w.id
+            AND wi.status = 'open'
+        )
+        OR EXISTS (
+          SELECT 1 FROM workflow_trigger_outbox dead
+          WHERE dead.workspace_id = w.workspace_id
+            AND dead.workflow_id = w.id
+            AND dead.status = 'dead'
+        )
+      ) AS intervention_required_count,
       COALESCE((
         SELECT COUNT(*) FROM workflow_run qr
         WHERE qr.workspace_id = #{workspaceId} AND qr.status = 'queued'
@@ -79,16 +93,42 @@
       COALESCE((
         SELECT COUNT(*) FROM workflow_intervention oi
         WHERE oi.workspace_id = #{workspaceId} AND oi.status = 'open'
+      ), 0) + COALESCE((
+        SELECT COUNT(*) FROM workflow_trigger_outbox dead
+        WHERE dead.workspace_id = #{workspaceId} AND dead.status = 'dead'
       ), 0) AS open_intervention_count,
       COALESCE((
         SELECT COUNT(*) FROM workflow_run recent
         WHERE recent.workspace_id = #{workspaceId}
           AND recent.status IN ('failed', 'intervention_required')
           AND recent.finished_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+      ), 0) + COALESCE((
+        SELECT COUNT(*) FROM workflow_trigger_outbox dead
+        WHERE dead.workspace_id = #{workspaceId}
+          AND dead.status = 'dead'
+          AND dead.completed_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
       ), 0) AS recent_failure_count
     FROM workflow w
     WHERE w.workspace_id = #{workspaceId}
       AND w.archived_at IS NULL
+  </select>
+
+  <select id="getDeadTriggerDiagnostics" resultType="WorkflowTriggerDiagnosticView">
+    SELECT dead.id AS outbox_id,
+           dead.workflow_id,
+           workflow.name AS workflow_name,
+           dead.trigger_type,
+           dead.last_error_code AS reason_code,
+           dead.completed_at AS failed_at
+    FROM workflow_trigger_outbox dead
+    JOIN workflow
+      ON workflow.workspace_id = dead.workspace_id
+     AND workflow.id = dead.workflow_id
+    WHERE dead.workspace_id = #{workspaceId}
+      AND dead.status = 'dead'
+      AND dead.last_error_code IS NOT NULL
+    ORDER BY dead.completed_at DESC, dead.id DESC
+    LIMIT #{limit}
   </select>
 
   <select id="getBacklog" resultType="WorkflowBacklogView">
@@ -268,6 +308,26 @@
      AND wr.id = wir.workflow_run_id
     WHERE wir.workspace_id = #{workspaceId} AND wir.invocation_id = #{invocationId}
     ORDER BY wir.ordinal
+  </select>
+
+  <select id="getPendingInvocationDispatches" resultType="WorkflowInvocationDispatch">
+    SELECT invocation.workspace_id,
+           invocation.workflow_id,
+           invocation.workflow_version_id,
+           invocation.id AS invocation_id,
+           record.record_id
+    FROM workflow_invocation invocation
+    JOIN workflow_invocation_record record
+      ON record.workspace_id = invocation.workspace_id
+     AND record.invocation_id = invocation.id
+    WHERE invocation.workspace_id = #{workspaceId}
+      AND invocation.status IN ('confirmed', 'running')
+      AND invocation.completed_at IS NULL
+      AND record.preview_status = 'ready'
+      AND record.execution_status = 'pending'
+      AND record.workflow_run_id IS NULL
+    ORDER BY invocation.confirmed_at, invocation.id, record.ordinal
+    LIMIT #{limit}
   </select>
 
   <update id="confirmInvocation">

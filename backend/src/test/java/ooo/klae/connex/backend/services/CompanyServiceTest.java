@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -57,6 +58,23 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
+
+    @Test
+    void removeTagIsIdempotentWhenTagNoLongerExists() {
+        Company company = newCompany();
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId());
+
+        assertDoesNotThrow(
+            () -> companyService.removeTag(company.getId(), Integer.MAX_VALUE));
+
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId()));
+    }
 
     @Test
     void createAndUpdateReconcileCurrentIdentityHistory() {

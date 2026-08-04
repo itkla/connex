@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.List;
+
 /** Workspace-level workflow operations counts. */
 public record WorkflowOperationsSummaryDto(
     int workflowCount,
@@ -11,5 +13,6 @@ public record WorkflowOperationsSummaryDto(
     int waitingCount,
     int overdueCount,
     int openInterventionCount,
-    int recentFailureCount
+    int recentFailureCount,
+    List<WorkflowTriggerDiagnosticDto> triggerDiagnostics
 ) { }

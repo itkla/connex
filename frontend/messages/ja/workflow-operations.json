@@ -24,6 +24,11 @@
       "queued": "キュー待ち",
       "overdue": "期限超過"
     },
+    "triggerDiagnostics": {
+      "title": "トリガー配信の対応が必要です",
+      "description": "これらのトリガーはレコード登録前に失敗しました。固定診断コードは、後続の配信が成功するまで表示されます。",
+      "outcome": "この {triggerType} トリガーでは実行が開始されませんでした。"
+    },
     "filters": {
       "statusLabel": "実行ステータスで絞り込む",
       "failureLabel": "失敗カテゴリで絞り込む",

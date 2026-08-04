@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.dto.WorkflowOperationsDetailDto;
 import ooo.klae.connex.backend.dto.WorkflowOperationsRunDto;
 import ooo.klae.connex.backend.dto.WorkflowOperationsRunPageDto;
 import ooo.klae.connex.backend.dto.WorkflowOperationsSummaryDto;
+import ooo.klae.connex.backend.dto.WorkflowTriggerDiagnosticDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
@@ -61,8 +62,8 @@ public class WorkflowOperationsService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowOperationsSummaryDto summary() {
-        WorkflowOperationsSummaryView view = operationsMapper.getSummary(
-            workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        WorkflowOperationsSummaryView view = operationsMapper.getSummary(workspaceId);
         return new WorkflowOperationsSummaryDto(
             view.getWorkflowCount(),
             view.getHealthyCount(),
@@ -73,7 +74,10 @@ public class WorkflowOperationsService {
             view.getWaitingCount(),
             view.getOverdueCount(),
             view.getOpenInterventionCount(),
-            view.getRecentFailureCount());
+            view.getRecentFailureCount(),
+            operationsMapper.getDeadTriggerDiagnostics(workspaceId, 50).stream()
+                .map(WorkflowTriggerDiagnosticDto::from)
+                .toList());
     }
 
     @Transactional(readOnly = true)

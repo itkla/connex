@@ -16,7 +16,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +34,7 @@ import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowRun;
+import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
@@ -75,7 +78,8 @@ class WorkflowRuntimeClaimServiceTest {
             dealMapper,
             canonicalizer,
             definitionValidator,
-            new WorkflowDedupeKey(),
+            new WorkflowDedupeKey(Clock.fixed(
+                Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC)),
             systemActor);
         workflow = workflow("canonical");
         version = version();
@@ -211,6 +215,36 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     @Test
+    void durableScheduleClaimChecksThePreUpgradePlaintextLedgerKey() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("schedule");
+        trigger.setCadence("daily");
+        stubCanonicalCompilation(trigger);
+        WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
+        outbox.setId(31L);
+        outbox.setWorkspaceId(7);
+        outbox.setWorkflowId(11);
+        outbox.setWorkflowVersionId(19L);
+        outbox.setTriggerType("schedule");
+        outbox.setTriggerEvent("daily");
+        outbox.setTriggerKey("20260803");
+        outbox.setRecordType("company");
+        RuleExecution legacy = new RuleExecution();
+        when(ruleMapper.getExecutionByDedupe(eq(7), eq(13), anyString()))
+            .thenAnswer(call -> "41:20260803".equals(call.getArgument(2, String.class))
+                ? legacy : null);
+
+        WorkflowRuntimeClaimService.CanonicalClaim claim =
+            service.claimOutbox(outbox, 41);
+
+        assertTrue(claim.replayed());
+        assertFalse(claim.started());
+        assertNull(claim.run());
+        verify(ruleMapper).getExecutionByDedupe(7, 13, "41:20260803");
+        verify(workflowRunMapper, never()).insertRun(any());
+    }
+
+    @Test
     void invalidScheduleEnrollmentConfigurationReturnsTypedExecutionError() {
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
@@ -245,6 +279,10 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     private void stubCanonicalCompilation() {
+        stubCanonicalCompilation(entityTrigger());
+    }
+
+    private void stubCanonicalCompilation(RuleTrigger trigger) {
         when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
         byte[] hash = new byte[32];
@@ -260,7 +298,7 @@ class WorkflowRuntimeClaimServiceTest {
             .thenReturn(compiled);
         when(compiled.entryNodeId()).thenReturn("trigger");
         when(compiled.node("trigger")).thenReturn(
-            new WorkflowNode.Trigger("trigger", entityTrigger()));
+            new WorkflowNode.Trigger("trigger", trigger));
     }
 
     private static Workflow workflow(String owner) {

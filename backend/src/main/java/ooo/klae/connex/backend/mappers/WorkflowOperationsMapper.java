@@ -8,15 +8,21 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.WorkflowBacklogView;
 import ooo.klae.connex.backend.beans.WorkflowIntervention;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
+import ooo.klae.connex.backend.beans.WorkflowInvocationDispatch;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
 import ooo.klae.connex.backend.beans.WorkflowOperationsRunView;
 import ooo.klae.connex.backend.beans.WorkflowOperationsSummaryView;
 import ooo.klae.connex.backend.beans.WorkflowRecipeOrigin;
+import ooo.klae.connex.backend.beans.WorkflowTriggerDiagnosticView;
 
 /** Tenant-scoped persistence for workflow operations, recipes, and exact invocations. */
 public interface WorkflowOperationsMapper {
 
     WorkflowOperationsSummaryView getSummary(@Param("workspaceId") int workspaceId);
+
+    List<WorkflowTriggerDiagnosticView> getDeadTriggerDiagnostics(
+        @Param("workspaceId") int workspaceId,
+        @Param("limit") int limit);
 
     WorkflowBacklogView getBacklog(
         @Param("workspaceId") int workspaceId,
@@ -62,6 +68,10 @@ public interface WorkflowOperationsMapper {
     List<WorkflowInvocationRecord> getInvocationRecords(
         @Param("workspaceId") int workspaceId,
         @Param("invocationId") long invocationId);
+
+    List<WorkflowInvocationDispatch> getPendingInvocationDispatches(
+        @Param("workspaceId") int workspaceId,
+        @Param("limit") int limit);
 
     int confirmInvocation(
         @Param("workspaceId") int workspaceId,

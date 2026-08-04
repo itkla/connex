@@ -21,6 +21,7 @@ import type {
     WorkflowOperationsRunItem,
     WorkflowOperationsSummary,
     WorkflowRunStatus,
+    WorkflowTriggerDiagnostic,
 } from "@/app/lib/types";
 import {
     formatWorkflowRunDateTime,
@@ -166,6 +167,12 @@ export default function WorkflowOperationsCenter() {
                         </Alert>
                     ) : null}
                     <SummaryStrip summary={data.summary} />
+                    {data.summary.triggerDiagnostics.length > 0 ? (
+                        <TriggerDiagnostics
+                            diagnostics={data.summary.triggerDiagnostics}
+                            locale={locale}
+                        />
+                    ) : null}
 
                     <section className="space-y-4" aria-labelledby="operations-runs-heading">
                         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -224,6 +231,58 @@ export default function WorkflowOperationsCenter() {
                 </div>
             )}
         </>
+    );
+}
+
+function TriggerDiagnostics({
+    diagnostics,
+    locale,
+}: {
+    diagnostics: WorkflowTriggerDiagnostic[];
+    locale: string;
+}) {
+    const t = useTranslations("WorkflowOperations");
+    return (
+        <section className="space-y-3" aria-labelledby="trigger-diagnostics-heading">
+            <div>
+                <h2 id="trigger-diagnostics-heading" className="text-lg font-semibold text-foreground">
+                    {t("triggerDiagnostics.title")}
+                </h2>
+                <p className="text-sm text-muted-foreground">{t("triggerDiagnostics.description")}</p>
+            </div>
+            <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-risk-high/40 bg-card">
+                {diagnostics.map((diagnostic) => (
+                    <li
+                        key={diagnostic.outboxId}
+                        className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto]"
+                    >
+                        <div className="min-w-0 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <ExclamationTriangleIcon className="size-4 shrink-0 text-risk-high" />
+                                <Link
+                                    href={`/workflows/${diagnostic.workflowId}`}
+                                    className="truncate text-sm font-medium text-foreground underline-offset-4 hover:underline"
+                                >
+                                    {diagnostic.workflowName}
+                                </Link>
+                                <Badge variant="outline" className="border-risk-high/40 bg-risk-high/10 font-mono text-risk-high">
+                                    {diagnostic.reasonCode}
+                                </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                {t("triggerDiagnostics.outcome", { triggerType: diagnostic.triggerType })}
+                            </p>
+                        </div>
+                        <time
+                            className="text-xs text-muted-foreground"
+                            dateTime={normalizeWorkflowRunDateTime(diagnostic.failedAt)}
+                        >
+                            {formatWorkflowRunDateTime(diagnostic.failedAt, locale)}
+                        </time>
+                    </li>
+                ))}
+            </ol>
+        </section>
     );
 }
 

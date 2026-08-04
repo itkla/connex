@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 import lombok.RequiredArgsConstructor;
 
@@ -33,8 +34,12 @@ public class WorkflowManualRunDispatchTransaction {
                 workspaceId, invocationId, recordId, "configuration");
             return new DispatchResult(null, true);
         }
-        operationsMapper.linkInvocationRun(
+        int linked = operationsMapper.linkInvocationRun(
             workspaceId, invocationId, recordId, run.getId());
+        if (linked != 1) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            return new DispatchResult(null, true);
+        }
         return new DispatchResult(run.getId(), false);
     }
 

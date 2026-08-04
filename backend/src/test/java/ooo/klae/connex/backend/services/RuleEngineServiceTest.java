@@ -297,7 +297,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void entityChange_suspendedPerson_doesNotFire() {
+    void entityChange_suspendedPerson_recordsUnavailableOutcomeWithoutFiring() {
         Person person = newPerson(newCompany());
         RuleDto rule = entityChangeRule("person", notifyAction(), null, "person.updated");
         personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);
@@ -305,6 +305,11 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         ruleEngineService.onEntityChange(workspace.getId(), "person", person.getId(), "person.updated");
 
         assertEquals(0, matchedExecutions(rule.getId()));
+        assertTrue(ruleMapper.getExecutionsByRule(
+            workspace.getId(), rule.getId(), 50).stream()
+            .anyMatch(execution -> "failed".equals(execution.getStatus())
+                && execution.getDetail() != null
+                && execution.getDetail().contains("record_unavailable")));
     }
 
     @Test
@@ -405,5 +410,24 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertEquals(1, matchedExecutions(rule.getId()));
         assertFalse(tagged(company.getId(), tag.getId()));
+    }
+
+    @Test
+    void removeTag_actionFailsClosedWhenThePublishedTagWasDeleted() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        RuleAction remove = new RuleAction();
+        remove.setType("remove_tag");
+        remove.setTagId(tag.getId());
+        RuleDto rule = entityChangeRule("company", remove, null, "company.updated");
+        tagMapper.delete(workspace.getId(), tag.getId());
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "company", company.getId(), "company.updated");
+
+        assertEquals(0, matchedExecutions(rule.getId()));
+        assertTrue(ruleMapper.getExecutionsByRule(
+            workspace.getId(), rule.getId(), 50).stream()
+            .anyMatch(execution -> "partial".equals(execution.getStatus())));
     }
 }

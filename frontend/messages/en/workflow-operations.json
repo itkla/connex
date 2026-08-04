@@ -24,6 +24,11 @@
       "queued": "Queued",
       "overdue": "Overdue"
     },
+    "triggerDiagnostics": {
+      "title": "Trigger delivery needs attention",
+      "description": "These triggers failed before record enrollment. The fixed diagnostic code remains visible until a later delivery succeeds.",
+      "outcome": "No run was started for this {triggerType} trigger."
+    },
     "filters": {
       "statusLabel": "Filter by run status",
       "failureLabel": "Filter by failure category",

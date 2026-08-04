@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
+import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 
 /** Atomically consumes an expiring manual scope token before record fan-out. */
 @Service
@@ -22,6 +23,7 @@ public class WorkflowManualRunConfirmationTransaction {
 
     private final WorkflowMapper workflowMapper;
     private final WorkflowOperationsMapper operationsMapper;
+    private final WorkflowTriggerOutboxMapper outboxMapper;
 
     @Transactional
     public WorkflowInvocation confirm(
@@ -61,6 +63,7 @@ public class WorkflowManualRunConfirmationTransaction {
             throw new ConflictException("Manual workflow scope has no runnable records");
         }
         requireRunnableWorkflow(workflow, invocation);
+        outboxMapper.ensureWorkspaceGate(workspaceId);
         if (operationsMapper.confirmInvocation(
                 workspaceId,
                 invocation.getId(),

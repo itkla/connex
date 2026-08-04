@@ -3284,6 +3284,16 @@ export type WorkflowOperationsSummary = {
     overdueCount: number;
     openInterventionCount: number;
     recentFailureCount: number;
+    triggerDiagnostics: WorkflowTriggerDiagnostic[];
+};
+
+export type WorkflowTriggerDiagnostic = {
+    outboxId: number;
+    workflowId: number;
+    workflowName: string;
+    triggerType: string;
+    reasonCode: string;
+    failedAt: string;
 };
 
 export type WorkflowOperationsRunItem = {

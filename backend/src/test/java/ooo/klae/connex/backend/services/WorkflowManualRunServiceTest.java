@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -24,11 +25,20 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
+import ooo.klae.connex.backend.beans.SavedView;
+import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
+import ooo.klae.connex.backend.beans.WorkflowVersion;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowInvocationResultDto;
 import ooo.klae.connex.backend.dto.WorkflowManualConfirmRequest;
+import ooo.klae.connex.backend.dto.WorkflowManualPreparationDto;
+import ooo.klae.connex.backend.dto.WorkflowManualPrepareRequest;
+import ooo.klae.connex.backend.dto.WorkflowManualScope;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -136,6 +146,84 @@ class WorkflowManualRunServiceTest {
 
         assertEquals("cancelled", result.status());
         assertEquals(cancelledAt, result.completedAt());
+    }
+
+    @Test
+    void zeroResultSavedViewSegmentWithoutNativeFiltersStaysEmpty() throws Exception {
+        stubSavedView("{\"segments\":{\"match\":\"all\",\"conditions\":[]}}");
+
+        WorkflowManualPreparationDto result = service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+        assertEquals(0, result.exactCount());
+        assertEquals(List.of("scope_empty"), result.blockers());
+        verifyNoInteractions(dealService);
+    }
+
+    @Test
+    void zeroResultSavedViewSegmentIntersectsRatherThanSubstitutesNativeFilters()
+            throws Exception {
+        stubSavedView(
+            "{\"segments\":{\"match\":\"all\",\"conditions\":[]},"
+                + "\"filters\":{\"status\":[\"open\"]}}");
+        when(dealService.getMatchingDealIds(
+            null, null, null, null, null, false, List.of("open"), null, null))
+            .thenReturn(List.of(91, 92));
+
+        WorkflowManualPreparationDto result = service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+        assertEquals(0, result.exactCount());
+        assertEquals(List.of("scope_empty"), result.blockers());
+        verify(dealService).getMatchingDealIds(
+            null, null, null, null, null, false, List.of("open"), null, null);
+    }
+
+    private void stubSavedView(String configJson) throws Exception {
+        when(workspaceService.getCurrentUserId()).thenReturn(41);
+        Workflow workflow = new Workflow();
+        workflow.setId(11);
+        workflow.setWorkspaceId(7);
+        workflow.setName("Saved view workflow");
+        workflow.setEnabled(true);
+        workflow.setRuntimeOwner("canonical");
+        workflow.setActiveVersionId(19L);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(19L);
+        version.setWorkflowId(11);
+        version.setWorkspaceId(7);
+        version.setName("Saved view workflow");
+        version.setVersionNumber(1);
+        version.setRecordType("deal");
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        version.setDefinitionHash(new byte[32]);
+        version.setDefinitionJson("{}");
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        SavedView view = new SavedView();
+        view.setId(5);
+        view.setRecordType("deal");
+        view.setConfig(JsonMapper.builder().build().readTree(configJson));
+        when(savedViewService.getById(5)).thenReturn(view);
+        when(objectMapper.treeToValue(
+            view.getConfig().get("segments"), SegmentDefinition.class))
+            .thenReturn(new SegmentDefinition());
+        when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class)))
+            .thenReturn(List.of());
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1, "trigger", List.of(), List.of());
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+        when(workspaceService.getRole(7, 17)).thenReturn("member");
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+        doAnswer(call -> {
+            call.<WorkflowInvocation>getArgument(0).setId(31L);
+            return null;
+        }).when(operationsMapper).insertInvocation(any());
     }
 
     private static WorkflowInvocation invocation(String status) {
