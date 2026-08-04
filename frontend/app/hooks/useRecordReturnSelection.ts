@@ -9,6 +9,7 @@ import {
     consumeRecordReturnSelection,
     type RecordCollection,
     type RecordReturnSelectionSnapshot,
+    type RestoredRecordSelection,
 } from '@/app/lib/recordReturnPath';
 
 const EMPTY_AVAILABLE_IDS: ReadonlySet<number> = new Set();
@@ -22,7 +23,7 @@ function useRecordReturnRestore(
     collection: RecordCollection,
     availableIds: ReadonlySet<number>,
     ready: boolean,
-    applyIds: ((ids: readonly number[]) => void) | null,
+    applyRestore: ((restored: RestoredRecordSelection) => void) | null,
 ): { userId: number | null; workspaceId: number | null } {
     const { context } = useActions();
     const { activeWorkspaceId } = useWorkspace();
@@ -36,7 +37,10 @@ function useRecordReturnRestore(
         restoredScopeRef.current = scope;
         const restored = consumeRecordReturnSelection(collection, userId, activeWorkspaceId);
         if (!restored) return;
-        applyIds?.(restored.ids.filter((id) => availableIds.has(id)));
+        applyRestore?.({
+            ...restored,
+            ids: restored.ids.filter((id) => availableIds.has(id)),
+        });
         let secondFrame: number | null = null;
         const firstFrame = window.requestAnimationFrame(() => {
             secondFrame = window.requestAnimationFrame(() => {
@@ -48,7 +52,7 @@ function useRecordReturnRestore(
             window.cancelAnimationFrame(firstFrame);
             if (secondFrame !== null) window.cancelAnimationFrame(secondFrame);
         };
-    }, [activeWorkspaceId, applyIds, availableIds, collection, ready, userId]);
+    }, [activeWorkspaceId, applyRestore, availableIds, collection, ready, userId]);
 
     return { userId, workspaceId: activeWorkspaceId };
 }
@@ -68,11 +72,11 @@ export function useRecordReturnSelection(
         () => new Set(availableRecords.map((record) => record.id)),
         [availableRecords],
     );
-    const applyIds = useCallback(
-        (ids: readonly number[]) => setSelectedIds(new Set(ids)),
+    const applyRestore = useCallback(
+        (restored: RestoredRecordSelection) => setSelectedIds(new Set(restored.ids)),
         [setSelectedIds],
     );
-    const { userId, workspaceId } = useRecordReturnRestore(collection, availableIds, ready, applyIds);
+    const { userId, workspaceId } = useRecordReturnRestore(collection, availableIds, ready, applyRestore);
 
     return useMemo(() => {
         if (userId === null || workspaceId === null) return undefined;
@@ -91,11 +95,21 @@ export function useRecordReturnSelection(
 export function useRecordReturnScroll(
     collection: RecordCollection,
     ready: boolean,
+    visibleCount?: number,
+    onRestoreVisibleCount?: (visibleCount: number) => void,
 ): RecordReturnSelectionSnapshot | undefined {
-    const { userId, workspaceId } = useRecordReturnRestore(collection, EMPTY_AVAILABLE_IDS, ready, null);
+    const applyRestore = useCallback((restored: RestoredRecordSelection) => {
+        if (restored.visibleCount !== undefined) onRestoreVisibleCount?.(restored.visibleCount);
+    }, [onRestoreVisibleCount]);
+    const { userId, workspaceId } = useRecordReturnRestore(
+        collection,
+        EMPTY_AVAILABLE_IDS,
+        ready,
+        onRestoreVisibleCount ? applyRestore : null,
+    );
 
     return useMemo(() => {
         if (userId === null || workspaceId === null) return undefined;
-        return { userId, workspaceId, ids: [] };
-    }, [userId, workspaceId]);
+        return { userId, workspaceId, ids: [], visibleCount };
+    }, [userId, visibleCount, workspaceId]);
 }

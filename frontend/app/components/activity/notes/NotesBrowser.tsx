@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
@@ -68,7 +68,6 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
     const visibleKey = `${query.trim()}|${groupBy}|${sortBy}`;
     const [visibleState, setVisibleState] = useState({ key: visibleKey, count: INITIAL_VISIBLE_NOTES });
     const visibleCount = visibleState.key === visibleKey ? visibleState.count : INITIAL_VISIBLE_NOTES;
-    const returnSnapshot = useRecordReturnScroll('notes', true);
 
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
@@ -100,6 +99,13 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
             return haystack.includes(needle);
         });
     }, [notes, query, personById, dealById, userById]);
+    const restoreVisibleCount = useCallback((count: number) => {
+        setVisibleState({
+            key: visibleKey,
+            count: Math.min(Math.max(count, INITIAL_VISIBLE_NOTES), filtered.length),
+        });
+    }, [filtered.length, visibleKey]);
+    const returnSnapshot = useRecordReturnScroll('notes', true, visibleCount, restoreVisibleCount);
 
     const groups = useMemo<NoteGroup[]>(() => {
         const sorted = [...filtered].sort((a, b) => {

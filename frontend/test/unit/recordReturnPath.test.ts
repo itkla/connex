@@ -168,9 +168,18 @@ describe('record return paths', () => {
     it('restores scroll for a widened collection with no multi-selection', () => {
         location.pathname = '/activity/notes';
         location.search = '?group=record';
-        recordDetailNavigationPath('notes', 5, { userId: 7, workspaceId: 11, ids: [] });
+        recordDetailNavigationPath('notes', 5, {
+            userId: 7,
+            workspaceId: 11,
+            ids: [],
+            visibleCount: 80,
+        });
 
-        expect(consumeRecordReturnSelection('notes', 7, 11)).toEqual({ ids: [], scrollTop: 417 });
+        expect(consumeRecordReturnSelection('notes', 7, 11)).toEqual({
+            ids: [],
+            scrollTop: 417,
+            visibleCount: 80,
+        });
     });
 
     it('restores a scoped selection once for the exact list URL', () => {
