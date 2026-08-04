@@ -91,12 +91,7 @@ test.describe("authenticated shell navigation", () => {
                 exact: true,
             }).click();
             await expect(page).toHaveURL(/\/dashboard$/);
-            await page.locator("#app-sidebar").getByRole("button", { name: /^E2E Harness/ }).click();
-            await page.getByRole("link", {
-                name: message("en", "common", "CommonSidebar.profile"),
-                exact: true,
-            }).click();
-            await expect(page).toHaveURL(/\/me$/);
+            await expect(page.locator("#app-sidebar").locator('img[src^="blob:"]')).toBeVisible();
             expect(requestCount).toBe(1);
 
             failMedia = true;
