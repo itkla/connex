@@ -52,6 +52,7 @@ export type ToolbarLabels = {
     linkApply: string;
     unlink: string;
     clearFormatting: string;
+    selectionToolbar: string;
     undo: string;
     redo: string;
     h1: string;
@@ -190,6 +191,32 @@ function LinkPopover({ editor, labels }: { editor: Editor; labels: ToolbarLabels
     );
 }
 
+export function InlineFormattingControls({
+    editor,
+    labels,
+    showLink = false,
+    showClear = false,
+}: {
+    editor: Editor;
+    labels: ToolbarLabels;
+    showLink?: boolean;
+    showClear?: boolean;
+}) {
+    return (
+        <>
+            <ToolbarButton label={labels.bold} active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()} icon={Bold} />
+            <ToolbarButton label={labels.italic} active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()} icon={Italic} />
+            <ToolbarButton label={labels.underline} active={editor.isActive("noteUnderline")} onClick={() => editor.chain().focus().toggleMark("noteUnderline").run()} icon={Underline} />
+            <ToolbarButton label={labels.strike} active={editor.isActive("strike")} onClick={() => editor.chain().focus().toggleStrike().run()} icon={Strikethrough} />
+            <ToolbarButton label={labels.code} active={editor.isActive("code")} onClick={() => editor.chain().focus().toggleCode().run()} icon={Code} />
+            {showLink ? <LinkPopover editor={editor} labels={labels} /> : null}
+            {showClear ? (
+                <ToolbarButton label={labels.clearFormatting} onClick={() => editor.chain().focus().unsetAllMarks().run()} icon={BrushCleaning} />
+            ) : null}
+        </>
+    );
+}
+
 export function EditorToolbar({ editor, labels, compact = false }: Props) {
     const [, setTick] = useState(0);
 
@@ -225,12 +252,7 @@ export function EditorToolbar({ editor, labels, compact = false }: Props) {
             <ToolbarButton label={labels.h2} active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} icon={Heading2} />
             <ToolbarButton label={labels.h3} active={editor.isActive("heading", { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} icon={Heading3} />
             {divider("d2")}
-            <ToolbarButton label={labels.bold} active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()} icon={Bold} />
-            <ToolbarButton label={labels.italic} active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()} icon={Italic} />
-            <ToolbarButton label={labels.underline} active={editor.isActive("noteUnderline")} onClick={() => editor.chain().focus().toggleMark("noteUnderline").run()} icon={Underline} />
-            <ToolbarButton label={labels.strike} active={editor.isActive("strike")} onClick={() => editor.chain().focus().toggleStrike().run()} icon={Strikethrough} />
-            <ToolbarButton label={labels.code} active={editor.isActive("code")} onClick={() => editor.chain().focus().toggleCode().run()} icon={Code} />
-            <LinkPopover editor={editor} labels={labels} />
+            <InlineFormattingControls editor={editor} labels={labels} showLink />
             {divider("d3")}
             <ToolbarButton label={labels.bulletList} active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()} icon={List} />
             <ToolbarButton label={labels.orderedList} active={editor.isActive("orderedList")} onClick={() => editor.chain().focus().toggleOrderedList().run()} icon={ListOrdered} />
