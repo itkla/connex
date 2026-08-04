@@ -44,6 +44,7 @@ test.describe("workspace and organization identity", () => {
             locale: "en-US",
             timezoneId: "UTC",
             reducedMotion: "reduce",
+            storageState: { cookies: [], origins: [] },
         });
         let removeVirtualAuthenticator: (() => Promise<void>) | null = null;
         try {
@@ -83,10 +84,12 @@ test.describe("workspace and organization identity", () => {
             await expect(page.getByText("Asia/Tokyo", { exact: true })).toBeVisible();
 
             await page.getByRole("button", { name: "Table" }).click();
-            await expect(page.getByRole("table", { name: "Authorized organization workspaces and memberships" }))
-                .toBeVisible();
-            await expect(page.getByRole("button", { name: workspaceName, exact: true })).toBeVisible();
-            await page.getByRole("button", { name: "E2E Harness", exact: true }).click();
+            const organizationTable = page.getByRole("table", {
+                name: "Authorized organization workspaces and memberships",
+            });
+            await expect(organizationTable).toBeVisible();
+            await expect(organizationTable.getByRole("button", { name: workspaceName, exact: true })).toBeVisible();
+            await organizationTable.getByRole("button", { name: "E2E Harness", exact: true }).click();
             await expect(page).toHaveURL(new RegExp(`/users/\\d+$`));
 
             const workspacesResponse = await context.request.get("/api/workspaces");

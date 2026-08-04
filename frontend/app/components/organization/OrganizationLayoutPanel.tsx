@@ -42,7 +42,7 @@ function initial(name: string): string {
 
 function MemberAvatar({ member }: { member: { displayName: string; profilePictureUrl?: string | null } }) {
     return (
-        <Avatar size="sm">
+        <Avatar size="sm" aria-hidden="true">
             {member.profilePictureUrl ? <AvatarImage src={member.profilePictureUrl} alt="" /> : null}
             <AvatarFallback>{initial(member.displayName)}</AvatarFallback>
         </Avatar>
