@@ -124,6 +124,7 @@ function useWorkflowCanvasContextMenu(
             );
             if (openRef.current && distance < CONTEXT_MENU_DRAG_THRESHOLD) {
                 event.preventDefault();
+                event.stopImmediatePropagation();
             }
         };
         const onOpeningPointerCancel = () => {

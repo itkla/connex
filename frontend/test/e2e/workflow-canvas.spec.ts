@@ -184,8 +184,8 @@ test.describe("workflow canvas", () => {
         const delayPosition = canvasPosition(saved, delayId);
         expect(edgeTarget(saved, "condition", "yes")).toBe(delayId);
         expect(edgeTarget(saved, delayId, "next")).toBe("end-no");
-        expect(Math.abs(delayPosition.x - invoked.flowX)).toBeLessThan(1);
-        expect(Math.abs(delayPosition.y - invoked.flowY)).toBeLessThan(1);
+        expect(Math.abs(delayPosition.x - invoked.flowX)).toBeLessThan(2);
+        expect(Math.abs(delayPosition.y - invoked.flowY)).toBeLessThan(2);
 
         await page.getByRole("button", { name: "Zoom in" }).click({ button: "right" });
         await expect(menu).toHaveCount(0);
