@@ -28,7 +28,7 @@ import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
 import type { ActionId } from '@/app/lib/actions/types';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
-import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealSummary, getTasksForDeal } from '@/app/lib/api';
+import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealById, getDealSummary, getTasksForDeal } from '@/app/lib/api';
 import {
     recordDetailNavigationPath,
     type RecordCollection,
@@ -56,7 +56,7 @@ type Props = {
 type PeekData =
     | { kind: 'person'; contact: Contact }
     | { kind: 'company'; company: Company; engagement: CompanyEngagement | null }
-    | { kind: 'deal'; summary: DealSummary; tasks: Task[]; activities: Activity[] };
+    | { kind: 'deal'; summary: DealSummary; company: Company | null; tasks: Task[]; activities: Activity[] };
 
 const PEEK_COLLECTIONS = {
     person: 'contacts',
@@ -270,6 +270,7 @@ export default memo(RecordPeekDrawer);
 function PeekAvatar({ target, data }: { target: PeekTarget | null; data: PeekData | null }) {
     if (data?.kind === 'person') return <ContactAvatar contact={data.contact} type="large" />;
     if (data?.kind === 'company') return <CompanyAvatar company={data.company} type="large" />;
+    if (data?.kind === 'deal' && data.company?.logoUrl) return <CompanyAvatar company={data.company} type="large" />;
     if (target?.type === 'deal' || data?.kind === 'deal') return <DealAvatar type="large" />;
     return <span className="grid size-10 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"><BuildingOffice2Icon className="size-5" /></span>;
 }
@@ -436,10 +437,14 @@ async function loadPeek(target: PeekTarget): Promise<PeekData> {
         ]);
         return { kind: 'company', company, engagement };
     }
-    const [summary, tasks, activities] = await Promise.all([
+    const [deal, summary, tasks, activities] = await Promise.all([
+        getDealById(target.id),
         getDealSummary(target.id),
         getTasksForDeal(target.id).catch(() => [] as Task[]),
         getActivitiesForDeal(target.id).catch(() => [] as Activity[]),
     ]);
-    return { kind: 'deal', summary, tasks, activities: sortActivities(activities) };
+    const company = deal.company == null
+        ? null
+        : await getCompanyById(deal.company).catch(() => null);
+    return { kind: 'deal', summary, company, tasks, activities: sortActivities(activities) };
 }
