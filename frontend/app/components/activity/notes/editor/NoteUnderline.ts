@@ -34,6 +34,7 @@ type MarkdownIt = {
 const configuredMarkdownInstances = new WeakSet<object>();
 
 type MarkdownTextState = {
+    inAutolink?: boolean;
     text: (value: string, escape?: boolean) => void;
 };
 
@@ -142,7 +143,8 @@ export const NoteText = Node.create({
         return {
             markdown: {
                 serialize(state: MarkdownTextState, node: PMNode) {
-                    state.text(escapeNoteUnderlineText(escapeHTML(node.text ?? '')));
+                    const text = escapeHTML(node.text ?? '');
+                    state.text(state.inAutolink ? text : escapeNoteUnderlineText(text), !state.inAutolink);
                 },
                 parse: {},
             },

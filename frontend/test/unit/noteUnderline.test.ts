@@ -69,6 +69,33 @@ describe('NoteUnderline', () => {
         expect(escapeNoteUnderlineText('++one++ +++')).toBe('&#43;&#43;one&#43;&#43; &#43;&#43;+');
     });
 
+    it('preserves literal plus runs in autolink URLs', () => {
+        const href = 'https://example.com/?q=C++';
+        const editor = new Editor({
+            extensions: [
+                StarterKit.configure({ text: false, underline: false }),
+                NoteText,
+                NoteUnderline,
+                Markdown.configure({ html: false }),
+            ],
+            content: {
+                type: 'doc',
+                content: [{
+                    type: 'paragraph',
+                    content: [{
+                        type: 'text',
+                        marks: [{ type: 'link', attrs: { href } }],
+                        text: href,
+                    }],
+                }],
+            },
+        });
+
+        const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
+        expect(storage.markdown?.getMarkdown?.()).toBe(`<${href}>`);
+        editor.destroy();
+    });
+
     it('parses bounded underline delimiters', () => {
         const pushed: Array<{ type: string; tag: string; nesting: number; markup?: string }> = [];
         const state = {
