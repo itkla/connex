@@ -44,6 +44,7 @@ function findUnderlineEnd(source: string, from: number, to: number): number {
     for (let cursor = from; cursor < to - 1; cursor += 1) {
         if (source[cursor] !== '+' || source[cursor + 1] !== '+') continue;
         if (isEscaped(source, cursor) || /\s/.test(source[cursor - 1] ?? '')) continue;
+        if (source[cursor - 1] === '+' || source[cursor + 2] === '+') continue;
         return cursor;
     }
     return -1;
@@ -55,6 +56,7 @@ export function parseNoteUnderline(state: MarkdownInlineState, silent: boolean):
     if (state.src.slice(start, start + 2) !== '++' || isEscaped(state.src, start)) return false;
 
     const contentStart = start + 2;
+    if (state.src[start - 1] === '+' || state.src[contentStart] === '+') return false;
     if (contentStart >= state.posMax || /\s/.test(state.src[contentStart] ?? '')) return false;
 
     const end = findUnderlineEnd(state.src, contentStart, state.posMax);

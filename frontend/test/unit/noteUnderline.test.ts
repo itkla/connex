@@ -34,7 +34,7 @@ describe('NoteUnderline', () => {
         editor.destroy();
     });
 
-    it('parses bounded underline delimiters and leaves C++ text alone', () => {
+    it('parses bounded underline delimiters', () => {
         const pushed: Array<{ type: string; tag: string; nesting: number; markup?: string }> = [];
         const state = {
             src: '++important++',
@@ -65,6 +65,31 @@ describe('NoteUnderline', () => {
             { type: 'note_underline_close', tag: 'u', nesting: -1 },
         ]);
 
-        expect(parseNoteUnderline({ ...state, src: 'C++ and D++', pos: 1, posMax: 11 }, true)).toBe(false);
+    });
+
+    it.each([
+        ['C++ and D++', 1],
+        ['++++', 0],
+        ['C++++', 1],
+        ['++literal++++', 0],
+        ['\\++literal++', 1],
+    ])('preserves literal plus run %s', (source, pos) => {
+        const state = {
+            src: source,
+            pos,
+            posMax: source.length,
+            env: {},
+            tokens: [],
+            md: {
+                inline: {
+                    parse: () => undefined,
+                    ruler: { before: () => undefined },
+                },
+            },
+            push: () => ({}),
+        };
+
+        expect(parseNoteUnderline(state, true)).toBe(false);
+        expect(state.pos).toBe(pos);
     });
 });
