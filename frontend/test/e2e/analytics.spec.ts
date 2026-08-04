@@ -4,6 +4,9 @@ test.describe("analytics", () => {
     test("range and granularity switching updates the URL, controls, and panels", async ({ page }) => {
         await page.goto("/overview/analytics");
         await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "At a glance" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "Trends" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "Breakdowns and diagnostics" })).toBeVisible();
 
         const rangeGroup = page.getByRole("group", { name: "Time range" });
         await expect(rangeGroup).toBeVisible();

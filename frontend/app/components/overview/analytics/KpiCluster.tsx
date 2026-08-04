@@ -127,15 +127,35 @@ function DeltaChip({ kpi }: { kpi: Kpi }) {
     );
 }
 
+type SnapshotKpis = {
+    activityCount: number;
+    warmth?: {
+        share: number;
+        trackedContacts: number;
+    };
+};
+
 /**
- * Renders the analytics/dashboard KPI cluster from the server-computed {@link DealKpis} DTO:
- * won revenue, new pipeline, win rate, and average cycle, each with a per-bucket sparkline and a
- * previous-period delta chip. All aggregation happens server-side; this component only presents it.
+ * Renders the mixed Analytics overview from the server-computed {@link DealKpis} DTO and snapshot
+ * signals: business outcomes, relationship health, and execution activity in one visual strip.
  */
-export default function KpiCluster({ kpis, currency }: { kpis: DealKpis; currency: string }) {
+export default function KpiCluster({
+    kpis,
+    currency,
+    snapshot,
+}: {
+    kpis: DealKpis;
+    currency: string;
+    snapshot?: SnapshotKpis;
+}) {
     const t = useTranslations('AnalyticsKpis');
     const locale = useLocale();
     const tiles = useMemo(() => toTiles(kpis), [kpis]);
+    const gridColumns = snapshot
+        ? snapshot.warmth
+            ? 'lg:grid-cols-3'
+            : 'lg:grid-cols-3 2xl:grid-cols-5'
+        : 'lg:grid-cols-4';
 
     const formatValue = (kpi: Kpi) => {
         if (kpi.format === 'currency') return formatCompactCurrency(kpi.value, currency, locale);
@@ -144,7 +164,7 @@ export default function KpiCluster({ kpis, currency }: { kpis: DealKpis; currenc
     };
 
     return (
-        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border sm:grid-cols-2 lg:grid-cols-4">
+        <div className={`grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border sm:grid-cols-2 ${gridColumns}`}>
             {tiles.map((kpi) => (
                 <div key={kpi.key} className="flex flex-col gap-3 bg-card p-6">
                     <div className="flex items-start justify-between gap-3">
@@ -169,6 +189,38 @@ export default function KpiCluster({ kpis, currency }: { kpis: DealKpis; currenc
                     <DeltaChip kpi={kpi} />
                 </div>
             ))}
+            {snapshot && (
+                <>
+                    {snapshot.warmth && (
+                        <div className="flex flex-col gap-3 bg-card p-6">
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                    {t('warmShare')}
+                                </span>
+                                <InfoTip title={t('warmShare')} label={t('infoAria')} body={t('warmShareTooltip')} />
+                            </div>
+                            <span className="text-3xl leading-none text-foreground tabular-nums">
+                                {Math.round(snapshot.warmth.share * 100)}%
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                                {t('warmShareCaption', { count: snapshot.warmth.trackedContacts })}
+                            </span>
+                        </div>
+                    )}
+                    <div className="flex flex-col gap-3 bg-card p-6">
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                {t('activity')}
+                            </span>
+                            <InfoTip title={t('activity')} label={t('infoAria')} body={t('activityTooltip')} />
+                        </div>
+                        <span className="text-3xl leading-none text-foreground tabular-nums">
+                            {snapshot.activityCount.toLocaleString(locale)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{t('activityCaption')}</span>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
