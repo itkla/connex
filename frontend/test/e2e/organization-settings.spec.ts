@@ -59,7 +59,7 @@ test.describe("workspace and organization identity", () => {
             const organizationName = `Northstar ${runId}`;
 
             await page.goto("/account/security");
-            await page.getByRole("button", { name: "Add a passkey" }).click();
+            await page.getByRole("button", { name: "Add a passkey" }).first().click();
             const passwordDialog = page.getByRole("dialog", { name: "Confirm your password" });
             await passwordDialog.getByLabel("Current password").fill(password);
             await passwordDialog.getByRole("button", { name: "Continue", exact: true }).click();
