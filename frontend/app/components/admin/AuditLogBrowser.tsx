@@ -43,7 +43,14 @@ import {
     formatShortDate,
     parseMysqlDateTime,
 } from "@/app/lib/utils";
-import { auditOutcome, presentAuditEntry, type AuditMetadataRow } from "@/app/lib/auditPresentation";
+import {
+    auditError,
+    auditOutcome,
+    auditSummary,
+    auditTargetLabel,
+    presentAuditEntry,
+    type AuditMetadataRow,
+} from "@/app/lib/auditPresentation";
 import { type AuditLogEntry } from "@/app/lib/types";
 
 type Tone = "create" | "update" | "delete" | "auth" | "view" | "default";
@@ -129,6 +136,10 @@ function rangeCutoff(range: RangeFilter, now: number | null): number {
 function isFailed(e: AuditLogEntry): boolean {
     const outcome = auditOutcome(e);
     return outcome != null && outcome !== "success" && outcome !== "attempt";
+}
+
+function isSuccessful(e: AuditLogEntry): boolean {
+    return auditOutcome(e) === "success";
 }
 
 export default function AuditLogBrowser({
@@ -249,9 +260,8 @@ export default function AuditLogBrowser({
                 }
                 if (except !== "outcome") {
                     if (filters.outcome !== "all") {
-                        const failed = isFailed(e);
-                        if (filters.outcome === "failed" && !failed) return false;
-                        if (filters.outcome === "success" && failed) return false;
+                        if (filters.outcome === "failed" && !isFailed(e)) return false;
+                        if (filters.outcome === "success" && !isSuccessful(e)) return false;
                     }
                 }
                 if (except !== "actors") {
@@ -276,14 +286,16 @@ export default function AuditLogBrowser({
     const actorCounts = useMemo(() => countBy(matches, entries, "actors", actorKeyOf), [matches, entries, actorKeyOf]);
 
     const outcomeCounts = useMemo(() => {
+        let all = 0;
         let success = 0;
         let failed = 0;
         for (const e of entries) {
             if (!matches(e, "outcome")) continue;
+            all++;
             if (isFailed(e)) failed++;
-            else success++;
+            if (isSuccessful(e)) success++;
         }
-        return { success, failed, all: success + failed };
+        return { success, failed, all };
     }, [matches, entries]);
 
     const rangeCounts = useMemo(() => {
@@ -921,10 +933,12 @@ function AuditRow({
     const verbText = meta ? t(meta.verbKey) : verb;
     const actorTag = (chunks: React.ReactNode) => <span className="font-semibold text-foreground">{chunks}</span>;
     const targetTag = (chunks: React.ReactNode) => <span className="font-medium text-foreground">{chunks}</span>;
-    const actionLine = entry.targetLabel && !PLAIN_VERBS.has(verb)
+    const targetLabel = auditTargetLabel(entry);
+    const summary = auditSummary(entry);
+    const actionLine = targetLabel && !PLAIN_VERBS.has(verb)
         ? t.rich("actionEntity", {
               actorName,
-              targetName: entry.targetLabel,
+              targetName: targetLabel,
               verb: verbText,
               actor: actorTag,
               target: targetTag,
@@ -932,7 +946,7 @@ function AuditRow({
         : t.rich("actionPlain", { actorName, verb: verbText, actor: actorTag });
 
     const presentation = presentAuditEntry(entry);
-    const errorText = typeof entry.context?.error === "string" ? entry.context.error : null;
+    const errorText = auditError(entry);
     const metadataRows = presentation.metadata.map((row) => ({
         label: t(row.labelKey),
         value: auditMetadataValue(row, t),
@@ -982,8 +996,8 @@ function AuditRow({
                     <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
                             <p className="text-sm leading-snug text-foreground/75">{actionLine}</p>
-                            {entry.summary && (
-                                <p className="mt-0.5 truncate text-xs text-muted-foreground">{entry.summary}</p>
+                            {summary && (
+                                <p className="mt-0.5 truncate text-xs text-muted-foreground">{summary}</p>
                             )}
                         </div>
                         <div className="flex shrink-0 items-center gap-2 pt-0.5">

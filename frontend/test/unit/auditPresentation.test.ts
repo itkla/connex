@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { auditOutcome, presentAuditEntry } from '@/app/lib/auditPresentation';
+import {
+    auditError,
+    auditOutcome,
+    auditSummary,
+    auditTargetLabel,
+    presentAuditEntry,
+} from '@/app/lib/auditPresentation';
 import type { AuditLogEntry } from '@/app/lib/types';
 
 function entry(overrides: Partial<AuditLogEntry>): AuditLogEntry {
@@ -26,7 +32,7 @@ describe('presentAuditEntry', () => {
             entityType: 'organization',
             changes: {
                 secretId: 17,
-                purpose: 'ORG_AI_PROVIDER_CREDENTIAL',
+                purpose: 'org.ai.provider_credential',
                 keyId: 'primary-v2',
                 rewrapped: false,
             },
@@ -35,7 +41,7 @@ describe('presentAuditEntry', () => {
         expect(presentation.diffs).toEqual([]);
         expect(presentation.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'secretId', value: 17 }),
-            expect.objectContaining({ key: 'purpose', value: 'ORG_AI_PROVIDER_CREDENTIAL' }),
+            expect.objectContaining({ key: 'purpose', value: 'org.ai.provider_credential' }),
             expect.objectContaining({ key: 'keyId', value: 'primary-v2' }),
             expect.objectContaining({ key: 'rewrapped', value: false }),
         ]));
@@ -49,7 +55,7 @@ describe('presentAuditEntry', () => {
             targetLabel: 'bedrock/us-east-1',
             changes: {
                 provider: 'bedrock',
-                model: 'anthropic.claude',
+                model: 'claude-sonnet-4@20250514',
                 feature: 'deal_brief',
                 correlationId: 'corr-123',
                 outcome: 'blocked',
@@ -63,7 +69,7 @@ describe('presentAuditEntry', () => {
 
         expect(presentation.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'provider', value: 'bedrock' }),
-            expect.objectContaining({ key: 'model', value: 'anthropic.claude' }),
+            expect.objectContaining({ key: 'model', value: 'claude-sonnet-4@20250514' }),
             expect.objectContaining({ key: 'correlationId', value: 'corr-123' }),
             expect.objectContaining({ key: 'result', value: 'blocked' }),
         ]));
@@ -103,7 +109,7 @@ describe('presentAuditEntry', () => {
         expect(missing.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'operation', value: 'secret_store.secret.use_failed' }),
             expect.objectContaining({ key: 'result', value: null }),
-            expect.objectContaining({ key: 'target', value: 'workspace #4' }),
+            expect.objectContaining({ key: 'target', value: 'secret_store' }),
         ]));
         expect(legacy.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'provider', value: 'vertex' }),
@@ -125,5 +131,39 @@ describe('presentAuditEntry', () => {
             { field: 'partial', old: 'Known', new: undefined },
         ]);
         expect(presentation.metadata).toEqual([]);
+    });
+
+    it('rejects uncontrolled values from allowlisted sensitive fields and outer display text', () => {
+        const unsafe = entry({
+            action: 'ai.llm.call',
+            entityType: 'ai_call',
+            targetLabel: 'private CRM content',
+            summary: 'private model output',
+            context: { error: 'secret token value' },
+            changes: {
+                provider: 'secret provider value',
+                region: 'private CRM content',
+                model: 'private model output',
+                feature: 'untrusted_feature',
+                correlationId: 'secret token value',
+                outcome: 'blocked',
+                inputTokens: -1,
+                mediaTypes: ['image/png', 'secret media value'],
+            },
+        });
+        const presentation = presentAuditEntry(unsafe);
+
+        expect(presentation.metadata.map((row) => row.key)).not.toEqual(expect.arrayContaining([
+            'provider',
+            'region',
+            'model',
+            'feature',
+            'correlationId',
+            'inputTokens',
+            'mediaTypes',
+        ]));
+        expect(auditTargetLabel(unsafe)).toBe('ai_call');
+        expect(auditSummary(unsafe)).toBe('AI call blocked');
+        expect(auditError(unsafe)).toBeNull();
     });
 });
