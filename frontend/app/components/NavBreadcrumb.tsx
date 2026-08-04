@@ -73,7 +73,7 @@ export default function NavBreadcrumb({ mode = "desktop" }: { mode?: BreadcrumbD
                 {nodes.map((node, index) => (
                     <Fragment key={node.kind === "crumb" ? node.crumb.pathname : "ellipsis"}>
                         {index > 0 ? <BreadcrumbSeparator /> : null}
-                        <BreadcrumbItem className="min-w-0">
+                        <BreadcrumbItem className={index === nodes.length - 2 ? "min-w-0 shrink-0" : "min-w-0"}>
                             {node.kind === "ellipsis" ? (
                                 <DropdownMenu>
                                     <DropdownMenuTrigger
@@ -102,6 +102,6 @@ export default function NavBreadcrumb({ mode = "desktop" }: { mode?: BreadcrumbD
         </Breadcrumb>
     );
     return mode === "mobile"
-        ? <div className="min-w-0 shrink-0 px-6 pb-4 lg:hidden">{breadcrumb}</div>
+        ? <div className="min-w-0 shrink-0 px-6 pb-4 xl:hidden">{breadcrumb}</div>
         : breadcrumb;
 }

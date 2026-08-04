@@ -80,7 +80,10 @@ export default function ContentShell({
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col">
-                <div data-app-toolbar className="relative flex w-full shrink-0 items-center gap-3 p-6 md:justify-center">
+                <div
+                    data-app-toolbar
+                    className="relative flex w-full shrink-0 items-center gap-3 p-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(20rem,36rem)_minmax(0,1fr)] md:gap-0"
+                >
                     <Button
                         type="button"
                         variant="ghost"
@@ -93,7 +96,7 @@ export default function ContentShell({
                     >
                         <MenuIcon className="size-5 text-muted-foreground" />
                     </Button>
-                    <div className="absolute left-6 hidden items-center gap-2 md:flex lg:max-w-[calc(50%-20rem)]">
+                    <div className="hidden min-w-0 items-center gap-2 md:flex">
                         <Button
                             type="button"
                             variant="ghost"
@@ -109,14 +112,14 @@ export default function ContentShell({
                                 <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
                             )}
                         </Button>
-                        <div className="hidden min-w-0 lg:block">
+                        <div className="hidden min-w-0 xl:block">
                             <Suspense fallback={null}>
                                 <NavBreadcrumb />
                             </Suspense>
                         </div>
                     </div>
 
-                    <div className="w-full max-w-xl min-w-0">
+                    <div className="w-full max-w-xl min-w-0 md:col-start-2 md:row-start-1">
                         <GlobalSearch />
                     </div>
                 </div>

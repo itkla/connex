@@ -50,7 +50,7 @@ test.describe("authenticated shell navigation", () => {
                         name: "avatar.png",
                         mimeType: "image/png",
                         buffer: Buffer.from(
-                            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=",
+                            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZKmcAAAAASUVORK5CYII=",
                             "base64",
                         ),
                     },
