@@ -297,7 +297,7 @@ export function disconnectWorkflowBranch(
     };
 }
 
-/** Inserts a typed node on one branch and returns the updated definition and canvas. */
+/** Inserts a typed node on one branch, honoring an explicit canvas position when supplied. */
 export function insertWorkflowNode(
     definition: WorkflowDefinition,
     canvas: WorkflowCanvas,
@@ -305,6 +305,7 @@ export function insertWorkflowNode(
     outcome: WorkflowEdgeOutcome,
     type: Exclude<WorkflowNodeType, "TRIGGER">,
     recordType: string,
+    position?: { x: number; y: number },
 ): { definition: WorkflowDefinition; canvas: WorkflowCanvas; insertedNodeId: string } | null {
     if (definition.nodes.length >= WORKFLOW_NODE_LIMIT) return null;
     if (type === "ACTION" && definition.nodes.filter((node) => node.type === "ACTION").length >= WORKFLOW_ACTION_LIMIT) {
@@ -342,9 +343,9 @@ export function insertWorkflowNode(
     }
     const sourcePosition = canvas.positions[sourceNodeId] ?? { x: 80, y: 80 };
     const targetPosition = previousEdge ? canvas.positions[previousEdge.targetNodeId] : undefined;
-    const insertedPosition = targetPosition
+    const insertedPosition = position ?? (targetPosition
         ? { x: (sourcePosition.x + targetPosition.x) / 2, y: (sourcePosition.y + targetPosition.y) / 2 }
-        : { x: sourcePosition.x, y: sourcePosition.y + 200 };
+        : { x: sourcePosition.x, y: sourcePosition.y + 200 });
     const positions = { ...canvas.positions, [node.id]: insertedPosition };
     const noNode = nextDefinition.nodes.find(
         (candidate) => candidate.type === "END" && !definition.nodes.some((existing) => existing.id === candidate.id) && candidate.id !== node.id,

@@ -316,6 +316,7 @@ export function useWorkflowEditor({
         sourceNodeId: string,
         outcome: WorkflowEdgeOutcome,
         type: Exclude<WorkflowNodeType, "TRIGGER">,
+        position?: { x: number; y: number },
     ) => {
         const inserted = insertWorkflowNode(
             history.present.definition,
@@ -324,6 +325,7 @@ export function useWorkflowEditor({
             outcome,
             type,
             history.present.recordType ?? "deal",
+            position,
         );
         if (!inserted) {
             toastError(t("graphLimitReached"));

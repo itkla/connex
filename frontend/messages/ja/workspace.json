@@ -440,6 +440,8 @@
     "nodeErrors": "このノードの問題",
     "deleteNode": "{name} を削除",
     "insertNode": "挿入",
+    "selectNodeToInsert": "先に接続元のノードを選択してください。",
+    "invalidConnection": "この分岐は選択したノードに接続できません。",
     "branchTargetLabel": "{branch} 分岐の接続先",
     "notConnected": "未接続",
     "disconnectBranch": "{branch} 分岐を切断",

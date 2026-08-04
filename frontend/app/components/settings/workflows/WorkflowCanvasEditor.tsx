@@ -1,12 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
 import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type MouseEvent as ReactMouseEvent,
+    type PointerEvent as ReactPointerEvent,
+} from "react";
+import {
+    Background,
+    BackgroundVariant,
     Controls,
     ReactFlow,
     useReactFlow,
     type Connection,
     type Edge,
+    type IsValidConnection,
+    type OnConnectEnd,
     type OnReconnect,
     type Viewport,
 } from "@xyflow/react";
@@ -14,6 +26,7 @@ import { useTheme } from "next-themes";
 import { useTranslations } from "next-intl";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useReducedMotion } from "motion/react";
+import "@xyflow/react/dist/style.css";
 
 import WorkflowNode, { type WorkflowFlowNode } from "@/app/components/settings/workflows/WorkflowNode";
 import type {
@@ -26,10 +39,20 @@ import type { WorkflowEditorDocument } from "@/app/components/settings/workflows
 import {
     isScheduleEnrollmentNode,
     isScheduleEnrollmentBranch,
+    canConnectWorkflowBranch,
     shouldFitWorkflowCanvasOnOpen,
     workflowNodeOutcomes,
 } from "@/app/components/settings/workflows/workflowGraph";
+import { toastError } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuLabel,
+    ContextMenuSeparator,
+    ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -40,12 +63,133 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const NODE_TYPES = { workflowNode: WorkflowNode };
-const INSERT_TYPES: Array<Exclude<WorkflowNodeType, "TRIGGER">> = ["CONDITION", "ACTION", "DELAY", "END"];
+type InsertNodeType = Exclude<WorkflowNodeType, "TRIGGER">;
+
+const INSERT_TYPES: InsertNodeType[] = ["CONDITION", "ACTION", "DELAY", "END"];
 const FIT_VIEW_DURATION_MS = 200;
 
 function isOutcome(value: string | null | undefined): value is WorkflowEdgeOutcome {
     return value === "next" || value === "yes" || value === "no";
 }
+
+function isWorkflowPaneTarget(target: EventTarget | null): boolean {
+    return target instanceof globalThis.Element && target.classList.contains("react-flow__pane");
+}
+
+function useWorkflowCanvasContextMenu(
+    readOnly: boolean,
+    screenToFlowPosition: (position: { x: number; y: number }) => { x: number; y: number },
+) {
+    const positionRef = useRef<{ x: number; y: number } | null>(null);
+    const [open, setOpen] = useState(false);
+    const capturePosition = useCallback((target: EventTarget | null, clientX: number, clientY: number) => {
+        positionRef.current = !readOnly && isWorkflowPaneTarget(target)
+            ? screenToFlowPosition({ x: clientX, y: clientY })
+            : null;
+    }, [readOnly, screenToFlowPosition]);
+    const onContextMenuCapture = useCallback((event: ReactMouseEvent) => {
+        capturePosition(event.target, event.clientX, event.clientY);
+    }, [capturePosition]);
+    const onPointerDownCapture = useCallback((event: ReactPointerEvent) => {
+        if (event.pointerType === "touch" || event.pointerType === "pen") {
+            capturePosition(event.target, event.clientX, event.clientY);
+        } else {
+            positionRef.current = null;
+        }
+    }, [capturePosition]);
+    const onOpenChange = useCallback((nextOpen: boolean) => {
+        if (nextOpen && positionRef.current) {
+            setOpen(true);
+            return;
+        }
+        setOpen(false);
+        positionRef.current = null;
+    }, []);
+    const position = useCallback(() => positionRef.current ?? undefined, []);
+    return { open, onOpenChange, onContextMenuCapture, onPointerDownCapture, position };
+}
+
+function WorkflowDropdownInsertItems({
+    sourceNodeId,
+    outcomes,
+    insertTypes,
+    branchLabel,
+    onInsert,
+}: {
+    sourceNodeId: string;
+    outcomes: WorkflowEdgeOutcome[];
+    insertTypes: InsertNodeType[];
+    branchLabel: (outcome: WorkflowEdgeOutcome) => string;
+    onInsert: (sourceNodeId: string, outcome: WorkflowEdgeOutcome, type: InsertNodeType) => void;
+}) {
+    const t = useTranslations("WorkspaceWorkflows");
+    return outcomes.map((outcome, outcomeIndex) => (
+        <div key={outcome}>
+            {outcomeIndex > 0 ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuLabel>{branchLabel(outcome)}</DropdownMenuLabel>
+            {insertTypes.map((type) => (
+                <DropdownMenuItem key={`${outcome}-${type}`} onSelect={() => onInsert(sourceNodeId, outcome, type)}>
+                    {t(`nodeType.${type.toLowerCase()}`)}
+                </DropdownMenuItem>
+            ))}
+        </div>
+    ));
+}
+
+function WorkflowContextInsertItems({
+    sourceNodeId,
+    outcomes,
+    insertTypes,
+    branchLabel,
+    onInsert,
+}: {
+    sourceNodeId: string | null;
+    outcomes: WorkflowEdgeOutcome[];
+    insertTypes: InsertNodeType[];
+    branchLabel: (outcome: WorkflowEdgeOutcome) => string;
+    onInsert: (sourceNodeId: string, outcome: WorkflowEdgeOutcome, type: InsertNodeType) => void;
+}) {
+    const t = useTranslations("WorkspaceWorkflows");
+    if (!sourceNodeId || outcomes.length === 0) {
+        return <ContextMenuItem disabled>{t("selectNodeToInsert")}</ContextMenuItem>;
+    }
+    return outcomes.map((outcome, outcomeIndex) => (
+        <div key={outcome}>
+            {outcomeIndex > 0 ? <ContextMenuSeparator /> : null}
+            <ContextMenuLabel>{branchLabel(outcome)}</ContextMenuLabel>
+            {insertTypes.map((type) => (
+                <ContextMenuItem key={`${outcome}-${type}`} onSelect={() => onInsert(sourceNodeId, outcome, type)}>
+                    {t(`nodeType.${type.toLowerCase()}`)}
+                </ContextMenuItem>
+            ))}
+        </div>
+    ));
+}
+
+type WorkflowCanvasEditorProps = {
+    document: WorkflowEditorDocument;
+    selectedNodeId: string | null;
+    diagnostics: WorkflowDiagnostic[];
+    run: WorkflowRunDetail | null;
+    readOnly: boolean;
+    focusNodeId: string | null;
+    nodeLabel: (nodeId: string) => string;
+    nodeSummary: (nodeId: string) => string;
+    branchLabel: (outcome: WorkflowEdgeOutcome) => string;
+    runStatusLabel: (status: string) => string;
+    onSelectNode: (nodeId: string) => void;
+    onMoveNode: (nodeId: string, position: { x: number; y: number }) => void;
+    onMoveViewport: (viewport: Viewport) => void;
+    onConnectBranch: (sourceNodeId: string, outcome: WorkflowEdgeOutcome, targetNodeId: string) => void;
+    onDisconnectBranch: (sourceNodeId: string, outcome: WorkflowEdgeOutcome) => void;
+    onInsertNode: (
+        sourceNodeId: string,
+        outcome: WorkflowEdgeOutcome,
+        type: InsertNodeType,
+        position?: { x: number; y: number },
+    ) => void;
+    onDeleteNode: (nodeId: string) => void;
+};
 
 /** Controlled React Flow projection of a semantic workflow definition and separate canvas layout. */
 export default function WorkflowCanvasEditor({
@@ -66,33 +210,18 @@ export default function WorkflowCanvasEditor({
     onDisconnectBranch,
     onInsertNode,
     onDeleteNode,
-}: {
-    document: WorkflowEditorDocument;
-    selectedNodeId: string | null;
-    diagnostics: WorkflowDiagnostic[];
-    run: WorkflowRunDetail | null;
-    readOnly: boolean;
-    focusNodeId: string | null;
-    nodeLabel: (nodeId: string) => string;
-    nodeSummary: (nodeId: string) => string;
-    branchLabel: (outcome: WorkflowEdgeOutcome) => string;
-    runStatusLabel: (status: string) => string;
-    onSelectNode: (nodeId: string) => void;
-    onMoveNode: (nodeId: string, position: { x: number; y: number }) => void;
-    onMoveViewport: (viewport: Viewport) => void;
-    onConnectBranch: (sourceNodeId: string, outcome: WorkflowEdgeOutcome, targetNodeId: string) => void;
-    onDisconnectBranch: (sourceNodeId: string, outcome: WorkflowEdgeOutcome) => void;
-    onInsertNode: (
-        sourceNodeId: string,
-        outcome: WorkflowEdgeOutcome,
-        type: Exclude<WorkflowNodeType, "TRIGGER">,
-    ) => void;
-    onDeleteNode: (nodeId: string) => void;
-}) {
+}: WorkflowCanvasEditorProps) {
     const t = useTranslations("WorkspaceWorkflows");
     const { resolvedTheme } = useTheme();
-    const { getNode, setCenter } = useReactFlow();
+    const { getNode, screenToFlowPosition, setCenter } = useReactFlow();
     const reduceMotion = useReducedMotion() ?? false;
+    const {
+        open: contextMenuOpen,
+        onOpenChange: onContextMenuOpenChange,
+        onContextMenuCapture,
+        onPointerDownCapture,
+        position: contextPosition,
+    } = useWorkflowCanvasContextMenu(readOnly, screenToFlowPosition);
     const invalidNodeIds = useMemo(
         () => new Set(diagnostics.flatMap((diagnostic) => diagnostic.nodeId ? [diagnostic.nodeId] : [])),
         [diagnostics],
@@ -201,6 +330,37 @@ export default function WorkflowCanvasEditor({
         }
     }, [onConnectBranch]);
 
+    const isValidConnection = useCallback<IsValidConnection>((connection) => (
+        connection.targetHandle === "in"
+        && isOutcome(connection.sourceHandle)
+        && canConnectWorkflowBranch(
+            document.definition,
+            connection.source,
+            connection.sourceHandle,
+            connection.target,
+        )
+    ), [document.definition]);
+
+    const onConnectEnd = useCallback<OnConnectEnd>((_, connectionState) => {
+        if (connectionState.isValid === false) {
+            toastError(t("invalidConnection"));
+        }
+    }, [t]);
+
+    const insertAtContextPosition = useCallback((
+        sourceNodeId: string,
+        outcome: WorkflowEdgeOutcome,
+        type: InsertNodeType,
+    ) => {
+        onInsertNode(sourceNodeId, outcome, type, contextPosition());
+    }, [contextPosition, onInsertNode]);
+
+    const onNodeContextMenu = useCallback((event: ReactMouseEvent, node: WorkflowFlowNode) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onSelectNode(node.id);
+    }, [onSelectNode]);
+
     const onReconnect = useCallback<OnReconnect>((oldEdge, connection) => {
         const semantic = document.definition.edges.find((edge) => edge.id === oldEdge.id);
         if (!semantic || !connection.target) return;
@@ -219,74 +379,97 @@ export default function WorkflowCanvasEditor({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-56">
-                            {selectedOutcomes.map((outcome, outcomeIndex) => (
-                                <div key={outcome}>
-                                    {outcomeIndex > 0 ? <DropdownMenuSeparator /> : null}
-                                    <DropdownMenuLabel>{branchLabel(outcome)}</DropdownMenuLabel>
-                                    {insertTypes.map((type) => (
-                                        <DropdownMenuItem
-                                            key={`${outcome}-${type}`}
-                                            onSelect={() => {
-                                                if (selectedNode) onInsertNode(selectedNode.id, outcome, type);
-                                            }}
-                                        >
-                                            {t(`nodeType.${type.toLowerCase()}`)}
-                                        </DropdownMenuItem>
-                                    ))}
-                                </div>
-                            ))}
+                            {selectedNode ? (
+                                <WorkflowDropdownInsertItems
+                                    sourceNodeId={selectedNode.id}
+                                    outcomes={selectedOutcomes}
+                                    insertTypes={insertTypes}
+                                    branchLabel={branchLabel}
+                                    onInsert={onInsertNode}
+                                />
+                            ) : null}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
             ) : null}
-            <div className="relative min-h-0 flex-1">
-                <ReactFlow
-                    nodes={nodes}
-                    edges={edges}
-                    nodeTypes={NODE_TYPES}
-                    defaultViewport={document.canvas.viewport}
-                    colorMode={resolvedTheme === "dark" ? "dark" : "light"}
-                    onNodeClick={(_, node) => onSelectNode(node.id)}
-                    onNodeDragStop={(_, node) => onMoveNode(node.id, node.position)}
-                    onNodesDelete={(deleted) => deleted.forEach((node) => onDeleteNode(node.id))}
-                    onEdgesDelete={(deleted) => deleted.forEach((edge) => {
-                        const semantic = document.definition.edges.find((candidate) => candidate.id === edge.id);
-                        if (semantic) onDisconnectBranch(semantic.sourceNodeId, semantic.outcome);
-                    })}
-                    onMoveEnd={(_, viewport) => onMoveViewport(viewport)}
-                    onConnect={onConnect}
-                    onReconnect={onReconnect}
-                    nodesConnectable={!readOnly}
-                    nodesDraggable={!readOnly}
-                    edgesReconnectable={!readOnly}
-                    elementsSelectable
-                    multiSelectionKeyCode={null}
-                    deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
-                    panOnScroll
-                    fitView={fitViewOnOpen}
-                    fitViewOptions={{
-                        padding: 0.25,
-                        maxZoom: 1,
-                        duration: reduceMotion ? 0 : FIT_VIEW_DURATION_MS,
-                    }}
-                    proOptions={{ hideAttribution: false }}
-                    ariaLabelConfig={{
-                        "node.a11yDescription.default": t("canvasA11y.nodeDescription"),
-                        "node.a11yDescription.keyboardDisabled": t("canvasA11y.nodeKeyboardDisabled"),
-                        "node.a11yDescription.ariaLiveMessage": ({ x, y }) => t("canvasA11y.nodeMoved", { x, y }),
-                        "edge.a11yDescription.default": t("canvasA11y.edgeDescription"),
-                        "controls.ariaLabel": t("canvasA11y.controls"),
-                        "controls.zoomIn.ariaLabel": t("canvasA11y.zoomIn"),
-                        "controls.zoomOut.ariaLabel": t("canvasA11y.zoomOut"),
-                        "controls.fitView.ariaLabel": t("canvasA11y.fitView"),
-                        "controls.interactive.ariaLabel": t("canvasA11y.interactive"),
-                        "minimap.ariaLabel": t("canvasA11y.minimap"),
-                        "handle.ariaLabel": t("canvasA11y.handle"),
-                    }}
-                >
-                    <Controls position="bottom-right" showInteractive={false} />
-                </ReactFlow>
-            </div>
+            <ContextMenu open={contextMenuOpen} onOpenChange={onContextMenuOpenChange}>
+                <ContextMenuTrigger asChild disabled={readOnly}>
+                    <div
+                        className="relative min-h-0 flex-1"
+                        onContextMenuCapture={onContextMenuCapture}
+                        onPointerDownCapture={onPointerDownCapture}
+                    >
+                        <ReactFlow
+                            nodes={nodes}
+                            edges={edges}
+                            nodeTypes={NODE_TYPES}
+                            defaultViewport={document.canvas.viewport}
+                            colorMode={resolvedTheme === "dark" ? "dark" : "light"}
+                            onNodeClick={(_, node) => onSelectNode(node.id)}
+                            onNodeContextMenu={onNodeContextMenu}
+                            onNodeDragStop={(_, node) => onMoveNode(node.id, node.position)}
+                            onNodesDelete={(deleted) => deleted.forEach((node) => onDeleteNode(node.id))}
+                            onEdgesDelete={(deleted) => deleted.forEach((edge) => {
+                                const semantic = document.definition.edges.find((candidate) => candidate.id === edge.id);
+                                if (semantic) onDisconnectBranch(semantic.sourceNodeId, semantic.outcome);
+                            })}
+                            onMoveEnd={(_, viewport) => onMoveViewport(viewport)}
+                            onConnect={onConnect}
+                            onConnectEnd={onConnectEnd}
+                            onReconnect={onReconnect}
+                            isValidConnection={isValidConnection}
+                            connectionRadius={24}
+                            connectionLineStyle={{ stroke: "var(--color-brand)", strokeWidth: 2 }}
+                            nodesConnectable={!readOnly}
+                            nodesDraggable={!readOnly}
+                            edgesReconnectable={!readOnly}
+                            elementsSelectable
+                            multiSelectionKeyCode={null}
+                            deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
+                            panOnScroll
+                            fitView={fitViewOnOpen}
+                            fitViewOptions={{
+                                padding: 0.25,
+                                maxZoom: 1,
+                                duration: reduceMotion ? 0 : FIT_VIEW_DURATION_MS,
+                            }}
+                            proOptions={{ hideAttribution: true }}
+                            ariaLabelConfig={{
+                                "node.a11yDescription.default": t("canvasA11y.nodeDescription"),
+                                "node.a11yDescription.keyboardDisabled": t("canvasA11y.nodeKeyboardDisabled"),
+                                "node.a11yDescription.ariaLiveMessage": ({ x, y }) => t("canvasA11y.nodeMoved", { x, y }),
+                                "edge.a11yDescription.default": t("canvasA11y.edgeDescription"),
+                                "controls.ariaLabel": t("canvasA11y.controls"),
+                                "controls.zoomIn.ariaLabel": t("canvasA11y.zoomIn"),
+                                "controls.zoomOut.ariaLabel": t("canvasA11y.zoomOut"),
+                                "controls.fitView.ariaLabel": t("canvasA11y.fitView"),
+                                "controls.interactive.ariaLabel": t("canvasA11y.interactive"),
+                                "minimap.ariaLabel": t("canvasA11y.minimap"),
+                                "handle.ariaLabel": t("canvasA11y.handle"),
+                            }}
+                        >
+                            <Background
+                                variant={BackgroundVariant.Dots}
+                                color="var(--color-chart-grid)"
+                                gap={24}
+                                size={1.25}
+                            />
+                            <Controls position="bottom-right" showInteractive={false} />
+                        </ReactFlow>
+                    </div>
+                </ContextMenuTrigger>
+                {!readOnly ? (
+                    <ContextMenuContent className="w-56 motion-reduce:animate-none motion-reduce:transition-none">
+                        <WorkflowContextInsertItems
+                            sourceNodeId={selectedNode?.id ?? null}
+                            outcomes={selectedOutcomes}
+                            insertTypes={insertTypes}
+                            branchLabel={branchLabel}
+                            onInsert={insertAtContextPosition}
+                        />
+                    </ContextMenuContent>
+                ) : null}
+            </ContextMenu>
         </div>
     );
 }
