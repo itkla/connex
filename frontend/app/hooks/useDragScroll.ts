@@ -47,32 +47,74 @@ export function useDragScroll<T extends HTMLElement = HTMLElement>(options?: Dra
 
         let dragging = false;
         let pendingLeft = false;
-        let leftThresholdCrossed = false;
         let moved = false;
         let clickResetTimer: number | null = null;
+        let classificationFrame: number | null = null;
+        let pendingMovement: { pointerId: number; clientX: number; clientY: number } | null = null;
         let startX = 0;
         let startY = 0;
         let startLeft = 0;
         let startTop = 0;
 
-        const beginDrag = (e: PointerEvent) => {
+        const applyScroll = (clientX: number, clientY: number) => {
+            const previousLeft = el.scrollLeft;
+            const previousTop = el.scrollTop;
+            el.scrollLeft = startLeft - (clientX - startX);
+            el.scrollTop = startTop - (clientY - startY);
+            moved ||= el.scrollLeft !== previousLeft || el.scrollTop !== previousTop;
+        };
+
+        const cancelPending = () => {
+            pendingLeft = false;
+            pendingMovement = null;
+            if (classificationFrame != null) window.cancelAnimationFrame(classificationFrame);
+            classificationFrame = null;
+        };
+
+        const beginDrag = (pointerId: number): boolean => {
+            try {
+                el.setPointerCapture(pointerId);
+            } catch {
+                cancelPending();
+                return false;
+            }
             dragging = true;
-            el.setPointerCapture(e.pointerId);
+            pendingLeft = false;
+            pendingMovement = null;
             el.dataset.dragging = 'true';
+            return true;
+        };
+
+        const classifyPending = () => {
+            classificationFrame = null;
+            const movement = pendingMovement;
+            if (!pendingLeft || dragging || movement == null) return;
+            if (hasTextSelectionWithin(el)) {
+                cancelPending();
+                return;
+            }
+            if (beginDrag(movement.pointerId)) applyScroll(movement.clientX, movement.clientY);
+        };
+
+        const scheduleClickReset = () => {
+            if (!moved) return;
+            clickResetTimer = window.setTimeout(() => {
+                moved = false;
+                clickResetTimer = null;
+            }, 0);
         };
 
         const onPointerDown = (e: PointerEvent) => {
             if (clickResetTimer != null) window.clearTimeout(clickResetTimer);
             clickResetTimer = null;
             moved = false;
-            pendingLeft = false;
-            leftThresholdCrossed = false;
+            cancelPending();
             if (e.button === 1) {
                 startX = e.clientX;
                 startY = e.clientY;
                 startLeft = el.scrollLeft;
                 startTop = el.scrollTop;
-                beginDrag(e);
+                beginDrag(e.pointerId);
                 e.preventDefault();
                 return;
             }
@@ -94,45 +136,46 @@ export function useDragScroll<T extends HTMLElement = HTMLElement>(options?: Dra
 
         const onPointerMove = (e: PointerEvent) => {
             if (pendingLeft && !dragging) {
+                if ((e.buttons & 1) === 0) {
+                    cancelPending();
+                    return;
+                }
                 const horizontalMovement = Math.abs(e.clientX - startX);
                 const verticalMovement = Math.abs(e.clientY - startY);
                 if (horizontalMovement <= LEFT_DRAG_THRESHOLD && verticalMovement <= LEFT_DRAG_THRESHOLD) return;
                 if (verticalMovement >= horizontalMovement) {
-                    pendingLeft = false;
+                    cancelPending();
                     return;
                 }
-                if (!leftThresholdCrossed) {
-                    leftThresholdCrossed = true;
-                    return;
-                }
-                if (hasTextSelectionWithin(el)) {
-                    pendingLeft = false;
-                    return;
-                }
-                beginDrag(e);
+                pendingMovement = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY };
+                if (classificationFrame == null) classificationFrame = window.requestAnimationFrame(classifyPending);
+                return;
             }
             if (!dragging) return;
-            const previousLeft = el.scrollLeft;
-            const previousTop = el.scrollTop;
-            el.scrollLeft = startLeft - (e.clientX - startX);
-            el.scrollTop = startTop - (e.clientY - startY);
-            moved ||= el.scrollLeft !== previousLeft || el.scrollTop !== previousTop;
+            applyScroll(e.clientX, e.clientY);
             e.preventDefault();
         };
 
         const endDrag = (e: PointerEvent) => {
-            pendingLeft = false;
-            leftThresholdCrossed = false;
-            if (!dragging) return;
+            if (!pendingLeft && !dragging) return;
+            const movement = pendingMovement;
+            if (pendingLeft && movement != null && !hasTextSelectionWithin(el)) {
+                applyScroll(movement.clientX, movement.clientY);
+            }
+            cancelPending();
             dragging = false;
             delete el.dataset.dragging;
             if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
-            if (moved) {
-                clickResetTimer = window.setTimeout(() => {
-                    moved = false;
-                    clickResetTimer = null;
-                }, 0);
-            }
+            scheduleClickReset();
+        };
+
+        const cancelDrag = (e: PointerEvent) => {
+            if (!pendingLeft && !dragging) return;
+            cancelPending();
+            dragging = false;
+            moved = false;
+            delete el.dataset.dragging;
+            if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
         };
 
         const onClickCapture = (e: MouseEvent) => {
@@ -151,20 +194,21 @@ export function useDragScroll<T extends HTMLElement = HTMLElement>(options?: Dra
 
         el.addEventListener('pointerdown', onPointerDown);
         el.addEventListener('pointermove', onPointerMove);
-        el.addEventListener('pointerup', endDrag);
-        el.addEventListener('pointercancel', endDrag);
+        window.addEventListener('pointerup', endDrag);
+        window.addEventListener('pointercancel', cancelDrag);
         el.addEventListener('click', onClickCapture, true);
         el.addEventListener('mousedown', suppressAutoScroll);
         el.addEventListener('auxclick', suppressAutoScroll);
 
         cleanupRef.current = () => {
             if (clickResetTimer != null) window.clearTimeout(clickResetTimer);
+            if (classificationFrame != null) window.cancelAnimationFrame(classificationFrame);
             ro.disconnect();
             el.removeEventListener('scroll', updateEdges);
             el.removeEventListener('pointerdown', onPointerDown);
             el.removeEventListener('pointermove', onPointerMove);
-            el.removeEventListener('pointerup', endDrag);
-            el.removeEventListener('pointercancel', endDrag);
+            window.removeEventListener('pointerup', endDrag);
+            window.removeEventListener('pointercancel', cancelDrag);
             el.removeEventListener('click', onClickCapture, true);
             el.removeEventListener('mousedown', suppressAutoScroll);
             el.removeEventListener('auxclick', suppressAutoScroll);
