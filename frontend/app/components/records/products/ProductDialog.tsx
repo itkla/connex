@@ -113,6 +113,8 @@ export default function ProductDialog({ open, onOpenChange, mode, product, onSav
                 currency: draft.currency,
                 taxRate: draft.taxRate.trim() === '' ? null : Number(draft.taxRate),
                 billingFrequency: draft.billingFrequency,
+                effectiveStart: product?.effectiveStart ?? null,
+                effectiveEnd: product?.effectiveEnd ?? null,
             };
             const saved = mode === 'create'
                 ? await createProduct(payload)
