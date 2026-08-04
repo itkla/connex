@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, ExclamationTriangleIcon, FunnelIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, EllipsisHorizontalIcon, ExclamationTriangleIcon, EyeIcon, FunnelIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { useLocale, useTranslations } from "next-intl";
@@ -30,7 +30,7 @@ import {
     emitNotificationStateChanged,
     onNotificationStateChanged,
 } from "@/app/components/notifications/notificationEvents";
-import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
+import { SnoozeCustomDialog, SnoozeSubmenu } from "@/app/components/notifications/SnoozeMenu";
 import { isNotificationSnoozedAt } from "@/app/components/notifications/notificationSnooze";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,13 @@ import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { PageShell } from "@/app/components/PageShell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
     Pagination,
     PaginationContent,
@@ -61,6 +68,73 @@ function matchesState(n: Notification, state: NotificationState, asOf: string): 
     if (state === "history") return inactive;
     if (state === "active") return !inactive && !snoozed;
     return true;
+}
+
+function NotificationManagementMenu({
+    read,
+    title,
+    disabled,
+    onToggleRead,
+    onSnooze,
+    onDismiss,
+}: {
+    read: boolean;
+    title: string;
+    disabled: boolean;
+    onToggleRead: () => void;
+    onSnooze: (body: SnoozeRequest) => void;
+    onDismiss: () => void;
+}) {
+    const t = useTranslations("Notifications");
+    const [customOpenedAt, setCustomOpenedAt] = useState<number | null>(null);
+    return (
+        <>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t("moreActions", { title })}
+                        disabled={disabled}
+                    >
+                        <EllipsisHorizontalIcon />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={onToggleRead}>
+                        <EyeIcon />
+                        {read ? t("markUnread") : t("markRead")}
+                    </DropdownMenuItem>
+                    <SnoozeSubmenu
+                        disabled={disabled}
+                        onSnooze={onSnooze}
+                        onCustom={() => {
+                            requestAnimationFrame(() => setCustomOpenedAt(Date.now()));
+                        }}
+                    />
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" onSelect={onDismiss}>
+                        <XMarkIcon />
+                        {t("dismiss")}
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+            {customOpenedAt != null ? (
+                <SnoozeCustomDialog
+                    key={customOpenedAt}
+                    open
+                    now={customOpenedAt}
+                    onOpenChange={(open) => {
+                        if (!open) setCustomOpenedAt(null);
+                    }}
+                    onSnooze={(body) => {
+                        setCustomOpenedAt(null);
+                        onSnooze(body);
+                    }}
+                />
+            ) : null}
+        </>
+    );
 }
 
 /**
@@ -804,7 +878,7 @@ export default function NotificationsInbox() {
                                     key={item.id}
                                     aria-busy={isPending}
                                     className={cn(
-                                        "group flex flex-wrap gap-4 px-5 py-4 transition-colors hover:bg-muted/40 sm:flex-nowrap",
+                                        "group grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-muted/40 sm:grid-cols-[auto_minmax(0,1fr)_auto]",
                                         !item.readAt && "bg-muted/30",
                                     )}
                                 >
@@ -844,7 +918,7 @@ export default function NotificationsInbox() {
                                         </div>
                                         {content.body ? <p className="mt-1 text-sm text-muted-foreground">{content.body}</p> : null}
                                     </button>
-                                    <div className="flex basis-full flex-wrap items-center justify-end gap-1 sm:basis-auto sm:flex-nowrap">
+                                    <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1 sm:col-start-3 sm:row-start-1">
                                         {item.dismissedAt || item.resolvedAt ? (
                                             <Button
                                                 variant="ghost"
@@ -893,27 +967,14 @@ export default function NotificationsInbox() {
                                                         {t("logTouch")}
                                                     </Button>
                                                 ) : null}
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
+                                                <NotificationManagementMenu
+                                                    read={Boolean(item.readAt)}
+                                                    title={content.title}
                                                     disabled={isPending}
-                                                    onClick={() => void toggleRead(item)}
-                                                >
-                                                    {item.readAt ? t("markUnread") : t("markRead")}
-                                                </Button>
-                                                <SnoozeMenu
-                                                    disabled={isPending}
+                                                    onToggleRead={() => void toggleRead(item)}
                                                     onSnooze={(body) => void snooze(item, body)}
+                                                    onDismiss={() => void dismiss(item)}
                                                 />
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon-sm"
-                                                    aria-label={t("dismiss")}
-                                                    disabled={isPending}
-                                                    onClick={() => void dismiss(item)}
-                                                >
-                                                    <XMarkIcon />
-                                                </Button>
                                             </>
                                         )}
                                     </div>
