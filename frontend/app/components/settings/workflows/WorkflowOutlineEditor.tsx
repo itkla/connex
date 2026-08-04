@@ -208,11 +208,11 @@ export default function WorkflowOutlineEditor({
                                                     {!mandatoryEnrollment ? (
                                                         <SelectItem value="disconnected">{t("notConnected")}</SelectItem>
                                                     ) : null}
-                                                    {ordered.filter((target) => (
+                                                    {ordered.map((target) => (
                                                         target.id === edge?.targetNodeId
                                                         || canConnectWorkflowBranch(document.definition, node.id, outcome, target.id)
-                                                    )).map((target) => (
-                                                        <SelectItem key={target.id} value={target.id}>{nodeLabel(target.id)}</SelectItem>
+                                                            ? <SelectItem key={target.id} value={target.id}>{nodeLabel(target.id)}</SelectItem>
+                                                            : null
                                                     ))}
                                                 </SelectContent>
                                             </Select>

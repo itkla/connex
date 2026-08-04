@@ -88,8 +88,8 @@ export default function WorkflowSimulationDialog({
                             <Badge variant="outline">{t(`simulation.result.${result.result}`)}</Badge>
                             {result.path.length > 0 ? (
                                 <ol className="space-y-2" aria-label={t("simulation.pathLabel")}>
-                                    {result.path.map((step, index) => (
-                                        <li key={`${step.nodeId}-${index}`} className="rounded-xl border border-border bg-muted/25 p-3">
+                                    {result.path.map((step) => (
+                                        <li key={step.nodeId} className="rounded-xl border border-border bg-muted/25 p-3">
                                             <div className="flex flex-wrap items-center gap-2 text-sm">
                                                 <span className="font-medium text-foreground">{t(`nodeType.${step.nodeType.toLowerCase()}`)}</span>
                                                 {step.actionType ? <span className="text-foreground">{tr(`action.${step.actionType}`)}</span> : null}
@@ -102,8 +102,8 @@ export default function WorkflowSimulationDialog({
                             ) : null}
                             {result.blockers.length > 0 ? (
                                 <ul className="space-y-1 text-sm text-destructive">
-                                    {result.blockers.map((blocker, index) => (
-                                        <li key={`${blocker.code}-${blocker.nodeId ?? index}`}>
+                                    {result.blockers.map((blocker) => (
+                                        <li key={`${blocker.code}:${blocker.nodeId ?? "global"}:${blocker.fieldPath ?? "no-field"}`}>
                                             {diagnosticMessage(blocker)}
                                         </li>
                                     ))}

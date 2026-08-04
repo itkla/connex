@@ -57,6 +57,8 @@ type ConflictState = {
     conflicts: WorkflowMergeConflict[];
 };
 
+type PendingState = "idle" | "loading";
+
 function documentFromWorkflow(workflow: WorkflowDto): WorkflowEditorDocument {
     return {
         name: workflow.name,
@@ -105,7 +107,7 @@ export function useWorkflowEditor({
     const [history, dispatch] = useReducer(workflowEditorReducer, initialDocument, createWorkflowEditorHistory);
     const [workflow, setWorkflow] = useState<WorkflowDto | null>(null);
     const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<number | null>(workflowId == null ? activeWorkspaceId : null);
-    const [loading, setLoading] = useState(workflowId != null);
+    const [loadState, setLoadState] = useState<PendingState>(workflowId != null ? "loading" : "idle");
     const [missing, setMissing] = useState(false);
     const [loadError, setLoadError] = useState(false);
     const [loadAttempt, setLoadAttempt] = useState(0);
@@ -113,9 +115,9 @@ export function useWorkflowEditor({
     const [busyAction, setBusyAction] = useState<string | null>(null);
     const [validation, setValidation] = useState<WorkflowValidation | null>(null);
     const [versions, setVersions] = useState<WorkflowVersion[]>([]);
-    const [versionsLoading, setVersionsLoading] = useState(false);
+    const [versionsLoadState, setVersionsLoadState] = useState<PendingState>("idle");
     const [simulation, setSimulation] = useState<WorkflowSimulation | null>(null);
-    const [simulationLoading, setSimulationLoading] = useState(false);
+    const [simulationLoadState, setSimulationLoadState] = useState<PendingState>("idle");
     const [simulationRecords, setSimulationRecords] = useState<RecordSelectOption[]>([]);
     const [conflict, setConflict] = useState<ConflictState | null>(null);
     const [conflictOpen, setConflictOpen] = useState(false);
@@ -136,7 +138,7 @@ export function useWorkflowEditor({
     ), []);
 
     const loadVersions = useCallback(async (id: number, workspaceId: number) => {
-        setVersionsLoading(true);
+        setVersionsLoadState("loading");
         try {
             const loaded = await getWorkflowVersions(id, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
@@ -145,7 +147,7 @@ export function useWorkflowEditor({
         } catch {
             if (isCurrentWorkspace(workspaceId)) toastError(t("versions.loadFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setVersionsLoading(false);
+            if (isCurrentWorkspace(workspaceId)) setVersionsLoadState("idle");
         }
     }, [isCurrentWorkspace, t]);
 
@@ -158,16 +160,16 @@ export function useWorkflowEditor({
             if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
             setWorkflow(null);
             setLoadedWorkspaceId(workspaceId);
-            setLoading(false);
+            setLoadState("idle");
             setMissing(false);
             setLoadError(false);
             setAccessDenied(false);
             setBusyAction(null);
             setValidation(null);
             setVersions([]);
-            setVersionsLoading(false);
+            setVersionsLoadState("idle");
             setSimulation(null);
-            setSimulationLoading(false);
+            setSimulationLoadState("idle");
             setSimulationRecords([]);
             setConflict(null);
             setConflictOpen(false);
@@ -181,14 +183,15 @@ export function useWorkflowEditor({
         if (!activeWorkspaceId || workflowId == null || switching) return;
         const workspaceId = activeWorkspaceId;
         const controller = new AbortController();
+        let active = true;
         void (async () => {
-            setLoading(true);
+            setLoadState("loading");
             setWorkflow(null);
             setVersions([]);
-            setVersionsLoading(false);
+            setVersionsLoadState("idle");
             setValidation(null);
             setSimulation(null);
-            setSimulationLoading(false);
+            setSimulationLoadState("idle");
             setSimulationRecords([]);
             setConflict(null);
             setConflictOpen(false);
@@ -204,7 +207,7 @@ export function useWorkflowEditor({
                     signal: controller.signal,
                     headers: { "X-Workspace-Id": String(workspaceId) },
                 });
-                if (controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
+                if (!active || controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
                 const document = documentFromWorkflow(loaded);
                 setWorkflow(loaded);
                 setLoadedWorkspaceId(workspaceId);
@@ -212,15 +215,18 @@ export function useWorkflowEditor({
                 setSelectedNodeId(document.definition.entryNodeId);
                 if (loaded.activeVersionId != null) void loadVersions(loaded.id, workspaceId);
             } catch (error) {
-                if (controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
+                if (!active || controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
                 if (error instanceof ApiError && error.status === 403) setAccessDenied(true);
                 else if (error instanceof ApiError && error.status === 404) setMissing(true);
                 else setLoadError(true);
             } finally {
-                if (!controller.signal.aborted && isCurrentWorkspace(workspaceId)) setLoading(false);
+                if (active && !controller.signal.aborted && isCurrentWorkspace(workspaceId)) setLoadState("idle");
             }
         })();
-        return () => controller.abort();
+        return () => {
+            active = false;
+            controller.abort();
+        };
     }, [activeWorkspaceId, isCurrentWorkspace, loadAttempt, loadVersions, switching, workflowId]);
 
     useEffect(() => () => {
@@ -489,7 +495,7 @@ export function useWorkflowEditor({
     const runSimulation = useCallback(async (recordId: number) => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || dirty || workspaceId == null || !scopeReady) return;
-        setSimulationLoading(true);
+        setSimulationLoadState("loading");
         try {
             const result = await simulateWorkflow(workflow.id, workflow.draftRevision, recordId, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
@@ -500,7 +506,7 @@ export function useWorkflowEditor({
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
             else toastError(t("simulation.failed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setSimulationLoading(false);
+            if (isCurrentWorkspace(workspaceId)) setSimulationLoadState("idle");
         }
     }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkspace, scopeReady, t, workflow]);
 
@@ -575,16 +581,16 @@ export function useWorkflowEditor({
         document: displayDocument,
         run: displayRun,
         inspection,
-        loading: loading || !scopeReady,
+        loading: loadState === "loading" || !scopeReady,
         missing,
         loadError,
         accessDenied,
         busyAction,
         validation,
         versions: scopeReady ? versions : [],
-        versionsLoading: scopeReady && versionsLoading,
+        versionsLoading: scopeReady && versionsLoadState === "loading",
         simulation: scopeReady ? simulation : null,
-        simulationLoading: scopeReady && simulationLoading,
+        simulationLoading: scopeReady && simulationLoadState === "loading",
         simulationRecords: scopeReady ? simulationRecords : [],
         conflict,
         conflictOpen,
@@ -628,7 +634,7 @@ export function useWorkflowEditor({
             setSelectedNodeId(history.present.definition.entryNodeId);
         },
         retryLoad: () => {
-            setLoading(true);
+            setLoadState("loading");
             setLoadAttempt((current) => current + 1);
         },
     };
