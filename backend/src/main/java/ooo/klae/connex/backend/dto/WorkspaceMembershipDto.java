@@ -19,9 +19,11 @@ public class WorkspaceMembershipDto {
     private String slug;
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private String timezone;
+    private long identityVersion;
     private String role;
     private int orgId;
     private String orgName;
+    private long orgIdentityVersion;
     private String orgRole;
 
     public WorkspaceMembershipDto(int id, String name, String slug, String role) {

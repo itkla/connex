@@ -7,7 +7,10 @@ import {
     adoptWorkspaces,
     applyOrganizationIdentity,
     applyWorkspaceIdentity,
+    preservePublishedOrganizationIdentities,
+    preservePublishedWorkspaceIdentities,
     resolveWorkspaceTimezone,
+    restoreOrganizationIdentity,
     restoreWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
 
@@ -35,9 +38,11 @@ describe("the workspace snapshot follows the server, not only the first render",
     });
 
     it("adopts a later payload instead of ignoring it", () => {
-        expect(providerBodyBeforeItsHandlers()).toMatch(
-            /if \(publishedWorkspaces !== initialWorkspaces\) \{\s*setPublishedWorkspaces\(initialWorkspaces\);\s*setWorkspaces\(adoptWorkspaces\(workspaces, publishedWorkspaces, initialWorkspaces\)\);\s*\}/,
-        );
+        const body = providerBodyBeforeItsHandlers();
+
+        expect(body).toContain("workspaceSnapshot.consumedWorkspaces !== initialWorkspaces");
+        expect(body).toContain("const adopted = adoptWorkspaces(");
+        expect(body).toContain("consumedWorkspaces: initialWorkspaces");
     });
 
     it("adopts it during render, so no frame commits the role the viewer just left", () => {
@@ -46,7 +51,7 @@ describe("the workspace snapshot follows the server, not only the first render",
 
     it("tracks what it has already consumed, so adopting cannot loop", () => {
         expect(providerBodyBeforeItsHandlers()).toContain(
-            "const [publishedWorkspaces, setPublishedWorkspaces] = useState(initialWorkspaces)",
+            "consumedWorkspaces: initialWorkspaces",
         );
     });
 
@@ -81,9 +86,11 @@ describe("a payload cannot erase a workspace the server has not seen yet", () =>
             name,
             slug: name.toLowerCase(),
             timezone: null,
+            identityVersion: 0,
             role: "owner",
             orgId: 1,
             orgName: "Acme",
+            orgIdentityVersion: 0,
             orgRole: "owner",
         };
     }
@@ -101,6 +108,34 @@ describe("a payload cannot erase a workspace the server has not seen yet", () =>
         const demoted = { ...a, role: "member" as const };
 
         expect(adoptWorkspaces([a], [a], [demoted])).toEqual([demoted]);
+    });
+
+    it("takes server membership state without regressing newer identity versions", () => {
+        const current = {
+            ...a,
+            name: "Current workspace",
+            identityVersion: 2,
+            orgName: "Current organization",
+            orgIdentityVersion: 3,
+        };
+        const stale = {
+            ...a,
+            role: "member" as const,
+            name: "Stale workspace",
+            identityVersion: 1,
+            orgName: "Stale organization",
+            orgIdentityVersion: 2,
+        };
+
+        expect(adoptWorkspaces([current], [a], [stale])).toEqual([{
+            ...stale,
+            name: current.name,
+            slug: current.slug,
+            timezone: current.timezone,
+            identityVersion: current.identityVersion,
+            orgName: current.orgName,
+            orgIdentityVersion: current.orgIdentityVersion,
+        }]);
     });
 
     it("keeps a just-created workspace an older payload does not mention", () => {
@@ -138,9 +173,11 @@ describe("identity mutations preserve membership state", () => {
         name: "Before",
         slug: "before",
         timezone: null,
+        identityVersion: 0,
         role: "admin",
         orgId: 4,
         orgName: "Old organization",
+        orgIdentityVersion: 0,
         orgRole: "admin",
     };
 
@@ -150,10 +187,12 @@ describe("identity mutations preserve membership state", () => {
             name: "After",
             slug: "before",
             timezone: "Asia/Tokyo",
+            identityVersion: 1,
         })).toEqual([{
             ...workspace,
             name: "After",
             timezone: "Asia/Tokyo",
+            identityVersion: 1,
         }]);
     });
 
@@ -163,12 +202,29 @@ describe("identity mutations preserve membership state", () => {
         expect(applyOrganizationIdentity([workspace, other], {
             id: 4,
             name: "New organization",
-        })).toEqual([{ ...workspace, orgName: "New organization" }, other]);
+            identityVersion: 1,
+        })).toEqual([{
+            ...workspace,
+            orgName: "New organization",
+            orgIdentityVersion: 1,
+        }, other]);
     });
 
     it("restores a failed optimistic identity while that exact value remains published", () => {
-        const optimistic = { id: 7, name: "Optimistic", slug: "before", timezone: "Asia/Tokyo" };
-        const previous = { id: 7, name: "Before", slug: "before", timezone: null };
+        const optimistic = {
+            id: 7,
+            name: "Optimistic",
+            slug: "before",
+            timezone: "Asia/Tokyo",
+            identityVersion: 0,
+        };
+        const previous = {
+            id: 7,
+            name: "Before",
+            slug: "before",
+            timezone: null,
+            identityVersion: 0,
+        };
 
         expect(restoreWorkspaceIdentity(
             [{ ...workspace, name: optimistic.name, timezone: optimistic.timezone }],
@@ -178,11 +234,130 @@ describe("identity mutations preserve membership state", () => {
     });
 
     it("does not overwrite a newer server identity while rolling back an older request", () => {
-        const optimistic = { id: 7, name: "Optimistic", slug: "before", timezone: "Asia/Tokyo" };
-        const previous = { id: 7, name: "Before", slug: "before", timezone: null };
-        const newer = [{ ...workspace, name: "Newer server value", timezone: "UTC" }];
+        const optimistic = {
+            id: 7,
+            name: "Optimistic",
+            slug: "before",
+            timezone: "Asia/Tokyo",
+            identityVersion: 0,
+        };
+        const previous = {
+            id: 7,
+            name: "Before",
+            slug: "before",
+            timezone: null,
+            identityVersion: 0,
+        };
+        const newer = [{
+            ...workspace,
+            name: "Newer server value",
+            timezone: "UTC",
+            identityVersion: 1,
+        }];
 
         expect(restoreWorkspaceIdentity(newer, optimistic, previous)).toBe(newer);
+    });
+
+    it("restores an optimistic organization label only while it is still published", () => {
+        const optimistic = { id: 4, name: "Optimistic", identityVersion: 0 };
+        const previous = { id: 4, name: "Old organization", identityVersion: 0 };
+
+        expect(restoreOrganizationIdentity(
+            [{ ...workspace, orgName: optimistic.name }],
+            optimistic,
+            previous,
+        )).toEqual([workspace]);
+        expect(restoreOrganizationIdentity(
+            [{ ...workspace, orgName: "Newer organization", orgIdentityVersion: 1 }],
+            optimistic,
+            previous,
+        )).toEqual([{
+            ...workspace,
+            orgName: "Newer organization",
+            orgIdentityVersion: 1,
+        }]);
+    });
+
+    it("holds a published workspace identity until the server acknowledges it", () => {
+        const published = {
+            id: 7,
+            name: "Published",
+            slug: "before",
+            timezone: "Asia/Tokyo",
+            identityVersion: 1,
+        };
+        const stale = [{ ...workspace, name: "Before", timezone: null }];
+
+        const protectedResult = preservePublishedWorkspaceIdentities(stale, [published]);
+        expect(protectedResult.workspaces).toEqual([{
+            ...workspace,
+            name: "Published",
+            timezone: "Asia/Tokyo",
+            identityVersion: 1,
+        }]);
+        expect(protectedResult.pending).toEqual([published]);
+
+        const acknowledged = preservePublishedWorkspaceIdentities(
+            protectedResult.workspaces,
+            [published],
+        );
+        expect(acknowledged.pending).toEqual([]);
+
+        const newer = [{
+            ...workspace,
+            name: "Newer",
+            timezone: "UTC",
+            identityVersion: 2,
+        }];
+        const superseded = preservePublishedWorkspaceIdentities(newer, [published]);
+        expect(superseded.workspaces).toBe(newer);
+        expect(superseded.pending).toEqual([]);
+    });
+
+    it("holds an organization label until every workspace in its snapshot acknowledges it", () => {
+        const sibling = { ...workspace, id: 8 };
+        const published = { id: 4, name: "Published organization", identityVersion: 1 };
+
+        const protectedResult = preservePublishedOrganizationIdentities(
+            [{ ...workspace, orgName: published.name }, sibling],
+            [published],
+        );
+        expect(protectedResult.workspaces).toEqual([
+            { ...workspace, orgName: published.name, orgIdentityVersion: 1 },
+            { ...sibling, orgName: published.name, orgIdentityVersion: 1 },
+        ]);
+        expect(protectedResult.pending).toEqual([published]);
+
+        const acknowledged = preservePublishedOrganizationIdentities(
+            protectedResult.workspaces,
+            [published],
+        );
+        expect(acknowledged.pending).toEqual([]);
+
+        const newer = [{
+            ...workspace,
+            orgName: "Newer organization",
+            orgIdentityVersion: 2,
+        }];
+        const superseded = preservePublishedOrganizationIdentities(newer, [published]);
+        expect(superseded.workspaces).toEqual(newer);
+        expect(superseded.pending).toEqual([]);
+    });
+
+    it("normalizes a held workspace to a newer organization snapshot", () => {
+        const arriving = {
+            ...workspace,
+            orgName: "Newer organization",
+            orgIdentityVersion: 2,
+        };
+        const held = { ...workspace, id: 8 };
+
+        expect(preservePublishedOrganizationIdentities([arriving, held], []).workspaces)
+            .toEqual([arriving, {
+                ...held,
+                orgName: arriving.orgName,
+                orgIdentityVersion: arriving.orgIdentityVersion,
+            }]);
     });
 });
 
@@ -192,9 +367,11 @@ describe("workspace timezone resolution", () => {
         name: "Active",
         slug: "active",
         timezone: "Asia/Tokyo",
+        identityVersion: 0,
         role: "owner",
         orgId: 4,
         orgName: "Organization",
+        orgIdentityVersion: 0,
         orgRole: "owner",
     };
 

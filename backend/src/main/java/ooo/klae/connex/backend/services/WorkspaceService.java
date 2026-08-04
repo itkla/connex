@@ -216,6 +216,7 @@ public class WorkspaceService {
      * @param timezoneRaw nullable IANA timezone override
      * @param expectedNameRaw display name observed before editing
      * @param expectedTimezoneRaw nullable timezone observed before editing
+     * @param expectedIdentityVersion identity version observed before editing
      * @return canonical persisted workspace identity
      */
     @Transactional
@@ -225,7 +226,8 @@ public class WorkspaceService {
             String nameRaw,
             String timezoneRaw,
             String expectedNameRaw,
-            String expectedTimezoneRaw) {
+            String expectedTimezoneRaw,
+            long expectedIdentityVersion) {
         requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
         String name = normalizeWorkspaceName(nameRaw);
@@ -233,7 +235,8 @@ public class WorkspaceService {
         String expectedName = normalizeWorkspaceName(expectedNameRaw);
         String expectedTimezone = normalizeWorkspaceTimezone(expectedTimezoneRaw);
         Workspace before = lockWorkspaceIdentityMutation(workspaceId, actorId);
-        if (!Objects.equals(before.getName(), expectedName)
+        if (before.getIdentityVersion() != expectedIdentityVersion
+                || !Objects.equals(before.getName(), expectedName)
                 || !Objects.equals(before.getTimezone(), expectedTimezone)) {
             throw new ConflictException("Workspace settings changed; refresh and retry");
         }
@@ -321,8 +324,14 @@ public class WorkspaceService {
                 "Workspace created", Map.of("workspaceId", workspace.getId(), "ownerUserId", ownerUserId));
         WorkspaceMembershipDto membership =
                 new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
+        Organization organization = organizationMapper.getById(orgId);
+        if (organization == null) {
+            throw new IllegalStateException("Provisioned organization disappeared");
+        }
         membership.setOrgId(orgId);
-        membership.setOrgName(organizationMapper.getById(orgId).getName());
+        membership.setIdentityVersion(workspace.getIdentityVersion());
+        membership.setOrgName(organization.getName());
+        membership.setOrgIdentityVersion(organization.getIdentityVersion());
         membership.setOrgRole(orgMemberService.orgRoleOf(orgId, ownerUserId));
         return membership;
     }
@@ -606,6 +615,7 @@ public class WorkspaceService {
             workspace.getName(),
             workspace.getSlug(),
             workspace.getTimezone(),
+            workspace.getIdentityVersion(),
             workspace.getUpdatedAt());
     }
 

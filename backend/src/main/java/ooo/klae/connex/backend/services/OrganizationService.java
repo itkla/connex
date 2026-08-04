@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.dto.OrganizationLayoutDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceMemberDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -47,13 +48,21 @@ public class OrganizationService {
      * @param orgId organization to rename
      * @param actorId authenticated actor
      * @param nameRaw required display name
+     * @param expectedNameRaw display name observed before editing
+     * @param expectedIdentityVersion identity version observed before editing
      * @return canonical persisted organization identity
      */
     @Transactional
-    public OrganizationIdentityDto rename(int orgId, int actorId, String nameRaw) {
+    public OrganizationIdentityDto rename(
+            int orgId,
+            int actorId,
+            String nameRaw,
+            String expectedNameRaw,
+            long expectedIdentityVersion) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         String name = normalizeName(nameRaw);
+        String expectedName = normalizeName(expectedNameRaw);
         if (userMapper.lockByIdForShare(actorId) == null) {
             throw orgAdminRequired();
         }
@@ -62,6 +71,10 @@ public class OrganizationService {
             throw orgAdminRequired();
         }
         orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
+        if (before.getIdentityVersion() != expectedIdentityVersion
+                || !Objects.equals(before.getName(), expectedName)) {
+            throw new ConflictException("Organization settings changed; refresh and retry");
+        }
         if (!Objects.equals(before.getName(), name)) {
             if (organizationMapper.updateName(orgId, name) == 0) {
                 throw orgAdminRequired();
@@ -202,6 +215,7 @@ public class OrganizationService {
             organization.getId(),
             organization.getName(),
             organization.getSlug(),
+            organization.getIdentityVersion(),
             organization.getUpdatedAt());
     }
 

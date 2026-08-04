@@ -3427,8 +3427,17 @@ export function getOrgMembers(orgId: number, init: RequestInit = {}) {
     return getJson<Types.OrgMember[]>(`/api/orgs/${orgId}/members`, { cache: "no-store", ...init });
 }
 
-export function updateOrganizationIdentity(orgId: number, name: string) {
-    return patchJson<Types.OrganizationIdentity>(`/api/orgs/${orgId}`, { name });
+export function updateOrganizationIdentity(
+    orgId: number,
+    name: string,
+    expectedName: string,
+    expectedIdentityVersion: number,
+) {
+    return patchJson<Types.OrganizationIdentity>(`/api/orgs/${orgId}`, {
+        name,
+        expectedName,
+        expectedIdentityVersion,
+    });
 }
 
 export function getOrganizationLayout(
@@ -3521,11 +3530,7 @@ export function getMyWorkspaces(init: RequestInit = {}) {
 
 export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<Types.MyWorkspaces> {
     if (!cookie) return EMPTY_WORKSPACES;
-    try {
-        return await getMyWorkspaces({ headers: { cookie }, cache: "no-store" });
-    } catch {
-        return EMPTY_WORKSPACES;
-    }
+    return getMyWorkspaces({ headers: { cookie }, cache: "no-store" });
 }
 
 export function createWorkspace(name: string) {
@@ -3541,12 +3546,14 @@ export function updateWorkspaceIdentity(
     timezone: string | null,
     expectedName: string,
     expectedTimezone: string | null,
+    expectedIdentityVersion: number,
 ) {
     return patchJson<Types.WorkspaceIdentity>(`/api/workspaces/${id}`, {
         name,
         timezone,
         expectedName,
         expectedTimezone,
+        expectedIdentityVersion,
     });
 }
 

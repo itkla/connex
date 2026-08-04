@@ -92,7 +92,8 @@ public class WorkspaceController {
             request.getName(),
             request.getTimezone(),
             request.getExpectedName(),
-            request.getExpectedTimezone());
+            request.getExpectedTimezone(),
+            request.getExpectedIdentityVersion());
     }
 
     @GetMapping("/pending")

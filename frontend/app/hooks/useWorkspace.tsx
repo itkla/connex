@@ -3,13 +3,18 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import type { OrganizationIdentity, Workspace, WorkspaceIdentity } from "@/app/lib/types";
+import type { Workspace } from "@/app/lib/types";
 import { createWorkspace, switchWorkspace } from "@/app/lib/api";
 import {
     adoptWorkspaces,
     applyOrganizationIdentity,
     applyWorkspaceIdentity,
+    preservePublishedOrganizationIdentities,
+    preservePublishedWorkspaceIdentities,
+    restoreOrganizationIdentity as restorePublishedOrganizationIdentity,
     restoreWorkspaceIdentity as restorePublishedWorkspaceIdentity,
+    type PublishedOrganizationIdentity,
+    type PublishedWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
 
 type PublishActiveWorkspace = (id: number | null) => void;
@@ -30,15 +35,62 @@ type WorkspaceContextValue = {
     runSelectionChange: SelectionChangeRunner;
     switchTo: (id: number) => Promise<void>;
     create: (name: string) => Promise<Workspace>;
-    publishWorkspaceIdentity: (
-        identity: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
-    ) => void;
+    publishWorkspaceIdentity: (identity: PublishedWorkspaceIdentity) => void;
     restoreWorkspaceIdentity: (
-        expected: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
-        replacement: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+        expected: PublishedWorkspaceIdentity,
+        replacement: PublishedWorkspaceIdentity,
     ) => void;
-    publishOrganizationIdentity: (identity: Pick<OrganizationIdentity, "id" | "name">) => void;
+    publishOrganizationIdentity: (identity: PublishedOrganizationIdentity) => void;
+    restoreOrganizationIdentity: (
+        expected: PublishedOrganizationIdentity,
+        replacement: PublishedOrganizationIdentity,
+    ) => void;
 };
+
+type WorkspaceSnapshotState = {
+    workspaces: Workspace[];
+    consumedWorkspaces: Workspace[];
+    workspaceIdentities: PublishedWorkspaceIdentity[];
+    organizationIdentities: PublishedOrganizationIdentity[];
+};
+
+function upsertWorkspaceIdentity(
+    identities: PublishedWorkspaceIdentity[],
+    identity: PublishedWorkspaceIdentity,
+): PublishedWorkspaceIdentity[] {
+    const current = identities.find(({ id }) => id === identity.id);
+    if (current && current.identityVersion > identity.identityVersion) return identities;
+    return [...identities.filter(({ id }) => id !== identity.id), identity];
+}
+
+function upsertOrganizationIdentity(
+    identities: PublishedOrganizationIdentity[],
+    identity: PublishedOrganizationIdentity,
+): PublishedOrganizationIdentity[] {
+    const current = identities.find(({ id }) => id === identity.id);
+    if (current && current.identityVersion > identity.identityVersion) return identities;
+    return [...identities.filter(({ id }) => id !== identity.id), identity];
+}
+
+function sameWorkspaceIdentity(
+    left: PublishedWorkspaceIdentity,
+    right: PublishedWorkspaceIdentity,
+): boolean {
+    return left.id === right.id
+        && left.name === right.name
+        && left.slug === right.slug
+        && left.timezone === right.timezone
+        && left.identityVersion === right.identityVersion;
+}
+
+function sameOrganizationIdentity(
+    left: PublishedOrganizationIdentity,
+    right: PublishedOrganizationIdentity,
+): boolean {
+    return left.id === right.id
+        && left.name === right.name
+        && left.identityVersion === right.identityVersion;
+}
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
@@ -56,6 +108,9 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
  * Adopting the payload during render rather than from an effect is deliberate: an effect would
  * commit one frame of exactly that stale chrome before correcting it, which is the defect in
  * miniature. {@link adoptWorkspaces} settles what a payload may overwrite.
+ * Identity values published by a mutation remain protected until a server payload carries the
+ * matching or a newer identity version. A failed optimistic mutation releases that protection
+ * before refreshing, allowing the authoritative server identity to replace the rollback value.
  *
  * Which workspace is active is never adopted from a refreshed prop. A server render that began
  * before {@link WorkspaceContextValue.switchTo} set the cookie can resolve after it, and the payload
@@ -84,17 +139,39 @@ export function WorkspaceProvider({
     children: React.ReactNode;
 }) {
     const router = useRouter();
-    const [workspaces, setWorkspaces] = useState(initialWorkspaces);
+    const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshotState>({
+        workspaces: initialWorkspaces,
+        consumedWorkspaces: initialWorkspaces,
+        workspaceIdentities: [],
+        organizationIdentities: [],
+    });
     const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId);
     const [switching, setSwitching] = useState(false);
-    const [publishedWorkspaces, setPublishedWorkspaces] = useState(initialWorkspaces);
     const activeWorkspaceIdRef = useRef(initialActiveId);
     const switchingRef = useRef(false);
 
-    if (publishedWorkspaces !== initialWorkspaces) {
-        setPublishedWorkspaces(initialWorkspaces);
-        setWorkspaces(adoptWorkspaces(workspaces, publishedWorkspaces, initialWorkspaces));
+    if (workspaceSnapshot.consumedWorkspaces !== initialWorkspaces) {
+        const adopted = adoptWorkspaces(
+            workspaceSnapshot.workspaces,
+            workspaceSnapshot.consumedWorkspaces,
+            initialWorkspaces,
+        );
+        const workspaceIdentityResult = preservePublishedWorkspaceIdentities(
+            adopted,
+            workspaceSnapshot.workspaceIdentities,
+        );
+        const organizationIdentityResult = preservePublishedOrganizationIdentities(
+            workspaceIdentityResult.workspaces,
+            workspaceSnapshot.organizationIdentities,
+        );
+        setWorkspaceSnapshot({
+            workspaces: organizationIdentityResult.workspaces,
+            consumedWorkspaces: initialWorkspaces,
+            workspaceIdentities: workspaceIdentityResult.pending,
+            organizationIdentities: organizationIdentityResult.pending,
+        });
     }
+    const workspaces = workspaceSnapshot.workspaces;
 
     const publishActiveWorkspace = useCallback((id: number | null) => {
         activeWorkspaceIdRef.current = id;
@@ -102,27 +179,73 @@ export function WorkspaceProvider({
     }, []);
 
     const publishWorkspace = useCallback((workspace: Workspace) => {
-        setWorkspaces((previous) => previous.some(({ id }) => id === workspace.id)
-            ? previous.map((held) => held.id === workspace.id ? workspace : held)
-            : [...previous, workspace]);
+        setWorkspaceSnapshot((previous) => ({
+            ...previous,
+            workspaces: previous.workspaces.some(({ id }) => id === workspace.id)
+                ? previous.workspaces.map((held) => held.id === workspace.id ? workspace : held)
+                : [...previous.workspaces, workspace],
+        }));
     }, []);
 
-    const publishWorkspaceIdentity = useCallback((identity: Pick<
-        WorkspaceIdentity,
-        "id" | "name" | "slug" | "timezone"
-    >) => {
-        setWorkspaces((previous) => applyWorkspaceIdentity(previous, identity));
+    const publishWorkspaceIdentity = useCallback((identity: PublishedWorkspaceIdentity) => {
+        setWorkspaceSnapshot((previous) => ({
+            ...previous,
+            workspaces: applyWorkspaceIdentity(previous.workspaces, identity),
+            workspaceIdentities: upsertWorkspaceIdentity(previous.workspaceIdentities, identity),
+        }));
     }, []);
 
     const restoreWorkspaceIdentity = useCallback((
-        expected: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
-        replacement: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+        expected: PublishedWorkspaceIdentity,
+        replacement: PublishedWorkspaceIdentity,
     ) => {
-        setWorkspaces((previous) => restorePublishedWorkspaceIdentity(previous, expected, replacement));
+        setWorkspaceSnapshot((previous) => {
+            const restored = restorePublishedWorkspaceIdentity(previous.workspaces, expected, replacement);
+            const workspaceIdentities = previous.workspaceIdentities.filter(
+                (identity) => !sameWorkspaceIdentity(identity, expected),
+            );
+            if (restored === previous.workspaces
+                && workspaceIdentities.length === previous.workspaceIdentities.length) return previous;
+            return {
+                ...previous,
+                workspaces: restored,
+                workspaceIdentities,
+            };
+        });
     }, []);
 
-    const publishOrganizationIdentity = useCallback((identity: Pick<OrganizationIdentity, "id" | "name">) => {
-        setWorkspaces((previous) => applyOrganizationIdentity(previous, identity));
+    const publishOrganizationIdentity = useCallback((identity: PublishedOrganizationIdentity) => {
+        setWorkspaceSnapshot((previous) => ({
+            ...previous,
+            workspaces: applyOrganizationIdentity(previous.workspaces, identity),
+            organizationIdentities: upsertOrganizationIdentity(
+                previous.organizationIdentities,
+                identity,
+            ),
+        }));
+    }, []);
+
+    const restoreOrganizationIdentity = useCallback((
+        expected: PublishedOrganizationIdentity,
+        replacement: PublishedOrganizationIdentity,
+    ) => {
+        setWorkspaceSnapshot((previous) => {
+            const restored = restorePublishedOrganizationIdentity(
+                previous.workspaces,
+                expected,
+                replacement,
+            );
+            const organizationIdentities = previous.organizationIdentities.filter(
+                (identity) => !sameOrganizationIdentity(identity, expected),
+            );
+            if (restored === previous.workspaces
+                && organizationIdentities.length === previous.organizationIdentities.length) return previous;
+            return {
+                ...previous,
+                workspaces: restored,
+                organizationIdentities,
+            };
+        });
     }, []);
 
     const runSelectionChange = useCallback(async <T,>(
@@ -198,6 +321,7 @@ export function WorkspaceProvider({
             publishWorkspaceIdentity,
             restoreWorkspaceIdentity,
             publishOrganizationIdentity,
+            restoreOrganizationIdentity,
         }),
         [
             workspaces,
@@ -211,6 +335,7 @@ export function WorkspaceProvider({
             publishWorkspaceIdentity,
             restoreWorkspaceIdentity,
             publishOrganizationIdentity,
+            restoreOrganizationIdentity,
         ],
     );
 

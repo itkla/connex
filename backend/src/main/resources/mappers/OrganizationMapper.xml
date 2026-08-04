@@ -8,17 +8,19 @@
   </insert>
 
   <select id="getById" resultType="Organization">
-    SELECT id, name, slug, created_at, updated_at FROM organization WHERE id = #{id}
+    SELECT id, name, slug, identity_version AS identityVersion, created_at, updated_at
+    FROM organization
+    WHERE id = #{id}
   </select>
 
   <select id="getActiveById" resultType="Organization">
-    SELECT id, name, slug, created_at, updated_at
+    SELECT id, name, slug, identity_version AS identityVersion, created_at, updated_at
     FROM organization
     WHERE id = #{id} AND lifecycle_state = 'active'
   </select>
 
   <select id="lockActiveIdentity" resultType="Organization">
-    SELECT id, name, slug, created_at, updated_at
+    SELECT id, name, slug, identity_version AS identityVersion, created_at, updated_at
     FROM organization
     WHERE id = #{id} AND lifecycle_state = 'active'
     FOR UPDATE
@@ -26,7 +28,7 @@
 
   <update id="updateName">
     UPDATE organization
-    SET name = #{name}
+    SET name = #{name}, identity_version = identity_version + 1
     WHERE id = #{id} AND lifecycle_state = 'active'
   </update>
 

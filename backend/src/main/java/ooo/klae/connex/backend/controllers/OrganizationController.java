@@ -32,7 +32,9 @@ public class OrganizationController {
         return organizationService.rename(
             orgId,
             authService.getCurrentUser().getId(),
-            request.getName());
+            request.getName(),
+            request.getExpectedName(),
+            request.getExpectedIdentityVersion());
     }
 
     @GetMapping("/{orgId}/layout")

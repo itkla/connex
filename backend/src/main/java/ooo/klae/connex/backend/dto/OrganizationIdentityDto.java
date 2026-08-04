@@ -5,5 +5,6 @@ public record OrganizationIdentityDto(
         int id,
         String name,
         String slug,
+        long identityVersion,
         String updatedAt) {
 }

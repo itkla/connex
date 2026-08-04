@@ -19,9 +19,11 @@ function workspace(role: WorkspaceRole, orgRole: OrgRole | null = null): Workspa
         name: "Acme",
         slug: "acme",
         timezone: null,
+        identityVersion: 0,
         role,
         orgId: 1,
         orgName: "Acme Inc",
+        orgIdentityVersion: 0,
         orgRole,
     };
 }

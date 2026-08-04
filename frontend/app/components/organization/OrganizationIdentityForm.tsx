@@ -17,14 +17,16 @@ import { Label } from "@/components/ui/label";
 export default function OrganizationIdentityForm({
     organization,
     onUpdated,
+    onReconcile,
 }: {
     organization: OrganizationIdentity;
     onUpdated: (organization: OrganizationIdentity) => void;
+    onReconcile: () => void;
 }) {
     const t = useTranslations("OrgOverview");
     const router = useRouter();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
-    const { publishOrganizationIdentity } = useWorkspace();
+    const { publishOrganizationIdentity, restoreOrganizationIdentity } = useWorkspace();
     const [name, setName] = useState(organization.name);
     const [fieldError, setFieldError] = useState("");
     const [saving, setSaving] = useState(false);
@@ -47,7 +49,12 @@ export default function OrganizationIdentityForm({
         publishOrganizationIdentity(optimistic);
         setSaving(true);
         try {
-            const updated = await updateOrganizationIdentity(organization.id, normalizedName);
+            const updated = await updateOrganizationIdentity(
+                organization.id,
+                normalizedName,
+                organization.name,
+                organization.identityVersion,
+            );
             onUpdated(updated);
             publishOrganizationIdentity(updated);
             setName(updated.name);
@@ -55,11 +62,20 @@ export default function OrganizationIdentityForm({
             router.refresh();
         } catch (error) {
             onUpdated(organization);
-            publishOrganizationIdentity(organization);
+            restoreOrganizationIdentity(optimistic, organization);
+            let reconcile = false;
             if (error instanceof ApiError && error.fieldErrors?.name) {
                 setFieldError(error.fieldErrors.name);
+            } else if (error instanceof ApiError && error.status === 409) {
+                toastError(t("stale"));
+                reconcile = true;
             } else if (!handlePasskeyStepUpError(error)) {
                 toastError(error instanceof Error ? error.message : t("saveFailed"));
+                reconcile = true;
+            }
+            if (reconcile) {
+                onReconcile();
+                router.refresh();
             }
         } finally {
             setSaving(false);

@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.dto.OrganizationIdentityDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -36,18 +37,20 @@ class OrganizationServiceIntegrationTest extends AbstractServiceTest {
         String slug = organization.getSlug();
 
         OrganizationIdentityDto renamed = organizationService.rename(
-            organization.getId(), currentUser.getId(), "  Renamed Org  ");
+            organization.getId(), currentUser.getId(), "  Renamed Org  ", "Original Org", 0L);
 
         assertEquals("Renamed Org", renamed.name());
         assertEquals(slug, renamed.slug());
+        assertEquals(1L, renamed.identityVersion());
         Organization persisted = organizationMapper.getActiveById(organization.getId());
         assertEquals("Renamed Org", persisted.getName());
         assertEquals(slug, persisted.getSlug());
-        assertEquals("Renamed Org", workspaceMapper.getMembershipsForUser(currentUser.getId()).stream()
+        var childMembership = workspaceMapper.getMembershipsForUser(currentUser.getId()).stream()
             .filter(membership -> membership.getId() == child.getId())
             .findFirst()
-            .orElseThrow()
-            .getOrgName());
+            .orElseThrow();
+        assertEquals("Renamed Org", childMembership.getOrgName());
+        assertEquals(1L, childMembership.getOrgIdentityVersion());
         assertEquals(1, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE action = 'org.rename' AND entity_id = ? "
                 + "AND workspace_id IS NULL AND org_id = ?",
@@ -70,18 +73,31 @@ class OrganizationServiceIntegrationTest extends AbstractServiceTest {
         orgMemberMapper.addMember(organization.getId(), otherOwner.getId(), "owner");
 
         assertThrows(ForbiddenException.class, () -> organizationService.rename(
-            organization.getId(), currentUser.getId(), "Probe"));
+            organization.getId(), currentUser.getId(), "Probe", "Protected Org", 0L));
         assertThrows(ForbiddenException.class, () -> organizationService.rename(
-            organization.getId(), currentUser.getId(), " "));
+            organization.getId(), currentUser.getId(), " ", "Protected Org", 0L));
         assertEquals("Protected Org", organizationMapper.getActiveById(organization.getId()).getName());
 
         orgMemberMapper.addMember(organization.getId(), currentUser.getId(), "admin");
         assertThrows(BadRequestException.class, () -> organizationService.rename(
-            organization.getId(), currentUser.getId(), null));
+            organization.getId(), currentUser.getId(), null, "Protected Org", 0L));
         assertThrows(BadRequestException.class, () -> organizationService.rename(
-            organization.getId(), currentUser.getId(), " "));
+            organization.getId(), currentUser.getId(), " ", "Protected Org", 0L));
         assertThrows(BadRequestException.class, () -> organizationService.rename(
-            organization.getId(), currentUser.getId(), "x".repeat(129)));
+            organization.getId(), currentUser.getId(), "x".repeat(129), "Protected Org", 0L));
+    }
+
+    @Test
+    void renameRejectsAStaleEditorWithoutOverwritingTheCommittedName() {
+        Organization organization = newOrganization("Original Org");
+        orgMemberMapper.addMember(organization.getId(), currentUser.getId(), "admin");
+
+        organizationService.rename(
+            organization.getId(), currentUser.getId(), "First Rename", "Original Org", 0L);
+
+        assertThrows(ConflictException.class, () -> organizationService.rename(
+            organization.getId(), currentUser.getId(), "Stale Rename", "First Rename", 0L));
+        assertEquals("First Rename", organizationMapper.getActiveById(organization.getId()).getName());
     }
 
     @Test

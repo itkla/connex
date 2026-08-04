@@ -10,5 +10,6 @@ public record WorkspaceIdentityDto(
         String name,
         String slug,
         String timezone,
+        long identityVersion,
         String updatedAt) {
 }

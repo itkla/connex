@@ -39,20 +39,22 @@ class OrganizationControllerTest {
     void renameDelegatesCanonicalIdentityMutation() {
         RenameOrganizationRequest request = new RenameOrganizationRequest();
         request.setName("Renamed Org");
+        request.setExpectedName("Original Org");
+        request.setExpectedIdentityVersion(4L);
         OrganizationIdentityDto expected = new OrganizationIdentityDto(
-            3, "Renamed Org", "immutable", "2026-08-03 12:00:00");
-        when(organizationService.rename(3, 7, "Renamed Org")).thenReturn(expected);
+            3, "Renamed Org", "immutable", 5L, "2026-08-03 12:00:00");
+        when(organizationService.rename(3, 7, "Renamed Org", "Original Org", 4L)).thenReturn(expected);
 
         OrganizationIdentityDto actual = controller.rename(3, request);
 
         assertSame(expected, actual);
-        verify(organizationService).rename(3, 7, "Renamed Org");
+        verify(organizationService).rename(3, 7, "Renamed Org", "Original Org", 4L);
     }
 
     @Test
     void layoutDelegatesIndependentCursorsAndLimit() {
         OrganizationLayoutDto expected = new OrganizationLayoutDto(
-            new OrganizationIdentityDto(3, "Org", "org", null),
+            new OrganizationIdentityDto(3, "Org", "org", 4L, null),
             List.of(),
             null,
             List.of(),

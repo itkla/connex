@@ -14,6 +14,7 @@ public class Workspace {
     private String name;
     private String slug;
     private String timezone;
+    private long identityVersion;
     private String createdAt;
     private String updatedAt;
 }

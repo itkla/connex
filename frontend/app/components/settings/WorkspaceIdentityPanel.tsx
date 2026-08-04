@@ -64,6 +64,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
             name: workspace.name,
             slug: workspace.slug,
             timezone: workspace.timezone,
+            identityVersion: workspace.identityVersion,
         };
         const optimistic = { ...previous, name: normalizedName, timezone };
         publishWorkspaceIdentity(optimistic);
@@ -75,6 +76,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
                 timezone,
                 previous.name,
                 previous.timezone,
+                previous.identityVersion,
             );
             publishWorkspaceIdentity(updated);
             setName(updated.name);

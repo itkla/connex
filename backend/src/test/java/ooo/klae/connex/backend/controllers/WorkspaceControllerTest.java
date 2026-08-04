@@ -103,15 +103,16 @@ class WorkspaceControllerTest {
         request.setTimezone("Pacific/Honolulu");
         request.setExpectedName("Original");
         request.setExpectedTimezone(null);
+        request.setExpectedIdentityVersion(4L);
         WorkspaceIdentityDto expected = new WorkspaceIdentityDto(
-            9, 3, "Renamed", "immutable", "Pacific/Honolulu", "2026-08-03 12:00:00");
+            9, 3, "Renamed", "immutable", "Pacific/Honolulu", 5L, "2026-08-03 12:00:00");
         when(workspaceService.updateIdentity(
-            9, 7, "Renamed", "Pacific/Honolulu", "Original", null)).thenReturn(expected);
+            9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L)).thenReturn(expected);
 
         WorkspaceIdentityDto actual = controller.updateIdentity(9, request);
 
         assertSame(expected, actual);
         verify(workspaceService).updateIdentity(
-            9, 7, "Renamed", "Pacific/Honolulu", "Original", null);
+            9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L);
     }
 }

@@ -28,7 +28,8 @@ class OrganizationSettingsMapperXmlTest {
             Map.of("workspaceId", 7, "name", "Renamed", "timezone", "UTC"));
         String sql = compact(update.getSql());
 
-        assertTrue(sql.contains("SET name = ?, timezone = ?"));
+        assertTrue(sql.contains(
+            "SET name = ?, timezone = ?, identity_version = identity_version + 1"));
         assertTrue(sql.contains("WHERE id = ? AND lifecycle_state = 'active'"));
         assertFalse(sql.contains("slug ="));
         assertFalse(sql.contains("org_id ="));
@@ -56,11 +57,30 @@ class OrganizationSettingsMapperXmlTest {
             "lockActiveIdentity",
             Map.of("id", 3)).getSql());
 
-        assertTrue(update.contains("SET name = ?"));
+        assertTrue(update.contains("SET name = ?, identity_version = identity_version + 1"));
         assertTrue(update.contains("WHERE id = ? AND lifecycle_state = 'active'"));
         assertFalse(update.contains("slug ="));
         assertTrue(lock.contains("lifecycle_state = 'active'"));
         assertTrue(lock.endsWith("FOR UPDATE"));
+    }
+
+    @Test
+    void workspaceMembershipProjectionCarriesBothIdentityVersions() throws Exception {
+        Configuration configuration = configuration();
+        String memberships = compact(boundSql(
+            configuration,
+            WorkspaceMapper.class,
+            "getMembershipsForUser",
+            Map.of("userId", 7)).getSql());
+        String organization = compact(boundSql(
+            configuration,
+            OrganizationMapper.class,
+            "getActiveById",
+            Map.of("id", 3)).getSql());
+
+        assertTrue(memberships.contains("w.identity_version AS identityVersion"));
+        assertTrue(memberships.contains("o.identity_version AS orgIdentityVersion"));
+        assertTrue(organization.contains("identity_version AS identityVersion"));
     }
 
     @Test
@@ -120,6 +140,17 @@ class OrganizationSettingsMapperXmlTest {
         assertEquals(1, migration.chars().filter(character -> character == ';').count());
     }
 
+    @Test
+    void identityVersionMigrationSeedsBothIdentityRootsAtZero() throws Exception {
+        String migration = resource("db/migration/control/V147__identity_versions.sql");
+        String sql = compact(migration);
+
+        assertTrue(sql.contains("ALTER TABLE workspace"));
+        assertTrue(sql.contains("ALTER TABLE organization"));
+        assertEquals(2, count(sql, "ADD COLUMN identity_version BIGINT NOT NULL DEFAULT 0"));
+        assertEquals(2, migration.chars().filter(character -> character == ';').count());
+    }
+
     private static Configuration configuration() throws Exception {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAliases(
@@ -159,5 +190,9 @@ class OrganizationSettingsMapperXmlTest {
 
     private static String compact(String sql) {
         return sql.replaceAll("\\s+", " ").trim();
+    }
+
+    private static int count(String value, String pattern) {
+        return value.split(java.util.regex.Pattern.quote(pattern), -1).length - 1;
     }
 }

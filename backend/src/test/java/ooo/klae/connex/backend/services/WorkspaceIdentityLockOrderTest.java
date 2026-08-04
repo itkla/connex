@@ -91,6 +91,7 @@ class WorkspaceIdentityLockOrderTest {
     void mutationLocksAndRevalidatesBeforeWritingAndScopedAudit() {
         Workspace before = workspace("Old Name", null);
         Workspace after = workspace("New Name", null);
+        after.setIdentityVersion(1L);
         WorkspaceMember membership = membership("admin", null, "active");
         when(workspaceMapper.getMemberRoleId(WORKSPACE_ID, ACTOR_ID))
             .thenReturn(null);
@@ -104,9 +105,10 @@ class WorkspaceIdentityLockOrderTest {
         when(workspaceMapper.getActiveById(WORKSPACE_ID)).thenReturn(after);
 
         WorkspaceIdentityDto result = service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null);
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null, 0L);
 
         assertEquals("New Name", result.name());
+        assertEquals(1L, result.identityVersion());
         InOrder order = inOrder(
             userMapper, workspaceMapper, organizationMapper, sessionSecurityService, auditService);
         order.verify(userMapper).isAccountDeletionReserved(ACTOR_ID);
@@ -145,7 +147,7 @@ class WorkspaceIdentityLockOrderTest {
             .thenReturn(membership);
 
         assertThrows(ConflictException.class, () -> service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Stale Name", null));
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Stale Name", null, 0L));
 
         InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper);
         order.verify(userMapper).lockById(ACTOR_ID);
@@ -155,6 +157,25 @@ class WorkspaceIdentityLockOrderTest {
         verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
         verify(auditService, never()).recordScoped(
             any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void staleIdentityVersionRefusesMutationEvenWhenContentMatches() {
+        Workspace before = workspace("Old Name", null);
+        before.setIdentityVersion(2L);
+        WorkspaceMember membership = membership("admin", null, "active");
+        when(workspaceMapper.getMemberRoleId(WORKSPACE_ID, ACTOR_ID)).thenReturn(null);
+        when(workspaceMapper.getRole(WORKSPACE_ID, ACTOR_ID)).thenReturn("admin");
+        when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(workspaceMapper.lockActiveIdentity(WORKSPACE_ID)).thenReturn(before);
+        when(organizationMapper.lockActiveByIdForShare(ORG_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
+            .thenReturn(membership);
+
+        assertThrows(ConflictException.class, () -> service.updateIdentity(
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null, 1L));
+
+        verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
     }
 
     @Test
@@ -173,7 +194,7 @@ class WorkspaceIdentityLockOrderTest {
         when(roleMapper.lockPermissions(WORKSPACE_ID, 5)).thenReturn(List.of());
 
         assertThrows(ForbiddenException.class, () -> service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null));
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null, 0L));
 
         InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper, roleMapper);
         order.verify(userMapper).lockById(ACTOR_ID);
@@ -197,7 +218,7 @@ class WorkspaceIdentityLockOrderTest {
         when(organizationMapper.lockActiveByIdForShare(ORG_ID)).thenReturn(null);
 
         assertThrows(ForbiddenException.class, () -> service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null));
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null, 0L));
 
         InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper);
         order.verify(userMapper).lockById(ACTOR_ID);
@@ -222,7 +243,7 @@ class WorkspaceIdentityLockOrderTest {
             .thenReturn(membership("admin", null, "pending"));
 
         assertThrows(ForbiddenException.class, () -> service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null));
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null, 0L));
 
         verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
     }

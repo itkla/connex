@@ -1367,6 +1367,7 @@ public class ReportService {
 
     private PeriodWindow resolvePeriod(
             String cadence, ReportRange configured, ReportGenerateRequest request, String bucket) {
+        ZoneId zone = ZoneId.of(workspaceService.getCurrentAnalyticsTimezone());
         LocalDate startOverride = request == null ? null : request.start();
         LocalDate endOverride = request == null ? null : request.end();
         if ((startOverride == null) != (endOverride == null)) {
@@ -1381,7 +1382,7 @@ public class ReportService {
             start = configured.start();
             end = configured.end();
         } else {
-            end = LocalDate.now(clock.withZone(userZone()));
+            end = LocalDate.now(clock.withZone(zone));
             start = switch (cadence) {
                 case "weekly" -> end.minusDays(6);
                 case "monthly" -> end.withDayOfMonth(1);
@@ -1411,7 +1412,7 @@ public class ReportService {
             priorEnd = start.minusDays(1);
             priorStart = priorEnd.minusDays(days - 1);
         }
-        return new PeriodWindow(start, end, priorStart, priorEnd, userZone(), cadence);
+        return new PeriodWindow(start, end, priorStart, priorEnd, zone, cadence);
     }
 
     private static void validateDates(LocalDate start, LocalDate end) {
@@ -1451,15 +1452,6 @@ public class ReportService {
 
     private static boolean hasValues(List<?> values) {
         return values != null && !values.isEmpty();
-    }
-
-    private ZoneId userZone() {
-        String timezone = authService.getCurrentUser().getTimezone();
-        try {
-            return ZoneId.of(timezone == null || timezone.isBlank() ? "UTC" : timezone);
-        } catch (DateTimeException exception) {
-            return ZoneOffset.UTC;
-        }
     }
 
     private ReportDefinition requireDefinition(int id) {

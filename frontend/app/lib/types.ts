@@ -2792,9 +2792,11 @@ export type Workspace = {
     name: string;
     slug: string;
     timezone: string | null;
+    identityVersion: number;
     role: WorkspaceRole;
     orgId: number;
     orgName: string;
+    orgIdentityVersion: number;
     orgRole: OrgRole | null;
 };
 
@@ -2804,6 +2806,7 @@ export type WorkspaceIdentity = {
     name: string;
     slug: string;
     timezone: string | null;
+    identityVersion: number;
     updatedAt: string;
 };
 
@@ -2811,6 +2814,7 @@ export type OrganizationIdentity = {
     id: number;
     name: string;
     slug: string;
+    identityVersion: number;
     updatedAt: string;
 };
 

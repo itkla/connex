@@ -25,6 +25,7 @@
     "save": "Save changes",
     "saving": "Saving",
     "saved": "Organization settings updated.",
+    "stale": "The organization changed while you were editing. Refresh and try again.",
     "saveFailed": "Could not update the organization.",
     "layoutTitle": "Organization layout",
     "layoutDescription": "See how organization authority, workspaces, and the memberships you may access fit together.",

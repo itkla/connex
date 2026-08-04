@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
+    ArrowPathIcon,
     ArrowTopRightOnSquareIcon,
     BuildingOffice2Icon,
     ChevronDownIcon,
@@ -11,7 +12,6 @@ import {
     TableCellsIcon,
     UserGroupIcon,
 } from "@heroicons/react/24/outline";
-import { Loader2Icon } from "lucide-react";
 
 import type {
     OrganizationIdentity,
@@ -255,54 +255,120 @@ function TableView({
 >) {
     const t = useTranslations("OrgOverview");
     return (
-        <div className="overflow-x-auto">
-            <table className="w-full min-w-2xl border-collapse text-left text-sm">
-                <caption className="sr-only">{t("tableCaption")}</caption>
-                <thead>
-                    <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
-                        <th scope="col" className="px-4 py-3 font-medium">{t("workspaceColumn")}</th>
-                        <th scope="col" className="px-4 py-3 font-medium">{t("timezoneColumn")}</th>
-                        <th scope="col" className="px-4 py-3 font-medium">{t("membersColumn")}</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                    {workspaces.map((workspace) => (
-                        <tr key={workspace.id} className="align-top">
-                            <th scope="row" className="px-4 py-4 font-normal">
-                                {workspace.rosterVisible ? (
-                                    <button
-                                        type="button"
-                                        disabled={switching}
-                                        className="rounded-md text-left font-semibold text-foreground outline-none hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
-                                        onClick={() => onNavigate(workspace.id, "/dashboard")}
-                                    >
-                                        {workspace.name}
-                                    </button>
-                                ) : (
-                                    <span className="font-semibold text-foreground">{workspace.name}</span>
-                                )}
-                                {workspace.id === activeWorkspaceId ? (
-                                    <Badge variant="secondary" className="ml-2">{t("currentWorkspace")}</Badge>
-                                ) : null}
-                                <p className="mt-1 font-mono text-xs text-muted-foreground">{workspace.slug}</p>
-                            </th>
-                            <td className="px-4 py-4 text-muted-foreground">
-                                {workspace.timezone ?? t("accountTimezone")}
-                            </td>
-                            <td className="px-4 py-4">
-                                <MemberLinks workspace={workspace} switching={switching} onNavigate={onNavigate} />
-                                {workspace.membershipsTruncated ? (
-                                    <p className="mt-2 text-xs text-muted-foreground">{t("rosterTruncated")}</p>
-                                ) : null}
-                            </td>
+        <>
+            <ul className="divide-y divide-border md:hidden" aria-label={t("tableCaption")}>
+                {workspaces.map((workspace) => (
+                    <li key={workspace.id} className="space-y-4 p-5">
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <p className="truncate font-semibold text-foreground">{workspace.name}</p>
+                                    {workspace.id === activeWorkspaceId ? (
+                                        <Badge variant="secondary">{t("currentWorkspace")}</Badge>
+                                    ) : null}
+                                </div>
+                                <p className="truncate font-mono text-xs text-muted-foreground">{workspace.slug}</p>
+                            </div>
+                            {workspace.rosterVisible ? (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={switching}
+                                    onClick={() => onNavigate(workspace.id, "/dashboard")}
+                                >
+                                    {t("openWorkspace")}
+                                    <ArrowTopRightOnSquareIcon className="size-4" />
+                                </Button>
+                            ) : null}
+                        </div>
+                        <dl className="grid gap-4">
+                            <div className="grid gap-1">
+                                <dt className="text-xs font-medium text-muted-foreground">{t("timezoneColumn")}</dt>
+                                <dd className="text-sm text-foreground">
+                                    {workspace.timezone ?? t("accountTimezone")}
+                                </dd>
+                            </div>
+                            <div className="grid gap-2">
+                                <dt className="text-xs font-medium text-muted-foreground">{t("membersColumn")}</dt>
+                                <dd>
+                                    <MemberLinks
+                                        workspace={workspace}
+                                        switching={switching}
+                                        onNavigate={onNavigate}
+                                    />
+                                    {workspace.membershipsTruncated ? (
+                                        <p className="mt-2 text-xs text-muted-foreground">{t("rosterTruncated")}</p>
+                                    ) : null}
+                                </dd>
+                            </div>
+                        </dl>
+                    </li>
+                ))}
+                {workspaces.length === 0 ? (
+                    <li className="px-6 py-12 text-center text-sm text-muted-foreground">
+                        {t("workspacesEmpty")}
+                    </li>
+                ) : null}
+            </ul>
+            <div className="hidden md:block">
+                <table className="w-full border-collapse text-left text-sm">
+                    <caption className="sr-only">{t("tableCaption")}</caption>
+                    <thead>
+                        <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+                            <th scope="col" className="px-4 py-3 font-medium">{t("workspaceColumn")}</th>
+                            <th scope="col" className="px-4 py-3 font-medium">{t("timezoneColumn")}</th>
+                            <th scope="col" className="px-4 py-3 font-medium">{t("membersColumn")}</th>
                         </tr>
-                    ))}
-                    {workspaces.length === 0 ? (
-                        <tr><td colSpan={3} className="px-6 py-12 text-center text-muted-foreground">{t("workspacesEmpty")}</td></tr>
-                    ) : null}
-                </tbody>
-            </table>
-        </div>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                        {workspaces.map((workspace) => (
+                            <tr key={workspace.id} className="align-top">
+                                <th scope="row" className="px-4 py-4 font-normal">
+                                    {workspace.rosterVisible ? (
+                                        <button
+                                            type="button"
+                                            disabled={switching}
+                                            className="rounded-md text-left font-semibold text-foreground outline-none hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
+                                            onClick={() => onNavigate(workspace.id, "/dashboard")}
+                                        >
+                                            {workspace.name}
+                                        </button>
+                                    ) : (
+                                        <span className="font-semibold text-foreground">{workspace.name}</span>
+                                    )}
+                                    {workspace.id === activeWorkspaceId ? (
+                                        <Badge variant="secondary" className="ml-2">{t("currentWorkspace")}</Badge>
+                                    ) : null}
+                                    <p className="mt-1 font-mono text-xs text-muted-foreground">{workspace.slug}</p>
+                                </th>
+                                <td className="px-4 py-4 text-muted-foreground">
+                                    {workspace.timezone ?? t("accountTimezone")}
+                                </td>
+                                <td className="px-4 py-4">
+                                    <MemberLinks
+                                        workspace={workspace}
+                                        switching={switching}
+                                        onNavigate={onNavigate}
+                                    />
+                                    {workspace.membershipsTruncated ? (
+                                        <p className="mt-2 text-xs text-muted-foreground">
+                                            {t("rosterTruncated")}
+                                        </p>
+                                    ) : null}
+                                </td>
+                            </tr>
+                        ))}
+                        {workspaces.length === 0 ? (
+                            <tr>
+                                <td colSpan={3} className="px-6 py-12 text-center text-muted-foreground">
+                                    {t("workspacesEmpty")}
+                                </td>
+                            </tr>
+                        ) : null}
+                    </tbody>
+                </table>
+            </div>
+        </>
     );
 }
 
@@ -395,7 +461,9 @@ export default function OrganizationLayoutPanel({
             {hasMore ? (
                 <div className="flex justify-center border-t border-border px-5 py-4">
                     <Button variant="outline" disabled={loadingMore} onClick={onLoadMore}>
-                        {loadingMore ? <Loader2Icon className="size-4 animate-spin" /> : null}
+                        {loadingMore ? (
+                            <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" />
+                        ) : null}
                         {loadingMore ? t("loadingMore") : t("loadMore")}
                     </Button>
                 </div>

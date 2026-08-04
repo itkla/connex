@@ -4,7 +4,8 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.WorkspaceMapper">
 
   <select id="getWorkspacesForUser" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.created_at, w.updated_at
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+           w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN workspace_member wm ON wm.workspace_id = w.id
     JOIN organization o ON o.id = w.org_id
@@ -14,8 +15,10 @@
   </select>
 
   <select id="getMembershipsForUser" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
-    SELECT w.id, w.name, w.slug, w.timezone, wm.role,
-           w.org_id AS orgId, o.name AS orgName, om.org_role AS orgRole
+    SELECT w.id, w.name, w.slug, w.timezone,
+           w.identity_version AS identityVersion, wm.role,
+           w.org_id AS orgId, o.name AS orgName,
+           o.identity_version AS orgIdentityVersion, om.org_role AS orgRole
     FROM workspace w
     JOIN workspace_member wm ON wm.workspace_id = w.id
     JOIN organization o ON o.id = w.org_id
@@ -26,8 +29,10 @@
   </select>
 
   <select id="getMembershipForUserForShare" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
-    SELECT w.id, w.name, w.slug, w.timezone, wm.role,
-           w.org_id AS orgId, o.name AS orgName, om.org_role AS orgRole
+    SELECT w.id, w.name, w.slug, w.timezone,
+           w.identity_version AS identityVersion, wm.role,
+           w.org_id AS orgId, o.name AS orgName,
+           o.identity_version AS orgIdentityVersion, om.org_role AS orgRole
     FROM workspace w
     JOIN workspace_member wm ON wm.workspace_id = w.id
     JOIN organization o ON o.id = w.org_id
@@ -38,20 +43,23 @@
   </select>
 
   <select id="getActiveById" resultType="Workspace">
-    SELECT id, org_id, name, slug, timezone, created_at, updated_at
+    SELECT id, org_id, name, slug, timezone,
+           identity_version AS identityVersion, created_at, updated_at
     FROM workspace
     WHERE id = #{workspaceId} AND lifecycle_state = 'active'
   </select>
 
   <select id="lockActiveIdentity" resultType="Workspace">
-    SELECT id, org_id, name, slug, timezone, created_at, updated_at
+    SELECT id, org_id, name, slug, timezone,
+           identity_version AS identityVersion, created_at, updated_at
     FROM workspace
     WHERE id = #{workspaceId} AND lifecycle_state = 'active'
     FOR UPDATE
   </select>
 
   <select id="getDefaultWorkspace" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.created_at, w.updated_at
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+           w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN organization o ON o.id = w.org_id
     WHERE w.slug = 'default'
@@ -208,7 +216,7 @@
 
   <update id="updateIdentity">
     UPDATE workspace
-    SET name = #{name}, timezone = #{timezone}
+    SET name = #{name}, timezone = #{timezone}, identity_version = identity_version + 1
     WHERE id = #{workspaceId} AND lifecycle_state = 'active'
   </update>
 
@@ -248,7 +256,8 @@
   </select>
 
   <select id="findByOrgId" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.created_at, w.updated_at
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+           w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN organization o ON o.id = w.org_id
     WHERE w.org_id = #{orgId}
@@ -257,7 +266,8 @@
   </select>
 
   <select id="findActiveByOrgIdPage" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.created_at, w.updated_at
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+           w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN organization o ON o.id = w.org_id
     WHERE w.org_id = #{orgId}
@@ -342,10 +352,14 @@
   </update>
 
   <select id="getPendingMemberships" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
-    SELECT w.id, w.name, w.slug, w.timezone, wm.role
+    SELECT w.id, w.name, w.slug, w.timezone,
+           w.identity_version AS identityVersion, wm.role,
+           w.org_id AS orgId, o.name AS orgName,
+           o.identity_version AS orgIdentityVersion, om.org_role AS orgRole
     FROM workspace w
     JOIN workspace_member wm ON wm.workspace_id = w.id
     JOIN organization o ON o.id = w.org_id
+    LEFT JOIN org_member om ON om.org_id = w.org_id AND om.user_id = wm.user_id
     WHERE wm.user_id = #{userId} AND wm.status = 'pending'
       AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
     ORDER BY w.name, w.id

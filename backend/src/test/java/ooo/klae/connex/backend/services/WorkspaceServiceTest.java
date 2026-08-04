@@ -34,6 +34,8 @@ class WorkspaceServiceTest extends AbstractServiceTest {
 
         assertNotEquals(0, created.getId());
         assertEquals("owner", created.getRole());
+        assertEquals(0L, created.getIdentityVersion());
+        assertEquals(0L, created.getOrgIdentityVersion());
         assertTrue(workspaceService.isMember(created.getId(), currentUser.getId()));
         assertEquals("owner", workspaceService.getRole(created.getId(), currentUser.getId()));
     }
@@ -112,14 +114,17 @@ class WorkspaceServiceTest extends AbstractServiceTest {
             "  Renamed Workspace  ",
             "Pacific/Honolulu",
             workspace.getName(),
-            null);
+            null,
+            0L);
 
         assertEquals("Renamed Workspace", updated.name());
         assertEquals("Pacific/Honolulu", updated.timezone());
         assertEquals(slug, updated.slug());
+        assertEquals(1L, updated.identityVersion());
         Workspace persisted = workspaceMapper.getActiveById(workspace.getId());
         assertEquals("Renamed Workspace", persisted.getName());
         assertEquals("Pacific/Honolulu", persisted.getTimezone());
+        assertEquals(1L, persisted.getIdentityVersion());
         assertEquals(slug, persisted.getSlug());
         assertEquals(1, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE action = 'workspace.rename' AND entity_id = ? "
@@ -152,7 +157,8 @@ class WorkspaceServiceTest extends AbstractServiceTest {
             workspace.getName(),
             "America/New_York",
             workspace.getName(),
-            null);
+            null,
+            0L);
 
         WorkspaceIdentityDto cleared = workspaceService.updateIdentity(
             workspace.getId(),
@@ -160,31 +166,33 @@ class WorkspaceServiceTest extends AbstractServiceTest {
             workspace.getName(),
             null,
             workspace.getName(),
-            "America/New_York");
+            "America/New_York",
+            1L);
 
         assertNull(cleared.timezone());
+        assertEquals(2L, cleared.identityVersion());
         assertNull(workspaceMapper.getActiveById(workspace.getId()).getTimezone());
     }
 
     @Test
     void updateIdentityRejectsInvalidNamesAndTimezones() {
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), null, null, workspace.getName(), null));
+            workspace.getId(), currentUser.getId(), null, null, workspace.getName(), null, 0L));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), " ", null, workspace.getName(), null));
+            workspace.getId(), currentUser.getId(), " ", null, workspace.getName(), null, 0L));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), "x".repeat(129), null, workspace.getName(), null));
+            workspace.getId(), currentUser.getId(), "x".repeat(129), null, workspace.getName(), null, 0L));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), workspace.getName(), " ", workspace.getName(), null));
+            workspace.getId(), currentUser.getId(), workspace.getName(), " ", workspace.getName(), null, 0L));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
             workspace.getId(), currentUser.getId(), workspace.getName(), "Not/A_Real_Zone",
-            workspace.getName(), null));
+            workspace.getName(), null, 0L));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
             workspace.getId(), currentUser.getId(), workspace.getName(), "+09:00",
-            workspace.getName(), null));
+            workspace.getName(), null, 0L));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
             workspace.getId(), currentUser.getId(), workspace.getName(), "x".repeat(65),
-            workspace.getName(), null));
+            workspace.getName(), null, 0L));
     }
 
     @Test
@@ -193,7 +201,7 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         authenticateAs(member, workspace.getId());
 
         assertThrows(ForbiddenException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), member.getId(), "Denied", null, workspace.getName(), null));
+            workspace.getId(), member.getId(), "Denied", null, workspace.getName(), null, 0L));
         assertEquals(workspace.getName(), workspaceMapper.getActiveById(workspace.getId()).getName());
     }
 
@@ -212,7 +220,7 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(foreign.getId(), foreignOwner.getId(), "owner");
 
         assertThrows(ForbiddenException.class, () -> workspaceService.updateIdentity(
-            foreign.getId(), currentUser.getId(), "Probe", "UTC", "Foreign Workspace", null));
+            foreign.getId(), currentUser.getId(), "Probe", "UTC", "Foreign Workspace", null, 0L));
         assertEquals("Foreign Workspace", workspaceMapper.getActiveById(foreign.getId()).getName());
     }
 }

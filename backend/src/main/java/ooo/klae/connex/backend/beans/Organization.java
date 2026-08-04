@@ -13,6 +13,7 @@ public class Organization {
     private int id;
     private String name;
     private String slug;
+    private long identityVersion;
     private String createdAt;
     private String updatedAt;
 }

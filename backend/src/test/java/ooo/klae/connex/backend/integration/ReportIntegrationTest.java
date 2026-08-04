@@ -1978,6 +1978,34 @@ class ReportIntegrationTest {
             .andExpect(jsonPath("$.widgets[0].points[0].priorValue").value(1));
     }
 
+    @Test
+    void generatedRelativePeriodsUseTheWorkspaceTimezone() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        assertEquals(1, jdbcTemplate.update(
+            "UPDATE workspace SET timezone = ? WHERE id = ?",
+            "Pacific/Kiritimati",
+            workspace.getId()));
+        String weeklyReport = REPORT_BODY
+            .replace("\"cadence\": \"custom\"", "\"cadence\": \"weekly\"")
+            .replace(
+                "\"range\": {\"start\": \"2026-01-01\", \"end\": \"2026-01-31\"}",
+                "\"range\": null");
+        int reportId = createReport(session, workspace, weeklyReport);
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.periodStart").value("2026-07-07"))
+            .andExpect(jsonPath("$.periodEnd").value("2026-07-13"));
+    }
+
     private int createReport(MockHttpSession session, Workspace workspace) throws Exception {
         return createReport(session, workspace, REPORT_BODY);
     }

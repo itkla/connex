@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.OrganizationLayoutAuthorityMemberDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceMemberDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -54,15 +55,18 @@ class OrganizationServiceUnitTest {
     void renameLocksActorOrganizationAndMembershipBeforeWriteAndScopedAudit() {
         Organization before = organization("Old Org");
         Organization after = organization("New Org");
+        after.setIdentityVersion(1L);
         when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
         when(organizationMapper.lockActiveIdentity(ORG_ID)).thenReturn(before);
         when(organizationMapper.updateName(ORG_ID, "New Org")).thenReturn(1);
         when(organizationMapper.getActiveById(ORG_ID)).thenReturn(after);
 
-        OrganizationIdentityDto result = service.rename(ORG_ID, ACTOR_ID, " New Org ");
+        OrganizationIdentityDto result = service.rename(
+            ORG_ID, ACTOR_ID, " New Org ", " Old Org ", 0L);
 
         assertEquals("New Org", result.name());
         assertEquals("immutable", result.slug());
+        assertEquals(1L, result.identityVersion());
         InOrder order = inOrder(
             orgMemberService,
             sessionSecurityService,
@@ -97,11 +101,40 @@ class OrganizationServiceUnitTest {
             .when(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
 
         assertThrows(ForbiddenException.class, () -> service.rename(
-            ORG_ID, ACTOR_ID, "New Org"));
+            ORG_ID, ACTOR_ID, "New Org", "Old Org", 0L));
 
         verify(organizationMapper, never()).updateName(any(Integer.class), any());
         verify(auditService, never()).recordScoped(
             any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void renameRejectsAStaleExpectedNameAfterLocking() {
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(organizationMapper.lockActiveIdentity(ORG_ID))
+            .thenReturn(organization("Newer Org"));
+
+        assertThrows(ConflictException.class, () -> service.rename(
+            ORG_ID, ACTOR_ID, "My Rename", "Old Org", 0L));
+
+        verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+        verify(organizationMapper, never()).updateName(any(Integer.class), any());
+        verify(auditService, never()).recordScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void renameRejectsAStaleIdentityVersionEvenWhenTheNameMatches() {
+        Organization before = organization("Current Org");
+        before.setIdentityVersion(2L);
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(organizationMapper.lockActiveIdentity(ORG_ID)).thenReturn(before);
+
+        assertThrows(ConflictException.class, () -> service.rename(
+            ORG_ID, ACTOR_ID, "My Rename", "Current Org", 1L));
+
+        verify(orgMemberService).requireOrgAdminForUpdate(ORG_ID, ACTOR_ID);
+        verify(organizationMapper, never()).updateName(any(Integer.class), any());
     }
 
     @Test

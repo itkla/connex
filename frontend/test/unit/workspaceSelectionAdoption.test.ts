@@ -112,9 +112,11 @@ function workspaceFixture(id: number, name: string): Workspace {
         name,
         slug: name.toLowerCase().replaceAll(" ", "-"),
         timezone: null,
+        identityVersion: 0,
         role: "member",
         orgId: 1,
         orgName: "Acme",
+        orgIdentityVersion: 0,
         orgRole: null,
     };
 }
@@ -138,16 +140,21 @@ async function renderInteractiveWorkspaceProvider(
         return workspace;
     }
 
-    const providerProps: Parameters<typeof WorkspaceProvider>[0] = {
-        initialWorkspaces,
-        initialActiveId,
-        children: createElement(CaptureWorkspace),
-    };
-    await act(async () => {
-        root.render(createElement(WorkspaceProvider, providerProps));
-    });
+    async function renderProvider(workspaces: Workspace[]) {
+        const providerProps: Parameters<typeof WorkspaceProvider>[0] = {
+            initialWorkspaces: workspaces,
+            initialActiveId,
+            children: createElement(CaptureWorkspace),
+        };
+        await act(async () => {
+            root.render(createElement(WorkspaceProvider, providerProps));
+        });
+    }
+
+    await renderProvider(initialWorkspaces);
     return {
         readWorkspace,
+        rerender: renderProvider,
         unmount: async () => act(async () => root.unmount()),
     };
 }
@@ -252,8 +259,13 @@ describe("authoritative workspace selection adoption", () => {
                 name: "After",
                 slug: active.slug,
                 timezone: "Asia/Tokyo",
+                identityVersion: 1,
             });
-            rendered.readWorkspace().publishOrganizationIdentity({ id: active.orgId, name: "New organization" });
+            rendered.readWorkspace().publishOrganizationIdentity({
+                id: active.orgId,
+                name: "New organization",
+                identityVersion: 1,
+            });
         });
 
         expect(rendered.readWorkspace().activeWorkspace).toMatchObject({
@@ -265,6 +277,196 @@ describe("authoritative workspace selection adoption", () => {
         });
         expect(rendered.readWorkspace().workspaces.find(({ id }) => id === sibling.id)?.orgName)
             .toBe("New organization");
+
+        await rendered.unmount();
+    });
+
+    it("rejects stale refresh identities and yields directly to a newer version", async () => {
+        const active = {
+            ...workspaceFixture(7, "Before"),
+            role: "admin" as const,
+            orgRole: "owner" as const,
+        };
+        const rendered = await renderInteractiveWorkspaceProvider([active], active.id);
+        const canonical = {
+            ...active,
+            name: "After",
+            timezone: "Asia/Tokyo",
+            identityVersion: 1,
+            orgName: "New organization",
+            orgIdentityVersion: 1,
+        };
+
+        await act(async () => {
+            rendered.readWorkspace().publishWorkspaceIdentity(canonical);
+            rendered.readWorkspace().publishOrganizationIdentity({
+                id: active.orgId,
+                name: canonical.orgName,
+                identityVersion: canonical.orgIdentityVersion,
+            });
+        });
+        await rendered.rerender([active]);
+
+        expect(rendered.readWorkspace().activeWorkspace).toMatchObject({
+            name: canonical.name,
+            timezone: canonical.timezone,
+            orgName: canonical.orgName,
+        });
+
+        const newer = {
+            ...canonical,
+            name: "Later",
+            identityVersion: 2,
+            orgName: "Later organization",
+            orgIdentityVersion: 2,
+        };
+        await rendered.rerender([newer]);
+
+        expect(rendered.readWorkspace().activeWorkspace).toMatchObject({
+            name: newer.name,
+            orgName: newer.orgName,
+        });
+
+        await rendered.unmount();
+    });
+
+    it("releases failed optimistic identities so an authoritative refresh can replace them", async () => {
+        const active = workspaceFixture(7, "Before");
+        const rendered = await renderInteractiveWorkspaceProvider([active], active.id);
+        const optimistic = { ...active, name: "Optimistic", orgName: "Optimistic organization" };
+
+        await act(async () => {
+            rendered.readWorkspace().publishWorkspaceIdentity(optimistic);
+            rendered.readWorkspace().publishOrganizationIdentity({
+                id: active.orgId,
+                name: optimistic.orgName,
+                identityVersion: optimistic.orgIdentityVersion,
+            });
+            rendered.readWorkspace().restoreWorkspaceIdentity(optimistic, active);
+            rendered.readWorkspace().restoreOrganizationIdentity(
+                {
+                    id: active.orgId,
+                    name: optimistic.orgName,
+                    identityVersion: optimistic.orgIdentityVersion,
+                },
+                {
+                    id: active.orgId,
+                    name: active.orgName,
+                    identityVersion: active.orgIdentityVersion,
+                },
+            );
+        });
+        const authoritative = {
+            ...active,
+            name: "Authoritative",
+            identityVersion: 1,
+            orgName: "Authoritative organization",
+            orgIdentityVersion: 1,
+        };
+        await rendered.rerender([authoritative]);
+
+        expect(rendered.readWorkspace().activeWorkspace).toMatchObject({
+            name: authoritative.name,
+            orgName: authoritative.orgName,
+        });
+
+        await rendered.unmount();
+    });
+
+    it("does not let an older failed publication clear a newer canonical identity", async () => {
+        const active = workspaceFixture(7, "Before");
+        const rendered = await renderInteractiveWorkspaceProvider([active], active.id);
+        const optimistic = { ...active, name: "Optimistic", orgName: "Optimistic organization" };
+        const canonical = {
+            ...active,
+            name: "Canonical",
+            identityVersion: 1,
+            orgName: "Canonical organization",
+            orgIdentityVersion: 1,
+        };
+
+        await act(async () => {
+            rendered.readWorkspace().publishWorkspaceIdentity(optimistic);
+            rendered.readWorkspace().publishOrganizationIdentity({
+                id: active.orgId,
+                name: optimistic.orgName,
+                identityVersion: optimistic.orgIdentityVersion,
+            });
+            rendered.readWorkspace().publishWorkspaceIdentity(canonical);
+            rendered.readWorkspace().publishOrganizationIdentity({
+                id: active.orgId,
+                name: canonical.orgName,
+                identityVersion: canonical.orgIdentityVersion,
+            });
+            rendered.readWorkspace().restoreWorkspaceIdentity(optimistic, active);
+            rendered.readWorkspace().restoreOrganizationIdentity(
+                {
+                    id: active.orgId,
+                    name: optimistic.orgName,
+                    identityVersion: optimistic.orgIdentityVersion,
+                },
+                {
+                    id: active.orgId,
+                    name: active.orgName,
+                    identityVersion: active.orgIdentityVersion,
+                },
+            );
+        });
+        await rendered.rerender([active]);
+
+        expect(rendered.readWorkspace().activeWorkspace).toMatchObject({
+            name: canonical.name,
+            identityVersion: canonical.identityVersion,
+            orgName: canonical.orgName,
+            orgIdentityVersion: canonical.orgIdentityVersion,
+        });
+
+        await rendered.unmount();
+    });
+
+    it("keeps a newer held identity after an absent payload and a later stale appearance", async () => {
+        const existing = workspaceFixture(7, "Existing");
+        const canonical = {
+            ...workspaceFixture(22, "Canonical"),
+            identityVersion: 2,
+            orgName: "Canonical organization",
+            orgIdentityVersion: 3,
+        };
+        const rendered = await renderInteractiveWorkspaceProvider([existing], existing.id);
+
+        await act(async () => {
+            await rendered.readWorkspace().runSelectionChange(async (
+                publishActiveWorkspace,
+                publishWorkspace,
+            ) => {
+                publishWorkspace(canonical);
+                publishActiveWorkspace(canonical.id);
+            });
+            rendered.readWorkspace().publishWorkspaceIdentity(canonical);
+            rendered.readWorkspace().publishOrganizationIdentity({
+                id: canonical.orgId,
+                name: canonical.orgName,
+                identityVersion: canonical.orgIdentityVersion,
+            });
+        });
+        await rendered.rerender([existing]);
+        const stale = {
+            ...workspaceFixture(canonical.id, "Stale"),
+            role: "owner" as const,
+            orgName: "Stale organization",
+            orgIdentityVersion: 2,
+            identityVersion: 1,
+        };
+        await rendered.rerender([existing, stale]);
+
+        expect(rendered.readWorkspace().workspaces.find(({ id }) => id === canonical.id))
+            .toMatchObject({
+                name: canonical.name,
+                identityVersion: canonical.identityVersion,
+                role: stale.role,
+                orgName: canonical.orgName,
+                orgIdentityVersion: canonical.orgIdentityVersion,
+            });
 
         await rendered.unmount();
     });
