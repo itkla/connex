@@ -42,7 +42,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
     const t = useTranslations("WorkspaceIdentity");
     const router = useRouter();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
-    const { publishWorkspaceIdentity } = useWorkspace();
+    const { publishWorkspaceIdentity, restoreWorkspaceIdentity } = useWorkspace();
     const [name, setName] = useState(workspace.name);
     const [timezone, setTimezone] = useState<string | null>(workspace.timezone);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -69,16 +69,25 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
         publishWorkspaceIdentity(optimistic);
         setSaving(true);
         try {
-            const updated = await updateWorkspaceIdentity(workspace.id, normalizedName, timezone);
+            const updated = await updateWorkspaceIdentity(
+                workspace.id,
+                normalizedName,
+                timezone,
+                previous.name,
+                previous.timezone,
+            );
             publishWorkspaceIdentity(updated);
             setName(updated.name);
             setTimezone(updated.timezone);
             toastSuccess(t("saved"));
             router.refresh();
         } catch (error) {
-            publishWorkspaceIdentity(previous);
+            restoreWorkspaceIdentity(optimistic, previous);
+            router.refresh();
             if (error instanceof ApiError && error.fieldErrors) {
                 setFieldErrors(error.fieldErrors);
+            } else if (error instanceof ApiError && error.status === 409) {
+                toastError(t("stale"));
             } else if (!handlePasskeyStepUpError(error)) {
                 toastError(error instanceof Error ? error.message : t("saveFailed"));
             }

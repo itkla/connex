@@ -3535,8 +3535,19 @@ export function createWorkspace(name: string) {
     );
 }
 
-export function updateWorkspaceIdentity(id: number, name: string, timezone: string | null) {
-    return patchJson<Types.WorkspaceIdentity>(`/api/workspaces/${id}`, { name, timezone });
+export function updateWorkspaceIdentity(
+    id: number,
+    name: string,
+    timezone: string | null,
+    expectedName: string,
+    expectedTimezone: string | null,
+) {
+    return patchJson<Types.WorkspaceIdentity>(`/api/workspaces/${id}`, {
+        name,
+        timezone,
+        expectedName,
+        expectedTimezone,
+    });
 }
 
 export function switchWorkspace(id: number) {

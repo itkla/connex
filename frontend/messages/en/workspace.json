@@ -92,6 +92,7 @@
     "saving": "Saving",
     "saved": "Workspace settings updated.",
     "saveFailed": "Could not update the workspace.",
+    "stale": "Workspace settings changed elsewhere. Review the latest values and try again.",
     "noAccessTitle": "Workspace settings permission required",
     "noAccessBody": "You need workspace settings permission to change this identity.",
     "permissionUnavailableTitle": "Permission check unavailable",

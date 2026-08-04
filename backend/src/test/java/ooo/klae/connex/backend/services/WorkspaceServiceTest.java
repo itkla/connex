@@ -107,7 +107,12 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         int orgId = workspaceService.getOrgId(workspace.getId());
 
         WorkspaceIdentityDto updated = workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), "  Renamed Workspace  ", "Pacific/Honolulu");
+            workspace.getId(),
+            currentUser.getId(),
+            "  Renamed Workspace  ",
+            "Pacific/Honolulu",
+            workspace.getName(),
+            null);
 
         assertEquals("Renamed Workspace", updated.name());
         assertEquals("Pacific/Honolulu", updated.timezone());
@@ -142,10 +147,20 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     void updateIdentitySupportsLegacyNullAndExplicitTimezoneClear() {
         assertNull(workspaceMapper.getActiveById(workspace.getId()).getTimezone());
         workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), workspace.getName(), "America/New_York");
+            workspace.getId(),
+            currentUser.getId(),
+            workspace.getName(),
+            "America/New_York",
+            workspace.getName(),
+            null);
 
         WorkspaceIdentityDto cleared = workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), workspace.getName(), null);
+            workspace.getId(),
+            currentUser.getId(),
+            workspace.getName(),
+            null,
+            workspace.getName(),
+            "America/New_York");
 
         assertNull(cleared.timezone());
         assertNull(workspaceMapper.getActiveById(workspace.getId()).getTimezone());
@@ -154,19 +169,22 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     @Test
     void updateIdentityRejectsInvalidNamesAndTimezones() {
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), null, null));
+            workspace.getId(), currentUser.getId(), null, null, workspace.getName(), null));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), " ", null));
+            workspace.getId(), currentUser.getId(), " ", null, workspace.getName(), null));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), "x".repeat(129), null));
+            workspace.getId(), currentUser.getId(), "x".repeat(129), null, workspace.getName(), null));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), workspace.getName(), " "));
+            workspace.getId(), currentUser.getId(), workspace.getName(), " ", workspace.getName(), null));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), workspace.getName(), "Not/A_Real_Zone"));
+            workspace.getId(), currentUser.getId(), workspace.getName(), "Not/A_Real_Zone",
+            workspace.getName(), null));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), workspace.getName(), "+09:00"));
+            workspace.getId(), currentUser.getId(), workspace.getName(), "+09:00",
+            workspace.getName(), null));
         assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), currentUser.getId(), workspace.getName(), "x".repeat(65)));
+            workspace.getId(), currentUser.getId(), workspace.getName(), "x".repeat(65),
+            workspace.getName(), null));
     }
 
     @Test
@@ -175,7 +193,7 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         authenticateAs(member, workspace.getId());
 
         assertThrows(ForbiddenException.class, () -> workspaceService.updateIdentity(
-            workspace.getId(), member.getId(), "Denied", null));
+            workspace.getId(), member.getId(), "Denied", null, workspace.getName(), null));
         assertEquals(workspace.getName(), workspaceMapper.getActiveById(workspace.getId()).getName());
     }
 
@@ -194,7 +212,7 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(foreign.getId(), foreignOwner.getId(), "owner");
 
         assertThrows(ForbiddenException.class, () -> workspaceService.updateIdentity(
-            foreign.getId(), currentUser.getId(), "Probe", "UTC"));
+            foreign.getId(), currentUser.getId(), "Probe", "UTC", "Foreign Workspace", null));
         assertEquals("Foreign Workspace", workspaceMapper.getActiveById(foreign.getId()).getName());
     }
 }

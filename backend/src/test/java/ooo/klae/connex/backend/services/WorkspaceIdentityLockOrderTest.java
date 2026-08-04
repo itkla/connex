@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 class WorkspaceIdentityLockOrderTest {
     private static final int WORKSPACE_ID = 7;
     private static final int ACTOR_ID = 11;
+    private static final int ORG_ID = 3;
 
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private UserMapper userMapper;
@@ -95,17 +97,18 @@ class WorkspaceIdentityLockOrderTest {
         when(workspaceMapper.getRole(WORKSPACE_ID, ACTOR_ID)).thenReturn("admin");
         when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
         when(workspaceMapper.lockActiveIdentity(WORKSPACE_ID)).thenReturn(before);
+        when(organizationMapper.lockActiveByIdForShare(ORG_ID)).thenReturn(ORG_ID);
         when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
             .thenReturn(membership);
         when(workspaceMapper.updateIdentity(WORKSPACE_ID, "New Name", null)).thenReturn(1);
         when(workspaceMapper.getActiveById(WORKSPACE_ID)).thenReturn(after);
 
         WorkspaceIdentityDto result = service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null);
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null);
 
         assertEquals("New Name", result.name());
         InOrder order = inOrder(
-            userMapper, workspaceMapper, sessionSecurityService, auditService);
+            userMapper, workspaceMapper, organizationMapper, sessionSecurityService, auditService);
         order.verify(userMapper).isAccountDeletionReserved(ACTOR_ID);
         order.verify(workspaceMapper).getMemberRoleId(WORKSPACE_ID, ACTOR_ID);
         order.verify(workspaceMapper).getRole(WORKSPACE_ID, ACTOR_ID);
@@ -113,6 +116,7 @@ class WorkspaceIdentityLockOrderTest {
         order.verify(userMapper).lockById(ACTOR_ID);
         order.verify(userMapper).isAccountDeletionReserved(ACTOR_ID);
         order.verify(workspaceMapper).lockActiveIdentity(WORKSPACE_ID);
+        order.verify(organizationMapper).lockActiveByIdForShare(ORG_ID);
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
         order.verify(workspaceMapper).updateIdentity(WORKSPACE_ID, "New Name", null);
         order.verify(auditService).singleChange("name", "Old Name", "New Name");
@@ -129,6 +133,31 @@ class WorkspaceIdentityLockOrderTest {
     }
 
     @Test
+    void staleIdentityPreconditionRefusesMutationAfterLockedAuthorization() {
+        Workspace before = workspace("Old Name", null);
+        WorkspaceMember membership = membership("admin", null, "active");
+        when(workspaceMapper.getMemberRoleId(WORKSPACE_ID, ACTOR_ID)).thenReturn(null);
+        when(workspaceMapper.getRole(WORKSPACE_ID, ACTOR_ID)).thenReturn("admin");
+        when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(workspaceMapper.lockActiveIdentity(WORKSPACE_ID)).thenReturn(before);
+        when(organizationMapper.lockActiveByIdForShare(ORG_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
+            .thenReturn(membership);
+
+        assertThrows(ConflictException.class, () -> service.updateIdentity(
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Stale Name", null));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper);
+        order.verify(userMapper).lockById(ACTOR_ID);
+        order.verify(workspaceMapper).lockActiveIdentity(WORKSPACE_ID);
+        order.verify(organizationMapper).lockActiveByIdForShare(ORG_ID);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
+        verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
+        verify(auditService, never()).recordScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void finalLockedCustomRolePermissionRevocationRefusesMutation() {
         Workspace before = workspace("Old Name", null);
         WorkspaceMember membership = membership("member", 5, "active");
@@ -137,20 +166,44 @@ class WorkspaceIdentityLockOrderTest {
             .thenReturn(List.of(Permission.WORKSPACE_SETTINGS.name()));
         when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
         when(workspaceMapper.lockActiveIdentity(WORKSPACE_ID)).thenReturn(before);
+        when(organizationMapper.lockActiveByIdForShare(ORG_ID)).thenReturn(ORG_ID);
         when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
             .thenReturn(membership);
         when(roleMapper.lockRole(WORKSPACE_ID, 5)).thenReturn(5);
         when(roleMapper.lockPermissions(WORKSPACE_ID, 5)).thenReturn(List.of());
 
         assertThrows(ForbiddenException.class, () -> service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null));
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null));
 
-        InOrder order = inOrder(userMapper, workspaceMapper, roleMapper);
+        InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper, roleMapper);
         order.verify(userMapper).lockById(ACTOR_ID);
         order.verify(workspaceMapper).lockActiveIdentity(WORKSPACE_ID);
+        order.verify(organizationMapper).lockActiveByIdForShare(ORG_ID);
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
         order.verify(roleMapper).lockRole(WORKSPACE_ID, 5);
         order.verify(roleMapper).lockPermissions(WORKSPACE_ID, 5);
+        verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
+        verify(auditService, never()).recordScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void finalOrganizationLifecycleFenceRefusesMutation() {
+        when(workspaceMapper.getMemberRoleId(WORKSPACE_ID, ACTOR_ID)).thenReturn(null);
+        when(workspaceMapper.getRole(WORKSPACE_ID, ACTOR_ID)).thenReturn("admin");
+        when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(workspaceMapper.lockActiveIdentity(WORKSPACE_ID))
+            .thenReturn(workspace("Old Name", null));
+        when(organizationMapper.lockActiveByIdForShare(ORG_ID)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class, () -> service.updateIdentity(
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, organizationMapper);
+        order.verify(userMapper).lockById(ACTOR_ID);
+        order.verify(workspaceMapper).lockActiveIdentity(WORKSPACE_ID);
+        order.verify(organizationMapper).lockActiveByIdForShare(ORG_ID);
+        verify(workspaceMapper, never()).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
         verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
         verify(auditService, never()).recordScoped(
             any(), any(), any(), any(), any(), any(), any(), any());
@@ -164,11 +217,12 @@ class WorkspaceIdentityLockOrderTest {
         when(userMapper.lockById(ACTOR_ID)).thenReturn(ACTOR_ID);
         when(workspaceMapper.lockActiveIdentity(WORKSPACE_ID))
             .thenReturn(workspace("Old Name", null));
+        when(organizationMapper.lockActiveByIdForShare(ORG_ID)).thenReturn(ORG_ID);
         when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
             .thenReturn(membership("admin", null, "pending"));
 
         assertThrows(ForbiddenException.class, () -> service.updateIdentity(
-            WORKSPACE_ID, ACTOR_ID, "New Name", null));
+            WORKSPACE_ID, ACTOR_ID, "New Name", null, "Old Name", null));
 
         verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
     }
@@ -176,7 +230,7 @@ class WorkspaceIdentityLockOrderTest {
     private static Workspace workspace(String name, String timezone) {
         Workspace workspace = new Workspace();
         workspace.setId(WORKSPACE_ID);
-        workspace.setOrgId(3);
+        workspace.setOrgId(ORG_ID);
         workspace.setName(name);
         workspace.setSlug("immutable");
         workspace.setTimezone(timezone);

@@ -8,7 +8,8 @@ import lombok.NoArgsConstructor;
 
 /**
  * Complete mutable workspace identity submitted to the workspace settings endpoint.
- * The name is required; a null timezone explicitly clears the workspace override.
+ * Expected values provide a content precondition; a null timezone explicitly clears
+ * the workspace override.
  */
 @Data
 @NoArgsConstructor
@@ -19,4 +20,11 @@ public class UpdateWorkspaceIdentityRequest {
 
     @Size(max = 64)
     private String timezone;
+
+    @NotBlank
+    @Size(max = 128)
+    private String expectedName;
+
+    @Size(max = 64)
+    private String expectedTimezone;
 }

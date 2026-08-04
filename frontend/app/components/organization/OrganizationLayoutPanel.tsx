@@ -81,21 +81,32 @@ function WorkspaceMemberList({
             <ul className="divide-y divide-border/70" aria-label={t("workspaceMembers", { name: workspace.name })}>
                 {workspace.memberships.map((member) => (
                     <li key={member.userId}>
-                        <button
-                            type="button"
-                            disabled={switching}
-                            className="group flex w-full items-center gap-3 rounded-lg px-1 py-2 text-left outline-none transition-colors motion-reduce:transition-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
-                            onClick={() => onNavigate(workspace.id, `/users/${member.userId}`)}
-                        >
-                            <MemberAvatar member={member} />
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                                {member.displayName}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                                {roleLabels[member.role] ?? member.role}
-                            </span>
-                            <ArrowTopRightOnSquareIcon className="size-4 text-muted-foreground opacity-0 transition-opacity motion-reduce:transition-none group-hover:opacity-100 group-focus-visible:opacity-100" />
-                        </button>
+                        {member.status === "active" ? (
+                            <button
+                                type="button"
+                                disabled={switching}
+                                className="group flex w-full items-center gap-3 rounded-lg px-1 py-2 text-left outline-none transition-colors motion-reduce:transition-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
+                                onClick={() => onNavigate(workspace.id, `/users/${member.userId}`)}
+                            >
+                                <MemberAvatar member={member} />
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                                    {member.displayName}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                    {roleLabels[member.role] ?? member.role}
+                                </span>
+                                <ArrowTopRightOnSquareIcon className="size-4 text-muted-foreground opacity-0 transition-opacity motion-reduce:transition-none group-hover:opacity-100 group-focus-visible:opacity-100" />
+                            </button>
+                        ) : (
+                            <div className="flex w-full items-center gap-3 px-1 py-2 text-muted-foreground">
+                                <MemberAvatar member={member} />
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                                    {member.displayName}
+                                </span>
+                                <span className="text-xs">{roleLabels[member.role] ?? member.role}</span>
+                                <Badge variant="outline">{t("pendingMembership")}</Badge>
+                            </div>
+                        )}
                     </li>
                 ))}
             </ul>
@@ -152,7 +163,9 @@ function StructureView({
                                     {workspace.rosterVisible ? (
                                         <>
                                             <UserGroupIcon className="size-4" />
-                                            <span>{t("memberCount", { count: workspace.memberships.length })}</span>
+                                            <span>{t("memberCount", {
+                                                count: workspace.memberships.filter(({ status }) => status === "active").length,
+                                            })}</span>
                                         </>
                                     ) : (
                                         <>
@@ -208,15 +221,23 @@ function MemberLinks({
         <ul className="space-y-1.5">
             {workspace.memberships.map((member: OrganizationLayoutWorkspaceMember) => (
                 <li key={member.userId}>
-                    <button
-                        type="button"
-                        disabled={switching}
-                        className="inline-flex items-center gap-2 rounded-md text-left text-sm font-medium text-foreground outline-none hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
-                        onClick={() => onNavigate(workspace.id, `/users/${member.userId}`)}
-                    >
-                        <MemberAvatar member={member} />
-                        {member.displayName}
-                    </button>
+                    {member.status === "active" ? (
+                        <button
+                            type="button"
+                            disabled={switching}
+                            className="inline-flex items-center gap-2 rounded-md text-left text-sm font-medium text-foreground outline-none hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
+                            onClick={() => onNavigate(workspace.id, `/users/${member.userId}`)}
+                        >
+                            <MemberAvatar member={member} />
+                            {member.displayName}
+                        </button>
+                    ) : (
+                        <span className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                            <MemberAvatar member={member} />
+                            {member.displayName}
+                            <Badge variant="outline">{t("pendingMembership")}</Badge>
+                        </span>
+                    )}
                 </li>
             ))}
         </ul>

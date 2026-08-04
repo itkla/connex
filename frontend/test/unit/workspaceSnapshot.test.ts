@@ -2,11 +2,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import type { Workspace } from "@/app/lib/types";
+import type { MyWorkspaces, Workspace } from "@/app/lib/types";
 import {
     adoptWorkspaces,
     applyOrganizationIdentity,
     applyWorkspaceIdentity,
+    resolveWorkspaceTimezone,
+    restoreWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
 
 const PROVIDER = "app/hooks/useWorkspace.tsx";
@@ -162,6 +164,57 @@ describe("identity mutations preserve membership state", () => {
             id: 4,
             name: "New organization",
         })).toEqual([{ ...workspace, orgName: "New organization" }, other]);
+    });
+
+    it("restores a failed optimistic identity while that exact value remains published", () => {
+        const optimistic = { id: 7, name: "Optimistic", slug: "before", timezone: "Asia/Tokyo" };
+        const previous = { id: 7, name: "Before", slug: "before", timezone: null };
+
+        expect(restoreWorkspaceIdentity(
+            [{ ...workspace, name: optimistic.name, timezone: optimistic.timezone }],
+            optimistic,
+            previous,
+        )).toEqual([workspace]);
+    });
+
+    it("does not overwrite a newer server identity while rolling back an older request", () => {
+        const optimistic = { id: 7, name: "Optimistic", slug: "before", timezone: "Asia/Tokyo" };
+        const previous = { id: 7, name: "Before", slug: "before", timezone: null };
+        const newer = [{ ...workspace, name: "Newer server value", timezone: "UTC" }];
+
+        expect(restoreWorkspaceIdentity(newer, optimistic, previous)).toBe(newer);
+    });
+});
+
+describe("workspace timezone resolution", () => {
+    const active: Workspace = {
+        id: 7,
+        name: "Active",
+        slug: "active",
+        timezone: "Asia/Tokyo",
+        role: "owner",
+        orgId: 4,
+        orgName: "Organization",
+        orgRole: "owner",
+    };
+
+    function snapshot(workspaces: Workspace[], activeWorkspaceId: number | null): MyWorkspaces {
+        return { workspaces, activeWorkspaceId };
+    }
+
+    it("prefers the active workspace reporting timezone", () => {
+        expect(resolveWorkspaceTimezone(snapshot([active], active.id), "UTC")).toBe("Asia/Tokyo");
+    });
+
+    it("falls back to the account timezone when the active workspace has no override", () => {
+        expect(resolveWorkspaceTimezone(
+            snapshot([{ ...active, timezone: null }], active.id),
+            "Pacific/Honolulu",
+        )).toBe("Pacific/Honolulu");
+    });
+
+    it("falls back to the account timezone when the active workspace is absent", () => {
+        expect(resolveWorkspaceTimezone(snapshot([active], 99), "UTC")).toBe("UTC");
     });
 });
 

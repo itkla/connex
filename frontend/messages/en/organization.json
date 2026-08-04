@@ -51,6 +51,7 @@
     "roleOwner": "Owner",
     "roleAdmin": "Admin",
     "roleMember": "Member",
+    "pendingMembership": "Pending",
     "loadMore": "Load more",
     "loadingMore": "Loading",
     "loadFailed": "Could not load the organization layout.",

@@ -1,4 +1,9 @@
-import type { OrganizationIdentity, Workspace, WorkspaceIdentity } from "@/app/lib/types";
+import type {
+    MyWorkspaces,
+    OrganizationIdentity,
+    Workspace,
+    WorkspaceIdentity,
+} from "@/app/lib/types";
 
 /**
  * Merges a freshly arrived server payload over the workspaces currently published to the tree.
@@ -40,6 +45,38 @@ export function applyWorkspaceIdentity(
     return workspaces.map((workspace) => workspace.id === identity.id
         ? { ...workspace, name: identity.name, slug: identity.slug, timezone: identity.timezone }
         : workspace);
+}
+
+/** Restores an optimistic identity only while that exact optimistic value is still published. */
+export function restoreWorkspaceIdentity(
+    workspaces: Workspace[],
+    expected: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+    replacement: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+): Workspace[] {
+    if (expected.id !== replacement.id) return workspaces;
+    let restored = false;
+    const next = workspaces.map((workspace) => {
+        if (workspace.id !== expected.id
+            || workspace.name !== expected.name
+            || workspace.slug !== expected.slug
+            || workspace.timezone !== expected.timezone) {
+            return workspace;
+        }
+        restored = true;
+        return {
+            ...workspace,
+            name: replacement.name,
+            slug: replacement.slug,
+            timezone: replacement.timezone,
+        };
+    });
+    return restored ? next : workspaces;
+}
+
+/** Resolves the active workspace reporting timezone with the account timezone as its fallback. */
+export function resolveWorkspaceTimezone(snapshot: MyWorkspaces, accountTimezone: string): string {
+    return snapshot.workspaces.find(({ id }) => id === snapshot.activeWorkspaceId)?.timezone
+        ?? accountTimezone;
 }
 
 /** Applies an organization display identity to every workspace belonging to that organization. */

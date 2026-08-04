@@ -25,6 +25,8 @@ class WorkspaceOrganizationSettingsRequestValidationTest {
         UpdateWorkspaceIdentityRequest request = new UpdateWorkspaceIdentityRequest();
         request.setName("Workspace");
         request.setTimezone(null);
+        request.setExpectedName("Workspace");
+        request.setExpectedTimezone(null);
 
         assertTrue(VALIDATOR.validate(request).isEmpty());
 
@@ -43,7 +45,24 @@ class WorkspaceOrganizationSettingsRequestValidationTest {
         UpdateWorkspaceIdentityRequest request = new UpdateWorkspaceIdentityRequest();
         request.setName("Workspace");
         request.setTimezone("x".repeat(65));
+        request.setExpectedName("Workspace");
 
+        assertFalse(VALIDATOR.validate(request).isEmpty());
+    }
+
+    @Test
+    void workspaceIdentityRequiresBoundedExpectedNameAndTimezone() {
+        UpdateWorkspaceIdentityRequest request = new UpdateWorkspaceIdentityRequest();
+        request.setName("Workspace");
+        request.setExpectedName(null);
+
+        assertFalse(VALIDATOR.validate(request).isEmpty());
+
+        request.setExpectedName("x".repeat(129));
+        assertFalse(VALIDATOR.validate(request).isEmpty());
+
+        request.setExpectedName("Workspace");
+        request.setExpectedTimezone("x".repeat(65));
         assertFalse(VALIDATOR.validate(request).isEmpty());
     }
 

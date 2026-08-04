@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
@@ -206,23 +207,36 @@ public class WorkspaceService {
 
     /**
      * Replaces the workspace's mutable display identity while preserving its immutable id and slug.
-     * Authorization is revalidated from locked user, workspace, membership, custom-role, and permission
-     * rows before the write. A null timezone clears the workspace override.
+     * Authorization is revalidated from locked user, workspace, organization, membership, custom-role,
+     * and permission rows before the write. A null timezone clears the workspace override.
      *
      * @param workspaceId workspace to update
      * @param actorId authenticated actor
      * @param nameRaw required display name
      * @param timezoneRaw nullable IANA timezone override
+     * @param expectedNameRaw display name observed before editing
+     * @param expectedTimezoneRaw nullable timezone observed before editing
      * @return canonical persisted workspace identity
      */
     @Transactional
     public WorkspaceIdentityDto updateIdentity(
-            int workspaceId, int actorId, String nameRaw, String timezoneRaw) {
+            int workspaceId,
+            int actorId,
+            String nameRaw,
+            String timezoneRaw,
+            String expectedNameRaw,
+            String expectedTimezoneRaw) {
         requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
         String name = normalizeWorkspaceName(nameRaw);
         String timezone = normalizeWorkspaceTimezone(timezoneRaw);
+        String expectedName = normalizeWorkspaceName(expectedNameRaw);
+        String expectedTimezone = normalizeWorkspaceTimezone(expectedTimezoneRaw);
         Workspace before = lockWorkspaceIdentityMutation(workspaceId, actorId);
+        if (!Objects.equals(before.getName(), expectedName)
+                || !Objects.equals(before.getTimezone(), expectedTimezone)) {
+            throw new ConflictException("Workspace settings changed; refresh and retry");
+        }
         boolean nameChanged = !Objects.equals(before.getName(), name);
         boolean timezoneChanged = !Objects.equals(before.getTimezone(), timezone);
         if (nameChanged || timezoneChanged) {
@@ -522,6 +536,9 @@ public class WorkspaceService {
         }
         Workspace workspace = workspaceMapper.lockActiveIdentity(workspaceId);
         if (workspace == null) {
+            throw workspaceSettingsForbidden();
+        }
+        if (organizationMapper.lockActiveByIdForShare(workspace.getOrgId()) == null) {
             throw workspaceSettingsForbidden();
         }
         WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, actorId);

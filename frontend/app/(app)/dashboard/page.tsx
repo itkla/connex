@@ -35,6 +35,7 @@ import {
     getDealsPageResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getIntroSuggestionsResultFromCookie,
+    getMyWorkspacesFromCookie,
     getNotesPageResultFromCookie,
     getNotifications,
     getPipelinesResultFromCookie,
@@ -62,6 +63,7 @@ import type {
     User,
     WarmthSummary,
 } from '@/app/lib/types';
+import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
 
 import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
 import CoolingRelationships, { type CoolingItem } from '@/app/components/dashboard/CoolingRelationships';
@@ -251,11 +253,15 @@ export default async function Dashboard() {
     const tUnavailable = await getTranslations('SectionUnavailable');
 
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const [user, workspaceSnapshot] = await Promise.all([
+        getCurrentUserFromCookie(cookie),
+        getMyWorkspacesFromCookie(cookie),
+    ]);
 
     if (!user) {
         redirect('/auth/login');
     }
+    const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const [contactsResult, dealsResult, pipelinesResult, stagesResult, tasksResult, upcomingTasks, activitiesResult, notesResult, users, recentFilesResult, fileFacetsResult, recentMovesResult, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolumeResult, leaderboardResult, taskSummaryResult, upcomingActivityCountResult, closingSoonCountResult, closingSoonDealsResult, captureOverviewResult] =
@@ -405,7 +411,7 @@ export default async function Dashboard() {
     const [dealKpisResult, pipelineValuesResult, revenueSeriesResult, stageDistributionResult] = await Promise.all([
         toResult(getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE)),
         toResult(getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE)),
-        toResult(getDealRevenueTimeseries(currency, user.timezone, {}, init)),
+        toResult(getDealRevenueTimeseries(currency, timezone, {}, init)),
         toResult(getDealStageDistribution(currency, {}, init)),
     ]);
     const dealKpis = dealKpisResult.ok ? dealKpisResult.data : EMPTY_DEAL_KPIS;
@@ -541,7 +547,7 @@ export default async function Dashboard() {
             : <SectionUnavailable />,
         revenueTrend: revenueAvailable
             ? chartCard(
-                <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
+                <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={timezone} />,
             )
             : <SectionUnavailable />,
         winRate: kpisAvailable

@@ -2828,7 +2828,7 @@ export type OrganizationLayoutWorkspaceMember = {
     profilePictureUrl?: string | null;
     role: string;
     roleId?: number | null;
-    status: string;
+    status: "active" | "pending";
 };
 
 export type OrganizationLayoutWorkspace = {

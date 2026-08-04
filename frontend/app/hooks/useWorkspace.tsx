@@ -9,6 +9,7 @@ import {
     adoptWorkspaces,
     applyOrganizationIdentity,
     applyWorkspaceIdentity,
+    restoreWorkspaceIdentity as restorePublishedWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
 
 type PublishActiveWorkspace = (id: number | null) => void;
@@ -31,6 +32,10 @@ type WorkspaceContextValue = {
     create: (name: string) => Promise<Workspace>;
     publishWorkspaceIdentity: (
         identity: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+    ) => void;
+    restoreWorkspaceIdentity: (
+        expected: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+        replacement: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
     ) => void;
     publishOrganizationIdentity: (identity: Pick<OrganizationIdentity, "id" | "name">) => void;
 };
@@ -109,6 +114,13 @@ export function WorkspaceProvider({
         setWorkspaces((previous) => applyWorkspaceIdentity(previous, identity));
     }, []);
 
+    const restoreWorkspaceIdentity = useCallback((
+        expected: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+        replacement: Pick<WorkspaceIdentity, "id" | "name" | "slug" | "timezone">,
+    ) => {
+        setWorkspaces((previous) => restorePublishedWorkspaceIdentity(previous, expected, replacement));
+    }, []);
+
     const publishOrganizationIdentity = useCallback((identity: Pick<OrganizationIdentity, "id" | "name">) => {
         setWorkspaces((previous) => applyOrganizationIdentity(previous, identity));
     }, []);
@@ -184,6 +196,7 @@ export function WorkspaceProvider({
             switchTo,
             create,
             publishWorkspaceIdentity,
+            restoreWorkspaceIdentity,
             publishOrganizationIdentity,
         }),
         [
@@ -196,6 +209,7 @@ export function WorkspaceProvider({
             switchTo,
             create,
             publishWorkspaceIdentity,
+            restoreWorkspaceIdentity,
             publishOrganizationIdentity,
         ],
     );
