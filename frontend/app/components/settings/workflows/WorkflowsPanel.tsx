@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
@@ -60,6 +60,36 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-colors motion-reduce:transition-none hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
+type WorkflowsPanelState = {
+    archived: boolean;
+    workflows: WorkflowListItem[];
+    loadedWorkspaceId: number | null;
+    loading: boolean;
+    accessDenied: boolean;
+    archiveTarget: WorkflowListItem | null;
+    runsTarget: WorkflowListItem | null;
+    pendingId: number | null;
+};
+
+type WorkflowsPanelAction = Partial<WorkflowsPanelState>
+    | ((state: WorkflowsPanelState) => Partial<WorkflowsPanelState>);
+
+const INITIAL_WORKFLOWS_PANEL_STATE: WorkflowsPanelState = {
+    archived: false,
+    workflows: [],
+    loadedWorkspaceId: null,
+    loading: true,
+    accessDenied: false,
+    archiveTarget: null,
+    runsTarget: null,
+    pendingId: null,
+};
+
+function workflowsPanelReducer(state: WorkflowsPanelState, action: WorkflowsPanelAction): WorkflowsPanelState {
+    const patch = typeof action === "function" ? action(state) : action;
+    return { ...state, ...patch };
+}
+
 /** Canonical workflow list with lifecycle, archive, duplication, and merged run continuity. */
 export default function WorkflowsPanel() {
     const t = useTranslations("WorkspaceWorkflows");
@@ -74,48 +104,71 @@ export default function WorkflowsPanel() {
         canRunAsSystem,
         switching,
     });
-    const [archived, setArchived] = useState(false);
-    const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
-    const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<number | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [accessDenied, setAccessDenied] = useState(false);
-    const [archiveTarget, setArchiveTarget] = useState<WorkflowListItem | null>(null);
-    const [runsTarget, setRunsTarget] = useState<WorkflowListItem | null>(null);
-    const [pendingId, setPendingId] = useState<number | null>(null);
+    const [{
+        archived,
+        workflows,
+        loadedWorkspaceId,
+        loading,
+        accessDenied,
+        archiveTarget,
+        runsTarget,
+        pendingId,
+    }, updatePanelState] = useReducer(workflowsPanelReducer, INITIAL_WORKFLOWS_PANEL_STATE);
     const scopeRef = useRef({ activeWorkspaceId, switching });
+    const lifetimeRef = useRef(false);
 
     useLayoutEffect(() => {
         scopeRef.current = { activeWorkspaceId, switching };
     }, [activeWorkspaceId, switching]);
 
     useEffect(() => {
+        lifetimeRef.current = true;
+        return () => {
+            lifetimeRef.current = false;
+        };
+    }, []);
+
+    const isPanelActive = (workspaceId: number) => (
+        lifetimeRef.current
+        && scopeRef.current.activeWorkspaceId === workspaceId
+        && !scopeRef.current.switching
+    );
+
+    useEffect(() => {
         if (!activeWorkspaceId || switching) return;
         const workspaceId = activeWorkspaceId;
         const controller = new AbortController();
+        let active = true;
         void (async () => {
-            setLoading(true);
-            setAccessDenied(false);
+            updatePanelState({ loading: true, accessDenied: false });
             try {
                 const loaded = await getWorkflows(archived, {
                     signal: controller.signal,
                     headers: { "X-Workspace-Id": String(workspaceId) },
                 });
-                if (!controller.signal.aborted && scopeRef.current.activeWorkspaceId === workspaceId) {
-                    setWorkflows(loaded);
-                    setLoadedWorkspaceId(workspaceId);
-                    setArchiveTarget(null);
-                    setRunsTarget(null);
-                    setPendingId(null);
+                if (active && !controller.signal.aborted && scopeRef.current.activeWorkspaceId === workspaceId) {
+                    updatePanelState({
+                        workflows: loaded,
+                        loadedWorkspaceId: workspaceId,
+                        archiveTarget: null,
+                        runsTarget: null,
+                        pendingId: null,
+                    });
                 }
             } catch (error) {
-                if (controller.signal.aborted) return;
-                if (error instanceof ApiError && error.status === 403) setAccessDenied(true);
+                if (!active || controller.signal.aborted) return;
+                if (error instanceof ApiError && error.status === 403) updatePanelState({ accessDenied: true });
                 else toastError(t("loadFailed"));
             } finally {
-                if (!controller.signal.aborted && scopeRef.current.activeWorkspaceId === workspaceId) setLoading(false);
+                if (active && !controller.signal.aborted && scopeRef.current.activeWorkspaceId === workspaceId) {
+                    updatePanelState({ loading: false });
+                }
             }
         })();
-        return () => controller.abort();
+        return () => {
+            active = false;
+            controller.abort();
+        };
     }, [activeWorkspaceId, archived, switching, t]);
 
     const visibleWorkflows = loadedWorkspaceId === activeWorkspaceId && !switching ? workflows : [];
@@ -124,73 +177,80 @@ export default function WorkflowsPanel() {
         const workspaceId = activeWorkspaceId;
         if (workflow.archivedAt || workspaceId == null || switching) return;
         const nextEnabled = !workflow.enabled;
-        setPendingId(workflow.id);
-        setWorkflows((current) => current.map((item) => (
-            item.id === workflow.id ? { ...item, enabled: nextEnabled } : item
-        )));
+        updatePanelState((current) => ({
+            pendingId: workflow.id,
+            workflows: current.workflows.map((item) => (
+                item.id === workflow.id ? { ...item, enabled: nextEnabled } : item
+            )),
+        }));
         try {
             const init = { headers: { "X-Workspace-Id": String(workspaceId) } };
             if (nextEnabled) await enableWorkflow(workflow.id, init);
             else await disableWorkflow(workflow.id, init);
-            if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+            if (!isPanelActive(workspaceId)) return;
             toastSuccess(t(nextEnabled ? "enabled" : "disabled"));
         } catch {
-            if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
-            setWorkflows((current) => current.map((item) => (
-                item.id === workflow.id ? { ...item, enabled: workflow.enabled } : item
-            )));
+            if (!isPanelActive(workspaceId)) return;
+            updatePanelState((current) => ({
+                workflows: current.workflows.map((item) => (
+                    item.id === workflow.id ? { ...item, enabled: workflow.enabled } : item
+                )),
+            }));
             toastError(t("lifecycleFailed"));
         } finally {
-            if (scopeRef.current.activeWorkspaceId === workspaceId) setPendingId(null);
+            if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
     };
 
     const confirmArchiveChange = async () => {
         const workspaceId = activeWorkspaceId;
         if (!archiveTarget || workspaceId == null || switching) return;
-        setPendingId(archiveTarget.id);
+        updatePanelState({ pendingId: archiveTarget.id });
         try {
             if (archived) {
                 await restoreWorkflow(archiveTarget.id, { headers: { "X-Workspace-Id": String(workspaceId) } });
-                if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+                if (!isPanelActive(workspaceId)) return;
                 toastSuccess(t("restored"));
             } else {
                 await archiveWorkflow(archiveTarget.id, { headers: { "X-Workspace-Id": String(workspaceId) } });
-                if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+                if (!isPanelActive(workspaceId)) return;
                 toastSuccess(t("archived"));
             }
-            setWorkflows((current) => current.filter((item) => item.id !== archiveTarget.id));
-            setArchiveTarget(null);
+            updatePanelState((current) => ({
+                workflows: current.workflows.filter((item) => item.id !== archiveTarget.id),
+                archiveTarget: null,
+            }));
         } catch {
-            if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
+            if (!isPanelActive(workspaceId)) return;
             toastError(t("lifecycleFailed"));
         } finally {
-            if (scopeRef.current.activeWorkspaceId === workspaceId) setPendingId(null);
+            if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
     };
 
     const togglePaused = async (workflow: WorkflowListItem) => {
         const workspaceId = activeWorkspaceId;
         if (workflow.archivedAt || workspaceId == null || switching) return;
-        setPendingId(workflow.id);
+        updatePanelState({ pendingId: workflow.id });
         try {
             const init = { headers: { "X-Workspace-Id": String(workspaceId) } };
             const updated = workflow.intakePausedAt
                 ? await resumeWorkflow(workflow.id, init)
                 : await pauseWorkflow(workflow.id, init);
-            if (scopeRef.current.activeWorkspaceId !== workspaceId || scopeRef.current.switching) return;
-            setWorkflows((current) => current.map((item) => item.id === workflow.id ? {
-                ...item,
-                intakePausedAt: updated.intakePausedAt,
-                intakePausedById: updated.intakePausedById,
-            } : item));
+            if (!isPanelActive(workspaceId)) return;
+            updatePanelState((current) => ({
+                workflows: current.workflows.map((item) => item.id === workflow.id ? {
+                    ...item,
+                    intakePausedAt: updated.intakePausedAt,
+                    intakePausedById: updated.intakePausedById,
+                } : item),
+            }));
             toastSuccess(t(workflow.intakePausedAt ? "resumed" : "paused"));
         } catch {
-            if (scopeRef.current.activeWorkspaceId === workspaceId && !scopeRef.current.switching) {
-                toastError(t("lifecycleFailed"));
-            }
+            if (!isPanelActive(workspaceId)) return;
+            toastError(t("lifecycleFailed"));
         } finally {
-            if (scopeRef.current.activeWorkspaceId === workspaceId) setPendingId(null);
+            if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
     };
 
@@ -220,7 +280,7 @@ export default function WorkflowsPanel() {
             />
 
             <section className="space-y-4" aria-busy={loading}>
-                <Tabs value={archived ? "archived" : "active"} onValueChange={(value) => setArchived(value === "archived")}>
+                <Tabs value={archived ? "archived" : "active"} onValueChange={(value) => updatePanelState({ archived: value === "archived" })}>
                     <TabsList aria-label={t("visibilityLabel")}>
                         <TabsTrigger value="active" disabled={switching}>{t("activeTab")}</TabsTrigger>
                         <TabsTrigger value="archived" disabled={switching}>{t("archivedTab")}</TabsTrigger>
@@ -342,7 +402,7 @@ export default function WorkflowsPanel() {
                                                     {duplicatingWorkflowId === workflow.id ? t("duplicating") : t("duplicate")}
                                                 </DropdownMenuItem>
                                             ) : null}
-                                            <DropdownMenuItem disabled={busy} onSelect={() => setRunsTarget(workflow)}>
+                                            <DropdownMenuItem disabled={busy} onSelect={() => updatePanelState({ runsTarget: workflow })}>
                                                 <ClockIcon className="size-4" />
                                                 {t("runs.view")}
                                             </DropdownMenuItem>
@@ -354,7 +414,7 @@ export default function WorkflowsPanel() {
                                                     {t(workflow.intakePausedAt ? "resume" : "pause")}
                                                 </DropdownMenuItem>
                                             ) : null}
-                                            <DropdownMenuItem disabled={busy} onSelect={() => setArchiveTarget(workflow)}>
+                                            <DropdownMenuItem disabled={busy} onSelect={() => updatePanelState({ archiveTarget: workflow })}>
                                                 {archived ? <ArrowUturnLeftIcon className="size-4" /> : <ArchiveBoxIcon className="size-4" />}
                                                 {t(archived ? "restore" : "archive")}
                                             </DropdownMenuItem>
@@ -371,7 +431,7 @@ export default function WorkflowsPanel() {
                 <WorkflowRunsDialog
                     open
                     onOpenChange={(open) => {
-                        if (!open) setRunsTarget(null);
+                        if (!open) updatePanelState({ runsTarget: null });
                     }}
                     workflowId={runsTarget.id}
                     workflowName={runsTarget.name}
@@ -382,7 +442,7 @@ export default function WorkflowsPanel() {
             <ArchiveRecordDialog
                 open={archiveTarget !== null && loadedWorkspaceId === activeWorkspaceId && !switching}
                 onOpenChange={(open) => {
-                    if (!open) setArchiveTarget(null);
+                    if (!open) updatePanelState({ archiveTarget: null });
                 }}
                 mode={archived ? "restore" : "archive"}
                 selectedIds={new Set(archiveTarget ? [archiveTarget.id] : [])}

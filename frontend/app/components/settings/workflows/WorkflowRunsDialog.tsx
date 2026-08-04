@@ -28,6 +28,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 type LoadState = "loading" | "success" | "error";
+type PendingState = "idle" | "loading";
 
 /** Merged canonical and legacy workflow run history with canonical step detail. */
 export default function WorkflowRunsDialog({
@@ -53,14 +54,16 @@ export default function WorkflowRunsDialog({
     const [loadState, setLoadState] = useState<LoadState>("loading");
     const [attempt, setAttempt] = useState(0);
     const [selected, setSelected] = useState<WorkflowRunDetail | null>(null);
-    const [detailLoading, setDetailLoading] = useState(false);
+    const [detailLoadState, setDetailLoadState] = useState<PendingState>("idle");
     const [moreLoading, setMoreLoading] = useState(false);
     const detailControllerRef = useRef<AbortController | null>(null);
     const workspaceHeaders = useMemo(() => ({ "X-Workspace-Id": String(workspaceId) }), [workspaceId]);
+    const detailLoading = detailLoadState === "loading";
 
     useEffect(() => {
         if (!open) return;
         const controller = new AbortController();
+        let active = true;
         void (async () => {
             setLoadState("loading");
             try {
@@ -68,15 +71,18 @@ export default function WorkflowRunsDialog({
                     signal: controller.signal,
                     headers: workspaceHeaders,
                 });
-                if (controller.signal.aborted) return;
+                if (!active || controller.signal.aborted) return;
                 setRuns(page.items);
                 setNextCursor(page.nextCursor);
                 setLoadState("success");
             } catch {
-                if (!controller.signal.aborted) setLoadState("error");
+                if (active && !controller.signal.aborted) setLoadState("error");
             }
         })();
-        return () => controller.abort();
+        return () => {
+            active = false;
+            controller.abort();
+        };
     }, [attempt, open, workflowId, workspaceHeaders]);
 
     useEffect(() => () => detailControllerRef.current?.abort(), []);
@@ -86,7 +92,7 @@ export default function WorkflowRunsDialog({
         detailControllerRef.current?.abort();
         const controller = new AbortController();
         detailControllerRef.current = controller;
-        setDetailLoading(true);
+        setDetailLoadState("loading");
         try {
             const detail = await getWorkflowRun(workflowId, run.runKey, {
                 signal: controller.signal,
@@ -96,7 +102,7 @@ export default function WorkflowRunsDialog({
         } catch {
             if (!controller.signal.aborted) toastError(t("runs.detailFailed"));
         } finally {
-            if (!controller.signal.aborted) setDetailLoading(false);
+            if (!controller.signal.aborted) setDetailLoadState("idle");
         }
     };
 

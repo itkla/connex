@@ -130,17 +130,18 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
         if (!activeWorkspaceId) return;
         const workspaceHeaders = { "X-Workspace-Id": String(activeWorkspaceId) };
         const controller = new AbortController();
+        let active = true;
         void Promise.all([
             getPipelines({ signal: controller.signal, headers: workspaceHeaders }).catch(() => []),
             getCompanies({ signal: controller.signal, headers: workspaceHeaders }).catch(() => []),
         ]).then(async ([pipelines, companies]) => {
-            if (controller.signal.aborted) return;
+            if (!active || controller.signal.aborted) return;
             const stageLists = await Promise.all(pipelines.map((pipeline) => (
                 getStagesByPipelineId(pipeline.id, { signal: controller.signal, headers: workspaceHeaders })
                     .then((stages) => stages.map((stage) => ({ id: stage.id, name: stage.name, pipeline: pipeline.name })))
                     .catch(() => [])
             )));
-            if (controller.signal.aborted) return;
+            if (!active || controller.signal.aborted) return;
             setReferenceOptions({
                 workspaceId: activeWorkspaceId,
                 value: {
@@ -149,7 +150,10 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                 },
             });
         });
-        return () => controller.abort();
+        return () => {
+            active = false;
+            controller.abort();
+        };
     }, [activeWorkspaceId]);
 
     const options = useMemo<RuleBuilderOptions | null>(() => (
@@ -479,7 +483,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                 swipeDirection="right"
                 motionClassName="duration-200"
             >
-                <DrawerContent showCloseButton={false} className="w-full gap-0 duration-200 sm:max-w-sm">
+                <DrawerContent showCloseButton={false} className="w-full gap-0 transition-transform duration-200 sm:max-w-sm">
                     <DrawerHeader className="border-b border-border">
                         <div className="flex items-center gap-2 pr-8">
                             <DrawerTitle>{t("inspectorTitle")}</DrawerTitle>

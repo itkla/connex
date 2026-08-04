@@ -33,8 +33,8 @@ export default function WorkflowValidationSummary({
                         {t("validationErrorTitle", { count: validation.errors.length })}
                     </h2>
                     <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                        {validation.errors.map((diagnostic, index) => (
-                            <li key={`${diagnostic.code}-${diagnostic.nodeId ?? "global"}-${diagnostic.edgeId ?? index}`}>
+                        {validation.errors.map((diagnostic) => (
+                            <li key={`${diagnostic.code}:${diagnostic.nodeId ?? "global"}:${diagnostic.edgeId ?? "no-edge"}:${diagnostic.fieldPath ?? "no-field"}`}>
                                 {diagnostic.nodeId ? (
                                     <Button
                                         variant="link"

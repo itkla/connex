@@ -26,6 +26,10 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 
+function workflowConflictKey(conflict: WorkflowMergeConflict): string {
+    return `${conflict.kind}:${conflict.key}`;
+}
+
 /** Per-item revision conflict recovery that never overwrites the retained local draft implicitly. */
 export default function WorkflowConflictDialog({
     open,
@@ -43,7 +47,6 @@ export default function WorkflowConflictDialog({
     const t = useTranslations("WorkspaceWorkflows");
     const [choices, setChoices] = useState<Record<string, "local" | "server">>({});
 
-    const keyFor = (conflict: WorkflowMergeConflict) => `${conflict.kind}:${conflict.key}`;
     const valueLabel = (conflict: WorkflowMergeConflict, side: "local" | "server") => {
         const value = side === "local" ? conflict.localValue : conflict.serverValue;
         if (value == null || value === "") return t("conflict.empty");
@@ -51,11 +54,11 @@ export default function WorkflowConflictDialog({
         const serialized = JSON.stringify(value);
         return serialized.length > 240 ? `${serialized.slice(0, 237)}…` : serialized;
     };
-    const complete = conflicts.every((conflict) => choices[keyFor(conflict)] != null);
+    const complete = conflicts.every((conflict) => choices[workflowConflictKey(conflict)] != null);
     const resolve = () => {
         let resolved = document;
         for (const conflict of conflicts) {
-            const choice = choices[keyFor(conflict)];
+            const choice = choices[workflowConflictKey(conflict)];
             if (choice) resolved = applyWorkflowMergeChoice(resolved, conflict, choice);
         }
         setChoices({});
@@ -77,7 +80,7 @@ export default function WorkflowConflictDialog({
                 </ResponsiveDialogHeader>
                 <div className="max-h-[55dvh] space-y-3 overflow-y-auto px-4 sm:px-0">
                     {conflicts.map((conflict) => {
-                        const key = keyFor(conflict);
+                        const key = workflowConflictKey(conflict);
                         return (
                             <div key={key} className="rounded-xl border border-border p-3">
                                 <Label htmlFor={`conflict-${key}`}>{t(`conflict.kind.${conflict.kind}`)}</Label>

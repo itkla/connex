@@ -259,6 +259,7 @@ function TriggerFields({
     const tr = useTranslations("WorkspaceRules");
     const isSchedule = node.config.type === "schedule";
     const recordType = document.recordType ?? "deal";
+    const selectedEvents = new Set(node.config.events ?? []);
     return (
         <div className="space-y-4">
             <LabeledField label={tr("recordType")}>
@@ -311,7 +312,7 @@ function TriggerFields({
                     <Label>{tr("eventsLabel")}</Label>
                     <div className="flex flex-wrap gap-1.5" {...fieldProps("config.events")} tabIndex={-1}>
                         {eventsFor(recordType).map((event) => {
-                            const selected = node.config.events?.includes(event) ?? false;
+                            const selected = selectedEvents.has(event);
                             return (
                                 <button
                                     key={event}
