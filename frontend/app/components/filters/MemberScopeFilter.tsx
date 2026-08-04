@@ -93,13 +93,18 @@ export default function MemberScopeFilter({
     onChange,
     members,
     counts,
+    label,
+    ariaLabel,
 }: {
     values: string[] | undefined;
     onChange: (values: string[]) => void;
     members: WorkspaceMember[];
     counts?: Map<string, number>;
+    label?: string;
+    ariaLabel?: string;
 }) {
     const t = useTranslations("MemberScope");
+    const controlLabel = label ?? t("label");
     const unassignedCount = counts?.get(MEMBER_SCOPE_UNASSIGNED);
     const { mode, memberIds } = interpretMemberScope(values);
     const active = mode !== "all";
@@ -109,9 +114,9 @@ export default function MemberScopeFilter({
         if (mode === "me") return t("me");
         if (mode === "unassigned") return t("unassigned");
         if (mode === "members" && memberIds.length === 1) {
-            return memberById.get(memberIds[0])?.displayName ?? t("label");
+            return memberById.get(memberIds[0])?.displayName ?? controlLabel;
         }
-        return t("label");
+        return controlLabel;
     })();
 
     const toggleSentinel = (sentinel: string) => {
@@ -124,7 +129,7 @@ export default function MemberScopeFilter({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button type="button" aria-label={t("ariaLabel")} aria-pressed={active} className={pillClass(active)}>
+                <button type="button" aria-label={ariaLabel ?? t("ariaLabel")} aria-pressed={active} className={pillClass(active)}>
                     <span>{pillLabel}</span>
                     {mode === "members" && memberIds.length > 1 && (
                         <span className="grid size-4 place-items-center rounded-full bg-brand text-[10px] font-semibold leading-none text-brand-foreground tabular-nums">
@@ -135,7 +140,7 @@ export default function MemberScopeFilter({
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel>{t("label")}</DropdownMenuLabel>
+                <DropdownMenuLabel>{controlLabel}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuCheckboxItem
                     checked={mode === "me"}
