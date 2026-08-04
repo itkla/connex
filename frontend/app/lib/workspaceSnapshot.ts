@@ -4,11 +4,11 @@ import type { Workspace } from "@/app/lib/types";
  * Merges a freshly arrived server payload over the workspaces currently published to the tree.
  *
  * The payload wins, except for workspaces the server has never mentioned. `WorkspaceProvider`'s
- * `create` appends the workspace it just created before the refresh that will report it, so a
- * server render that began earlier can arrive with the creation missing. Dropping it there would
- * not merely flicker: the active workspace is already the new one, so it would name a workspace
- * absent from the list and `activeWorkspace` would resolve to null, leaving the shell with no
- * active workspace until some later refresh happened to repair it.
+ * `create` and pending-membership acceptance publish their returned workspace before the refresh
+ * that will report it, so a server render that began earlier can arrive with that workspace
+ * missing. Dropping it there would not merely flicker: the active workspace is already the new one,
+ * so it would name a workspace absent from the list and `activeWorkspace` would resolve to null,
+ * leaving the shell with no active workspace until some later refresh happened to repair it.
  *
  * Absence is only treated as an addition when the previously consumed payload did not mention the
  * workspace either. A workspace that was in the last payload and is gone from this one was removed

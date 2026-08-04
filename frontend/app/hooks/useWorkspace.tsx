@@ -7,12 +7,22 @@ import type { Workspace } from "@/app/lib/types";
 import { createWorkspace, switchWorkspace } from "@/app/lib/api";
 import { adoptWorkspaces } from "@/app/lib/workspaceSnapshot";
 
+type PublishActiveWorkspace = (id: number | null) => void;
+type PublishWorkspace = (workspace: Workspace) => void;
+type SelectionChangeRunner = <T>(
+    operation: (
+        publishActiveWorkspace: PublishActiveWorkspace,
+        publishWorkspace: PublishWorkspace,
+    ) => Promise<T>,
+) => Promise<T>;
+
 type WorkspaceContextValue = {
     workspaces: Workspace[];
     activeWorkspaceId: number | null;
     activeWorkspace: Workspace | null;
     switching: boolean;
     runInWorkspace: (id: number, operation: (switched: boolean) => Promise<void>) => Promise<boolean>;
+    runSelectionChange: SelectionChangeRunner;
     switchTo: (id: number) => Promise<void>;
     create: (name: string) => Promise<Workspace>;
 };
@@ -34,15 +44,18 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
  * commit one frame of exactly that stale chrome before correcting it, which is the defect in
  * miniature. {@link adoptWorkspaces} settles what a payload may overwrite.
  *
- * Which workspace is active is **not** adopted from props, and that is a known gap rather than an
- * invariant — see #1021. Four endpoints move it by writing the session cookie without going through
- * this provider (accepting an invite, accepting an invite link, accepting a pending membership, and
- * leaving a workspace, each followed by a bare `router.refresh()`), so the cookie and the payload
- * can name a workspace this provider does not. Syncing it from props is not the fix: a server
- * render that began before {@link WorkspaceContextValue.switchTo} set the cookie can resolve after
- * it, and the payload carries no generation to order two in-flight renders by, so adopting it
- * blindly trades a stale active workspace for a non-deterministic one. The role staleness this
- * sync does address lives entirely in the list.
+ * Which workspace is active is never adopted from a refreshed prop. A server render that began
+ * before {@link WorkspaceContextValue.switchTo} set the cookie can resolve after it, and the payload
+ * carries no generation to order two in-flight renders. Only one selection-changing operation at a
+ * time is therefore permitted. Within a successful operation, the response cookie is
+ * applied before that result is published to provider state, so serialization prevents another
+ * selection response from inverting those two decisions.
+ *
+ * This is not a complete convergence guarantee. If a 200 response's body fails to read or parse,
+ * the browser has already applied its cookie but the operation cannot publish its result. Because
+ * `initialActiveId` is mount-only, nothing re-synchronizes the provider after that failure.
+ * Recovery for that residual is tracked by
+ * {@link https://github.com/itkla/connex/issues/1023 issue #1023}.
  *
  * @param initialWorkspaces - the viewer's workspaces as of the current server render
  * @param initialActiveId - the workspace the session cookie selects, or null when none is
@@ -70,27 +83,49 @@ export function WorkspaceProvider({
         setWorkspaces(adoptWorkspaces(workspaces, publishedWorkspaces, initialWorkspaces));
     }
 
+    const publishActiveWorkspace = useCallback((id: number | null) => {
+        activeWorkspaceIdRef.current = id;
+        setActiveWorkspaceId(id);
+    }, []);
+
+    const publishWorkspace = useCallback((workspace: Workspace) => {
+        setWorkspaces((previous) => previous.some(({ id }) => id === workspace.id)
+            ? previous.map((held) => held.id === workspace.id ? workspace : held)
+            : [...previous, workspace]);
+    }, []);
+
+    const runSelectionChange = useCallback(async <T,>(
+        operation: (
+            publishActiveWorkspace: PublishActiveWorkspace,
+            publishWorkspace: PublishWorkspace,
+        ) => Promise<T>,
+    ) => {
+        if (switchingRef.current) throw new Error("A workspace operation is already in progress");
+        switchingRef.current = true;
+        setSwitching(true);
+        try {
+            return await operation(publishActiveWorkspace, publishWorkspace);
+        } finally {
+            switchingRef.current = false;
+            setSwitching(false);
+        }
+    }, [publishActiveWorkspace, publishWorkspace]);
+
     const runInWorkspace = useCallback(async (
         id: number,
         operation: (switched: boolean) => Promise<void>,
     ) => {
         if (switchingRef.current) return false;
-        switchingRef.current = true;
-        setSwitching(true);
-        try {
+        return runSelectionChange(async (publishActiveWorkspace) => {
             const switched = id !== activeWorkspaceIdRef.current;
             if (switched) {
                 await switchWorkspace(id);
-                activeWorkspaceIdRef.current = id;
-                setActiveWorkspaceId(id);
+                publishActiveWorkspace(id);
             }
             await operation(switched);
             return true;
-        } finally {
-            switchingRef.current = false;
-            setSwitching(false);
-        }
-    }, []);
+        });
+    }, [runSelectionChange]);
 
     const switchTo = useCallback(
         async (id: number) => {
@@ -103,24 +138,15 @@ export function WorkspaceProvider({
     );
 
     const create = useCallback(
-        async (name: string) => {
-            if (switchingRef.current) throw new Error("A workspace operation is already in progress");
-            switchingRef.current = true;
-            setSwitching(true);
-            try {
-                const workspace = await createWorkspace(name);
-                setWorkspaces((prev) => [...prev, workspace]);
-                activeWorkspaceIdRef.current = workspace.id;
-                setActiveWorkspaceId(workspace.id);
-                router.replace("/dashboard");
-                router.refresh();
-                return workspace;
-            } finally {
-                switchingRef.current = false;
-                setSwitching(false);
-            }
-        },
-        [router],
+        (name: string) => runSelectionChange(async (publishActiveWorkspace, publishWorkspace) => {
+            const workspace = await createWorkspace(name);
+            publishWorkspace(workspace);
+            publishActiveWorkspace(workspace.id);
+            router.replace("/dashboard");
+            router.refresh();
+            return workspace;
+        }),
+        [router, runSelectionChange],
     );
 
     const activeWorkspace = useMemo(
@@ -135,6 +161,7 @@ export function WorkspaceProvider({
             activeWorkspace,
             switching,
             runInWorkspace,
+            runSelectionChange,
             switchTo,
             create,
         }),
@@ -144,6 +171,7 @@ export function WorkspaceProvider({
             activeWorkspace,
             switching,
             runInWorkspace,
+            runSelectionChange,
             switchTo,
             create,
         ],

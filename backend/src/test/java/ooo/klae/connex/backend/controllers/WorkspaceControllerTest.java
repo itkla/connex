@@ -1,10 +1,16 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import jakarta.servlet.http.HttpServletResponse;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,14 +18,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
 import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class WorkspaceControllerTest {
@@ -48,24 +57,37 @@ class WorkspaceControllerTest {
     }
 
     @Test
-    void leaveSetsNextWorkspaceCookieReturnedByService() {
+    void leaveSetsNextWorkspaceCookieReturnedByService() throws NoSuchMethodException {
         MockHttpServletResponse response = new MockHttpServletResponse();
         when(workspaceService.leaveWorkspaceAndSelectNext(9, 7)).thenReturn(12);
 
-        controller.leave(9, response);
+        WorkspaceSelectionDto selection = controller.leave(9, response);
+        var method = WorkspaceController.class.getDeclaredMethod(
+            "leave",
+            int.class,
+            HttpServletResponse.class
+        );
 
+        assertEquals(12, selection.activeWorkspaceId());
+        assertEquals(WorkspaceSelectionDto.class, method.getReturnType());
+        assertNull(method.getAnnotation(ResponseStatus.class));
         verify(workspaceService).leaveWorkspaceAndSelectNext(9, 7);
         verify(workspaceCookie).set(response, 12);
         verify(workspaceCookie, never()).clear(response);
     }
 
     @Test
-    void leaveClearsWorkspaceCookieWhenNoMembershipRemains() {
+    void leaveClearsWorkspaceCookieWhenNoMembershipRemains() throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         when(workspaceService.leaveWorkspaceAndSelectNext(9, 7)).thenReturn(null);
 
-        controller.leave(9, response);
+        WorkspaceSelectionDto selection = controller.leave(9, response);
+        JsonMapper jsonMapper = JsonMapper.builder()
+            .changeDefaultPropertyInclusion(ignored -> JsonInclude.Value.ALL_NON_NULL)
+            .build();
 
+        assertNull(selection.activeWorkspaceId());
+        assertEquals("{\"activeWorkspaceId\":null}", jsonMapper.writeValueAsString(selection));
         verify(workspaceService).leaveWorkspaceAndSelectNext(9, 7);
         verify(workspaceCookie).clear(response);
         verify(workspaceCookie, never()).set(same(response), anyInt());
