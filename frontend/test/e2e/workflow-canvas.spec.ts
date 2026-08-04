@@ -67,11 +67,11 @@ async function dragConnection(page: Page, source: Locator, target: Locator, vali
     await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
     await page.mouse.down();
     await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 8 });
-    await expect(target).toHaveClass(/\bconnectingto\b/);
+    await expect(target).toHaveClass(/(?:^|\s)connectingto(?:\s|$)/);
     if (valid) {
-        await expect(target).toHaveClass(/\bvalid\b/);
+        await expect(target).toHaveClass(/(?:^|\s)valid(?:\s|$)/);
     } else {
-        await expect(target).not.toHaveClass(/\bvalid\b/);
+        await expect(target).not.toHaveClass(/(?:^|\s)valid(?:\s|$)/);
     }
     await page.mouse.up();
 }
