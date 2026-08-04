@@ -309,6 +309,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
         run: editor.run,
         readOnly: editor.readOnly,
         focusNodeId: editor.selectedNodeId,
+        focusRequestId: editor.focusRequestId,
         nodeLabel,
         nodeSummary,
         branchLabel,

@@ -173,6 +173,7 @@ type WorkflowCanvasEditorProps = {
     run: WorkflowRunDetail | null;
     readOnly: boolean;
     focusNodeId: string | null;
+    focusRequestId: number;
     nodeLabel: (nodeId: string) => string;
     nodeSummary: (nodeId: string) => string;
     branchLabel: (outcome: WorkflowEdgeOutcome) => string;
@@ -199,6 +200,7 @@ export default function WorkflowCanvasEditor({
     run,
     readOnly,
     focusNodeId,
+    focusRequestId,
     nodeLabel,
     nodeSummary,
     branchLabel,
@@ -215,6 +217,7 @@ export default function WorkflowCanvasEditor({
     const { resolvedTheme } = useTheme();
     const { getNode, screenToFlowPosition, setCenter } = useReactFlow();
     const reduceMotion = useReducedMotion() ?? false;
+    const handledFocusRef = useRef({ nodeId: focusNodeId, requestId: focusRequestId });
     const {
         open: contextMenuOpen,
         onOpenChange: onContextMenuOpenChange,
@@ -310,7 +313,12 @@ export default function WorkflowCanvasEditor({
     }), [document.definition, readOnly, run?.path]);
 
     useEffect(() => {
-        if (!focusNodeId) return;
+        const handledFocus = handledFocusRef.current;
+        const shouldFocus = focusNodeId != null && (
+            handledFocus.nodeId !== focusNodeId || handledFocus.requestId !== focusRequestId
+        );
+        handledFocusRef.current = { nodeId: focusNodeId, requestId: focusRequestId };
+        if (!shouldFocus) return;
         const node = getNode(focusNodeId);
         if (!node) return;
         void setCenter(
@@ -322,7 +330,7 @@ export default function WorkflowCanvasEditor({
             const element = globalThis.document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(focusNodeId)}"]`);
             element?.focus();
         });
-    }, [document.canvas.viewport.zoom, focusNodeId, getNode, setCenter]);
+    }, [document.canvas.viewport.zoom, focusNodeId, focusRequestId, getNode, setCenter]);
 
     const onConnect = useCallback((connection: Connection) => {
         if (connection.source && connection.target && isOutcome(connection.sourceHandle)) {
