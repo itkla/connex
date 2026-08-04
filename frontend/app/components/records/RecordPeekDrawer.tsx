@@ -11,17 +11,26 @@ import {
     ChevronDownIcon,
     ChevronUpIcon,
     DocumentTextIcon,
+    EllipsisHorizontalIcon,
     LinkIcon,
+    XMarkIcon,
 } from '@heroicons/react/24/outline';
 
 import {
     Drawer,
+    DrawerClose,
     DrawerContent,
     DrawerDescription,
     DrawerHeader,
     DrawerTitle,
 } from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActionRecord, useActions } from '@/app/hooks/useActions';
 import { useRecentRecords } from '@/app/hooks/useRecentRecords';
@@ -168,9 +177,15 @@ function RecordPeekDrawer({
                 if (!open) onClose();
             }}
             swipeDirection={isMobile ? 'down' : 'right'}
+            showSwipeHandle={isMobile}
+            motionClassName="duration-200"
         >
-            <DrawerContent data-record-peek="" className="flex w-full flex-col gap-0 sm:max-w-md">
-                <DrawerHeader className="gap-3 border-b pr-12">
+            <DrawerContent
+                data-record-peek=""
+                showCloseButton={false}
+                className="flex h-dvh max-h-dvh w-full flex-col gap-0 rounded-none pt-[env(safe-area-inset-top)] md:h-full md:max-h-none md:max-w-md md:rounded-2xl md:pt-0"
+            >
+                <DrawerHeader className="gap-3 border-b">
                     <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                             {t(`type_${browserType}`)}
@@ -187,6 +202,11 @@ function RecordPeekDrawer({
                             <Button variant="ghost" size="icon-xs" aria-label={t('next')} disabled={!hasNext} onClick={onNext}>
                                 <ChevronDownIcon className="size-4" />
                             </Button>
+                            <DrawerClose
+                                render={<Button variant="ghost" size="icon-xs" aria-label={t('close')} />}
+                            >
+                                <XMarkIcon className="size-4" />
+                            </DrawerClose>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -216,49 +236,53 @@ function RecordPeekDrawer({
                 </div>
 
                 {target && !error && (
-                    <div className="grid grid-cols-2 gap-2 border-t p-3">
+                    <div
+                        data-record-peek-actions=""
+                        className="flex items-center gap-2 border-t px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-3"
+                    >
                         <Button
-                            variant={browserType === 'deal' ? 'brand' : 'outline'}
+                            variant="brand"
                             size="sm"
                             onClick={openFull}
-                            className={!actionRecord || canLogActivity ? 'col-span-2 justify-start' : 'justify-start'}
+                            className="flex-1"
                         >
                             <ArrowTopRightOnSquareIcon className="size-4" />
                             {t('openFull')}
                         </Button>
-                        {canLogActivity && logActivityAction && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => runRecordAction('create.activity')}
-                                className="col-span-2 justify-start sm:col-span-1"
-                            >
-                                {LogActivityIcon && <LogActivityIcon className="size-4" />}
-                                {logActivityAction.label ?? actionsT(logActivityAction.labelKey)}
-                            </Button>
-                        )}
-                        {canAddNote && (
-                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('create.note')} className="justify-start">
-                                <DocumentTextIcon className="size-4" />
-                                {t('addNote')}
-                            </Button>
-                        )}
-                        {canCreateTask && (
-                            <Button variant="ghost" size="sm" onClick={() => runRecordAction('create.task')} className="justify-start">
-                                <CheckCircleIcon className="size-4" />
-                                {t('createTask')}
-                            </Button>
-                        )}
-                        {canCopyLink && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => runRecordAction('record.copy-link')}
-                                className={canLogActivity ? 'col-span-2 justify-start sm:col-span-1' : 'justify-start'}
-                            >
-                                <LinkIcon className="size-4" />
-                                {t('copyLink')}
-                            </Button>
+                        {(canLogActivity || canAddNote || canCreateTask || canCopyLink) && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="icon-sm" aria-label={t('moreActions')}>
+                                        <EllipsisHorizontalIcon className="size-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" side="top" className="w-52 motion-reduce:animate-none">
+                                    {canLogActivity && logActivityAction && (
+                                        <DropdownMenuItem onSelect={() => runRecordAction('create.activity')}>
+                                            {LogActivityIcon && <LogActivityIcon className="size-4" />}
+                                            {logActivityAction.label ?? actionsT(logActivityAction.labelKey)}
+                                        </DropdownMenuItem>
+                                    )}
+                                    {canAddNote && (
+                                        <DropdownMenuItem onSelect={() => runRecordAction('create.note')}>
+                                            <DocumentTextIcon className="size-4" />
+                                            {t('addNote')}
+                                        </DropdownMenuItem>
+                                    )}
+                                    {canCreateTask && (
+                                        <DropdownMenuItem onSelect={() => runRecordAction('create.task')}>
+                                            <CheckCircleIcon className="size-4" />
+                                            {t('createTask')}
+                                        </DropdownMenuItem>
+                                    )}
+                                    {canCopyLink && (
+                                        <DropdownMenuItem onSelect={() => runRecordAction('record.copy-link')}>
+                                            <LinkIcon className="size-4" />
+                                            {t('copyLink')}
+                                        </DropdownMenuItem>
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                         )}
                     </div>
                 )}

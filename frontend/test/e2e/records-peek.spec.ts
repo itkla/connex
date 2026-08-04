@@ -107,4 +107,26 @@ test.describe("records browse and peek", () => {
         }).click();
         await expect(page).toHaveURL(new RegExp(`q=${encodeURIComponent(contact.name)}`));
     });
+
+    test("mobile Peek uses the full viewport and keeps secondary actions in overflow @mobile-only", async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.peek;
+        await page.setViewportSize({ width: 412, height: 915 });
+        await page.goto(`/records/contacts?view=table&q=${encodeURIComponent(contact.name)}`);
+
+        const row = page.locator(`[data-record-row-id="${contact.id}"]`);
+        await row.click();
+
+        const peek = page.locator("[data-record-peek]");
+        await expect(peek).toBeVisible();
+        const bounds = await peek.boundingBox();
+        expect(bounds?.y).toBeLessThanOrEqual(1);
+        expect(bounds?.height).toBeGreaterThanOrEqual(914);
+
+        const actions = peek.locator("[data-record-peek-actions]");
+        await expect(actions.getByRole("button", { name: "Open record" })).toBeVisible();
+        await expect(actions.getByRole("button", { name: "More actions" })).toBeVisible();
+        await actions.getByRole("button", { name: "More actions" }).click();
+        await expect(page.getByRole("menuitem", { name: "Add note" })).toBeVisible();
+        await expect(page.getByRole("menuitem", { name: "Create task" })).toBeVisible();
+    });
 });
