@@ -15,6 +15,19 @@ const MENU_OPTIONS: NonNullable<BubbleMenuProps["options"]> = {
     shift: true,
 };
 
+const shouldShowSelectionToolbar: NonNullable<BubbleMenuProps["shouldShow"]> = ({
+    editor,
+    state,
+    from,
+    to,
+}) => canShowSelectionToolbar({
+    editable: editor.isEditable,
+    textSelection: state.selection instanceof TextSelection,
+    from,
+    to,
+    codeBlock: editor.isActive("codeBlock"),
+});
+
 /** Contextual inline-format controls for non-empty text selections. */
 export function SelectionToolbar({ editor, labels }: { editor: Editor; labels: ToolbarLabels }) {
     const [, setRevision] = useState(0);
@@ -35,13 +48,7 @@ export function SelectionToolbar({ editor, labels }: { editor: Editor; labels: T
             pluginKey="note-selection-toolbar"
             updateDelay={0}
             options={MENU_OPTIONS}
-            shouldShow={({ editor: activeEditor, state, from, to }) => canShowSelectionToolbar({
-                editable: activeEditor.isEditable,
-                textSelection: state.selection instanceof TextSelection,
-                from,
-                to,
-                codeBlock: activeEditor.isActive("codeBlock"),
-            })}
+            shouldShow={shouldShowSelectionToolbar}
             role="toolbar"
             aria-label={labels.selectionToolbar}
             aria-orientation="horizontal"
