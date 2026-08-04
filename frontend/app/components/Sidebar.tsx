@@ -99,7 +99,9 @@ function useSections(navAccess: NavAccess): NavSection[] {
         sectionPathname === "/account/connections" && sectionSearchParams.get("panel") === "reviews";
     const workspaceItems: NavItem[] = [
         { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
-        { label: t("navWorkflows"), href: "/workflows", icon: BoltIcon },
+        ...(navAccess.workflows
+            ? [{ label: t("navWorkflows"), href: "/workflows", icon: BoltIcon }]
+            : []),
         ...(navAccess.captureReviews
             ? [{
                 label: t("navCaptureReviews"),
@@ -205,13 +207,6 @@ function longestMatchingHref(items: readonly NavItem[], pathname: string): strin
     }
     return longestMatch;
 }
-
-// function toggleSidebar() {
-//     const sidebar = document.querySelector(".sidebar");
-//     if (sidebar) {
-//         sidebar.classList.toggle("hidden");
-//     }
-// }
 
 function NavGroup({
     section,

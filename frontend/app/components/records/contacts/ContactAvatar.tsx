@@ -1,4 +1,5 @@
 import { type Contact } from "@/app/lib/types";
+import ProtectedMediaImage from "@/app/components/ProtectedMediaImage";
 import { cn } from "@/lib/utils";
 import { UserIcon } from "@heroicons/react/24/outline";
 
@@ -21,16 +22,21 @@ const ICON_CLASS: Record<AvatarSize, string> = {
 };
 
 export default function ContactAvatar({ contact, type = 'small' }: { contact: Contact; type?: AvatarSize; upload?: boolean }) {
+    const fallback = (
+        <span className="h-full w-full flex items-center justify-center bg-muted-foreground/40">
+            <UserIcon className={cn("text-muted-foreground", ICON_CLASS[type])} />
+        </span>
+    );
     return (
-        // ContactAvatars are always round. company logos are squircles
         <div className={cn("shrink-0 overflow-hidden rounded-full bg-muted ring-1 ring-border", SIZE_CLASS[type])}>
-            {contact.imageUrl ? (
-                <img src={contact.imageUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
-            ) : (
-                <div className="h-full w-full flex items-center justify-center bg-muted-foreground/40">
-                    <UserIcon className={cn("text-muted-foreground", ICON_CLASS[type])} />
-                </div>
-            )}
+            <ProtectedMediaImage
+                src={contact.imageUrl}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+                fallback={fallback}
+            />
         </div>
     )
 }

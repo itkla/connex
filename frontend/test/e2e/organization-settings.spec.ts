@@ -74,6 +74,7 @@ test.describe("workspace and organization identity", () => {
             await page.getByRole("button", { name: "Save changes" }).click();
             await expect(page.getByText("Workspace settings updated.")).toBeVisible();
             await expect(page.getByRole("button", { name: "Switch workspace" })).toContainText(workspaceName);
+            await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(workspaceName);
 
             await page.goto("/organization/overview");
             await expect(page.getByRole("heading", { name: "Organization identity" })).toBeVisible();
@@ -82,6 +83,7 @@ test.describe("workspace and organization identity", () => {
             await expect(page.getByText("Organization settings updated.")).toBeVisible();
             await expect(page.getByText(organizationName, { exact: true }).first()).toBeVisible();
             await expect(page.getByText("Asia/Tokyo", { exact: true })).toBeVisible();
+            await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(organizationName);
 
             await page.getByRole("button", { name: "Table" }).click();
             const organizationTable = page.getByRole("table", {
@@ -91,6 +93,10 @@ test.describe("workspace and organization identity", () => {
             await expect(organizationTable.getByRole("button", { name: workspaceName, exact: true })).toBeVisible();
             await organizationTable.getByRole("button", { name: "E2E Harness", exact: true }).click();
             await expect(page).toHaveURL(new RegExp(`/users/\\d+$`));
+            const userBreadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+            await expect(userBreadcrumb).toContainText("E2E Harness");
+            await expect(userBreadcrumb).toContainText("Users");
+            await expect(userBreadcrumb).not.toContainText(organizationName);
 
             const workspacesResponse = await context.request.get("/api/workspaces");
             expect(workspacesResponse.status()).toBe(200);

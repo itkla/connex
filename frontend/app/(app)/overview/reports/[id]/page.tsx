@@ -13,6 +13,7 @@ import {
     getReportSnapshots,
 } from '@/app/lib/api';
 import type { ReportSnapshotSummary } from '@/app/lib/types';
+import { CrumbLabel } from '@/app/hooks/useNavTrail';
 
 export async function generateMetadata() {
     const t = await getTranslations('Reports');
@@ -43,13 +44,16 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     }
 
     return (
-        <ReportDocumentBoard
-            definition={report}
-            initialSnapshots={snapshots}
-            canUpdateReports={effectivePermissions.includes('REPORT_UPDATE')}
-            canDeleteReports={effectivePermissions.includes('REPORT_DELETE')}
-            currentUserId={user.id}
-            defaultTimezone={user.timezone}
-        />
+        <>
+            <CrumbLabel pathname={`/overview/reports/${id}`} value={report.name} />
+            <ReportDocumentBoard
+                definition={report}
+                initialSnapshots={snapshots}
+                canUpdateReports={effectivePermissions.includes('REPORT_UPDATE')}
+                canDeleteReports={effectivePermissions.includes('REPORT_DELETE')}
+                currentUserId={user.id}
+                defaultTimezone={user.timezone}
+            />
+        </>
     );
 }

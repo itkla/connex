@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import {
+    BoltIcon,
     ClipboardDocumentListIcon,
     Cog6ToothIcon,
     FlagIcon,
@@ -77,6 +78,18 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 },
             });
         }
+        if (navAccess.workflows) {
+            gated.push({
+                id: "navigate.workflows",
+                group: "navigate",
+                labelKey: "navigate.workflows",
+                icon: BoltIcon,
+                order: 150,
+                execute: (_context, helpers) => {
+                    helpers.router.push("/workflows");
+                },
+            });
+        }
         if (navAccess.auditLog) {
             gated.push({
                 id: "navigate.audit-log",
@@ -95,6 +108,7 @@ export default function NavActionsBridge({ navAccess }: Props): null {
         navAccess.diagnostics,
         navAccess.campaigns,
         navAccess.captureReviews,
+        navAccess.workflows,
         navAccess.auditLog,
     ]);
 

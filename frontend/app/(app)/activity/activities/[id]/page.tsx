@@ -4,7 +4,7 @@ import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ArrowLeftIcon, BriefcaseIcon, UserIcon } from "@heroicons/react/24/outline";
+import { BriefcaseIcon, UserIcon } from "@heroicons/react/24/outline";
 
 import {
     getActivityById,
@@ -16,8 +16,6 @@ import {
 import type { User } from "@/app/lib/types";
 import { formatDateTime } from "@/app/lib/utils";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
-import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
-import RecordReturnLink from "@/app/components/records/RecordReturnLink";
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
@@ -38,13 +36,10 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
 
 export default async function ActivityDetailPage({
     params,
-    searchParams,
 }: {
     params: Promise<{ id: string }>;
-    searchParams: Promise<{ returnTo?: string | string[] }>;
 }) {
-    const [{ id }, query] = await Promise.all([params, searchParams]);
-    const returnPath = resolveRecordReturnPath("activities", query.returnTo);
+    const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) {
@@ -86,13 +81,6 @@ export default async function ActivityDetailPage({
     return (
         <PageShell tier="form">
                 <Rise className="flex flex-col gap-6">
-                    <RecordReturnLink
-                        href={returnPath}
-                        className="inline-flex w-fit items-center gap-2 text-base text-brand transition-colors hover:text-brand-hover"
-                    >
-                        <ArrowLeftIcon className="size-4" />
-                        <span>{t("back")}</span>
-                    </RecordReturnLink>
                     <CrumbLabel value={activity.subject} />
 
                     <div className="flex items-start gap-3.5">

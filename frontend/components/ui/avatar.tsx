@@ -3,6 +3,10 @@
 import * as React from "react"
 import { Avatar as AvatarPrimitive } from "radix-ui"
 
+import {
+  useProtectedMediaSource,
+  useProtectedMediaVisibility,
+} from "@/app/hooks/useProtectedMedia"
 import { cn } from "@/lib/utils"
 
 function Avatar({
@@ -27,17 +31,45 @@ function Avatar({
 
 function AvatarImage({
   className,
+  src,
+  onLoadingStatusChange,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
+  const protectedSource = typeof src === "string" ? src : null
+  const { visibilityRef, loadProtectedMedia } = useProtectedMediaVisibility()
+  const { resolvedSource, reject } = useProtectedMediaSource(protectedSource, loadProtectedMedia)
+  const visibleSource = typeof src === "string" ? resolvedSource : src
+  const handleLoadingStatusChange = React.useCallback(
+    (status: "idle" | "loading" | "loaded" | "error") => {
+      if (status === "error" && typeof visibleSource === "string") reject(visibleSource)
+      onLoadingStatusChange?.(status)
+    },
+    [onLoadingStatusChange, reject, visibleSource]
+  )
+
+  if (!src) return null
+
   return (
-    <AvatarPrimitive.Image
-      data-slot="avatar-image"
-      className={cn(
-        "aspect-square size-full rounded-full object-cover",
-        className
-      )}
-      {...props}
-    />
+    <>
+      <span
+        ref={visibilityRef}
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+      />
+      {visibleSource ? (
+        <AvatarPrimitive.Image
+          key={typeof visibleSource === "string" ? visibleSource : undefined}
+          data-slot="avatar-image"
+          src={visibleSource}
+          onLoadingStatusChange={handleLoadingStatusChange}
+          className={cn(
+            "aspect-square size-full rounded-full object-cover",
+            className
+          )}
+          {...props}
+        />
+      ) : null}
+    </>
   )
 }
 

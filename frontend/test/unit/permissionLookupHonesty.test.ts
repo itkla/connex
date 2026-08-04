@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { isValidElement } from 'react';
+import { Children, Fragment, isValidElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import AccessDeniedPage from '@/app/components/AccessDeniedPage';
@@ -30,6 +30,10 @@ type SnapshotWorld = {
     attainment?: boolean;
     snapshot?: 'ready' | 'gone' | 'forbidden';
 };
+
+function hasChildren(value: unknown): value is { children?: ReactNode } {
+    return typeof value === 'object' && value !== null && 'children' in value;
+}
 
 function json(body: unknown): Response {
     return new Response(JSON.stringify(body), {
@@ -68,7 +72,7 @@ function stubOnlyThisRoutesReads(world: SnapshotWorld): void {
             }));
         }
         if (url.endsWith('/api/reports/1')) {
-            return Promise.resolve(json({ id: 1, config: { widgets: [{ measure }] } }));
+            return Promise.resolve(json({ id: 1, name: 'Pipeline health', config: { widgets: [{ measure }] } }));
         }
         return Promise.resolve(new Response('', { status: 404 }));
     });
@@ -79,7 +83,10 @@ async function renderSnapshotPage(world: SnapshotWorld): Promise<unknown> {
     const rendered = await ReportSnapshotPage({
         params: Promise.resolve({ id: '1', snapshotId: '2' }),
     });
-    return isValidElement(rendered) ? rendered.type : null;
+    if (!isValidElement(rendered)) return null;
+    if (rendered.type !== Fragment || !hasChildren(rendered.props)) return rendered.type;
+    const content = Children.toArray(rendered.props.children).at(-1);
+    return isValidElement(content) ? content.type : null;
 }
 
 afterEach(() => {

@@ -1,5 +1,6 @@
 import { UserIcon } from '@heroicons/react/24/outline';
 
+import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import { cn } from '@/lib/utils';
 
 type PartySize = 'sm' | 'md';
@@ -25,15 +26,21 @@ export default function PartyAvatar({
     imageUrl?: string | null;
     size?: PartySize;
 }) {
+    const fallback = (
+        <span className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
+            <UserIcon className={cn('text-muted-foreground', ICON_CLASS[size])} aria-hidden />
+        </span>
+    );
     return (
         <div className={cn('shrink-0 overflow-hidden rounded-full bg-muted ring-1 ring-border', SIZE_CLASS[size])}>
-            {imageUrl ? (
-                <img src={imageUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
-            ) : (
-                <div className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
-                    <UserIcon className={cn('text-muted-foreground', ICON_CLASS[size])} aria-hidden />
-                </div>
-            )}
+            <ProtectedMediaImage
+                src={imageUrl}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+                fallback={fallback}
+            />
         </div>
     );
 }

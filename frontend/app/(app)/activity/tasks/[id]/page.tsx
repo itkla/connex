@@ -5,7 +5,6 @@ import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
-    ArrowLeftIcon,
     BriefcaseIcon,
     CheckCircleIcon,
     UserIcon,
@@ -93,13 +92,6 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     return (
         <PageShell tier="form">
                 <Rise className="flex flex-col gap-6">
-                    <Link
-                        href="/activity/tasks"
-                        className="inline-flex w-fit items-center gap-2 text-base text-brand transition-colors hover:text-brand-hover"
-                    >
-                        <ArrowLeftIcon className="size-4" />
-                        <span>{t("back")}</span>
-                    </Link>
                     <CrumbLabel value={noteSnippet(task.description, 60) || t("untitled")} />
 
                     <div className="flex items-start gap-3">

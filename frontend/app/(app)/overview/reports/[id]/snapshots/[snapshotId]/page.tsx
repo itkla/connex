@@ -17,6 +17,7 @@ import {
 } from '@/app/lib/api';
 import type { ReportSnapshot, ReportSnapshotSummary } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
+import { CrumbLabel } from '@/app/hooks/useNavTrail';
 
 export async function generateMetadata() {
     const t = await getTranslations('Reports');
@@ -87,28 +88,31 @@ export default async function ReportSnapshotPage({
         const forbidden = outcome.status === 'forbidden';
         const Icon = forbidden ? LockClosedIcon : ArchiveBoxXMarkIcon;
         return (
-            <div className="min-h-full bg-background px-2 pb-12 pt-8">
-                <div className="mx-auto w-full max-w-[100rem]">
-                    <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-                        <Icon className="mx-auto size-8 text-muted-foreground" />
-                        <h1 className="mt-4 text-lg font-semibold text-foreground">
-                            {forbidden
-                                ? t('document.snapshotForbiddenTitle')
-                                : t('document.snapshotUnavailableTitle')}
-                        </h1>
-                        <p className="mx-auto mt-1 max-w-prose text-sm text-muted-foreground">
-                            {forbidden
-                                ? t('document.snapshotForbiddenBody')
-                                : t('document.snapshotUnavailableBody')}
-                        </p>
-                        {forbidden ? null : (
-                            <Button className="mt-6" variant="outline" asChild>
-                                <Link href={`/overview/reports/${id}`}>{t('document.viewLiveReport')}</Link>
-                            </Button>
-                        )}
+            <>
+                <CrumbLabel pathname={`/overview/reports/${id}`} value={report.name} />
+                <div className="min-h-full bg-background px-2 pb-12 pt-8">
+                    <div className="mx-auto w-full max-w-[100rem]">
+                        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
+                            <Icon className="mx-auto size-8 text-muted-foreground" />
+                            <h1 className="mt-4 text-lg font-semibold text-foreground">
+                                {forbidden
+                                    ? t('document.snapshotForbiddenTitle')
+                                    : t('document.snapshotUnavailableTitle')}
+                            </h1>
+                            <p className="mx-auto mt-1 max-w-prose text-sm text-muted-foreground">
+                                {forbidden
+                                    ? t('document.snapshotForbiddenBody')
+                                    : t('document.snapshotUnavailableBody')}
+                            </p>
+                            {forbidden ? null : (
+                                <Button className="mt-6" variant="outline" asChild>
+                                    <Link href={`/overview/reports/${id}`}>{t('document.viewLiveReport')}</Link>
+                                </Button>
+                            )}
+                        </div>
                     </div>
                 </div>
-            </div>
+            </>
         );
     }
 
@@ -129,14 +133,17 @@ export default async function ReportSnapshotPage({
         ));
 
     return (
-        <ReportDocumentBoard
-            definition={report}
-            initialSnapshots={initialSnapshots}
-            initialSnapshot={snapshot}
-            canUpdateReports={effectivePermissions.includes('REPORT_UPDATE')}
-            canDeleteReports={effectivePermissions.includes('REPORT_DELETE')}
-            currentUserId={user.id}
-            defaultTimezone={user.timezone}
-        />
+        <>
+            <CrumbLabel pathname={`/overview/reports/${id}`} value={report.name} />
+            <ReportDocumentBoard
+                definition={report}
+                initialSnapshots={initialSnapshots}
+                initialSnapshot={snapshot}
+                canUpdateReports={effectivePermissions.includes('REPORT_UPDATE')}
+                canDeleteReports={effectivePermissions.includes('REPORT_DELETE')}
+                currentUserId={user.id}
+                defaultTimezone={user.timezone}
+            />
+        </>
     );
 }

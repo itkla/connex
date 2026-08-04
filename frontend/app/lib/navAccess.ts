@@ -20,6 +20,8 @@ export type NavAccess = {
      * hide working functionality rather than a broken promise.
      */
     campaigns: boolean;
+    /** Workflow definitions, recipes, and operations require {@code RULE_MANAGE}. */
+    workflows: boolean;
     /**
      * Workspace diagnostics require {@code WORKSPACE_SETTINGS}, the permission its endpoints
      * enforce. Gating on the role-derived owner/admin approximation instead would hide the page
@@ -34,6 +36,7 @@ export const NO_NAV_ACCESS: NavAccess = {
     auditLog: false,
     captureReviews: false,
     campaigns: false,
+    workflows: false,
     diagnostics: false,
 };
 
@@ -55,6 +58,7 @@ export function resolveNavAccess(
         captureReviews:
             capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft,
         campaigns: effectivePermissions.includes("CAMPAIGN_VIEW"),
+        workflows: effectivePermissions.includes("RULE_MANAGE"),
         diagnostics: effectivePermissions.includes("WORKSPACE_SETTINGS"),
     };
 }

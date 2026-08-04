@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useReducer } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import {
-    ArrowLeftIcon,
     ArrowPathIcon,
     BoltIcon,
     CheckCircleIcon,
@@ -19,6 +18,7 @@ import {
 import AccessDenied from "@/app/components/AccessDenied";
 import { useActions } from "@/app/hooks/useActions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import {
     ApiError,
     assignWorkflowIntervention,
@@ -215,6 +215,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
 
     return (
         <div className="space-y-8">
+            <CrumbLabel pathname={`/workflows/${workflowId}`} value={workflow.name} />
             {mutationError ? (
                 <Alert variant="destructive">
                     <ExclamationTriangleIcon />
@@ -223,12 +224,6 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                 </Alert>
             ) : null}
             <header className="space-y-4">
-                <Button asChild variant="ghost" size="sm" className="-ml-2">
-                    <Link href="/workflows/operations">
-                        <ArrowLeftIcon className="size-4" />
-                        {t("detail.back")}
-                    </Link>
-                </Button>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">
                         <div className="flex flex-wrap items-center gap-2">

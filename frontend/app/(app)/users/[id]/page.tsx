@@ -1,8 +1,6 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
-import Link from "next/link";
-import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import {
@@ -63,14 +61,6 @@ export default async function UserPage({ params }: { params: { id: number } }) {
         <PageShell tier="reading">
                 <Rise>
                     <div className="flex flex-col gap-8">
-                        <Link
-                            href="/users"
-                            className="inline-flex w-fit items-center gap-2 text-base text-brand hover:text-brand-hover"
-                        >
-                            <ArrowLeftIcon className="h-4 w-4" />
-                            <span>{t("allUsers")}</span>
-                        </Link>
-
                         <CrumbLabel value={user.displayName} />
                         <header className="flex items-center gap-6">
                             <UserAvatar user={user} type="xlarge" />

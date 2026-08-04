@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { ArrowLeftIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +32,7 @@ import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignSt
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
+import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
 import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
 import { PageShell } from "@/app/components/PageShell";
@@ -300,13 +300,7 @@ export default function CampaignDetail({
         <>
             <PageShell tier="reading">
                 <Rise className="flex flex-col gap-4">
-                    <Link
-                        href="/marketing/campaigns"
-                        className="inline-flex w-fit items-center gap-2 text-base text-brand transition-colors hover:text-brand-hover"
-                    >
-                        <ArrowLeftIcon className="h-4 w-4" />
-                        {t("back")}
-                    </Link>
+                    <CrumbLabel value={current.name} />
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
                         <div className="flex min-w-0 flex-wrap items-center gap-3">
                             <h1 className="text-4xl font-extrabold tracking-tight text-foreground">

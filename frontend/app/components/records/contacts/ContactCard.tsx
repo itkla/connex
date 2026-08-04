@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
+import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import { updateContact, uploadContactPicture } from '@/app/lib/api';
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
@@ -169,17 +170,16 @@ export default function ContactCard({
             onClick={readOnly ? undefined : openContactPage}
         >
             <div className="relative aspect-square w-full overflow-hidden">
-                {imageUrl ? (
-                    <img
-                        src={imageUrl}
-                        alt={name}
-                        className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
-                    />
-                ) : (
-                    <div className={cn('flex h-full w-full items-center justify-center', tintFor(name))}>
-                        <span className="text-5xl font-semibold tracking-tight select-none">{initialsOf(name)}</span>
-                    </div>
-                )}
+                <ProtectedMediaImage
+                    src={imageUrl}
+                    alt={name}
+                    className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
+                    fallback={(
+                        <span className={cn('flex h-full w-full items-center justify-center', tintFor(name))}>
+                            <span className="text-5xl font-semibold tracking-tight select-none">{initialsOf(name)}</span>
+                        </span>
+                    )}
+                />
 
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>

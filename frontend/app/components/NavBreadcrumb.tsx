@@ -1,7 +1,17 @@
-'use client';
+"use client";
 
-import { Fragment } from 'react';
-import Link from 'next/link';
+import { Fragment } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
+
+import RecordReturnLink from "@/app/components/records/RecordReturnLink";
+import { useNavTrail, type Crumb } from "@/app/hooks/useNavTrail";
+import {
+    buildBreadcrumbNodes,
+    type BreadcrumbDisplayMode,
+} from "@/app/lib/breadcrumbRoutes";
+import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
 import {
     Breadcrumb,
     BreadcrumbEllipsis,
@@ -10,69 +20,80 @@ import {
     BreadcrumbList,
     BreadcrumbPage,
     BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
+} from "@/components/ui/breadcrumb";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useNavTrail, type Crumb } from '@/app/hooks/useNavTrail';
+} from "@/components/ui/dropdown-menu";
 
-type Node = { kind: 'crumb'; crumb: Crumb; current: boolean } | { kind: 'ellipsis'; hidden: Crumb[] };
+function ResolvedCrumbLink({
+    crumb,
+    dropdown = false,
+}: {
+    crumb: Crumb;
+    dropdown?: boolean;
+}) {
+    const searchParams = useSearchParams();
+    const returnTargets = searchParams.getAll("returnTo");
+    const returnTarget = returnTargets.length === 0
+        ? undefined
+        : returnTargets.length === 1
+            ? returnTargets[0]
+            : returnTargets;
+    const href = crumb.returnCollection
+        ? resolveRecordReturnPath(crumb.returnCollection, returnTarget)
+        : crumb.pathname;
+    const className = dropdown ? undefined : "max-w-[12rem] truncate";
+    const link = crumb.returnCollection && !dropdown ? (
+        <RecordReturnLink href={href} className={className}>
+            {crumb.label}
+        </RecordReturnLink>
+    ) : (
+        <Link href={href} className={className}>{crumb.label}</Link>
+    );
 
-function buildNodes(trail: Crumb[]): Node[] {
-    if (trail.length <= 3) {
-        return trail.map((crumb, i) => ({ kind: 'crumb', crumb, current: i === trail.length - 1 }));
-    }
-    return [
-        { kind: 'crumb', crumb: trail[0], current: false },
-        { kind: 'ellipsis', hidden: trail.slice(1, trail.length - 2) },
-        { kind: 'crumb', crumb: trail[trail.length - 2], current: false },
-        { kind: 'crumb', crumb: trail[trail.length - 1], current: true },
-    ];
+    return dropdown
+        ? <DropdownMenuItem asChild>{link}</DropdownMenuItem>
+        : <BreadcrumbLink asChild>{link}</BreadcrumbLink>;
 }
 
-/**
- * User-aware breadcrumb: renders the trail of pages the user actually traversed to reach the
- * current one. Hidden on top-level pages (nothing to trace back to). Long trails collapse to the
- * origin, an expandable ellipsis, and the last two steps.
- */
-export default function NavBreadcrumb() {
+/** Renders the deterministic route hierarchy in a desktop or compact mobile form. */
+export default function NavBreadcrumb({ mode = "desktop" }: { mode?: BreadcrumbDisplayMode }) {
     const trail = useNavTrail();
-    if (trail.length <= 1) return null;
+    const t = useTranslations("CommonBreadcrumb");
+    if (trail.length <= 1 || !trail.some((crumb) => crumb.current)) return null;
 
-    const nodes = buildNodes(trail);
+    const nodes = buildBreadcrumbNodes(trail, mode);
 
-    return (
-        <Breadcrumb className="min-w-0">
+    const breadcrumb = (
+        <Breadcrumb aria-label={t("ariaLabel")} className="min-w-0">
             <BreadcrumbList className="flex-nowrap overflow-hidden">
-                {nodes.map((node, i) => (
-                    <Fragment key={node.kind === 'crumb' ? node.crumb.pathname : 'ellipsis'}>
-                        {i > 0 && <BreadcrumbSeparator />}
+                {nodes.map((node, index) => (
+                    <Fragment key={node.kind === "crumb" ? node.crumb.pathname : "ellipsis"}>
+                        {index > 0 ? <BreadcrumbSeparator /> : null}
                         <BreadcrumbItem className="min-w-0">
-                            {node.kind === 'ellipsis' ? (
+                            {node.kind === "ellipsis" ? (
                                 <DropdownMenu>
                                     <DropdownMenuTrigger
-                                        aria-label="Show hidden steps"
+                                        aria-label={t("showHidden")}
                                         className="flex items-center rounded-sm outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
                                     >
                                         <BreadcrumbEllipsis />
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="start">
-                                        {node.hidden.map((c) => (
-                                            <DropdownMenuItem key={c.pathname} asChild>
-                                                <Link href={c.pathname}>{c.label}</Link>
-                                            </DropdownMenuItem>
+                                        {node.hidden.map((crumb) => (
+                                            <ResolvedCrumbLink key={crumb.pathname} crumb={crumb} dropdown />
                                         ))}
                                     </DropdownMenuContent>
                                 </DropdownMenu>
-                            ) : node.current ? (
-                                <BreadcrumbPage className="max-w-[16rem] truncate">{node.crumb.label}</BreadcrumbPage>
+                            ) : node.crumb.current ? (
+                                <BreadcrumbPage className="max-w-[16rem] truncate">
+                                    {node.crumb.label}
+                                </BreadcrumbPage>
                             ) : (
-                                <BreadcrumbLink asChild className="max-w-[12rem] truncate">
-                                    <Link href={node.crumb.pathname}>{node.crumb.label}</Link>
-                                </BreadcrumbLink>
+                                <ResolvedCrumbLink crumb={node.crumb} />
                             )}
                         </BreadcrumbItem>
                     </Fragment>
@@ -80,4 +101,7 @@ export default function NavBreadcrumb() {
             </BreadcrumbList>
         </Breadcrumb>
     );
+    return mode === "mobile"
+        ? <div className="min-w-0 shrink-0 px-6 pb-4 lg:hidden">{breadcrumb}</div>
+        : breadcrumb;
 }
