@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import org.apache.ibatis.annotations.Param;
+
 import ooo.klae.connex.backend.beans.Organization;
 
 /**
@@ -11,6 +13,9 @@ import ooo.klae.connex.backend.beans.Organization;
 public interface OrganizationMapper {
     int insert(Organization organization);
     Organization getById(int id);
+    Organization getActiveById(int id);
+    Organization lockActiveIdentity(int id);
+    int updateName(@Param("id") int id, @Param("name") String name);
     Integer lockById(int id);
     Integer lockActiveById(int id);
     int lockDuplicateDecision(int id);

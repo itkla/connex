@@ -279,23 +279,26 @@ public class DealController {
 
     /**
      * GET endpoint for workspace-wide realized and projected deal revenue by month.
+     * Calendar boundaries use the server-owned workspace timezone; legacy timezone query
+     * parameters remain accepted during client migration but cannot override it.
      */
     @GetMapping("/revenue-timeseries")
     public DealRevenueSeriesDto getRevenueTimeseries(
         @RequestParam(required = false) String currency,
-        @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset,
+        @RequestParam(name = "timezone", required = false) String legacyTimezone,
+        @RequestParam(name = "tzOffset", required = false) String legacyTzOffset,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
         return dealService.getRevenueTimeseries(
-            normalizedCurrency, AnalyticsPeriods.resolveTimezone(timezone, tzOffset),
+            normalizedCurrency, workspaceService.getCurrentAnalyticsTimezone(),
             analyticsMemberScope(scope, memberIds));
     }
 
     /**
      * GET endpoint for realized and projected deal revenue over aligned calendar periods.
+     * Calendar boundaries use the server-owned workspace timezone.
      */
     @GetMapping("/revenue-series")
     public DealRevenuePeriodSeriesDto getRevenueSeries(
@@ -303,13 +306,14 @@ public class DealController {
         @RequestParam String to,
         @RequestParam String granularity,
         @RequestParam(required = false) String currency,
-        @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset,
+        @RequestParam(name = "timezone", required = false) String legacyTimezone,
+        @RequestParam(name = "tzOffset", required = false) String legacyTzOffset,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        Window window = AnalyticsPeriods.requiredWindow(from, to, timezone, tzOffset);
+        Window window = AnalyticsPeriods.requiredWindow(
+            from, to, workspaceService.getCurrentAnalyticsTimezone(), null);
         List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window, granularity);
         return dealService.getRevenueSeries(
             normalizedCurrency, window, periods, analyticsMemberScope(scope, memberIds));
@@ -340,11 +344,11 @@ public class DealController {
         @RequestParam(required = false) String from,
         @RequestParam(required = false) String to,
         @RequestParam(required = false) String granularity,
-        @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset
+        @RequestParam(name = "timezone", required = false) String legacyTimezone,
+        @RequestParam(name = "tzOffset", required = false) String legacyTzOffset
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        Optional<Window> window = analyticsWindow(from, to);
         if (window.isPresent()) {
             List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window.get(), granularity);
             return dealService.getDealKpis(
@@ -365,11 +369,11 @@ public class DealController {
         @RequestParam(required = false) List<Integer> memberIds,
         @RequestParam(required = false) String from,
         @RequestParam(required = false) String to,
-        @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset
+        @RequestParam(name = "timezone", required = false) String legacyTimezone,
+        @RequestParam(name = "tzOffset", required = false) String legacyTzOffset
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        Optional<Window> window = analyticsWindow(from, to);
         if (window.isPresent()) {
             return dealService.getDealPipelineValue(
                 normalizedCurrency, window.get(), analyticsMemberScope(scope, memberIds));
@@ -422,6 +426,14 @@ public class DealController {
         }
         return dealService.getClosingSoonDeals(validatePositiveDays(days), limit)
             .stream().map(DealDto::from).toList();
+    }
+
+    private Optional<Window> analyticsWindow(String from, String to) {
+        if (from == null && to == null) {
+            return Optional.empty();
+        }
+        return AnalyticsPeriods.optionalWindow(
+            from, to, workspaceService.getCurrentAnalyticsTimezone(), null);
     }
 
     private static int analyticsRangeDays(String range) {

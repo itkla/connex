@@ -101,6 +101,7 @@ public class ActivityController {
 
     /**
      * GET endpoint for workspace-wide activity volume by analytics time bucket.
+     * Calendar boundaries use the server-owned workspace timezone.
      */
     @GetMapping("/volume")
     public List<ActivityVolumeBucketDto> getActivityVolume(
@@ -110,10 +111,10 @@ public class ActivityController {
         @RequestParam(required = false) String from,
         @RequestParam(required = false) String to,
         @RequestParam(required = false) String granularity,
-        @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset
+        @RequestParam(name = "timezone", required = false) String legacyTimezone,
+        @RequestParam(name = "tzOffset", required = false) String legacyTzOffset
     ) {
-        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        Optional<Window> window = analyticsWindow(from, to);
         if (window.isPresent()) {
             List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window.get(), granularity);
             return activityService.getActivityVolume(
@@ -142,16 +143,17 @@ public class ActivityController {
 
     /**
      * GET endpoint for workspace-wide user touch counts within an analytics range.
+     * Calendar boundaries use the server-owned workspace timezone.
      */
     @GetMapping("/leaderboard")
     public List<TeamLeaderboardEntryDto> getTeamLeaderboard(
         @RequestParam(defaultValue = "90d") String range,
         @RequestParam(required = false) String from,
         @RequestParam(required = false) String to,
-        @RequestParam(required = false) String timezone,
-        @RequestParam(required = false) String tzOffset
+        @RequestParam(name = "timezone", required = false) String legacyTimezone,
+        @RequestParam(name = "tzOffset", required = false) String legacyTzOffset
     ) {
-        Optional<Window> window = AnalyticsPeriods.optionalWindow(from, to, timezone, tzOffset);
+        Optional<Window> window = analyticsWindow(from, to);
         if (window.isPresent()) {
             return activityService.getTeamLeaderboard(window.get());
         }
@@ -204,6 +206,14 @@ public class ActivityController {
     @DeleteMapping("/{id}")
     public void deleteActivity(@PathVariable int id) {
         activityService.delete(id);
+    }
+
+    private Optional<Window> analyticsWindow(String from, String to) {
+        if (from == null && to == null) {
+            return Optional.empty();
+        }
+        return AnalyticsPeriods.optionalWindow(
+            from, to, workspaceService.getCurrentAnalyticsTimezone(), null);
     }
 
     private static int analyticsRangeDays(String range) {

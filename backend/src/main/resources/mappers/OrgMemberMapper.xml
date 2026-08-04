@@ -77,6 +77,20 @@
     ORDER BY FIELD(om.org_role, 'owner', 'admin'), u.display_name, u.id
   </select>
 
+  <select id="findLayoutAuthorityMemberships"
+          resultType="ooo.klae.connex.backend.dto.OrganizationLayoutAuthorityMemberDto">
+    SELECT u.id AS userId, u.display_name AS displayName,
+           u.profile_picture_url AS profilePictureUrl, om.org_role AS orgRole
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id
+    JOIN app_user u ON u.id = om.user_id
+    WHERE om.org_id = #{orgId}
+      AND om.user_id &gt; #{afterUserId}
+      AND o.lifecycle_state = 'active'
+    ORDER BY om.user_id
+    LIMIT #{limit}
+  </select>
+
   <select id="getMembershipsForUser" resultType="ooo.klae.connex.backend.dto.OrgMembershipDto">
     SELECT o.id, o.name, o.slug, om.org_role AS orgRole
     FROM organization o

@@ -11,6 +11,25 @@
     SELECT id, name, slug, created_at, updated_at FROM organization WHERE id = #{id}
   </select>
 
+  <select id="getActiveById" resultType="Organization">
+    SELECT id, name, slug, created_at, updated_at
+    FROM organization
+    WHERE id = #{id} AND lifecycle_state = 'active'
+  </select>
+
+  <select id="lockActiveIdentity" resultType="Organization">
+    SELECT id, name, slug, created_at, updated_at
+    FROM organization
+    WHERE id = #{id} AND lifecycle_state = 'active'
+    FOR UPDATE
+  </select>
+
+  <update id="updateName">
+    UPDATE organization
+    SET name = #{name}
+    WHERE id = #{id} AND lifecycle_state = 'active'
+  </update>
+
   <select id="lockById" resultType="java.lang.Integer">
     SELECT id FROM organization WHERE id = #{id} FOR UPDATE
   </select>

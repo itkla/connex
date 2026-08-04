@@ -3,21 +3,30 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 class WorkspaceServiceTest extends AbstractServiceTest {
 
     @Autowired WorkspaceService workspaceService;
     @Autowired TenantContext tenantContext;
+    @Autowired OrganizationMapper organizationMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     @Test
     void createWorkspace_makesCallerOwner() {
@@ -90,5 +99,102 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(ws.getId(), member.getId(), "member");
         assertThrows(ForbiddenException.class,
             () -> workspaceService.requireRole(ws.getId(), member.getId(), WorkspaceService.Role.ADMIN));
+    }
+
+    @Test
+    void updateIdentityPersistsCanonicalValuesPreservesSlugAndAuditsExactScope() {
+        String slug = workspace.getSlug();
+        int orgId = workspaceService.getOrgId(workspace.getId());
+
+        WorkspaceIdentityDto updated = workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), "  Renamed Workspace  ", "Pacific/Honolulu");
+
+        assertEquals("Renamed Workspace", updated.name());
+        assertEquals("Pacific/Honolulu", updated.timezone());
+        assertEquals(slug, updated.slug());
+        Workspace persisted = workspaceMapper.getActiveById(workspace.getId());
+        assertEquals("Renamed Workspace", persisted.getName());
+        assertEquals("Pacific/Honolulu", persisted.getTimezone());
+        assertEquals(slug, persisted.getSlug());
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'workspace.rename' AND entity_id = ? "
+                + "AND workspace_id = ? AND org_id = ?",
+            Integer.class,
+            workspace.getId(),
+            workspace.getId(),
+            orgId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'workspace.settings.update' AND entity_id = ? "
+                + "AND workspace_id = ? AND org_id = ?",
+            Integer.class,
+            workspace.getId(),
+            workspace.getId(),
+            orgId));
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE action = 'workspace.rename' AND entity_id = ? "
+                + "ORDER BY id DESC LIMIT 1",
+            String.class,
+            workspace.getId());
+        assertTrue(changes.contains("Renamed Workspace"));
+    }
+
+    @Test
+    void updateIdentitySupportsLegacyNullAndExplicitTimezoneClear() {
+        assertNull(workspaceMapper.getActiveById(workspace.getId()).getTimezone());
+        workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), workspace.getName(), "America/New_York");
+
+        WorkspaceIdentityDto cleared = workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), workspace.getName(), null);
+
+        assertNull(cleared.timezone());
+        assertNull(workspaceMapper.getActiveById(workspace.getId()).getTimezone());
+    }
+
+    @Test
+    void updateIdentityRejectsInvalidNamesAndTimezones() {
+        assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), null, null));
+        assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), " ", null));
+        assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), "x".repeat(129), null));
+        assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), workspace.getName(), " "));
+        assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), workspace.getName(), "Not/A_Real_Zone"));
+        assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), workspace.getName(), "+09:00"));
+        assertThrows(BadRequestException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), currentUser.getId(), workspace.getName(), "x".repeat(65)));
+    }
+
+    @Test
+    void updateIdentityDeniesMemberWithoutSettingsPermission() {
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> workspaceService.updateIdentity(
+            workspace.getId(), member.getId(), "Denied", null));
+        assertEquals(workspace.getName(), workspaceMapper.getActiveById(workspace.getId()).getName());
+    }
+
+    @Test
+    void updateIdentityDeniesWorkspaceInAnotherOrganizationWithoutMembership() {
+        Organization organization = new Organization();
+        organization.setName("Foreign Org");
+        organization.setSlug("foreign-org-" + unique());
+        organizationMapper.insert(organization);
+        Workspace foreign = new Workspace();
+        foreign.setOrgId(organization.getId());
+        foreign.setName("Foreign Workspace");
+        foreign.setSlug("foreign-workspace-" + unique());
+        workspaceMapper.insert(foreign);
+        User foreignOwner = newUser();
+        workspaceMapper.addMember(foreign.getId(), foreignOwner.getId(), "owner");
+
+        assertThrows(ForbiddenException.class, () -> workspaceService.updateIdentity(
+            foreign.getId(), currentUser.getId(), "Probe", "UTC"));
+        assertEquals("Foreign Workspace", workspaceMapper.getActiveById(foreign.getId()).getName());
     }
 }
