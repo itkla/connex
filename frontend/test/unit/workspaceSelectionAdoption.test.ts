@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceProvider, useWorkspace } from "@/app/hooks/useWorkspace";
+import type { Workspace } from "@/app/lib/types";
 import {
     getActiveWorkspaceMembers,
     getWorkspaceMembers,
@@ -58,6 +59,98 @@ function renderWorkspaceProvider() {
     return workspace;
 }
 
+function installMinimalDocument(): HTMLElement {
+    class HtmlIFrameElement {}
+
+    const documentTarget = {
+        nodeType: 9,
+        activeElement: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        createElement: vi.fn(() => containerTarget),
+    };
+    const windowTarget = {
+        document: documentTarget,
+        event: undefined,
+        HTMLIFrameElement: HtmlIFrameElement,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+    };
+    const containerTarget = {
+        nodeType: 1,
+        tagName: "DIV",
+        nodeName: "DIV",
+        namespaceURI: "http://www.w3.org/1999/xhtml",
+        ownerDocument: documentTarget,
+        firstChild: null,
+        lastChild: null,
+        parentNode: null,
+        textContent: "",
+        style: {},
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        appendChild: vi.fn(),
+        insertBefore: vi.fn(),
+        removeChild: vi.fn(),
+        setAttribute: vi.fn(),
+        removeAttribute: vi.fn(),
+    };
+    Object.assign(documentTarget, {
+        defaultView: windowTarget,
+        documentElement: containerTarget,
+        body: containerTarget,
+    });
+    vi.stubGlobal("window", windowTarget);
+    vi.stubGlobal("document", documentTarget);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    return document.createElement("div");
+}
+
+function workspaceFixture(id: number, name: string): Workspace {
+    return {
+        id,
+        name,
+        slug: name.toLowerCase().replaceAll(" ", "-"),
+        role: "member",
+        orgId: 1,
+        orgName: "Acme",
+        orgRole: null,
+    };
+}
+
+async function renderInteractiveWorkspaceProvider(
+    initialWorkspaces: Workspace[],
+    initialActiveId: number | null,
+) {
+    const container = installMinimalDocument();
+    const { createRoot } = await import("react-dom/client");
+    const root = createRoot(container);
+    let workspace: ReturnType<typeof useWorkspace> | undefined;
+
+    function CaptureWorkspace() {
+        workspace = useWorkspace();
+        return null;
+    }
+
+    function readWorkspace() {
+        if (!workspace) throw new Error("Workspace provider did not render");
+        return workspace;
+    }
+
+    const providerProps: Parameters<typeof WorkspaceProvider>[0] = {
+        initialWorkspaces,
+        initialActiveId,
+        children: createElement(CaptureWorkspace),
+    };
+    await act(async () => {
+        root.render(createElement(WorkspaceProvider, providerProps));
+    });
+    return {
+        readWorkspace,
+        unmount: async () => act(async () => root.unmount()),
+    };
+}
+
 afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
@@ -97,6 +190,52 @@ describe("authoritative workspace selection adoption", () => {
         expect(blockedOperation).toHaveBeenCalledOnce();
     });
 
+    it("keeps the returned membership active immediately after acceptance without a refresh", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const accepted = workspaceFixture(22, "Accepted workspace");
+        const rendered = await renderInteractiveWorkspaceProvider([existing], existing.id);
+
+        await act(async () => {
+            await rendered.readWorkspace().runSelectionChange(async (
+                publishActiveWorkspace,
+                publishWorkspace,
+            ) => {
+                publishWorkspace(accepted);
+                publishActiveWorkspace(accepted.id);
+            });
+        });
+
+        expect(rendered.readWorkspace().activeWorkspace).not.toBeNull();
+        expect(rendered.readWorkspace().activeWorkspace?.name).toBe("Accepted workspace");
+        expect(rendered.readWorkspace().workspaces.filter(({ id }) => id === accepted.id)).toHaveLength(1);
+        expect(router.refresh).not.toHaveBeenCalled();
+
+        await rendered.unmount();
+    });
+
+    it("replaces an existing membership by id instead of duplicating it", async () => {
+        const pending = workspaceFixture(22, "Pending workspace");
+        const accepted = workspaceFixture(22, "Accepted workspace");
+        const rendered = await renderInteractiveWorkspaceProvider([pending], null);
+
+        await act(async () => {
+            await rendered.readWorkspace().runSelectionChange(async (
+                publishActiveWorkspace,
+                publishWorkspace,
+            ) => {
+                publishWorkspace(accepted);
+                publishActiveWorkspace(accepted.id);
+            });
+        });
+
+        expect(rendered.readWorkspace().activeWorkspace?.name).toBe("Accepted workspace");
+        expect(rendered.readWorkspace().workspaces.filter(({ id }) => id === accepted.id)).toEqual([
+            accepted,
+        ]);
+
+        await rendered.unmount();
+    });
+
     it("routes switches, creation, acceptance, and leave through the same mutex", () => {
         const provider = source(PROVIDER);
         const switching = section(provider, "const runInWorkspace", "const switchTo");
@@ -106,10 +245,11 @@ describe("authoritative workspace selection adoption", () => {
         const leaving = section(panel, "const doLeave =", "return (");
 
         expect(switching).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
-        expect(creation).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
-        expect(acceptance).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
+        expect(creation).toContain("runSelectionChange(async (publishActiveWorkspace, publishWorkspace) =>");
+        expect(acceptance).toContain("runSelectionChange(async (publishActiveWorkspace, publishWorkspace) =>");
         expect(leaving).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
         expect(switching).toContain("publishActiveWorkspace(id);");
+        expect(creation).toContain("publishWorkspace(workspace);");
         expect(creation).toContain("publishActiveWorkspace(workspace.id);");
         expect(switching).not.toContain("activeWorkspaceIdRef.current = id;");
         expect(creation).not.toContain("activeWorkspaceIdRef.current = workspace.id;");
@@ -120,7 +260,7 @@ describe("authoritative workspace selection adoption", () => {
         const acceptance = section(panel, "const accept =", "const decline =");
         const leaving = section(panel, "const doLeave =", "return (");
 
-        expect(acceptance).toMatch(/const accepted = await acceptWorkspace\(workspace\.id\);[\s\S]*publishActiveWorkspace\(accepted\.id\);[\s\S]*router\.refresh\(\)/);
+        expect(acceptance).toMatch(/const accepted = await acceptWorkspace\(workspace\.id\);[\s\S]*publishWorkspace\(accepted\);[\s\S]*publishActiveWorkspace\(accepted\.id\);[\s\S]*router\.refresh\(\)/);
         expect(leaving).toMatch(/const selection = await leaveWorkspace\(activeWorkspaceId\);[\s\S]*publishActiveWorkspace\(selection\.activeWorkspaceId\);[\s\S]*router\.replace\(selection\.activeWorkspaceId !== null \? "\/dashboard" : "\/onboarding"\);[\s\S]*router\.refresh\(\)/);
     });
 

@@ -76,6 +76,7 @@ describe("a payload cannot erase a workspace the server has not seen yet", () =>
     const a = workspace(1, "Alpha");
     const b = workspace(2, "Beta");
     const created = workspace(3, "Created");
+    const accepted = workspace(4, "Accepted");
 
     it("takes the server's list when it has nothing local to preserve", () => {
         expect(adoptWorkspaces([a], [a], [a, b])).toEqual([a, b]);
@@ -89,6 +90,10 @@ describe("a payload cannot erase a workspace the server has not seen yet", () =>
 
     it("keeps a just-created workspace an older payload does not mention", () => {
         expect(adoptWorkspaces([a, created], [a], [a])).toEqual([a, created]);
+    });
+
+    it("keeps a just-accepted workspace absent from both consumed and arriving payloads", () => {
+        expect(adoptWorkspaces([a, accepted], [a], [a])).toEqual([a, accepted]);
     });
 
     it("drops a workspace the viewer left, rather than resurrecting it", () => {

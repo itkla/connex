@@ -8,8 +8,12 @@ import { createWorkspace, switchWorkspace } from "@/app/lib/api";
 import { adoptWorkspaces } from "@/app/lib/workspaceSnapshot";
 
 type PublishActiveWorkspace = (id: number | null) => void;
+type PublishWorkspace = (workspace: Workspace) => void;
 type SelectionChangeRunner = <T>(
-    operation: (publishActiveWorkspace: PublishActiveWorkspace) => Promise<T>,
+    operation: (
+        publishActiveWorkspace: PublishActiveWorkspace,
+        publishWorkspace: PublishWorkspace,
+    ) => Promise<T>,
 ) => Promise<T>;
 
 type WorkspaceContextValue = {
@@ -84,19 +88,28 @@ export function WorkspaceProvider({
         setActiveWorkspaceId(id);
     }, []);
 
+    const publishWorkspace = useCallback((workspace: Workspace) => {
+        setWorkspaces((previous) => previous.some(({ id }) => id === workspace.id)
+            ? previous.map((held) => held.id === workspace.id ? workspace : held)
+            : [...previous, workspace]);
+    }, []);
+
     const runSelectionChange = useCallback(async <T,>(
-        operation: (publishActiveWorkspace: PublishActiveWorkspace) => Promise<T>,
+        operation: (
+            publishActiveWorkspace: PublishActiveWorkspace,
+            publishWorkspace: PublishWorkspace,
+        ) => Promise<T>,
     ) => {
         if (switchingRef.current) throw new Error("A workspace operation is already in progress");
         switchingRef.current = true;
         setSwitching(true);
         try {
-            return await operation(publishActiveWorkspace);
+            return await operation(publishActiveWorkspace, publishWorkspace);
         } finally {
             switchingRef.current = false;
             setSwitching(false);
         }
-    }, [publishActiveWorkspace]);
+    }, [publishActiveWorkspace, publishWorkspace]);
 
     const runInWorkspace = useCallback(async (
         id: number,
@@ -125,9 +138,9 @@ export function WorkspaceProvider({
     );
 
     const create = useCallback(
-        (name: string) => runSelectionChange(async (publishActiveWorkspace) => {
+        (name: string) => runSelectionChange(async (publishActiveWorkspace, publishWorkspace) => {
             const workspace = await createWorkspace(name);
-            setWorkspaces((prev) => [...prev, workspace]);
+            publishWorkspace(workspace);
             publishActiveWorkspace(workspace.id);
             router.replace("/dashboard");
             router.refresh();

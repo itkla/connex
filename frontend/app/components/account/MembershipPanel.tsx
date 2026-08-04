@@ -61,8 +61,9 @@ export default function MembershipPanel() {
     const accept = async (workspace: Workspace) => {
         setBusyId(workspace.id);
         try {
-            await runSelectionChange(async (publishActiveWorkspace) => {
+            await runSelectionChange(async (publishActiveWorkspace, publishWorkspace) => {
                 const accepted = await acceptWorkspace(workspace.id);
+                publishWorkspace(accepted);
                 publishActiveWorkspace(accepted.id);
                 setPending((prev) => prev.filter((w) => w.id !== workspace.id));
                 toastSuccess(t("accepted", { workspace: workspace.name }));
