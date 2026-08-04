@@ -43,7 +43,7 @@ import {
     formatShortDate,
     parseMysqlDateTime,
 } from "@/app/lib/utils";
-import { presentAuditEntry, type AuditMetadataRow } from "@/app/lib/auditPresentation";
+import { auditOutcome, presentAuditEntry, type AuditMetadataRow } from "@/app/lib/auditPresentation";
 import { type AuditLogEntry } from "@/app/lib/types";
 
 type Tone = "create" | "update" | "delete" | "auth" | "view" | "default";
@@ -127,7 +127,8 @@ function rangeCutoff(range: RangeFilter, now: number | null): number {
 }
 
 function isFailed(e: AuditLogEntry): boolean {
-    return e.outcome != null && e.outcome !== "success";
+    const outcome = auditOutcome(e);
+    return outcome != null && outcome !== "success" && outcome !== "attempt";
 }
 
 export default function AuditLogBrowser({

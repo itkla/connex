@@ -139,6 +139,16 @@ function fixedMetadata(entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'ent
     ];
 }
 
+/** Resolves the domain outcome used by audit filtering, counts, badges, and details. */
+export function auditOutcome(
+    entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'outcome' | 'changes'>,
+): string | null {
+    const aiEntry = entry.entityType === 'ai_call' || entry.action === 'ai.llm.call';
+    if (!aiEntry) return entry.outcome;
+    const metadataOutcome = safeMetadataValue(entry.changes?.outcome);
+    return typeof metadataOutcome === 'string' ? metadataOutcome : entry.outcome;
+}
+
 /** Builds a fail-closed audit presentation without exposing arbitrary metadata fields. */
 export function presentAuditEntry(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'entityId' | 'targetLabel' | 'outcome' | 'changes'>,
@@ -147,11 +157,11 @@ export function presentAuditEntry(
     const secretEntry = entry.action.startsWith('secret_store.');
     const aiEntry = entry.entityType === 'ai_call' || entry.action === 'ai.llm.call';
     if (secretEntry || aiEntry) {
-        const result = aiEntry ? safeMetadataValue(changes?.outcome) ?? entry.outcome : entry.outcome;
+        const result = auditOutcome(entry);
         return {
             diffs: [],
             metadata: [
-                ...fixedMetadata({ ...entry, outcome: typeof result === 'string' ? result : entry.outcome }),
+                ...fixedMetadata({ ...entry, outcome: result }),
                 ...metadataRows(changes, secretEntry ? SECRET_FIELDS : AI_FIELDS),
             ],
         };

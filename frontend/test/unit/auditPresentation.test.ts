@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { presentAuditEntry } from '@/app/lib/auditPresentation';
+import { auditOutcome, presentAuditEntry } from '@/app/lib/auditPresentation';
 import type { AuditLogEntry } from '@/app/lib/types';
 
 function entry(overrides: Partial<AuditLogEntry>): AuditLogEntry {
@@ -72,6 +72,18 @@ describe('presentAuditEntry', () => {
             'response',
             'credential',
         ]));
+        expect(auditOutcome(entry({
+            action: 'ai.llm.call',
+            entityType: 'ai_call',
+            outcome: 'success',
+            changes: { outcome: 'blocked' },
+        }))).toBe('blocked');
+        expect(auditOutcome(entry({
+            action: 'ai.llm.call',
+            entityType: 'ai_call',
+            outcome: 'success',
+            changes: { outcome: 'attempt' },
+        }))).toBe('attempt');
     });
 
     it('keeps null and partial legacy domain entries useful without rendering blank fields', () => {
