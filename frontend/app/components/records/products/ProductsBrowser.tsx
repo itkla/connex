@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { PencilIcon, TrashIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline';
+import {
+    CubeIcon,
+    EllipsisHorizontalIcon,
+    MagnifyingGlassIcon,
+    PencilIcon,
+    TrashIcon,
+} from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -18,11 +24,12 @@ import { SearchField } from '@/app/components/filters';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ProductDialog from '@/app/components/records/products/ProductDialog';
+import { EmptyState } from '@/app/components/EmptyState';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteProduct, exportProductsCsv, getProducts } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { formatCurrency } from '@/app/lib/utils';
+import { formatCurrency, formatDate } from '@/app/lib/utils';
 import type { Product } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
@@ -38,9 +45,10 @@ type ProductSearchResult = ProductSearchScope & (
     | { status: 'error' }
 );
 
-/** Workspace-scoped product/service catalog admin: searchable table with create/edit/delete. */
+/** Workspace-scoped product/service catalog admin with responsive browsing and create/edit/delete. */
 export default function ProductsBrowser({ products: initial }: { products: Product[] }) {
     const t = useTranslations('ProductsBrowser');
+    const layoutT = useTranslations('RecordsProductsLayout');
     const tf = useTranslations('Filters');
     const locale = useLocale();
     const { activeWorkspaceId, switching } = useWorkspace();
@@ -136,6 +144,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                 <Rise>
                     <PageHeader
                         title={t('title')}
+                        description={layoutT('description')}
                         actions={
                             <RecordsActions
                                 entity="products"
@@ -149,12 +158,24 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                 </Rise>
 
                 <Rise delay={0.06}>
-                    <div className="flex items-center justify-between gap-3">
-                        <SectionHeader title={t('sectionCatalog')} />
-                        <div className="w-64">
-                            <SearchField value={query} onChange={setQuery} onClear={() => setQuery('')}
+                    <div className="space-y-3">
+                        <SectionHeader
+                            title={t('sectionCatalog')}
+                            action={searching || searchFailed ? undefined : (
+                                <span className="text-xs tabular-nums text-muted-foreground">
+                                    {t('catalogCount', { count: filtered.length })}
+                                </span>
+                            )}
+                        />
+                        <div className="w-full sm:max-w-sm">
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
                                 placeholder={t('searchPlaceholder')}
-                                searchAria={tf('searchAria')} clearAria={tf('clearSearchAria')} />
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
+                            />
                         </div>
                     </div>
                 </Rise>
@@ -171,62 +192,118 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                                 {t('retrySearch')}
                             </Button>
                         </div>
+                    ) : products.length === 0 && normalizedQuery.length === 0 ? (
+                        <EmptyState
+                            icon={CubeIcon}
+                            title={t('emptyTitle')}
+                            body={t('empty')}
+                            action={
+                                <Button variant="brand" onClick={() => setDialog({ mode: 'create' })}>
+                                    {t('newButton')}
+                                </Button>
+                            }
+                        />
                     ) : filtered.length === 0 ? (
-                        <div className="rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
-                            {query ? t('noMatches') : t('empty')}
-                        </div>
+                        <EmptyState
+                            icon={MagnifyingGlassIcon}
+                            title={t('noMatchesTitle')}
+                            body={t('noMatches')}
+                            tone="muted"
+                            action={
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setQuery('')}
+                                >
+                                    {t('clearFilters')}
+                                </Button>
+                            }
+                        />
                     ) : (
                         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                                        <th className="px-6 py-3 font-medium">{t('columnName')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnSku')}</th>
-                                        <th className="px-6 py-3 font-medium text-right">{t('columnPrice')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnBilling')}</th>
-                                        <th className="px-6 py-3 font-medium">{t('columnStatus')}</th>
-                                        <th className="px-6 py-3" />
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-border">
-                                    {filtered.map((p) => (
-                                        <tr key={p.id} className="transition-colors hover:bg-muted/50">
-                                            <td className="px-6 py-3">
-                                                <div className="font-medium text-foreground">{p.name}</div>
-                                                {p.unit ? <div className="text-xs text-muted-foreground">{t('perUnit', { unit: p.unit })}</div> : null}
-                                            </td>
-                                            <td className="px-6 py-3 text-muted-foreground">{p.sku || '—'}</td>
-                                            <td className="px-6 py-3 text-right tabular-nums">{formatCurrency(p.unitPrice, p.currency, locale)}</td>
-                                            <td className="px-6 py-3 text-muted-foreground">
-                                                {p.billingFrequency === 'recurring' ? t('recurring') : t('oneTime')}
-                                            </td>
-                                            <td className="px-6 py-3">
-                                                <span className={p.active ? 'text-chart-won' : 'text-muted-foreground'}>
-                                                    {p.active ? t('active') : t('inactive')}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-3 text-right">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon-xs" aria-label={t('actions')}>
-                                                            <EllipsisHorizontalIcon className="size-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onSelect={() => setDialog({ mode: 'edit', product: p })}>
-                                                            <PencilIcon className="size-4" />{t('edit')}
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(p)}>
-                                                            <TrashIcon className="size-4" />{t('delete')}
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <div
+                                aria-hidden="true"
+                                className="hidden grid-cols-[minmax(12rem,1fr)_6rem_7rem_6rem_5rem_10rem_2rem] items-center gap-5 border-b border-border px-5 py-3 text-left text-xs uppercase tracking-[0.08em] text-muted-foreground xl:grid"
+                            >
+                                <span>{t('columnName')}</span>
+                                <span>{t('columnSku')}</span>
+                                <span className="text-right">{t('columnPrice')}</span>
+                                <span>{t('columnBilling')}</span>
+                                <span>{t('columnTax')}</span>
+                                <span>{t('columnAvailability')}</span>
+                                <span />
+                            </div>
+                            <ul className="divide-y divide-border">
+                                {filtered.map((product) => (
+                                    <li
+                                        key={product.id}
+                                        className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-x-3 p-4 transition-colors hover:bg-muted/50 xl:grid-cols-[minmax(12rem,1fr)_6rem_7rem_6rem_5rem_10rem_2rem] xl:items-center xl:gap-5 xl:px-5 xl:py-3.5"
+                                    >
+                                        <div className="min-w-0 xl:col-start-1 xl:row-start-1">
+                                            <div className="truncate font-medium text-foreground">{product.name}</div>
+                                            {product.description ? (
+                                                <p className="mt-1 line-clamp-2 text-sm text-muted-foreground xl:mt-0.5 xl:truncate xl:text-xs">
+                                                    {product.description}
+                                                </p>
+                                            ) : product.unit ? (
+                                                <p className="mt-0.5 text-xs text-muted-foreground">{t('perUnit', { unit: product.unit })}</p>
+                                            ) : null}
+                                        </div>
+                                        <div className="col-start-2 row-start-1 xl:col-start-6 xl:row-start-1">
+                                            <span className="sr-only">{t('columnAvailability')}: </span>
+                                            <ProductStatus active={product.active} activeLabel={t('active')} inactiveLabel={t('inactive')} />
+                                            <div className="mt-1 hidden text-xs text-muted-foreground xl:block">
+                                                <span className="sr-only">{t('effectiveDates')}: </span>
+                                                {formatEffectiveRange(product, locale, t)}
+                                            </div>
+                                        </div>
+                                        <div className="col-start-3 row-start-1 text-right xl:col-start-7 xl:row-start-1">
+                                            <ProductActions
+                                                label={t('actionsFor', { name: product.name })}
+                                                editLabel={t('edit')}
+                                                deleteLabel={t('delete')}
+                                                onEdit={() => setDialog({ mode: 'edit', product })}
+                                                onDelete={() => setRemoveTarget(product)}
+                                            />
+                                        </div>
+                                        <div className="col-span-3 mt-4 xl:col-span-1 xl:col-start-3 xl:row-start-1 xl:mt-0 xl:text-right">
+                                            <div className="text-lg font-semibold tabular-nums text-foreground xl:text-sm">
+                                                <span className="sr-only">{t('columnPrice')}: </span>
+                                                {formatCurrency(product.unitPrice, product.currency, locale)}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground xl:hidden">
+                                                {product.billingFrequency === 'recurring' ? t('recurring') : t('oneTime')}
+                                                {product.unit ? ` · ${t('perUnit', { unit: product.unit })}` : ''}
+                                            </div>
+                                        </div>
+                                        <div className="hidden text-sm text-muted-foreground xl:col-start-2 xl:row-start-1 xl:block">
+                                            <span className="sr-only">{t('columnSku')}: </span>
+                                            {product.sku || '—'}
+                                        </div>
+                                        <div className="hidden text-sm text-muted-foreground xl:col-start-4 xl:row-start-1 xl:block">
+                                            <span className="sr-only">{t('columnBilling')}: </span>
+                                            {product.billingFrequency === 'recurring' ? t('recurring') : t('oneTime')}
+                                        </div>
+                                        <div className="hidden text-sm text-muted-foreground xl:col-start-5 xl:row-start-1 xl:block">
+                                            <span className="sr-only">{t('columnTax')}: </span>
+                                            {formatTaxRate(product, locale)}
+                                        </div>
+                                        <dl className="col-span-3 mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3 text-xs xl:hidden">
+                                            <div>
+                                                <dt className="text-muted-foreground">{t('columnSku')}</dt>
+                                                <dd className="mt-0.5 truncate font-medium text-foreground">{product.sku || '—'}</dd>
+                                            </div>
+                                            <div>
+                                                <dt className="text-muted-foreground">{t('columnTax')}</dt>
+                                                <dd className="mt-0.5 font-medium text-foreground">{formatTaxRate(product, locale)}</dd>
+                                            </div>
+                                            <div className="col-span-2">
+                                                <dt className="text-muted-foreground">{t('effectiveDates')}</dt>
+                                                <dd className="mt-0.5 font-medium text-foreground">{formatEffectiveRange(product, locale, t)}</dd>
+                                            </div>
+                                        </dl>
+                                    </li>
+                                ))}
+                            </ul>
                         </div>
                     )}
                 </Rise>
@@ -255,4 +332,61 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
             />
         </>
     );
+}
+
+function ProductStatus({ active, activeLabel, inactiveLabel }: { active: boolean; activeLabel: string; inactiveLabel: string }) {
+    return (
+        <span className={active
+            ? 'inline-flex shrink-0 items-center gap-1.5 rounded-full bg-chart-won/10 px-2 py-1 text-xs font-medium text-chart-won'
+            : 'inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground'}>
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+            {active ? activeLabel : inactiveLabel}
+        </span>
+    );
+}
+
+function ProductActions({
+    label,
+    editLabel,
+    deleteLabel,
+    onEdit,
+    onDelete,
+}: {
+    label: string;
+    editLabel: string;
+    deleteLabel: string;
+    onEdit: () => void;
+    onDelete: () => void;
+}) {
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-xs" aria-label={label} className="size-10 xl:size-6">
+                    <EllipsisHorizontalIcon className="size-4" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={onEdit}>
+                    <PencilIcon className="size-4" />{editLabel}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+                    <TrashIcon className="size-4" />{deleteLabel}
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
+function formatTaxRate(product: Product, locale: string): string {
+    return product.taxRate == null ? '—' : `${new Intl.NumberFormat(locale).format(product.taxRate)}%`;
+}
+
+function formatEffectiveRange(product: Product, locale: string, t: ReturnType<typeof useTranslations>): string {
+    const start = product.effectiveStart ? formatDate(product.effectiveStart, locale) : null;
+    const end = product.effectiveEnd ? formatDate(product.effectiveEnd, locale) : null;
+    if (start && end) return t('effectiveRange', { start, end });
+    if (start) return t('effectiveFrom', { date: start });
+    if (end) return t('effectiveUntil', { date: end });
+    return t('noDateLimit');
 }
