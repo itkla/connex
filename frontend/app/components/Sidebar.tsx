@@ -70,6 +70,7 @@ import { recentRecordHref } from '@/app/lib/recentRecords';
 import type { SidebarSectionId } from '@/app/lib/sidebarSections';
 import type { NavAccess } from '@/app/lib/navAccess';
 import { useSidebarSections } from '@/app/hooks/useSidebarSections';
+import { useNotifications } from '@/app/hooks/useNotifications';
 
 /** Maximum number of recent records surfaced in the sidebar; the store retains more for the palette. */
 const SIDEBAR_RECENTS_LIMIT = 5;
@@ -78,6 +79,7 @@ type NavItem = {
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
+    nested?: boolean;
     /** Overrides path-based active matching for hrefs that carry a query (e.g. pinned saved views). */
     active?: boolean;
 };
@@ -146,14 +148,12 @@ function useSections(navAccess: NavAccess): NavSection[] {
         {
             id: "records",
             label: t("sectionRecords"),
-            activePaths: ["/records"],
             items: [
                 { label: t("navCompanies"), href: "/records/companies", icon: BuildingOffice2Icon },
                 { label: t("navContacts"), href: "/records/contacts", icon: UsersIcon },
                 { label: t("navDeals"), href: "/records/deals", icon: BriefcaseIcon },
                 { label: t("navPipelines"), href: "/records/pipelines", icon: FunnelIcon },
                 { label: t("navProducts"), href: "/records/products", icon: CubeIcon },
-                { label: t("navApprovalPolicies"), href: "/records/approval-policies", icon: ShieldCheckIcon },
             ],
         },
         ...(navAccess.campaigns ? [marketingSection] : []),
@@ -165,7 +165,6 @@ function useSections(navAccess: NavAccess): NavSection[] {
                 { label: t("navActivities"), href: "/activity/all", icon: ChatBubbleLeftRightIcon },
                 { label: t("navTasks"), href: "/activity/tasks", icon: CheckCircleIcon },
                 { label: t("navNotes"), href: "/activity/notes", icon: DocumentTextIcon },
-                { label: t("navNotifications"), href: "/notifications", icon: BellIcon },
             ],
         },
         {
@@ -174,6 +173,12 @@ function useSections(navAccess: NavAccess): NavSection[] {
             activePaths: ["/library"],
             items: [
                 { label: t("navDocuments"), href: "/library/documents", icon: DocumentDuplicateIcon },
+                {
+                    label: t("navApprovalPolicies"),
+                    href: "/records/approval-policies",
+                    icon: ShieldCheckIcon,
+                    nested: true,
+                },
                 { label: t("navTags"), href: "/library/tags", icon: TagIcon },
                 { label: t("navFiles"), href: "/library/files", icon: FolderIcon },
             ],
@@ -320,10 +325,13 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${active
-                    ? "text-brand-dark font-medium"
-                    : "font-light text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                    }`}
+                className={cn(
+                    "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                    item.nested && "ml-6",
+                    active
+                        ? "font-medium text-brand-dark"
+                        : "font-light text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                )}
             >
                 {active && (
                     <motion.span
@@ -380,8 +388,10 @@ function ThemeSubmenu() {
 
 function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; rail: boolean }) {
     const t = useTranslations("CommonSidebar");
+    const tn = useTranslations("Notifications");
     const locale = useLocale();
     const router = useRouter();
+    const { unread } = useNotifications();
     const [pendingLocale, setPendingLocale] = useState<Locale | null>(null);
     const localeRequestRef = useRef(0);
 
@@ -463,6 +473,26 @@ function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; 
                         >
                             <Cog6ToothIcon className="size-4" />
                             {t("accountSettings")}
+                        </Link>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item asChild>
+                        <Link
+                            href="/notifications"
+                            className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
+                        >
+                            <BellIcon className="size-4" />
+                            {t("navNotifications")}
+                            {unread > 0 ? (
+                                <>
+                                    <span className="sr-only">{tn("unreadCount", { count: unread })}</span>
+                                    <span
+                                        aria-hidden="true"
+                                        className="ml-auto min-w-5 rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-5 text-white"
+                                    >
+                                        {unread > 99 ? "99+" : unread}
+                                    </span>
+                                </>
+                            ) : null}
                         </Link>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item asChild>
