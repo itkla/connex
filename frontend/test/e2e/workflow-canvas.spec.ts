@@ -168,6 +168,7 @@ test.describe("workflow canvas", () => {
         await page.mouse.click(invoked.clientX, invoked.clientY, { button: "right" });
         const menu = page.getByRole("menu");
         await expect(menu).toBeVisible();
+        await expect(flow.locator(".react-flow__node")).toHaveCount(4);
         const yesGroup = menu.getByText("Yes", { exact: true }).locator("..");
         await yesGroup.getByRole("menuitem", { name: "Delay" }).click();
         await expect(flow.locator(".react-flow__node")).toHaveCount(5);

@@ -67,6 +67,7 @@ type InsertNodeType = Exclude<WorkflowNodeType, "TRIGGER">;
 
 const INSERT_TYPES: InsertNodeType[] = ["CONDITION", "ACTION", "DELAY", "END"];
 const FIT_VIEW_DURATION_MS = 200;
+const CONTEXT_MENU_DRAG_THRESHOLD = 8;
 
 function isOutcome(value: string | null | undefined): value is WorkflowEdgeOutcome {
     return value === "next" || value === "yes" || value === "no";
@@ -81,8 +82,11 @@ function useWorkflowCanvasContextMenu(
     screenToFlowPosition: (position: { x: number; y: number }) => { x: number; y: number },
 ) {
     const positionRef = useRef<{ x: number; y: number } | null>(null);
+    const activationPointRef = useRef<{ x: number; y: number } | null>(null);
+    const openRef = useRef(false);
     const [open, setOpen] = useState(false);
     const capturePosition = useCallback((target: EventTarget | null, clientX: number, clientY: number) => {
+        activationPointRef.current = { x: clientX, y: clientY };
         positionRef.current = !readOnly && isWorkflowPaneTarget(target)
             ? screenToFlowPosition({ x: clientX, y: clientY })
             : null;
@@ -94,16 +98,43 @@ function useWorkflowCanvasContextMenu(
         if (event.pointerType === "touch" || event.pointerType === "pen") {
             capturePosition(event.target, event.clientX, event.clientY);
         } else {
+            activationPointRef.current = null;
             positionRef.current = null;
         }
     }, [capturePosition]);
     const onOpenChange = useCallback((nextOpen: boolean) => {
         if (nextOpen && positionRef.current) {
+            openRef.current = true;
             setOpen(true);
             return;
         }
+        openRef.current = false;
         setOpen(false);
+        activationPointRef.current = null;
         positionRef.current = null;
+    }, []);
+    useEffect(() => {
+        const onOpeningPointerUp = (event: PointerEvent) => {
+            const activationPoint = activationPointRef.current;
+            activationPointRef.current = null;
+            if (!activationPoint) return;
+            const distance = Math.hypot(
+                event.clientX - activationPoint.x,
+                event.clientY - activationPoint.y,
+            );
+            if (openRef.current && distance < CONTEXT_MENU_DRAG_THRESHOLD) {
+                event.preventDefault();
+            }
+        };
+        const onOpeningPointerCancel = () => {
+            activationPointRef.current = null;
+        };
+        globalThis.document.addEventListener("pointerup", onOpeningPointerUp, true);
+        globalThis.document.addEventListener("pointercancel", onOpeningPointerCancel, true);
+        return () => {
+            globalThis.document.removeEventListener("pointerup", onOpeningPointerUp, true);
+            globalThis.document.removeEventListener("pointercancel", onOpeningPointerCancel, true);
+        };
     }, []);
     const position = useCallback(() => positionRef.current ?? undefined, []);
     return { open, onOpenChange, onContextMenuCapture, onPointerDownCapture, position };
