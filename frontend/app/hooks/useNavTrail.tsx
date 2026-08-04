@@ -1,198 +1,181 @@
-'use client';
+"use client";
 
 import {
     createContext,
     useCallback,
     useContext,
     useEffect,
+    useId,
     useMemo,
-    useRef,
     useState,
     type ReactNode,
-} from 'react';
-import { usePathname } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+} from "react";
+import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 
-/** A single step in the user's navigation trail: the visited route and its resolved label. */
-export interface Crumb {
+import { useWorkspace } from "@/app/hooks/useWorkspace";
+import {
+    resolveBreadcrumbRoute,
+    type BreadcrumbCrumb,
+    type BreadcrumbMessageKey,
+} from "@/app/lib/breadcrumbRoutes";
+import type { NavAccess } from "@/app/lib/navAccess";
+
+export type Crumb = BreadcrumbCrumb;
+
+type LabelRegistration = {
     pathname: string;
+    registrationId: string;
     label: string;
-}
+};
 
-interface NavTrailContextValue {
+type LabelRegistry = {
+    scope: string;
+    labels: readonly LabelRegistration[];
+};
+
+type NavTrailContextValue = {
+    scope: string;
     trail: Crumb[];
-    setLabelFor: (pathname: string, label: string) => void;
-}
+    registerLabel: (
+        scope: string,
+        pathname: string,
+        registrationId: string,
+        label: string,
+    ) => () => void;
+};
 
 const NavTrailContext = createContext<NavTrailContextValue | null>(null);
 
-const STORAGE_KEY = 'connex:nav-trail';
-const MAX_TRAIL = 12;
-
-const ROUTE_LABELS: readonly { prefix: string; key: string }[] = [
-    { prefix: '/dashboard', key: 'navDashboard' },
-    { prefix: '/overview/calendar', key: 'navCalendar' },
-    { prefix: '/overview/map', key: 'navMap' },
-    { prefix: '/overview/introductions', key: 'navIntroductions' },
-    { prefix: '/overview/analytics', key: 'navAnalytics' },
-    { prefix: '/overview/reports', key: 'navReports' },
-    { prefix: '/overview/reports/goals', key: 'navGoals' },
-    { prefix: '/records/companies', key: 'navCompanies' },
-    { prefix: '/records/contacts', key: 'navContacts' },
-    { prefix: '/records/deals', key: 'navDeals' },
-    { prefix: '/records/pipelines', key: 'navPipelines' },
-    { prefix: '/records/products', key: 'navProducts' },
-    { prefix: '/records/approval-policies', key: 'navApprovalPolicies' },
-    { prefix: '/marketing/campaigns', key: 'navCampaigns' },
-    { prefix: '/activity/all', key: 'navActivities' },
-    { prefix: '/activity/tasks', key: 'navTasks' },
-    { prefix: '/activity/notes', key: 'navNotes' },
-    { prefix: '/library/documents', key: 'navDocuments' },
-    { prefix: '/library/tags', key: 'navTags' },
-    { prefix: '/library/files', key: 'navFiles' },
-    { prefix: '/notifications', key: 'navNotifications' },
-    { prefix: '/search', key: 'navSearch' },
-    { prefix: '/me', key: 'profile' },
-    { prefix: '/account', key: 'accountSettings' },
-    { prefix: '/users', key: 'navUsers' },
-    { prefix: '/workflows', key: 'navWorkflows' },
-    { prefix: '/settings', key: 'navSettings' },
-    { prefix: '/organization', key: 'navOrganization' },
-    { prefix: '/admin/logs', key: 'navAuditLog' },
-    { prefix: '/docs', key: 'navDocs' },
-];
-
-function matchRoute(pathname: string): { prefix: string; key: string } | null {
-    let best: { prefix: string; key: string } | null = null;
-    for (const entry of ROUTE_LABELS) {
-        if (pathname === entry.prefix || pathname.startsWith(`${entry.prefix}/`)) {
-            if (!best || entry.prefix.length > best.prefix.length) best = entry;
-        }
-    }
-    return best;
+function resolvedLabels(registrations: readonly LabelRegistration[]): ReadonlyMap<string, string> {
+    const labels = new Map<string, string>();
+    for (const registration of registrations) labels.set(registration.pathname, registration.label);
+    return labels;
 }
 
-function humanize(pathname: string): string {
-    const seg = pathname.split('/').filter(Boolean).pop();
-    if (!seg) return '/';
-    return seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ');
-}
-
-function readStored(): Crumb[] | null {
-    try {
-        const raw = sessionStorage.getItem(STORAGE_KEY);
-        if (!raw) return null;
-        const parsed: unknown = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return null;
-        return parsed.filter(
-            (c): c is Crumb =>
-                typeof c === 'object' && c !== null && typeof (c as Crumb).pathname === 'string' && typeof (c as Crumb).label === 'string',
-        );
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Folds a navigation into the trail: a section root restarts the trail, revisiting an existing
- * step truncates back to it, and anything else (a detail/sub page) appends a new step.
- */
-function advance(prev: Crumb[], pathname: string, labelFor: (p: string) => string): Crumb[] {
-    const label = labelFor(pathname);
-    if (prev.length > 0 && prev[prev.length - 1].pathname === pathname) {
-        if (prev[prev.length - 1].label === label) return prev;
-        const next = prev.slice();
-        next[next.length - 1] = { pathname, label };
-        return next;
-    }
-    const route = matchRoute(pathname);
-    if (route && route.prefix === pathname) return [{ pathname, label }];
-    const existing = prev.findIndex((c) => c.pathname === pathname);
-    if (existing >= 0) return prev.slice(0, existing + 1);
-    const next = [...prev, { pathname, label }];
-    return next.length > MAX_TRAIL ? next.slice(next.length - MAX_TRAIL) : next;
-}
-
-/**
- * Tracks the user's actual navigation trail (not the URL hierarchy) so a breadcrumb can show where
- * they came from — e.g. arriving at a company from the map reads "Map / <company>". The trail is
- * persisted per session so it survives reloads.
- */
-export function NavTrailProvider({ children }: { children: ReactNode }) {
+/** Provides deterministic breadcrumbs scoped to the current user and active workspace. */
+export function NavTrailProvider({
+    userId,
+    navAccess,
+    children,
+}: {
+    userId: number;
+    navAccess: NavAccess;
+    children: ReactNode;
+}) {
     const pathname = usePathname();
-    const t = useTranslations('CommonSidebar');
-    const [trail, setTrail] = useState<Crumb[]>([]);
-    const overridesRef = useRef<Record<string, string>>({});
-    const initializedRef = useRef(false);
-
-    const labelFor = useCallback(
-        (path: string): string => {
-            const override = overridesRef.current[path];
-            if (override) return override;
-            const route = matchRoute(path);
-            return route ? t(route.key) : humanize(path);
-        },
-        [t],
+    const { activeWorkspace, activeWorkspaceId } = useWorkspace();
+    const t = useTranslations("CommonBreadcrumb");
+    const scope = `${userId}:${activeWorkspaceId ?? "none"}`;
+    const [registry, setRegistry] = useState<LabelRegistry>({
+        scope,
+        labels: [],
+    });
+    if (registry.scope !== scope) setRegistry({ scope, labels: [] });
+    const dynamicLabels = useMemo(
+        () => resolvedLabels(registry.scope === scope ? registry.labels : []),
+        [registry, scope],
     );
 
-    useEffect(() => {
-        setTrail((prev) => {
-            let base = prev;
-            if (!initializedRef.current) {
-                initializedRef.current = true;
-                const stored = readStored();
-                if (stored && stored.length > 0) base = stored;
-            }
-            return advance(base, pathname, labelFor);
-        });
-    }, [pathname, labelFor]);
-
-    useEffect(() => {
-        if (!initializedRef.current) return;
-        try {
-            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(trail));
-        } catch {
-            return;
+    const registerLabel = useCallback((
+        registrationScope: string,
+        registeredPathname: string,
+        registrationId: string,
+        label: string,
+    ) => {
+        const cleanPathname = registeredPathname.trim();
+        const cleanLabel = label.trim();
+        if (
+            !cleanPathname.startsWith("/")
+            || cleanPathname.includes("?")
+            || cleanPathname.includes("#")
+            || !cleanLabel
+        ) {
+            return () => undefined;
         }
-    }, [trail]);
-
-    const setLabelFor = useCallback((path: string, label: string) => {
-        if (!label || overridesRef.current[path] === label) return;
-        overridesRef.current = { ...overridesRef.current, [path]: label };
-        setTrail((prev) => {
-            const idx = prev.findIndex((c) => c.pathname === path);
-            if (idx < 0 || prev[idx].label === label) return prev;
-            const next = prev.slice();
-            next[idx] = { pathname: path, label };
-            return next;
+        setRegistry((current) => {
+            if (current.scope !== registrationScope) return current;
+            const existing = current.labels.find(
+                (registration) => registration.registrationId === registrationId,
+            );
+            if (existing?.pathname === cleanPathname && existing.label === cleanLabel) return current;
+            return {
+                scope: registrationScope,
+                labels: [
+                    ...current.labels.filter(
+                        (registration) => registration.registrationId !== registrationId,
+                    ),
+                    { pathname: cleanPathname, registrationId, label: cleanLabel },
+                ],
+            };
         });
+        return () => {
+            setRegistry((current) => {
+                if (current.scope !== registrationScope) return current;
+                const labels = current.labels.filter(
+                    (registration) => registration.registrationId !== registrationId,
+                );
+                return labels.length === current.labels.length ? current : { scope: registrationScope, labels };
+            });
+        };
     }, []);
 
-    const value = useMemo<NavTrailContextValue>(() => ({ trail, setLabelFor }), [trail, setLabelFor]);
+    const translate = useCallback(
+        (key: BreadcrumbMessageKey) => t(key),
+        [t],
+    );
+    const trail = useMemo(
+        () => resolveBreadcrumbRoute(pathname, {
+            workspaceName: activeWorkspace?.name ?? null,
+            organizationName: activeWorkspace?.orgName ?? null,
+            organizationAccessible: activeWorkspace?.orgRole != null,
+            navAccess,
+            dynamicLabels,
+            translate,
+        }).crumbs,
+        [activeWorkspace, dynamicLabels, navAccess, pathname, translate],
+    );
+    const value = useMemo<NavTrailContextValue>(
+        () => ({ scope, trail, registerLabel }),
+        [registerLabel, scope, trail],
+    );
 
     return <NavTrailContext.Provider value={value}>{children}</NavTrailContext.Provider>;
 }
 
-/** The current navigation trail. Empty until the provider has resolved the first route. */
+/** Returns the canonical breadcrumb trail for the current authenticated route. */
 export function useNavTrail(): Crumb[] {
     return useContext(NavTrailContext)?.trail ?? [];
 }
 
-/**
- * Overrides the current page's breadcrumb label — for detail pages that want the entity name
- * (e.g. a company's name) rather than the section label the route resolves to.
- */
-export function useCrumbLabel(label: string): void {
-    const pathname = usePathname();
-    const ctx = useContext(NavTrailContext);
-    const setLabelFor = ctx?.setLabelFor;
-    useEffect(() => {
-        if (setLabelFor) setLabelFor(pathname, label);
-    }, [setLabelFor, pathname, label]);
+/** Registers a dynamic entity label for the current route or an explicit parent route. */
+export function useCrumbLabel(label: string, pathname?: string): void {
+    const currentPathname = usePathname();
+    const registrationId = useId();
+    const context = useContext(NavTrailContext);
+    const currentScope = context?.scope ?? null;
+    const registerLabel = context?.registerLabel;
+    const [registrationIdentity, setRegistrationIdentity] = useState({
+        routePathname: currentPathname,
+        scope: currentScope,
+    });
+    if (
+        registrationIdentity.routePathname !== currentPathname
+        || (registrationIdentity.scope === null && currentScope !== null)
+    ) {
+        setRegistrationIdentity({ routePathname: currentPathname, scope: currentScope });
+    }
+    const registeredPathname = pathname ?? currentPathname;
+    useEffect(
+        () => registrationIdentity.scope
+            ? registerLabel?.(registrationIdentity.scope, registeredPathname, registrationId, label)
+            : undefined,
+        [label, registerLabel, registeredPathname, registrationId, registrationIdentity.scope],
+    );
 }
 
-/** Renders nothing; sets the current page's breadcrumb label. Usable from Server Components. */
-export function CrumbLabel({ value }: { value: string }): null {
-    useCrumbLabel(value);
+/** Registers a breadcrumb label from a server-rendered page without adding visible content. */
+export function CrumbLabel({ value, pathname }: { value: string; pathname?: string }): null {
+    useCrumbLabel(value, pathname);
     return null;
 }

@@ -16,6 +16,7 @@ import { NotificationProvider } from "@/app/hooks/useNotifications";
 import { NowProvider } from "@/app/hooks/useNow";
 import { PermissionsProvider } from "@/app/hooks/usePermissions";
 import { WorkspaceProvider } from "@/app/hooks/useWorkspace";
+import { ProtectedMediaProvider } from "@/app/hooks/useProtectedMedia";
 import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 import { ActionProvider } from "@/app/hooks/useActions";
 import { PinnedViewsProvider } from "@/app/hooks/usePinnedViews";
@@ -48,7 +49,7 @@ export default async function AppLayout({
     const cookie = headerList.get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
-    if (!user) { // Sidebar expects the user object to not be null, so even though this auth check is handled by the proxy, we need to satisfy that condition. note to hunter: leave it as-is for now
+    if (!user) {
         const pathname = headerList.get('x-pathname') ?? '/dashboard';
         redirect(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
     }
@@ -70,40 +71,42 @@ export default async function AppLayout({
         <NowProvider value={requestNow()}>
             <PermissionsProvider permissions={effectivePermissions} status={permissionsStatus}>
                 <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
-                    <NotificationProvider key={user.id} recipientId={user.id}>
-                        <NavTrailProvider>
-                            <ActionProvider user={user}>
-                                <NotificationActionsBridge />
-                                <PreferenceActionsBridge
-                                    userLocale={resolveLocale(user.locale)}
-                                    cookieLocale={localePreferenceFromCookieHeader(cookie)}
-                                />
-                                <DraftResumeBridge />
-                                <NavActionsBridge navAccess={navAccess} />
-                                <PinnedViewsProvider>
-                                    <PinnedViewsActionsBridge />
-                                    <RecentRecordsProvider>
-                                        <RecentRecordsActionsBridge />
-                                        <SidebarModeProvider>
-                                            <ContentShell
-                                                sidebar={
-                                                    <Suspense fallback={<SidebarFallback className={SIDEBAR_SURFACE_CLASS} />}>
-                                                        <Sidebar
-                                                            user={user}
-                                                            navAccess={navAccess}
-                                                            className={SIDEBAR_SURFACE_CLASS}
-                                                        />
-                                                    </Suspense>
-                                                }
-                                            >
-                                                {children}
-                                            </ContentShell>
-                                        </SidebarModeProvider>
-                                    </RecentRecordsProvider>
-                                </PinnedViewsProvider>
-                            </ActionProvider>
-                        </NavTrailProvider>
-                    </NotificationProvider>
+                    <ProtectedMediaProvider userId={user.id}>
+                        <NotificationProvider key={user.id} recipientId={user.id}>
+                            <NavTrailProvider userId={user.id} navAccess={navAccess}>
+                                <ActionProvider user={user}>
+                                    <NotificationActionsBridge />
+                                    <PreferenceActionsBridge
+                                        userLocale={resolveLocale(user.locale)}
+                                        cookieLocale={localePreferenceFromCookieHeader(cookie)}
+                                    />
+                                    <DraftResumeBridge />
+                                    <NavActionsBridge navAccess={navAccess} />
+                                    <PinnedViewsProvider>
+                                        <PinnedViewsActionsBridge />
+                                        <RecentRecordsProvider>
+                                            <RecentRecordsActionsBridge />
+                                            <SidebarModeProvider>
+                                                <ContentShell
+                                                    sidebar={
+                                                        <Suspense fallback={<SidebarFallback className={SIDEBAR_SURFACE_CLASS} />}>
+                                                            <Sidebar
+                                                                user={user}
+                                                                navAccess={navAccess}
+                                                                className={SIDEBAR_SURFACE_CLASS}
+                                                            />
+                                                        </Suspense>
+                                                    }
+                                                >
+                                                    {children}
+                                                </ContentShell>
+                                            </SidebarModeProvider>
+                                        </RecentRecordsProvider>
+                                    </PinnedViewsProvider>
+                                </ActionProvider>
+                            </NavTrailProvider>
+                        </NotificationProvider>
+                    </ProtectedMediaProvider>
                 </WorkspaceProvider>
             </PermissionsProvider>
         </NowProvider>

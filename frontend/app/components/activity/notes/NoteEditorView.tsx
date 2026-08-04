@@ -149,15 +149,17 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
 
     return (
         <PageShell tier="reading">
-                <CrumbLabel value={displayTitle} />
-                <div className="flex items-center justify-between gap-4">
-                    <RecordReturnLink
-                        href={returnPath}
-                        className="inline-flex w-fit items-center gap-2 text-sm text-brand transition-colors hover:text-brand-hover"
-                    >
-                        <ArrowLeftIcon className="h-4 w-4" />
-                        {t("back")}
-                    </RecordReturnLink>
+                {note ? <CrumbLabel value={displayTitle} /> : null}
+                <div className={note ? "flex items-center justify-end gap-4" : "flex items-center justify-between gap-4"}>
+                    {note ? null : (
+                        <RecordReturnLink
+                            href={returnPath}
+                            className="inline-flex w-fit items-center gap-2 text-sm text-brand transition-colors hover:text-brand-hover"
+                        >
+                            <ArrowLeftIcon className="h-4 w-4" />
+                            {t("back")}
+                        </RecordReturnLink>
+                    )}
                     <SaveIndicator status={status} labels={t} />
                 </div>
 

@@ -10,7 +10,6 @@ import {
     useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { useLocale, useTranslations } from "next-intl";
 import { CameraIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
@@ -43,6 +42,7 @@ import {
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import ChangeEmailDialog from "@/app/components/account/ChangeEmailDialog";
+import ProtectedMediaImage from "@/app/components/ProtectedMediaImage";
 
 type Props = {
     user: User;
@@ -149,20 +149,16 @@ function ProfilePhotoField({ previewUrl, initial, disabled, onSelect }: ProfileP
                 aria-label={t("changePhotoAria")}
                 className="group relative size-20 shrink-0 overflow-hidden rounded-full ring-1 ring-border outline-none transition-transform duration-150 ease-out focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
             >
-                {previewUrl ? (
-                    <Image
-                        src={previewUrl}
-                        alt={t("photoAlt")}
-                        width={80}
-                        height={80}
-                        unoptimized
-                        className="size-full object-cover"
-                    />
-                ) : (
-                    <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-dark">
-                        {initial}
-                    </span>
-                )}
+                <ProtectedMediaImage
+                    src={previewUrl}
+                    alt={t("photoAlt")}
+                    className="size-full object-cover"
+                    fallback={(
+                        <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-dark">
+                            {initial}
+                        </span>
+                    )}
+                />
                 <span className="absolute inset-0 grid place-items-center bg-black/50 text-white opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none">
                     <CameraIcon className="size-5" />
                 </span>

@@ -15,6 +15,7 @@ import {
     getTagsFromCookie,
 } from '@/app/lib/api';
 import type { Tag } from '@/app/lib/types';
+import { CrumbLabel } from '@/app/hooks/useNavTrail';
 
 export async function generateMetadata() {
     const t = await getTranslations('Reports');
@@ -46,13 +47,16 @@ export default async function EditReportPage({ params }: { params: Promise<{ id:
     }
 
     return (
-        <ReportBuilderBoard
-            initialReport={report}
-            pipelines={pipelines}
-            owners={ownersResult.ok ? ownersResult.data : []}
-            ownersFailed={!ownersResult.ok}
-            tags={tags}
-            canReadGoals={canReadGoals}
-        />
+        <>
+            <CrumbLabel pathname={`/overview/reports/${id}`} value={report.name} />
+            <ReportBuilderBoard
+                initialReport={report}
+                pipelines={pipelines}
+                owners={ownersResult.ok ? ownersResult.data : []}
+                ownersFailed={!ownersResult.ok}
+                tags={tags}
+                canReadGoals={canReadGoals}
+            />
+        </>
     );
 }

@@ -2,6 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { BREADCRUMB_STATIC_ROUTE_PATHS } from "@/app/lib/breadcrumbRoutes";
+
 const APP_ROOT = join(process.cwd(), "app");
 const ROUTE_ROOTS = [join(APP_ROOT, "(app)"), APP_ROOT];
 
@@ -47,10 +49,6 @@ const paletteTargets = uniqueSorted([
 
 const sidebarTargets = uniqueSorted(
     matchAll(read("app/components/Sidebar.tsx"), /href:\s*"(\/[^"]*)"/g),
-);
-
-const navTrailTargets = uniqueSorted(
-    matchAll(read("app/hooks/useNavTrail.tsx"), /prefix:\s*'(\/[^']*)'/g),
 );
 
 const recordDetailBases = uniqueSorted(
@@ -108,7 +106,7 @@ describe("navigation targets resolve to real routes", () => {
         expect(routeExists(target)).toBe(true);
     });
 
-    it.each(navTrailTargets)("nav-trail route %s exists", (target) => {
+    it.each(BREADCRUMB_STATIC_ROUTE_PATHS)("breadcrumb route %s exists", (target) => {
         expect(routeExists(target)).toBe(true);
     });
 

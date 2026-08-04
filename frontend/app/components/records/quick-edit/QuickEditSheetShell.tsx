@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
+import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import { cn } from '@/lib/utils';
 
 export const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
@@ -241,11 +242,12 @@ export function QuickEditMediaUpload({
                 (disabled || selectionPending) && 'pointer-events-none opacity-60',
             )}
         >
-            {previewSrc ? (
-                <img src={previewSrc} alt="" className="h-full w-full object-cover" />
-            ) : (
-                fallback
-            )}
+            <ProtectedMediaImage
+                src={previewSrc}
+                alt=""
+                className="h-full w-full object-cover"
+                fallback={fallback}
+            />
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
                 <CameraIcon className="size-5 text-white" />
             </div>

@@ -95,9 +95,9 @@ export default function QuickEditCompanySheet({
                         file={pendingLogo}
                         existingUrl={c.logoUrl ?? null}
                         fallback={
-                            <div className="flex h-full w-full items-center justify-center bg-muted-foreground/20">
+                            <span className="flex h-full w-full items-center justify-center bg-muted-foreground/20">
                                 <BuildingOffice2Icon className="size-8 text-muted-foreground" />
-                            </div>
+                            </span>
                         }
                         onSelect={(file) => updateLogoFile(c.id, file)}
                         onInvalidSelect={() => toastError(t('unsupportedLogo'))}

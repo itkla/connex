@@ -8,7 +8,7 @@ import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import { type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
+import { UserIcon } from "@heroicons/react/24/outline";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import Rise from "@/app/components/motion/Rise";
@@ -32,17 +32,13 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
 import RelationshipEvidencePanel from "@/app/components/records/RelationshipEvidencePanel";
 import RecordStickyContext from "@/app/components/records/RecordStickyContext";
-import RecordReturnLink from "@/app/components/records/RecordReturnLink";
-import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
 
 type ContactPageProps = {
     params: Promise<{ id: number }>;
-    searchParams: Promise<{ returnTo?: string | string[] }>;
 };
 
-export default async function ContactPage({ params, searchParams }: ContactPageProps) {
-    const [{ id }, query] = await Promise.all([params, searchParams]);
-    const returnPath = resolveRecordReturnPath("contacts", query.returnTo);
+export default async function ContactPage({ params }: ContactPageProps) {
+    const { id } = await params;
     const cookieStore = await cookies();
     const cookie = cookieStore.toString();
     const activeWorkspaceCookie = cookieStore.get("connex_workspace")?.value;
@@ -105,26 +101,14 @@ export default async function ContactPage({ params, searchParams }: ContactPageP
         <PageShell tier="reading">
                 <RecordStickyContext
                     anchorId="contact-record-identity"
-                    backHref={returnPath}
-                    backLabel={t("allContacts")}
                     name={contact.name}
                     temperature={evidence?.temperature}
                 />
                 <Rise>
-                    <div className="flex flex-row justify-between">
-                        <RecordReturnLink
-                            href={returnPath}
-                            className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
-                        >
-                            <ArrowLeftIcon className="h-4 w-4" />
-                            <span>{t("allContacts")}</span>
-                        </RecordReturnLink>
-                    </div>
-
                     <CrumbLabel value={contact.name} />
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
                     <RecentRecordBridge type="person" id={contact.id} label={contact.name} />
-                    <header id="contact-record-identity" className="mt-8 flex flex-wrap items-center justify-between gap-6">
+                    <header id="contact-record-identity" className="flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <ContactAvatar contact={contact} type="xlarge" />
                             <div className="flex flex-col gap-2">

@@ -7,7 +7,7 @@ import { CrumbLabel } from '@/app/hooks/useNavTrail';
 import RecentRecordBridge from '@/app/components/actions/RecentRecordBridge';
 import ActionRecordBridge from '@/app/components/actions/ActionRecordBridge';
 import type { ReactNode } from 'react';
-import { ArrowLeftIcon, BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getLocale, getTranslations } from 'next-intl/server';
 
@@ -79,8 +79,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
 import RecordStickyContext from '@/app/components/records/RecordStickyContext';
-import RecordReturnLink from '@/app/components/records/RecordReturnLink';
-import { resolveRecordReturnPath } from '@/app/lib/recordReturnPath';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -88,14 +86,12 @@ type ResolvedDealPerson = { person: Contact; role: string | null };
 
 type DealPageProps = {
     params: Promise<{ id: number }>;
-    searchParams: Promise<{ returnTo?: string | string[] }>;
 };
 
-export default async function DealPage({ params, searchParams }: DealPageProps) {
-    const [{ id: rawId }, query] = await Promise.all([params, searchParams]);
+export default async function DealPage({ params }: DealPageProps) {
+    const { id: rawId } = await params;
     const id = Number(rawId);
     if (!Number.isInteger(id) || id < 1) notFound();
-    const returnPath = resolveRecordReturnPath('deals', query.returnTo);
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
 
@@ -217,26 +213,14 @@ export default async function DealPage({ params, searchParams }: DealPageProps) 
         <PageShell tier="reading">
                 <RecordStickyContext
                     anchorId="deal-record-identity"
-                    backHref={returnPath}
-                    backLabel={t('allDeals')}
                     name={deal.name}
                     risk={risk}
                 />
                 <Rise>
-                    <div className="flex flex-row justify-between">
-                        <RecordReturnLink
-                            href={returnPath}
-                            className="inline-flex w-fit items-center gap-2 text-base text-brand hover:text-brand-hover"
-                        >
-                            <ArrowLeftIcon className="h-4 w-4" />
-                            <span>{t('allDeals')}</span>
-                        </RecordReturnLink>
-                    </div>
-
                     <CrumbLabel value={deal.name} />
                     <RecentRecordBridge type="deal" id={deal.id} label={deal.name} />
                     <ActionRecordBridge type="deal" id={deal.id} label={deal.name} />
-                    <header id="deal-record-identity" className="mt-8 flex flex-wrap items-center justify-between gap-6">
+                    <header id="deal-record-identity" className="flex flex-wrap items-center justify-between gap-6">
                         <div className="flex flex-col gap-2 py-8">
                             <div className="flex flex-row flex-wrap items-center gap-3">
                                 <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{deal.name}</h1>

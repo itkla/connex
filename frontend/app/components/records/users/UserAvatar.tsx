@@ -1,4 +1,5 @@
 import { type User } from "@/app/lib/types";
+import ProtectedMediaImage from "@/app/components/ProtectedMediaImage";
 import { cn } from "@/lib/utils";
 
 type AvatarSize = "small" | "medium" | "large" | "xlarge" | "2xlarge";
@@ -27,20 +28,27 @@ export default function UserAvatar({
     type?: AvatarSize;
 }) {
     const initial = user.displayName?.slice(0, 1).toUpperCase() || "?";
-    return (
-        <div className={cn("shrink-0 overflow-hidden rounded-full ring-1 ring-border", SIZE_CLASS[type])}>
-            {user.profilePictureUrl ? (
-                <img src={user.profilePictureUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-                <div
-                    className={cn(
-                        "flex h-full w-full items-center justify-center bg-brand-light font-medium text-brand-dark",
-                        TEXT_CLASS[type],
-                    )}
-                >
-                    {initial}
-                </div>
+    const fallback = (
+        <span
+            className={cn(
+                "flex h-full w-full items-center justify-center bg-brand-light font-medium text-brand-dark",
+                TEXT_CLASS[type],
             )}
+        >
+            {initial}
+        </span>
+    );
+    return (
+        <div
+            aria-hidden="true"
+            className={cn("shrink-0 overflow-hidden rounded-full ring-1 ring-border", SIZE_CLASS[type])}
+        >
+            <ProtectedMediaImage
+                src={user.profilePictureUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                fallback={fallback}
+            />
         </div>
     );
 }

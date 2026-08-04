@@ -94,9 +94,9 @@ export default function QuickEditSheet({
                         file={pendingImage}
                         existingUrl={c.imageUrl ?? null}
                         fallback={
-                            <div className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
+                            <span className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
                                 <UserIcon className="size-8 text-muted-foreground" />
-                            </div>
+                            </span>
                         }
                         onSelect={(file) => updateImageFile(c.id, file)}
                         onInvalidSelect={() => toastError(t('unsupportedImage'))}

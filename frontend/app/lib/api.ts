@@ -5,6 +5,7 @@ const API_BASE =
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
+import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
 
 import type {
     AuthenticationResponseJSON,
@@ -78,6 +79,7 @@ const inFlightReportGenerations = new Map<string, {
     request: Promise<Types.ReportDocument>;
 }>();
 const inFlightReportRequests = new Set<AbortController>();
+const clientRequestIdentityInvalidationListeners = new Set<() => void>();
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
@@ -153,6 +155,41 @@ function invalidateClientRequestIdentity() {
         controller.abort();
     }
     inFlightReportRequests.clear();
+    for (const listener of [...clientRequestIdentityInvalidationListeners]) {
+        try {
+            listener();
+        } catch {}
+    }
+}
+
+/** Subscribes browser resources that must be revoked whenever authentication identity changes. */
+export function subscribeClientRequestIdentityInvalidation(listener: () => void): () => void {
+    clientRequestIdentityInvalidationListeners.add(listener);
+    return () => clientRequestIdentityInvalidationListeners.delete(listener);
+}
+
+/** Fetches one canonical protected image under an explicitly captured workspace identity. */
+export function fetchProtectedMediaResponse(
+    path: string,
+    workspaceId: number,
+    signal: AbortSignal,
+): Promise<Response> {
+    if (
+        !isProtectedMediaPath(path)
+        || !Number.isInteger(workspaceId)
+        || workspaceId < 1
+        || workspaceId > 2_147_483_647
+    ) {
+        return Promise.reject(new RangeError("Protected media request scope is invalid"));
+    }
+    return fetch(`${API_BASE}${path}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "X-Workspace-Id": String(workspaceId) },
+        mode: "same-origin",
+        redirect: "error",
+        signal,
+    });
 }
 
 type ClientIdentityTransition = "invalidate" | "refresh" | "logout" | "workspace";

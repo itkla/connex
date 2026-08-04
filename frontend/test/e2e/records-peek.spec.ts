@@ -28,7 +28,13 @@ test.describe("records browse and peek", () => {
         await expect(page.getByRole("heading", { name: contact.name }).first()).toBeVisible();
         expect(new URL(page.url()).searchParams.get("returnTo")).toContain(`peek=person%3A${contact.id}`);
 
-        await page.getByRole("link", { name: message("en", "contacts", "ContactsPage.allContacts") }).first().click();
+        const breadcrumb = page.getByRole("navigation", {
+            name: message("en", "common", "CommonBreadcrumb.ariaLabel"),
+        });
+        await breadcrumb.getByRole("link", {
+            name: message("en", "common", "CommonBreadcrumb.contacts"),
+            exact: true,
+        }).click();
         await expect(page).toHaveURL(peekUrl);
         await expect(peek).toBeVisible();
         await expect(row.locator('[data-slot="checkbox"]')).toHaveAttribute("data-state", "checked");
@@ -90,12 +96,14 @@ test.describe("records browse and peek", () => {
         await page.locator("[data-app-main]").evaluate((main) => main.scrollTo({ top: 900 }));
         const sticky = page.locator("[data-record-sticky-context]");
         await expect(sticky).toHaveAttribute("data-visible", "true");
-        await expect(sticky.getByRole("link", {
-            name: message("ja", "contacts", "ContactsPage.allContacts"),
-        })).toBeVisible();
+        await expect(sticky.getByRole("link")).toHaveCount(0);
 
-        await sticky.getByRole("link", {
-            name: message("ja", "contacts", "ContactsPage.allContacts"),
+        const breadcrumb = page.getByRole("navigation", {
+            name: message("ja", "common", "CommonBreadcrumb.ariaLabel"),
+        });
+        await breadcrumb.getByRole("link", {
+            name: message("ja", "common", "CommonBreadcrumb.contacts"),
+            exact: true,
         }).click();
         await expect(page).toHaveURL(new RegExp(`q=${encodeURIComponent(contact.name)}`));
     });

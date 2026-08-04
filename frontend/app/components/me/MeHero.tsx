@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { ArrowUpRightIcon } from "@heroicons/react/24/outline";
 
 import type { TemperatureBand, TemperatureTrend, User } from "@/app/lib/types";
+import ProtectedMediaImage from "@/app/components/ProtectedMediaImage";
 import { cn } from "@/lib/utils";
 import { warmthDotClass } from "@/app/lib/utils";
 
@@ -147,11 +148,12 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                                 className="me-halo absolute -inset-5 rounded-full bg-[radial-gradient(circle,color-mix(in_oklch,var(--color-brand)_42%,transparent),transparent_70%)]"
                             />
                             <span className="ncd-sheen relative grid size-20 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-brand-light to-brand-dark text-2xl font-semibold text-white shadow-[0_18px_45px_-18px_rgba(0,0,0,0.55)] ring-2 ring-background sm:size-28 sm:text-3xl">
-                                {user.profilePictureUrl ? (
-                                    <img src={user.profilePictureUrl} alt="" className="size-full object-cover" />
-                                ) : (
-                                    initials
-                                )}
+                                <ProtectedMediaImage
+                                    src={user.profilePictureUrl}
+                                    alt=""
+                                    className="size-full object-cover"
+                                    fallback={initials}
+                                />
                             </span>
                         </div>
                     </div>
@@ -253,11 +255,12 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                                     )}
                                     style={{ width: n.size, height: n.size }}
                                 >
-                                    {n.imageUrl ? (
-                                        <img src={n.imageUrl} alt="" className="size-full object-cover" />
-                                    ) : (
-                                        initialsOf(n.name)
-                                    )}
+                                    <ProtectedMediaImage
+                                        src={n.imageUrl}
+                                        alt=""
+                                        className="size-full object-cover"
+                                        fallback={initialsOf(n.name)}
+                                    />
                                 </span>
                                 <span
                                     aria-hidden

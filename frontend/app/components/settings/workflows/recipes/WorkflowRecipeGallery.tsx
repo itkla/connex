@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-    ArrowLeftIcon,
     ArrowPathIcon,
     BoltIcon,
     CheckCircleIcon,
@@ -16,6 +15,7 @@ import AccessDenied from "@/app/components/AccessDenied";
 import { EmptyState } from "@/app/components/EmptyState";
 import { PageHeader } from "@/app/components/PageHeader";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import { WorkflowSimulationEvidence } from "@/app/components/settings/workflows/WorkflowSimulationDialog";
 import {
     ApiError,
@@ -83,14 +83,6 @@ export function WorkflowRecipeGallery() {
             <PageHeader
                 title={t("recipes.title")}
                 description={t("recipes.description")}
-                actions={(
-                    <Button asChild variant="outline">
-                        <Link href="/workflows">
-                            <ArrowLeftIcon className="size-4" />
-                            {t("recipes.back")}
-                        </Link>
-                    </Button>
-                )}
             />
             {error === "load" ? (
                 <RecipeError onRetry={() => setAttempt((value) => value + 1)} />
@@ -229,13 +221,8 @@ export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
 
     return (
         <div className="space-y-8">
+            <CrumbLabel value={t(`recipes.items.${messageKey}.title`)} />
             <header className="space-y-4">
-                <Button asChild variant="ghost" size="sm" className="-ml-2">
-                    <Link href="/workflows/recipes">
-                        <ArrowLeftIcon className="size-4" />
-                        {t("recipes.backToRecipes")}
-                    </Link>
-                </Button>
                 <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">{t("recipes.version", { version: recipe.recipeVersion })}</Badge>

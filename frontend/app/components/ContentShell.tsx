@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,10 +37,6 @@ export default function ContentShell({
         return () => mql.removeEventListener("change", onChange);
     }, []);
 
-    // Lock the document scroll while the app shell is mounted so the window itself
-    // never scrolls (only the <main> content area does). A window scrollbar would drag
-    // the whole shell, sidebar included. Restored on unmount so marketing/auth pages
-    // outside the shell scroll normally.
     useEffect(() => {
         const html = document.documentElement;
         const previous = html.style.overflow;
@@ -84,7 +80,10 @@ export default function ContentShell({
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col">
-                <div data-app-toolbar className="relative flex w-full shrink-0 items-center gap-3 p-6 md:justify-center">
+                <div
+                    data-app-toolbar
+                    className="relative flex w-full shrink-0 items-center gap-3 p-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(20rem,36rem)_minmax(0,1fr)] md:gap-0"
+                >
                     <Button
                         type="button"
                         variant="ghost"
@@ -97,7 +96,7 @@ export default function ContentShell({
                     >
                         <MenuIcon className="size-5 text-muted-foreground" />
                     </Button>
-                    <div className="absolute left-6 hidden max-w-[calc(50%-20rem)] items-center gap-2 md:flex">
+                    <div className="hidden min-w-0 items-center gap-2 md:flex">
                         <Button
                             type="button"
                             variant="ghost"
@@ -113,13 +112,21 @@ export default function ContentShell({
                                 <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
                             )}
                         </Button>
-                        <NavBreadcrumb />
+                        <div className="hidden min-w-0 xl:block">
+                            <Suspense fallback={null}>
+                                <NavBreadcrumb />
+                            </Suspense>
+                        </div>
                     </div>
 
-                    <div className="w-full max-w-xl min-w-0">
+                    <div className="w-full max-w-xl min-w-0 md:col-start-2 md:row-start-1">
                         <GlobalSearch />
                     </div>
                 </div>
+
+                <Suspense fallback={null}>
+                    <NavBreadcrumb mode="mobile" />
+                </Suspense>
 
                 <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6">
                     {children}

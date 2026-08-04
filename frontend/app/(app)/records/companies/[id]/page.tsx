@@ -8,7 +8,7 @@ import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
+import { UserIcon } from "@heroicons/react/24/outline";
 import PipelineCard from "@/app/components/records/PipelineCard";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -46,17 +46,13 @@ import Attachments from "@/app/components/attachments/Attachments";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import RelationshipEvidencePanel from "@/app/components/records/RelationshipEvidencePanel";
 import RecordStickyContext from "@/app/components/records/RecordStickyContext";
-import RecordReturnLink from "@/app/components/records/RecordReturnLink";
-import { resolveRecordReturnPath } from "@/app/lib/recordReturnPath";
 
 type CompanyPageProps = {
     params: Promise<{ id: number }>;
-    searchParams: Promise<{ returnTo?: string | string[] }>;
 };
 
-export default async function CompanyPage({ params, searchParams }: CompanyPageProps) {
-    const [{ id }, query] = await Promise.all([params, searchParams]);
-    const returnPath = resolveRecordReturnPath("companies", query.returnTo);
+export default async function CompanyPage({ params }: CompanyPageProps) {
+    const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
 
@@ -118,24 +114,14 @@ export default async function CompanyPage({ params, searchParams }: CompanyPageP
         <PageShell tier="reading">
                 <RecordStickyContext
                     anchorId="company-record-identity"
-                    backHref={returnPath}
-                    backLabel={t("backToAll")}
                     name={company.name}
                     temperature={evidence?.temperature}
                 />
                 <Rise>
-                    <RecordReturnLink
-                        href={returnPath}
-                        className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
-                    >
-                        <ArrowLeftIcon className="h-4 w-4" />
-                        <span>{t("backToAll")}</span>
-                    </RecordReturnLink>
-
                     <CrumbLabel value={company.name} />
                     <RecentRecordBridge type="company" id={company.id} label={company.name} />
                     <ActionRecordBridge type="company" id={company.id} label={company.name} />
-                    <header id="company-record-identity" className="mt-8 flex flex-wrap items-center justify-between gap-6">
+                    <header id="company-record-identity" className="flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <CompanyAvatar company={company} type="2xlarge" />
                             <div className="flex flex-col gap-2">

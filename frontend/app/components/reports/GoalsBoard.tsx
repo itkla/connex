@@ -1,11 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import {
-    ArrowLeftIcon,
     FlagIcon,
     PencilSquareIcon,
     PlusIcon,
@@ -102,12 +100,6 @@ export default function GoalsBoard({
             <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
                 <header className="flex flex-wrap items-end justify-between gap-5">
                     <div>
-                        <Button asChild variant="ghost" size="sm" className="mb-4 -ml-2">
-                            <Link href="/overview/reports">
-                                <ArrowLeftIcon />
-                                {t('goals.backToReports')}
-                            </Link>
-                        </Button>
                         <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
                             {t('goals.eyebrow')}
                         </p>
