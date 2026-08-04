@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.never;
@@ -21,6 +22,8 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.UpdateWorkspaceIdentityRequest;
+import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
 import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
@@ -91,5 +94,25 @@ class WorkspaceControllerTest {
         verify(workspaceService).leaveWorkspaceAndSelectNext(9, 7);
         verify(workspaceCookie).clear(response);
         verify(workspaceCookie, never()).set(same(response), anyInt());
+    }
+
+    @Test
+    void updateIdentityDelegatesActorAndCompleteMutableIdentity() {
+        UpdateWorkspaceIdentityRequest request = new UpdateWorkspaceIdentityRequest();
+        request.setName("Renamed");
+        request.setTimezone("Pacific/Honolulu");
+        request.setExpectedName("Original");
+        request.setExpectedTimezone(null);
+        request.setExpectedIdentityVersion(4L);
+        WorkspaceIdentityDto expected = new WorkspaceIdentityDto(
+            9, 3, "Renamed", "immutable", "Pacific/Honolulu", 5L, "2026-08-03 12:00:00");
+        when(workspaceService.updateIdentity(
+            9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L)).thenReturn(expected);
+
+        WorkspaceIdentityDto actual = controller.updateIdentity(9, request);
+
+        assertSame(expected, actual);
+        verify(workspaceService).updateIdentity(
+            9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L);
     }
 }

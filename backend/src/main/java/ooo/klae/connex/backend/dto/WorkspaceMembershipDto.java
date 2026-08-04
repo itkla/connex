@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -15,9 +17,13 @@ public class WorkspaceMembershipDto {
     private int id;
     private String name;
     private String slug;
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private String timezone;
+    private long identityVersion;
     private String role;
     private int orgId;
     private String orgName;
+    private long orgIdentityVersion;
     private String orgRole;
 
     public WorkspaceMembershipDto(int id, String name, String slug, String role) {

@@ -563,36 +563,30 @@ class RecordListControllerTest {
     }
 
     @Test
-    void dealChartEndpointsNormalizeAndForwardCurrency() {
+    void dealChartEndpointsUseServerOwnedTimezoneAndNormalizeCurrency() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
         when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("Pacific/Honolulu");
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
         List<DealStageDistributionDto> distribution = List.of(
             new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
-        when(dealService.getRevenueTimeseries("JPY", "America/New_York", allTeam)).thenReturn(series);
-        when(dealService.getRevenueTimeseries("JPY", "+09:00", allTeam)).thenReturn(series);
+        when(dealService.getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam)).thenReturn(series);
         when(dealService.getStageDistribution("JPY", allTeam)).thenReturn(distribution);
 
-        assertSame(series, controller.getRevenueTimeseries("JPY", "America/New_York", null, null, null));
-        assertSame(series, controller.getRevenueTimeseries("JPY", null, "+09:00", null, null));
+        assertSame(series, controller.getRevenueTimeseries(
+            "JPY", "Mars/Olympus", "25:00", null, null));
         assertSame(distribution, controller.getStageDistribution("JPY", null, null));
 
         controller.getRevenueTimeseries("  ", null, null, null, null);
         controller.getStageDistribution("", null, null);
 
-        assertThrows(BadRequestException.class,
-            () -> controller.getRevenueTimeseries("JPY", "UTC", "+09:00", null, null));
-        assertThrows(BadRequestException.class,
-            () -> controller.getRevenueTimeseries("JPY", "Mars/Olympus", null, null, null));
-
-        verify(dealService).getRevenueTimeseries("JPY", "America/New_York", allTeam);
-        verify(dealService).getRevenueTimeseries("JPY", "+09:00", allTeam);
+        verify(dealService).getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam);
         verify(dealService).getStageDistribution("JPY", allTeam);
-        verify(dealService).getRevenueTimeseries(null, "UTC", allTeam);
+        verify(dealService).getRevenueTimeseries(null, "Pacific/Honolulu", allTeam);
         verify(dealService).getStageDistribution(null, allTeam);
     }
 
@@ -680,7 +674,7 @@ class RecordListControllerTest {
     }
 
     @Test
-    void windowedAnalyticsEndpointsDispatchWithValidatedUtcWindows() {
+    void windowedAnalyticsEndpointsDispatchWithServerOwnedTimezone() {
         DealController dealController = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService, memberScopeResolver);
@@ -692,6 +686,7 @@ class RecordListControllerTest {
             List.of(), List.of(), List.of(), List.of());
         DealRevenuePeriodSeriesDto revenue = new DealRevenuePeriodSeriesDto(List.of(), List.of());
         when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("Pacific/Honolulu");
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
         when(dealService.getDealKpis(any(), any(Window.class), anyList(), eq(allTeam))).thenReturn(kpis);
         when(dealService.getRevenueSeries(any(), any(Window.class), anyList(), eq(allTeam))).thenReturn(revenue);
@@ -715,18 +710,24 @@ class RecordListControllerTest {
 
         verify(dealService).getDealKpis(
             eq("JPY"),
-            argThat(window -> "America/New_York".equals(window.timezone().getId())),
+            argThat(window -> "Pacific/Honolulu".equals(window.timezone().getId())),
             anyList(),
             eq(allTeam));
         verify(dealService).getDealPipelineValue(
             eq("JPY"),
-            argThat(window -> "+09:00".equals(window.timezone().getId())),
+            argThat(window -> "Pacific/Honolulu".equals(window.timezone().getId())),
             eq(allTeam));
         verify(dealService).getRevenueSeries(
             eq("JPY"),
-            argThat(window -> "UTC".equals(window.timezone().getId())),
+            argThat(window -> "Pacific/Honolulu".equals(window.timezone().getId())),
             anyList(),
             eq(allTeam));
+        verify(activityService).getActivityVolume(
+            argThat(window -> "Pacific/Honolulu".equals(window.timezone().getId())),
+            anyList(),
+            eq(allTeam));
+        verify(activityService).getTeamLeaderboard(
+            argThat(window -> "Pacific/Honolulu".equals(window.timezone().getId())));
     }
 
     @Test
@@ -756,12 +757,6 @@ class RecordListControllerTest {
         assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
             null, "90d", null, null,
             "bad-date", "2026-01-01", null, null));
-        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
-            null, "90d", null, null,
-            "2026-01-01", "2026-01-02", "Mars/Olympus", null));
-        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(
-            null, "90d", null, null,
-            "2026-01-01", "2026-01-02", "UTC", "+09:00"));
     }
 
     @Test

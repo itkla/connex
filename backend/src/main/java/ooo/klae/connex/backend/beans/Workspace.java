@@ -13,6 +13,8 @@ public class Workspace {
     private int orgId;
     private String name;
     private String slug;
+    private String timezone;
+    private long identityVersion;
     private String createdAt;
     private String updatedAt;
 }

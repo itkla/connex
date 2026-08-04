@@ -45,6 +45,8 @@ The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` a
 
 Because each browser project registers a **fresh user and workspace**, desktop and phone runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).
 
+Playwright applies the active project's `use` options when a spec calls `browser.newContext()` through the built-in `browser` fixture. A spec that provisions a different identity must therefore pass `storageState: { cookies: [], origins: [] }`. Its `context.request` shares the context's cookies, so omitting that override would reuse the project JSESSIONID and replace the authenticated principal for every spec sharing that saved session.
+
 ## Projects and viewports
 
 `playwright.config.ts` defines four projects:

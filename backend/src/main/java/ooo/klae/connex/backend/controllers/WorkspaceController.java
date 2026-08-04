@@ -29,6 +29,8 @@ import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
+import ooo.klae.connex.backend.dto.UpdateWorkspaceIdentityRequest;
+import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
 import ooo.klae.connex.backend.services.AllowedDomainService;
@@ -78,6 +80,20 @@ public class WorkspaceController {
         workspaceService.requireMember(id, userId);
         workspaceService.rememberActive(userId, id);
         workspaceCookie.set(response, id);
+    }
+
+    @PatchMapping("/{id}")
+    public WorkspaceIdentityDto updateIdentity(
+            @PathVariable int id,
+            @Valid @RequestBody UpdateWorkspaceIdentityRequest request) {
+        return workspaceService.updateIdentity(
+            id,
+            authService.getCurrentUser().getId(),
+            request.getName(),
+            request.getTimezone(),
+            request.getExpectedName(),
+            request.getExpectedTimezone(),
+            request.getExpectedIdentityVersion());
     }
 
     @GetMapping("/pending")

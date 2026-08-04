@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
+import ooo.klae.connex.backend.dto.OrganizationLayoutAuthorityMemberDto;
 
 /**
  * Persistence for organization memberships (the org control plane). Org-scoped
@@ -23,5 +24,9 @@ public interface OrgMemberMapper {
     List<Integer> lockOwnerIds(@Param("orgId") int orgId);
     List<Integer> orgIdsOwnedBy(@Param("userId") int userId);
     List<OrgMemberDto> getMembers(@Param("orgId") int orgId);
+    List<OrganizationLayoutAuthorityMemberDto> findLayoutAuthorityMemberships(
+        @Param("orgId") int orgId,
+        @Param("afterUserId") int afterUserId,
+        @Param("limit") int limit);
     List<OrgMembershipDto> getMembershipsForUser(@Param("userId") int userId);
 }

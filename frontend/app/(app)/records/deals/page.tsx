@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
-import { type CookieResult, getDealsPage, getDealMetricsFromCookie, getDealFacetsFromCookie, getCurrentUserFromCookie, getDefaultSavedViewFromCookie, getSavedViewsResultFromCookie } from "@/app/lib/api";
+import { type CookieResult, getDealsPage, getDealMetricsFromCookie, getDealFacetsFromCookie, getCurrentUserFromCookie, getDefaultSavedViewFromCookie, getMyWorkspacesFromCookie, getSavedViewsResultFromCookie } from "@/app/lib/api";
 import { type Deal, type DealFacets, type DealMetrics, type Page, type SavedView } from "@/app/lib/types";
+import { resolveWorkspaceTimezone } from "@/app/lib/workspaceSnapshot";
 import { redirect } from "next/navigation";
 import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
 
@@ -35,11 +36,15 @@ function dominantCurrency(metrics: DealMetrics): string | undefined {
 
 export default async function DealsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const [user, workspaceSnapshot] = await Promise.all([
+        getCurrentUserFromCookie(cookie),
+        getMyWorkspacesFromCookie(cookie),
+    ]);
 
     if (!user) {
         redirect('/auth/login');
     }
+    const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
     const status = statusParam((await searchParams).status);
     const init = { headers: { cookie: cookie ?? '' } } as const;
@@ -61,7 +66,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
             savedViews={savedViews}
             defaultView={defaultView}
             savedViewsUnavailable={!savedViewsResult.ok}
-            timezone={user.timezone}
+            timezone={timezone}
             currentUserId={user.id}
         />
     );

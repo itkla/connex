@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.DateTimeException;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
@@ -8,6 +10,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -26,8 +29,10 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
@@ -65,6 +70,9 @@ public class WorkspaceService {
     private final SessionSecurityService sessionSecurityService;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final int WORKSPACE_NAME_MAX = 128;
+    private static final int TIMEZONE_MAX = 64;
+    private static final Set<String> AVAILABLE_TIMEZONES = Set.copyOf(ZoneId.getAvailableZoneIds());
 
     /** Built-in role permission bundles. Owner gets the full catalog. */
     private static final Set<Permission> MEMBER_PERMISSIONS = memberPermissions();
@@ -145,6 +153,25 @@ public class WorkspaceService {
             .orElseThrow(() -> new ForbiddenException("Active workspace is not accessible"));
     }
 
+    /**
+     * Resolves analytics calendar boundaries from the active workspace override, falling back to
+     * the authenticated actor's persisted timezone and then UTC for legacy users.
+     *
+     * @return server-owned IANA timezone for active-workspace analytics
+     */
+    public String getCurrentAnalyticsTimezone() {
+        Workspace workspace = workspaceMapper.getActiveById(getCurrentWorkspaceId());
+        if (workspace == null) {
+            throw new ForbiddenException("Active workspace is not accessible");
+        }
+        User actor = userMapper.getUserById(getCurrentUserId());
+        if (actor == null) {
+            throw new ForbiddenException("Authentication is required to resolve a workspace");
+        }
+        String actorTimezone = TimezoneSupport.validateIana(actor.getTimezone(), "UTC");
+        return TimezoneSupport.validateIana(workspace.getTimezone(), actorTimezone);
+    }
+
     /** The workspace to activate when none is supplied: remembered last-active, else first membership, else null. */
     public Integer defaultWorkspaceIdFor(int userId) {
         Integer last = workspaceMapper.getLastActiveWorkspaceId(userId);
@@ -176,6 +203,77 @@ public class WorkspaceService {
 
     public List<WorkspaceMembershipDto> getMembershipsForCurrentUser() {
         return workspaceMapper.getMembershipsForUser(currentUser().getId());
+    }
+
+    /**
+     * Replaces the workspace's mutable display identity while preserving its immutable id and slug.
+     * Authorization is revalidated from locked user, workspace, organization, membership, custom-role,
+     * and permission rows before the write. A null timezone clears the workspace override.
+     *
+     * @param workspaceId workspace to update
+     * @param actorId authenticated actor
+     * @param nameRaw required display name
+     * @param timezoneRaw nullable IANA timezone override
+     * @param expectedNameRaw display name observed before editing
+     * @param expectedTimezoneRaw nullable timezone observed before editing
+     * @param expectedIdentityVersion identity version observed before editing
+     * @return canonical persisted workspace identity
+     */
+    @Transactional
+    public WorkspaceIdentityDto updateIdentity(
+            int workspaceId,
+            int actorId,
+            String nameRaw,
+            String timezoneRaw,
+            String expectedNameRaw,
+            String expectedTimezoneRaw,
+            long expectedIdentityVersion) {
+        requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        String name = normalizeWorkspaceName(nameRaw);
+        String timezone = normalizeWorkspaceTimezone(timezoneRaw);
+        String expectedName = normalizeWorkspaceName(expectedNameRaw);
+        String expectedTimezone = normalizeWorkspaceTimezone(expectedTimezoneRaw);
+        Workspace before = lockWorkspaceIdentityMutation(workspaceId, actorId);
+        if (before.getIdentityVersion() != expectedIdentityVersion
+                || !Objects.equals(before.getName(), expectedName)
+                || !Objects.equals(before.getTimezone(), expectedTimezone)) {
+            throw new ConflictException("Workspace settings changed; refresh and retry");
+        }
+        boolean nameChanged = !Objects.equals(before.getName(), name);
+        boolean timezoneChanged = !Objects.equals(before.getTimezone(), timezone);
+        if (nameChanged || timezoneChanged) {
+            if (workspaceMapper.updateIdentity(workspaceId, name, timezone) == 0) {
+                throw new ForbiddenException("Requires the WORKSPACE_SETTINGS permission in this workspace");
+            }
+            if (nameChanged) {
+                auditService.recordScoped(
+                    "workspace.rename",
+                    "workspace",
+                    workspaceId,
+                    workspaceId,
+                    before.getOrgId(),
+                    name,
+                    "Renamed workspace",
+                    auditService.singleChange("name", before.getName(), name));
+            }
+            if (timezoneChanged) {
+                auditService.recordScoped(
+                    "workspace.settings.update",
+                    "workspace",
+                    workspaceId,
+                    workspaceId,
+                    before.getOrgId(),
+                    name,
+                    "Updated workspace timezone",
+                    auditService.singleChange("timezone", before.getTimezone(), timezone));
+            }
+        }
+        Workspace updated = workspaceMapper.getActiveById(workspaceId);
+        if (updated == null) {
+            throw new ForbiddenException("Requires the WORKSPACE_SETTINGS permission in this workspace");
+        }
+        return workspaceIdentity(updated);
     }
 
     public void rememberActive(int userId, int workspaceId) {
@@ -226,8 +324,14 @@ public class WorkspaceService {
                 "Workspace created", Map.of("workspaceId", workspace.getId(), "ownerUserId", ownerUserId));
         WorkspaceMembershipDto membership =
                 new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
+        Organization organization = organizationMapper.getById(orgId);
+        if (organization == null) {
+            throw new IllegalStateException("Provisioned organization disappeared");
+        }
         membership.setOrgId(orgId);
-        membership.setOrgName(organizationMapper.getById(orgId).getName());
+        membership.setIdentityVersion(workspace.getIdentityVersion());
+        membership.setOrgName(organization.getName());
+        membership.setOrgIdentityVersion(organization.getIdentityVersion());
         membership.setOrgRole(orgMemberService.orgRoleOf(orgId, ownerUserId));
         return membership;
     }
@@ -432,6 +536,91 @@ public class WorkspaceService {
         if (workspaceMapper.lockWorkspace(workspaceId) == null) {
             throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
         }
+    }
+
+    private Workspace lockWorkspaceIdentityMutation(int workspaceId, int actorId) {
+        if (userMapper.lockById(actorId) == null
+                || userMapper.isAccountDeletionReserved(actorId)) {
+            throw workspaceSettingsForbidden();
+        }
+        Workspace workspace = workspaceMapper.lockActiveIdentity(workspaceId);
+        if (workspace == null) {
+            throw workspaceSettingsForbidden();
+        }
+        if (organizationMapper.lockActiveByIdForShare(workspace.getOrgId()) == null) {
+            throw workspaceSettingsForbidden();
+        }
+        WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, actorId);
+        if (!isExactMembership(membership, workspaceId, actorId)
+                || !"active".equals(membership.getStatus())) {
+            throw workspaceSettingsForbidden();
+        }
+        Set<Permission> permissions;
+        if (membership.getRoleId() == null) {
+            Role role = Role.of(membership.getRole());
+            if (role == null) {
+                throw workspaceSettingsForbidden();
+            }
+            permissions = builtInPermissions(role);
+        } else {
+            int roleId = membership.getRoleId();
+            if (roleMapper.lockRole(workspaceId, roleId) == null) {
+                throw workspaceSettingsForbidden();
+            }
+            permissions = parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+        }
+        if (!permissions.contains(Permission.WORKSPACE_SETTINGS)) {
+            throw workspaceSettingsForbidden();
+        }
+        return workspace;
+    }
+
+    private static String normalizeWorkspaceName(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new BadRequestException("Workspace name is required");
+        }
+        String name = raw.trim();
+        if (name.length() > WORKSPACE_NAME_MAX) {
+            throw new BadRequestException("Workspace name must be 128 characters or fewer");
+        }
+        return name;
+    }
+
+    private static String normalizeWorkspaceTimezone(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String timezone = raw.trim();
+        if (timezone.isEmpty()) {
+            throw new BadRequestException("Workspace timezone must be null or a valid IANA timezone");
+        }
+        if (timezone.length() > TIMEZONE_MAX) {
+            throw new BadRequestException("Workspace timezone must be 64 characters or fewer");
+        }
+        try {
+            String canonical = ZoneId.of(timezone).getId();
+            if (!AVAILABLE_TIMEZONES.contains(canonical)) {
+                throw new BadRequestException("Workspace timezone must be a valid IANA timezone");
+            }
+            return canonical;
+        } catch (DateTimeException exception) {
+            throw new BadRequestException("Workspace timezone must be a valid IANA timezone");
+        }
+    }
+
+    private static WorkspaceIdentityDto workspaceIdentity(Workspace workspace) {
+        return new WorkspaceIdentityDto(
+            workspace.getId(),
+            workspace.getOrgId(),
+            workspace.getName(),
+            workspace.getSlug(),
+            workspace.getTimezone(),
+            workspace.getIdentityVersion(),
+            workspace.getUpdatedAt());
+    }
+
+    private static ForbiddenException workspaceSettingsForbidden() {
+        return new ForbiddenException("Requires the WORKSPACE_SETTINGS permission in this workspace");
     }
 
     void assertNotSoleOwnerOfWorkspaces(List<Integer> ownedWorkspaceIds) {

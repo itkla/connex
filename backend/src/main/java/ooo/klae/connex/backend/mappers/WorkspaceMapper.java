@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceMemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 
 /**
@@ -20,6 +21,8 @@ public interface WorkspaceMapper {
     WorkspaceMembershipDto getMembershipForUserForShare(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    Workspace getActiveById(@Param("workspaceId") int workspaceId);
+    Workspace lockActiveIdentity(@Param("workspaceId") int workspaceId);
     Workspace getDefaultWorkspace();
     boolean isMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     /**
@@ -54,6 +57,10 @@ public interface WorkspaceMapper {
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
     int insert(Workspace workspace);
+    int updateIdentity(
+        @Param("workspaceId") int workspaceId,
+        @Param("name") String name,
+        @Param("timezone") String timezone);
     Integer getOrgId(int workspaceId);
     List<Integer> findWorkspaceIds();
     List<Integer> findWorkspaceIdsPage(
@@ -61,6 +68,15 @@ public interface WorkspaceMapper {
     List<Integer> findWorkspaceIdsLifecyclePage(
         @Param("afterId") int afterId, @Param("limit") int limit);
     List<Workspace> findByOrgId(@Param("orgId") int orgId);
+    List<Workspace> findActiveByOrgIdPage(
+        @Param("orgId") int orgId,
+        @Param("afterWorkspaceId") int afterWorkspaceId,
+        @Param("limit") int limit);
+    List<OrganizationLayoutWorkspaceMemberDto> findLayoutMemberships(
+        @Param("orgId") int orgId,
+        @Param("actorId") int actorId,
+        @Param("workspaceIds") List<Integer> workspaceIds,
+        @Param("memberLimit") int memberLimit);
     int countEnforcingSsoMemberships(int userId);
     int addMember(
         @Param("workspaceId") int workspaceId,

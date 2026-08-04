@@ -10,6 +10,7 @@ import {
     getDealRiskAnalyticsFromCookie,
     getIntroSuggestionsFromCookie,
     getIntroductions,
+    getMyWorkspacesFromCookie,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
     getTaskSummaryFromCookie,
@@ -27,6 +28,7 @@ import type {
     User,
     WarmthSummary,
 } from '@/app/lib/types';
+import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
 import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
@@ -49,10 +51,14 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AnalyticsPage() {
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const [user, workspaceSnapshot] = await Promise.all([
+        getCurrentUserFromCookie(cookie),
+        getMyWorkspacesFromCookie(cookie),
+    ]);
     if (!user) {
         redirect('/auth/login');
     }
+    const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
 
@@ -85,7 +91,7 @@ export default async function AnalyticsPage() {
     return (
         <AnalyticsBoard
             dealMetrics={dealMetrics}
-            timezone={user.timezone}
+            timezone={timezone}
             pipelines={pipelines}
             stages={stages}
             users={users}
