@@ -667,6 +667,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             defaultPerson={defaultPerson}
                             defaultDeal={defaultDeal}
                             defaultContent=""
+                            compact
                             onSubmittingChange={handleSubmittingChange}
                             onCancel={back}
                             onClose={onClose}

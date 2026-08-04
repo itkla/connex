@@ -92,6 +92,8 @@ function isNoteDraftData(value: unknown): value is NoteDraftData {
         value !== null &&
         'content' in value &&
         typeof value.content === 'string' &&
+        (!('title' in value) || typeof value.title === 'string') &&
+        (!('visibility' in value) || value.visibility === 'private' || value.visibility === 'workspace') &&
         'personId' in value &&
         isNullableId(value.personId) &&
         'dealId' in value &&
@@ -170,7 +172,9 @@ function sameTaskDraft(left: StoredDraft<TaskDraftData>, right: StoredDraft<Task
 function sameNoteDraft(left: StoredDraft<NoteDraftData>, right: StoredDraft<NoteDraftData>): boolean {
     return (
         left.savedAt === right.savedAt &&
+        left.data.title === right.data.title &&
         left.data.content === right.data.content &&
+        left.data.visibility === right.data.visibility &&
         left.data.personId === right.data.personId &&
         left.data.dealId === right.data.dealId
     );

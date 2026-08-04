@@ -27,6 +27,7 @@ import { SearchField, FilterBar, RadioFilter, type FilterChipData } from '@/app/
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteNote } from '@/app/lib/api';
@@ -54,7 +55,7 @@ const STANDALONE = '__standalone';
 const INITIAL_VISIBLE_NOTES = 40;
 const NOTES_PAGE_SIZE = 40;
 
-export default function NotesBrowser({ notes, persons, deals, users }: Props) {
+export default function NotesBrowser({ notes, persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityNotes');
     const tf = useTranslations('Filters');
@@ -64,6 +65,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
     const [groupBy, setGroupBy] = useState<GroupBy>('record');
     const [sortBy, setSortBy] = useState<SortBy>('updated');
     const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
+    const [dialogNote, setDialogNote] = useState<Note | null | undefined>(undefined);
     const [isDeleting, setIsDeleting] = useState(false);
     const visibleKey = `${query.trim()}|${groupBy}|${sortBy}`;
     const [visibleState, setVisibleState] = useState({ key: visibleKey, count: INITIAL_VISIBLE_NOTES });
@@ -200,7 +202,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                         actions={
                             <Button
                                 variant="brand"
-                                onClick={() => router.push('/activity/notes/new')}
+                                onClick={() => setDialogNote(null)}
                             >
                                 <PlusIcon strokeWidth={2.5} />
                                 {t('new')}
@@ -266,7 +268,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                             </p>
                             {notes.length === 0 && (
                                 <Button
-                                    onClick={() => router.push('/activity/notes/new')}
+                                    onClick={() => setDialogNote(null)}
                                     variant="brand"
                                     className="mt-6"
                                 >
@@ -304,11 +306,13 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                                                     untitled: t('untitled'),
                                                     actionsAria: t('actionsAria'),
                                                     open: t('open'),
+                                                    edit: t('edit'),
                                                     delete: t('delete'),
                                                 }}
                                                 onOpen={() => router.push(
                                                     recordDetailNavigationPath('notes', note.id, returnSnapshot),
                                                 )}
+                                                onEdit={() => setDialogNote(note)}
                                                 onDelete={() => setDeleteTarget(note)}
                                             />
                                         ))}
@@ -336,6 +340,20 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                 </Rise>
             </PageShell>
 
+            {dialogNote !== undefined ? (
+                <NoteDialog
+                    key={dialogNote ? `edit-${dialogNote.id}` : 'create'}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setDialogNote(undefined);
+                    }}
+                    note={dialogNote}
+                    persons={persons}
+                    deals={deals}
+                    currentUserId={currentUserId}
+                />
+            ) : null}
+
             <DeleteRecordDialog
                 open={deleteTarget !== null}
                 onOpenChange={(open) => {
@@ -360,6 +378,7 @@ function NoteRow({
     locale,
     labels,
     onOpen,
+    onEdit,
     onDelete,
 }: {
     note: Note;
@@ -367,8 +386,9 @@ function NoteRow({
     recordLabel: string | null;
     recordKind: 'person' | 'deal' | null;
     locale: string;
-    labels: { untitled: string; actionsAria: string; open: string; delete: string };
+    labels: { untitled: string; actionsAria: string; open: string; edit: string; delete: string };
     onOpen: () => void;
+    onEdit: () => void;
     onDelete: () => void;
 }) {
     const title = deriveNoteTitle(note, labels.untitled);
@@ -431,6 +451,10 @@ function NoteRow({
                     <DropdownMenuItem onSelect={() => onOpen()}>
                         <ArrowUpRightIcon className="size-4" />
                         {labels.open}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onEdit()}>
+                        <PencilSquareIcon className="size-4" />
+                        {labels.edit}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                         className="text-destructive hover:bg-destructive/10"
