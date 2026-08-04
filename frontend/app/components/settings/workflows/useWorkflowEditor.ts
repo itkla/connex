@@ -333,6 +333,7 @@ export function useWorkflowEditor({
         }
         updateDocument({ ...history.present, definition: inserted.definition, canvas: inserted.canvas }, "commit");
         setSelectedNodeId(inserted.insertedNodeId);
+        setFocusRequestId((current) => current + 1);
     }, [history.present, t, updateDocument]);
 
     const deleteNode = useCallback((nodeId: string) => {

@@ -217,7 +217,7 @@ export default function WorkflowCanvasEditor({
     const { resolvedTheme } = useTheme();
     const { getNode, screenToFlowPosition, setCenter } = useReactFlow();
     const reduceMotion = useReducedMotion() ?? false;
-    const handledFocusRef = useRef({ nodeId: focusNodeId, requestId: focusRequestId });
+    const handledFocusRequestIdRef = useRef(focusRequestId);
     const {
         open: contextMenuOpen,
         onOpenChange: onContextMenuOpenChange,
@@ -313,11 +313,8 @@ export default function WorkflowCanvasEditor({
     }), [document.definition, readOnly, run?.path]);
 
     useEffect(() => {
-        const handledFocus = handledFocusRef.current;
-        const shouldFocus = focusNodeId != null && (
-            handledFocus.nodeId !== focusNodeId || handledFocus.requestId !== focusRequestId
-        );
-        handledFocusRef.current = { nodeId: focusNodeId, requestId: focusRequestId };
+        const shouldFocus = focusNodeId != null && handledFocusRequestIdRef.current !== focusRequestId;
+        handledFocusRequestIdRef.current = focusRequestId;
         if (!shouldFocus) return;
         const node = getNode(focusNodeId);
         if (!node) return;
