@@ -61,6 +61,7 @@ import EditableCell from './EditableCell';
 type SortDirection = 'asc' | 'desc';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 const PAGE_SIZES = [10, 25, 50, 100];
+const TABLE_DRAG_EXCLUDE_SELECTOR = 'a, button, input, textarea, select, label, [contenteditable="true"], [draggable="true"], [role="button"], [role="checkbox"], [role="link"], [data-drag-handle]';
 
 function pageList(current: number, total: number): (number | 'gap')[] {
     if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -152,7 +153,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const router = useRouter();
     const t = useTranslations('RecordsRenderView');
     const reduce = useReducedMotion() ?? false;
-    const { ref: scrollRef, edges } = useDragScroll<HTMLDivElement>({ leftDragSelector: 'thead' });
+    const { ref: scrollRef, edges } = useDragScroll<HTMLDivElement>({
+        leftDragSelector: 'table',
+        excludeDragSelector: TABLE_DRAG_EXCLUDE_SELECTOR,
+    });
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [pageSize, setPageSize] = useState(25);
@@ -668,7 +672,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     return (
         <>
             <div className={cn('relative overflow-hidden rounded-2xl border border-border bg-card', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
-                <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none data-[dragging=true]:[&_thead]:cursor-grabbing">
+                <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none data-[dragging=true]:[&_thead]:cursor-grabbing data-[dragging=true]:[&_tbody_tr]:cursor-grabbing">
                     <table data-density={density} className="w-full min-w-max border-collapse text-left text-sm">
                         <thead>
                             <tr ref={headerRowRef} className="cursor-grab border-b border-border bg-muted/60">
