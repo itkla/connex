@@ -1,4 +1,5 @@
-import { Mark, mergeAttributes } from '@tiptap/core';
+import { Mark, Node, mergeAttributes } from '@tiptap/core';
+import type { Node as PMNode } from '@tiptap/pm/model';
 
 type MarkdownToken = {
     type?: string;
@@ -31,6 +32,20 @@ type MarkdownIt = {
 };
 
 const configuredMarkdownInstances = new WeakSet<object>();
+
+type MarkdownTextState = {
+    esc: (value: string, startOfLine?: boolean) => string;
+    text: (value: string, escape?: boolean) => void;
+};
+
+function escapeHTML(value: string): string {
+    return value.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+/** Escapes literal underline delimiters before Markdown serialization. */
+export function escapeNoteUnderlineText(value: string): string {
+    return value.replaceAll('++', '\\+\\+');
+}
 
 function isEscaped(source: string, index: number): boolean {
     let backslashes = 0;
@@ -114,6 +129,24 @@ export const NoteUnderline = Mark.create({
                         markdownIt.inline.ruler.before('emphasis', 'note-underline', parseNoteUnderline);
                     },
                 },
+            },
+        };
+    },
+});
+
+/** Text node serializer paired with {@link NoteUnderline} to preserve literal plus runs. */
+export const NoteText = Node.create({
+    name: 'text',
+    group: 'inline',
+
+    addStorage() {
+        return {
+            markdown: {
+                serialize(state: MarkdownTextState, node: PMNode) {
+                    const escapedMarkdown = state.esc(escapeHTML(node.text ?? ''));
+                    state.text(escapeNoteUnderlineText(escapedMarkdown), false);
+                },
+                parse: {},
             },
         };
     },

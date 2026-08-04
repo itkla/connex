@@ -15,7 +15,7 @@ import { SlashCommand } from "./editor/SlashCommand";
 import { buildSlashCommands } from "./editor/slashCommands";
 import { Callout } from "./editor/Callout";
 import { Toggle, ToggleSummary } from "./editor/Toggle";
-import { NoteUnderline } from "./editor/NoteUnderline";
+import { NoteText, NoteUnderline } from "./editor/NoteUnderline";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 
@@ -64,6 +64,7 @@ export default function RichNoteEditor({
         extensions: [
             StarterKit.configure({
                 heading: { levels: [1, 2, 3] },
+                text: false,
                 underline: false,
                 link: {
                     openOnClick: false,
@@ -85,6 +86,7 @@ export default function RichNoteEditor({
             Callout.configure({ cycleLabel: t("calloutCycleAria") }),
             ToggleSummary,
             Toggle.configure({ expandLabel: t("toggleExpand"), collapseLabel: t("toggleCollapse") }),
+            NoteText,
             NoteUnderline,
             SlashCommand.configure({ commands: buildSlashCommands(t) }),
         ],

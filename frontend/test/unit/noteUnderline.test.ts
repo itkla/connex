@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { Markdown } from 'tiptap-markdown';
 
 import {
+    NoteText,
     NoteUnderline,
+    escapeNoteUnderlineText,
     parseNoteUnderline,
 } from '@/app/components/activity/notes/editor/NoteUnderline';
 
@@ -12,7 +14,8 @@ describe('NoteUnderline', () => {
     it('serializes underline without enabling raw HTML', () => {
         const editor = new Editor({
             extensions: [
-                StarterKit.configure({ underline: false }),
+                StarterKit.configure({ text: false, underline: false }),
+                NoteText,
                 NoteUnderline,
                 Markdown.configure({ html: false }),
             ],
@@ -32,6 +35,34 @@ describe('NoteUnderline', () => {
         const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
         expect(storage.markdown?.getMarkdown?.()).toBe('++important++');
         editor.destroy();
+    });
+
+    it.each([
+        ['++literal++', '\\+\\+literal\\+\\+'],
+        ['++++', '\\+\\+\\+\\+'],
+        ['C++++', 'C\\+\\+\\+\\+'],
+        ['<script>++literal++</script>', '&lt;script&gt;\\+\\+literal\\+\\+&lt;/script&gt;'],
+    ])('serializes literal delimiter text safely: %s', (text, expected) => {
+        const editor = new Editor({
+            extensions: [
+                StarterKit.configure({ text: false, underline: false }),
+                NoteText,
+                NoteUnderline,
+                Markdown.configure({ html: false }),
+            ],
+            content: {
+                type: 'doc',
+                content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+            },
+        });
+
+        const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
+        expect(storage.markdown?.getMarkdown?.()).toBe(expected);
+        editor.destroy();
+    });
+
+    it('escapes every complete literal delimiter pair', () => {
+        expect(escapeNoteUnderlineText('++one++ +++')).toBe('\\+\\+one\\+\\+ \\+\\++');
     });
 
     it('parses bounded underline delimiters', () => {
