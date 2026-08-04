@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
@@ -8,6 +9,7 @@ import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
+import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 
@@ -16,7 +18,11 @@ import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -109,6 +115,45 @@ public class RuleDefinitionValidator {
         requireCurrentPermissions(required);
     }
 
+    void validateWorkflowNodes(
+            String recordTypeValue,
+            WorkflowNode.Trigger trigger,
+            List<WorkflowNode.Condition> conditions,
+            List<WorkflowNode.Action> actions,
+            String executionMode) {
+        Set<Permission> required = validateWorkflowNodesForMutation(
+            recordTypeValue, trigger, conditions, actions, executionMode);
+        requireCurrentSystemRole(executionMode);
+        requireCurrentPermissions(required);
+    }
+
+    Set<Permission> validateWorkflowNodesForMutation(
+            String recordTypeValue,
+            WorkflowNode.Trigger trigger,
+            List<WorkflowNode.Condition> conditions,
+            List<WorkflowNode.Action> actions,
+            String executionMode) {
+        Configured<RuleTrigger> configuredTrigger = new Configured<>(
+            trigger == null ? null : trigger.id(),
+            trigger == null ? null : trigger.config());
+        List<Configured<SegmentDefinition>> configuredConditions = conditions == null
+            ? null
+            : conditions.stream()
+                .map(condition -> new Configured<>(condition.id(), condition.config()))
+                .toList();
+        List<Configured<RuleAction>> configuredActions = actions == null
+            ? null
+            : actions.stream()
+                .map(action -> new Configured<>(action.id(), action.config()))
+                .toList();
+        return validateConfiguredWorkflowDefinitionForMutation(
+            recordTypeValue,
+            configuredTrigger,
+            configuredConditions,
+            configuredActions,
+            executionMode);
+    }
+
     Set<Permission> validateDefinitionForMutation(
             String recordTypeValue,
             RuleTrigger trigger,
@@ -128,17 +173,61 @@ public class RuleDefinitionValidator {
             List<SegmentDefinition> conditions,
             List<RuleAction> actions,
             String executionMode) {
-        if (trigger == null) {
-            throw new BadRequestException("Rule trigger is required");
+        return validateConfiguredWorkflowDefinitionForMutation(
+            recordTypeValue,
+            new Configured<>(null, trigger),
+            conditions == null
+                ? null
+                : conditions.stream().map(value -> new Configured<>(null, value)).toList(),
+            actions == null
+                ? null
+                : actions.stream().map(value -> new Configured<>(null, value)).toList(),
+            executionMode);
+    }
+
+    private Set<Permission> validateConfiguredWorkflowDefinitionForMutation(
+            String recordTypeValue,
+            Configured<RuleTrigger> trigger,
+            List<Configured<SegmentDefinition>> conditions,
+            List<Configured<RuleAction>> actions,
+            String executionMode) {
+        if (trigger == null || trigger.value() == null) {
+            throw invalid(
+                WorkflowDiagnosticCode.TRIGGER_CONFIG_REQUIRED,
+                "Rule trigger is required",
+                trigger == null ? null : trigger.nodeId(), "config", Map.of());
         }
-        if (conditions == null || conditions.stream().anyMatch(condition -> condition == null)) {
-            throw new BadRequestException("Workflow condition config is required");
+        if (conditions == null) {
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_CONFIG_REQUIRED,
+                "Workflow condition config is required",
+                null, "config", Map.of());
+        }
+        Configured<SegmentDefinition> missingCondition = conditions.stream()
+            .filter(condition -> condition.value() == null)
+            .findFirst()
+            .orElse(null);
+        if (missingCondition != null) {
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_CONFIG_REQUIRED,
+                "Workflow condition config is required",
+                missingCondition.nodeId(), "config", Map.of());
         }
         if (actions == null || actions.isEmpty() || actions.size() > 16) {
-            throw new BadRequestException("A rule requires between 1 and 16 actions");
+            throw invalid(
+                WorkflowDiagnosticCode.ACTION_REQUIRED,
+                "A rule requires between 1 and 16 actions",
+                null, "nodes", Map.of("minimum", "1", "maximum", "16"));
         }
-        if (actions.stream().anyMatch(action -> action == null)) {
-            throw new BadRequestException("Rule action config is required");
+        Configured<RuleAction> missingAction = actions.stream()
+            .filter(action -> action.value() == null)
+            .findFirst()
+            .orElse(null);
+        if (missingAction != null) {
+            throw invalid(
+                WorkflowDiagnosticCode.ACTION_CONFIG_REQUIRED,
+                "Rule action config is required",
+                missingAction.nodeId(), "config", Map.of());
         }
         requireStructurallyValid(trigger);
         conditions.forEach(this::requireStructurallyValid);
@@ -146,29 +235,57 @@ public class RuleDefinitionValidator {
 
         String recordType = normalize(recordTypeValue);
         if (!RECORD_TYPES.contains(recordType)) {
-            throw new BadRequestException("Invalid record type: " + recordTypeValue);
+            throw invalid(
+                WorkflowDiagnosticCode.RECORD_TYPE_INVALID,
+                "Invalid record type: " + recordTypeValue,
+                null, "recordType", Map.of());
         }
         String mode = normalize(executionMode);
         if (!EXECUTION_MODES.contains(mode)) {
-            throw new BadRequestException("Invalid execution mode: " + executionMode);
+            throw invalid(
+                WorkflowDiagnosticCode.EXECUTION_MODE_INVALID,
+                "Invalid execution mode: " + executionMode,
+                null, "executionMode", Map.of());
         }
         if (!conditions.isEmpty() && !SEGMENT_RECORD_TYPES.contains(recordType)) {
-            throw new BadRequestException("WHEN conditions are not supported for record type: " + recordTypeValue);
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_RECORD_TYPE_UNSUPPORTED,
+                "WHEN conditions are not supported for record type: " + recordTypeValue,
+                conditions.getFirst().nodeId(), "config", Map.of("recordType", recordType));
         }
-        for (SegmentDefinition condition : conditions) {
-            if (!hasWhen(condition)) {
-                throw new BadRequestException("A WHEN condition must contain at least one condition");
+        for (Configured<SegmentDefinition> condition : conditions) {
+            if (!hasWhen(condition.value())) {
+                throw invalid(
+                    WorkflowDiagnosticCode.CONDITION_EMPTY,
+                    "A WHEN condition must contain at least one condition",
+                    condition.nodeId(), "config", Map.of());
             }
-            segmentService.validate(recordType, condition);
+            try {
+                segmentService.validate(recordType, condition.value());
+            } catch (WorkflowDefinitionValidationException exception) {
+                throw new WorkflowDefinitionValidationException(
+                    exception.getMessage(),
+                    exception.diagnostic().atNode(condition.nodeId(), "config"));
+            }
         }
         validateTrigger(trigger, recordType, !conditions.isEmpty());
         validateActions(actions, recordType);
         return actionPermissions(actions, recordType);
     }
 
-    private <T> void requireStructurallyValid(T value) {
-        if (!beanValidator.validate(value).isEmpty()) {
-            throw new BadRequestException("Rule definition is invalid");
+    private <T> void requireStructurallyValid(Configured<T> configured) {
+        ConstraintViolation<T> violation = beanValidator.validate(configured.value()).stream()
+            .sorted(Comparator.comparing(value -> value.getPropertyPath().toString()))
+            .findFirst()
+            .orElse(null);
+        if (violation != null) {
+            String property = violation.getPropertyPath().toString();
+            throw invalid(
+                WorkflowDiagnosticCode.CONFIG_FIELD_INVALID,
+                "Rule definition is invalid",
+                configured.nodeId(),
+                property.isBlank() ? "config" : "config." + property,
+                Map.of());
         }
     }
 
@@ -185,10 +302,12 @@ public class RuleDefinitionValidator {
         return hasConditions || hasGroups;
     }
 
-    private Set<Permission> actionPermissions(List<RuleAction> actions, String recordType) {
+    private Set<Permission> actionPermissions(
+            List<Configured<RuleAction>> actions, String recordType) {
         EnumSet<Permission> required = EnumSet.noneOf(Permission.class);
-        for (RuleAction action : actions) {
-            Permission permission = actionPermission(normalize(action.getType()), recordType);
+        for (Configured<RuleAction> action : actions) {
+            Permission permission = actionPermission(
+                normalize(action.value().getType()), recordType);
             if (permission != null) {
                 required.add(permission);
             }
@@ -204,6 +323,10 @@ public class RuleDefinitionValidator {
         if ("system".equals(normalize(executionMode))) {
             workspaceService.requireRole(Role.ADMIN);
         }
+    }
+
+    Permission actionPermission(RuleAction action, String recordType) {
+        return actionPermission(normalize(action.getType()), recordType);
     }
 
     private Permission actionPermission(String type, String recordType) {
@@ -222,17 +345,28 @@ public class RuleDefinitionValidator {
         };
     }
 
-    private void validateTrigger(RuleTrigger trigger, String recordType, boolean hasCondition) {
-        String type = normalize(trigger.getType());
+    private void validateTrigger(
+            Configured<RuleTrigger> trigger, String recordType, boolean hasCondition) {
+        RuleTrigger value = trigger.value();
+        String type = normalize(value.getType());
         if (!TRIGGER_TYPES.contains(type)) {
-            throw new BadRequestException("Invalid trigger type: " + trigger.getType());
+            throw invalid(
+                WorkflowDiagnosticCode.TRIGGER_TYPE_INVALID,
+                "Invalid trigger type: " + value.getType(),
+                trigger.nodeId(), "config.type", Map.of());
         }
         if ("entity_change".equals(type)) {
             if (!ENTITY_CHANGE_RECORD_TYPES.contains(recordType)) {
-                throw new BadRequestException("Entity-change rules are only supported for deal and company records");
+                throw invalid(
+                    WorkflowDiagnosticCode.ENTITY_CHANGE_RECORD_TYPE_UNSUPPORTED,
+                    "Entity-change rules are only supported for deal and company records",
+                    trigger.nodeId(), "config.type", Map.of("recordType", recordType));
             }
-            if (trigger.getEvents() == null || trigger.getEvents().isEmpty()) {
-                throw new BadRequestException("An entity-change trigger requires at least one event");
+            if (value.getEvents() == null || value.getEvents().isEmpty()) {
+                throw invalid(
+                    WorkflowDiagnosticCode.TRIGGER_EVENTS_REQUIRED,
+                    "An entity-change trigger requires at least one event",
+                    trigger.nodeId(), "config.events", Map.of());
             }
             Set<String> supported = switch (recordType) {
                 case "deal" -> DEAL_EVENTS;
@@ -241,61 +375,116 @@ public class RuleDefinitionValidator {
                 case "task" -> TASK_EVENTS;
                 default -> Set.of();
             };
-            for (String event : trigger.getEvents()) {
+            for (String event : value.getEvents()) {
                 if (!supported.contains(event)) {
-                    throw new BadRequestException("Unsupported event for " + recordType + ": " + event);
+                    throw invalid(
+                        WorkflowDiagnosticCode.TRIGGER_EVENT_UNSUPPORTED,
+                        "Unsupported event for " + recordType + ": " + event,
+                        trigger.nodeId(), "config.events",
+                        Map.of("recordType", recordType));
                 }
             }
         } else {
             if (!SEGMENT_RECORD_TYPES.contains(recordType)) {
-                throw new BadRequestException("Schedule rules are not supported for record type: " + recordType);
+                throw invalid(
+                    WorkflowDiagnosticCode.SCHEDULE_RECORD_TYPE_UNSUPPORTED,
+                    "Schedule rules are not supported for record type: " + recordType,
+                    trigger.nodeId(), "config.type", Map.of("recordType", recordType));
             }
-            if (trigger.getCadence() == null || !CADENCES.contains(normalize(trigger.getCadence()))) {
-                throw new BadRequestException("A schedule rule requires a valid cadence");
+            if (value.getCadence() == null
+                    || !CADENCES.contains(normalize(value.getCadence()))) {
+                throw invalid(
+                    WorkflowDiagnosticCode.SCHEDULE_CADENCE_INVALID,
+                    "A schedule rule requires a valid cadence",
+                    trigger.nodeId(), "config.cadence", Map.of());
             }
             if (!hasCondition) {
-                throw new BadRequestException("A schedule rule requires a WHEN condition");
+                throw invalid(
+                    WorkflowDiagnosticCode.SCHEDULE_CONDITION_REQUIRED,
+                    "A schedule rule requires a WHEN condition",
+                    trigger.nodeId(), "config.type", Map.of());
             }
         }
     }
 
-    private void validateActions(List<RuleAction> actions, String recordType) {
-        for (RuleAction action : actions) {
+    private void validateActions(
+            List<Configured<RuleAction>> actions, String recordType) {
+        for (Configured<RuleAction> configured : actions) {
+            RuleAction action = configured.value();
             String type = normalize(action.getType());
             if (!ACTION_TYPES.contains(type)) {
-                throw new BadRequestException("Invalid action type: " + action.getType());
+                throw invalid(
+                    WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
+                    "Invalid action type: " + action.getType(),
+                    configured.nodeId(), "config.type", Map.of());
             }
             Set<String> supportedRecordTypes = ACTION_RECORD_TYPES.get(type);
             if (supportedRecordTypes == null || !supportedRecordTypes.contains(recordType)) {
-                throw new BadRequestException("'" + type + "' actions are not supported for " + recordType + " rules");
+                throw invalid(
+                    WorkflowDiagnosticCode.ACTION_RECORD_TYPE_UNSUPPORTED,
+                    "'" + type + "' actions are not supported for " + recordType + " rules",
+                    configured.nodeId(), "config.type",
+                    Map.of("actionType", type, "recordType", recordType));
             }
             switch (type) {
-                case "create_task", "notify" -> requireText(action.getTitle(), "title");
-                case "log_activity" -> requireText(action.getActivityType(), "activityType");
-                case "create_note" -> requireText(action.getBody(), "body");
+                case "create_task", "notify" -> requireText(
+                    action.getTitle(), configured.nodeId(), "title");
+                case "log_activity" -> requireText(
+                    action.getActivityType(), configured.nodeId(), "activityType");
+                case "create_note" -> requireText(
+                    action.getBody(), configured.nodeId(), "body");
                 case "add_tag", "remove_tag" -> {
                     if (action.getTagId() == null) {
-                        throw new BadRequestException("A " + type + " action requires a tagId");
+                        throw requiredActionField(
+                            "A " + type + " action requires a tagId",
+                            configured.nodeId(), "tagId");
                     }
                 }
                 case "assign_owner" -> {
                     if (action.getTargetUserId() == null) {
-                        throw new BadRequestException("An assign_owner action requires a targetUserId");
+                        throw requiredActionField(
+                            "An assign_owner action requires a targetUserId",
+                            configured.nodeId(), "targetUserId");
                     }
                 }
                 case "change_stage" -> {
                     if (action.getTargetStageId() == null) {
-                        throw new BadRequestException("A change_stage action requires a targetStageId");
+                        throw requiredActionField(
+                            "A change_stage action requires a targetStageId",
+                            configured.nodeId(), "targetStageId");
                     }
                 }
-                default -> throw new BadRequestException("Invalid action type: " + action.getType());
+                default -> throw invalid(
+                    WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
+                    "Invalid action type: " + action.getType(),
+                    configured.nodeId(), "config.type", Map.of());
             }
         }
     }
 
-    private static void requireText(String value, String field) {
+    private static void requireText(String value, String nodeId, String field) {
         if (value == null || value.isBlank()) {
-            throw new BadRequestException("Action requires '" + field + "'");
+            throw requiredActionField("Action requires '" + field + "'", nodeId, field);
         }
     }
+
+    private static WorkflowDefinitionValidationException requiredActionField(
+            String message, String nodeId, String field) {
+        return invalid(
+            WorkflowDiagnosticCode.ACTION_FIELD_REQUIRED,
+            message, nodeId, "config." + field, Map.of("field", field));
+    }
+
+    private static WorkflowDefinitionValidationException invalid(
+            WorkflowDiagnosticCode code,
+            String message,
+            String nodeId,
+            String fieldPath,
+            Map<String, String> params) {
+        return new WorkflowDefinitionValidationException(
+            message,
+            new WorkflowDiagnosticDto(code, nodeId, null, fieldPath, params));
+    }
+
+    private record Configured<T>(String nodeId, T value) { }
 }

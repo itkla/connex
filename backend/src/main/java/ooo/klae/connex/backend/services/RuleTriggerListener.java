@@ -19,7 +19,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @RequiredArgsConstructor
 public class RuleTriggerListener {
 
-    private final RuleEngineService ruleEngineService;
+    private final WorkflowTriggerIntake workflowTriggerIntake;
     private final TenantWorkScope tenantWorkScope;
     private static final Logger log = LoggerFactory.getLogger(RuleTriggerListener.class);
 
@@ -28,9 +28,18 @@ public class RuleTriggerListener {
     public void onTrigger(RuleTriggerEvent event) {
         try {
             tenantWorkScope.inWorkspace(event.workspaceId(), () ->
-                ruleEngineService.onEntityChange(event.workspaceId(), event.recordType(), event.entityId(), event.event()));
+                workflowTriggerIntake.enqueue(new WorkflowTriggerDispatch.EntityChange(
+                    event.workspaceId(),
+                    event.recordType(),
+                    event.entityId(),
+                    event.event(),
+                    event.triggerKey(),
+                    event.occurredAt())));
         } catch (Exception e) {
-            log.warn("Rule engine failed for {} {} {}: {}", event.recordType(), event.entityId(), event.event(), e.getMessage());
+            log.warn(
+                "Workflow intake failed recordType={} recordId={} event={} exceptionClass={}",
+                event.recordType(), event.entityId(), event.event(),
+                e.getClass().getSimpleName());
         }
     }
 }

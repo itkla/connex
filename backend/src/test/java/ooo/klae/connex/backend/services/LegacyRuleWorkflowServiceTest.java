@@ -309,13 +309,13 @@ class LegacyRuleWorkflowServiceTest {
     }
 
     @Test
-    void deleteUnlinksWorkflowBeforeCascadingVersionsAndRuleExecutions() {
+    void deleteArchivesAndDisablesWithoutDeletingHistory() {
         PersistedAggregate aggregate = persistedAggregate(false);
+        aggregate.rule().setEnabled(true);
+        aggregate.workflow().setEnabled(true);
         stubAggregate(aggregate);
-        when(workflowMapper.unlinkLegacyRuleForDeletion(7, 101, 9, 23, 202L, 4))
-            .thenReturn(1);
-        when(workflowMapper.delete(7, 101)).thenReturn(1);
-        when(ruleMapper.delete(7, 23)).thenReturn(1);
+        when(ruleMapper.updateEnabled(7, 23, false)).thenReturn(1);
+        when(workflowMapper.archive(7, 101, 9)).thenReturn(1);
 
         Rule deleted = service.delete(7, 9, 23);
 
@@ -327,9 +327,8 @@ class LegacyRuleWorkflowServiceTest {
         order.verify(workflowMapper).getByIdForUpdate(7, 101);
         order.verify(workflowVersionMapper).getByIdForUpdate(7, 101, 202L);
         order.verify(ruleMapper).getByIdForUpdate(7, 23);
-        order.verify(workflowMapper).unlinkLegacyRuleForDeletion(7, 101, 9, 23, 202L, 4);
-        order.verify(workflowMapper).delete(7, 101);
-        order.verify(ruleMapper).delete(7, 23);
+        order.verify(ruleMapper).updateEnabled(7, 23, false);
+        order.verify(workflowMapper).archive(7, 101, 9);
     }
 
     private void stubAggregate(PersistedAggregate aggregate) {
@@ -372,6 +371,8 @@ class LegacyRuleWorkflowServiceTest {
         workflow.setName(projection.getName());
         workflow.setDescription(projection.getDescription());
         workflow.setEnabled(enabled);
+        workflow.setRuntimeOwner("legacy");
+        workflow.setArchivedAt(null);
         workflow.setDraftRevision(4);
         workflow.setDraftRecordType(projection.getRecordType());
         workflow.setDraftExecutionMode(projection.getExecutionMode());

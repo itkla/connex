@@ -12,6 +12,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,6 +41,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowListView;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
@@ -47,16 +50,21 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
+import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
+import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -71,6 +79,7 @@ class WorkflowServiceTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
     @Mock private WorkflowDefinitionValidator workflowDefinitionValidator;
+    @Mock private WorkflowRuntimeProperties runtimeProperties;
 
     private WorkflowDraftCanonicalizer canonicalizer;
     private LegacyWorkflowGraphConverter graphConverter;
@@ -91,9 +100,14 @@ class WorkflowServiceTest {
             canonicalizer,
             workflowDefinitionValidator,
             graphConverter,
-            definitionCodec);
+            definitionCodec,
+            new WorkflowVersionProjection(definitionCodec),
+            runtimeProperties);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
+        lenient().when(workspaceService.getCurrentPermissions())
+            .thenReturn(Permission.grantableSet());
+        lenient().when(workspaceService.isBuiltInAdmin(7, 41)).thenReturn(true);
         lenient().when(workflowDefinitionValidator.validateForMutation(
             any(), any(), any())).thenReturn(Set.of());
     }
@@ -115,6 +129,7 @@ class WorkflowServiceTest {
         assertEquals(0, created.draftRevision());
         assertEquals(41, created.runAsUserId());
         assertFalse(created.enabled());
+        assertEquals("legacy", created.runtimeOwner());
         assertNull(created.activeVersionId());
         assertNull(workflow.getValue().getLegacyRuleId());
         assertEquals(41, workflow.getValue().getCreatedById());
@@ -122,6 +137,52 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.create"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow created"), eq(Map.of("draftRevision", 0, "executionMode", "user")));
+    }
+
+    @Test
+    void listUsesOneBoundedProjectionAndSelectsTheLatestRunCandidate() {
+        WorkflowListView first = listView(101);
+        first.setCanonicalRunId(301L);
+        first.setCanonicalRunStatus("succeeded");
+        first.setCanonicalRunStartedAt(LocalDateTime.of(2026, 8, 2, 10, 0));
+        first.setCanonicalRunFinishedAt(LocalDateTime.of(2026, 8, 2, 10, 1));
+        first.setLegacyRunId(71);
+        first.setLegacyRunStatus("failed");
+        first.setLegacyRunExecutedAt(LocalDateTime.of(2026, 8, 2, 9, 0));
+        WorkflowListView second = listView(102);
+        second.setLegacyRunId(72);
+        second.setLegacyRunStatus("matched");
+        second.setLegacyRunExecutedAt(LocalDateTime.of(2026, 8, 2, 11, 0));
+        when(workflowMapper.listItemsByWorkspace(7, false))
+            .thenReturn(List.of(first, second));
+
+        var result = service.list(false);
+
+        assertEquals(List.of(101, 102), result.stream().map(item -> item.id()).toList());
+        assertEquals("canonical-301", result.getFirst().latestRun().runKey());
+        assertEquals("legacy-72", result.getLast().latestRun().runKey());
+        assertEquals("succeeded", result.getLast().latestRun().status());
+        assertEquals(4, result.getFirst().nodeCount());
+        assertEquals(1, result.getFirst().actionCount());
+        verify(workflowMapper).listItemsByWorkspace(7, false);
+        verify(workflowMapper, never()).listByWorkspace(7, false);
+    }
+
+    @Test
+    void legacyRuleResolutionNeverFallsBackToTheCanonicalIdSpace() {
+        Workflow linked = workflow("Workflow", "user", 3, 41, 101, null, false);
+        linked.setId(808);
+        when(workflowMapper.getByLegacyRuleId(7, 101)).thenReturn(linked);
+
+        var resolved = service.resolveLegacyRule(101);
+
+        assertEquals(808, resolved.workflowId());
+        verify(workflowMapper).getByLegacyRuleId(7, 101);
+        verify(workflowMapper, never()).getById(7, 101);
+
+        when(workflowMapper.getByLegacyRuleId(7, 102)).thenReturn(null);
+        assertThrows(ResourceNotFoundException.class, () -> service.resolveLegacyRule(102));
+        verify(workflowMapper, never()).getById(7, 102);
     }
 
     @Test
@@ -255,15 +316,16 @@ class WorkflowServiceTest {
         var result = service.validate(101);
 
         assertTrue(result.valid());
+        assertTrue(result.canPublish());
         assertEquals(3, result.draftRevision());
-        verify(workflowDefinitionValidator).validate(
+        verify(workflowDefinitionValidator).validateForMutation(
             eq("deal"), eq("user"), any(WorkflowDefinition.class));
         verify(workflowMapper, never()).updateDraft(any(), any(Integer.class));
         verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
     }
 
     @Test
-    void validateKeepsBranchingClosedUntilTheCanonicalRuntimeCutover() {
+    void validateSeparatesCanonicalValidityFromLegacyPublicationCapability() {
         Workflow workflow = workflow("Workflow", "user", 3, 41, null, null, false);
         CanonicalDraft branching = canonicalizer.canonicalizeDraftJson(
             "Workflow",
@@ -276,14 +338,68 @@ class WorkflowServiceTest {
         workflow.setDraftCanvasJson(branching.canvasJson());
         when(workflowMapper.getById(7, 101)).thenReturn(workflow);
 
-        BadRequestException exception = assertThrows(
-            BadRequestException.class,
-            () -> service.validate(101));
+        var result = service.validate(101);
 
-        assertEquals("Legacy workflow condition no branch must end", exception.getMessage());
-        verify(workflowDefinitionValidator).validate(
+        assertTrue(result.valid());
+        assertFalse(result.canPublish());
+        assertEquals(WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
+            result.errors().getFirst().code());
+        verify(workflowDefinitionValidator).validateForMutation(
             eq("deal"), eq("user"), any(WorkflowDefinition.class));
         verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+
+        when(runtimeProperties.enabled()).thenReturn(true);
+
+        var canonicalResult = service.validate(101);
+
+        assertTrue(canonicalResult.valid());
+        assertTrue(canonicalResult.canPublish());
+        assertTrue(canonicalResult.errors().isEmpty());
+    }
+
+    @Test
+    void validateReturnsStructuredDomainErrorsWithoutTurningThemIntoHttpFailures() {
+        Workflow workflow = workflow("Workflow", "user", 3, 41, null, null, false);
+        WorkflowDiagnosticDto diagnostic = new WorkflowDiagnosticDto(
+            WorkflowDiagnosticCode.BRANCH_OUTCOME_REQUIRED,
+            "condition",
+            null,
+            null,
+            Map.of("outcome", "no"));
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+        doThrow(new WorkflowDefinitionValidationException(
+            "Workflow condition requires a no branch", diagnostic))
+            .when(workflowDefinitionValidator)
+            .validateForMutation(eq("deal"), eq("user"), any(WorkflowDefinition.class));
+
+        var result = service.validate(101);
+
+        assertFalse(result.valid());
+        assertFalse(result.canPublish());
+        assertEquals(List.of(diagnostic), result.errors());
+        assertEquals(List.of(), result.requiredPermissions());
+        assertEquals(List.of(), result.missingPermissions());
+        verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
+    }
+
+    @Test
+    void validateReportsMissingActionPermissionsAndSystemAuthoringEligibility() {
+        Workflow workflow = workflow("Workflow", "system", 3, null, null, null, false);
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+        when(workflowDefinitionValidator.validateForMutation(
+            any(), any(), any())).thenReturn(Set.of(
+                Permission.TASK_CREATE, Permission.NOTE_CREATE));
+        when(workspaceService.getCurrentPermissions()).thenReturn(
+            Set.of(Permission.RULE_MANAGE, Permission.NOTE_CREATE));
+        when(workspaceService.isBuiltInAdmin(7, 41)).thenReturn(false);
+
+        var result = service.validate(101);
+
+        assertTrue(result.valid());
+        assertFalse(result.canPublish());
+        assertFalse(result.systemAuthoringAllowed());
+        assertEquals(List.of("NOTE_CREATE", "TASK_CREATE"), result.requiredPermissions());
+        assertEquals(List.of("TASK_CREATE"), result.missingPermissions());
     }
 
     @Test
@@ -297,10 +413,10 @@ class WorkflowServiceTest {
         when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
         stubUserMutation(Set.of(41), Set.of(41));
 
-        assertThrows(BadRequestException.class, () -> service.validate(101));
+        assertFalse(service.validate(101).valid());
         assertThrows(BadRequestException.class, () -> service.publish(101, publishRequest(3)));
 
-        verify(workflowDefinitionValidator, never()).validate(any(), any(), any());
+        verify(workflowDefinitionValidator, never()).validateForMutation(any(), any(), any());
         verifyNoInteractions(ruleMapper);
         verify(workflowVersionMapper).getLatest(7, 101);
         verify(workflowVersionMapper, never()).getByIdForUpdate(
@@ -403,6 +519,46 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.publish"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow published"), eq(Map.of("versionNumber", 1)));
+    }
+
+    @Test
+    void firstPublishUsesCanonicalOwnershipWithoutCreatingALegacyRuleWhenGateIsEnabled() {
+        when(runtimeProperties.enabled()).thenReturn(true);
+        Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
+        when(workflowMapper.getById(7, 101)).thenReturn(workflow);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
+        when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
+        stubUserMutation(Set.of(41), Set.of(41));
+        WorkflowDefinition definition = canonicalizer.parseDefinition(
+            workflow.getDraftDefinitionJson());
+        CompiledWorkflow compiled = mock(CompiledWorkflow.class);
+        when(workflowDefinitionValidator.validate("deal", "user", definition))
+            .thenReturn(compiled);
+        when(compiled.entryNodeId()).thenReturn("eventSource");
+        when(compiled.node("eventSource")).thenReturn(definition.nodes().stream()
+            .filter(node -> "eventSource".equals(node.id()))
+            .findFirst()
+            .orElseThrow());
+        when(compiled.topologicalOrder()).thenReturn(
+            List.of("eventSource", "notifyOwner", "complete"));
+        when(compiled.node("notifyOwner")).thenReturn(definition.nodes().get(1));
+        when(compiled.node("complete")).thenReturn(definition.nodes().get(2));
+        when(compiled.enrollmentConditionNodeId()).thenReturn(null);
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(88L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(workflowMapper.assignFirstCanonicalPublication(
+            7, 101, 88L, 41, 0)).thenReturn(1);
+
+        WorkflowDto published = service.publish(101, publishRequest(0));
+
+        assertEquals("canonical", published.runtimeOwner());
+        assertEquals(88L, published.activeVersionId());
+        verify(ruleMapper, never()).insert(any());
+        verify(ruleMapper, never()).update(any());
+        verify(workflowMapper).assignFirstCanonicalPublication(
+            7, 101, 88L, 41, 0);
     }
 
     @Test
@@ -859,6 +1015,59 @@ class WorkflowServiceTest {
     }
 
     @Test
+    void archiveDisablesLegacyProjectionAndRestoreLeavesWorkflowDisabled() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of());
+        when(ruleMapper.updateEnabled(7, 77, false)).thenReturn(1);
+        when(workflowMapper.archive(7, 101, 41)).thenReturn(1);
+
+        WorkflowDto archived = service.archive(101);
+
+        assertFalse(archived.enabled());
+        assertNotNull(archived.archivedAt());
+        InOrder archiveWrites = inOrder(ruleMapper, workflowMapper);
+        archiveWrites.verify(ruleMapper).updateEnabled(7, 77, false);
+        archiveWrites.verify(workflowMapper).archive(7, 101, 41);
+        verify(auditService).record(
+            eq("workflow.archive"), eq("workflow"), eq(101), eq("Workflow 101"),
+            eq("Workflow archived"), any());
+
+        pair.workflow().setEnabled(false);
+        pair.rule().setEnabled(false);
+        pair.workflow().setArchivedAt(LocalDateTime.of(2026, 8, 2, 12, 0));
+        when(workflowMapper.restore(7, 101, 41)).thenReturn(1);
+
+        WorkflowDto restored = service.restore(101);
+
+        assertFalse(restored.enabled());
+        assertNull(restored.archivedAt());
+        verify(workflowMapper).restore(7, 101, 41);
+        verify(auditService).record(
+            eq("workflow.restore"), eq("workflow"), eq(101), eq("Workflow 101"),
+            eq("Workflow restored"), any());
+    }
+
+    @Test
+    void archivedWorkflowRemainsReadableButRejectsEveryMutableLifecycleOperation() {
+        Workflow archived = workflow("Workflow", "user", 3, 41, null, null, false);
+        archived.setArchivedAt(LocalDateTime.of(2026, 8, 2, 12, 0));
+        when(workflowMapper.getById(7, 101)).thenReturn(archived);
+
+        WorkflowDto readable = service.getById(101);
+
+        assertNotNull(readable.archivedAt());
+        assertThrows(
+            ConflictException.class,
+            () -> service.saveDraft(101, draftRequest("Changed", "user", 3)));
+        assertThrows(ConflictException.class, () -> service.validate(101));
+        assertThrows(
+            ConflictException.class,
+            () -> service.publish(101, publishRequest(3)));
+        assertThrows(ConflictException.class, () -> service.enable(101));
+    }
+
+    @Test
     void legacyBlankDescriptionRemainsReadableAtTheCanonicalBoundary() {
         Workflow workflow = workflow("Workflow", "user", 3, 41, null, null, false);
         workflow.setDescription("   ");
@@ -949,6 +1158,24 @@ class WorkflowServiceTest {
         return request;
     }
 
+    private static WorkflowListView listView(int id) {
+        WorkflowListView workflow = new WorkflowListView();
+        workflow.setId(id);
+        workflow.setWorkspaceId(7);
+        workflow.setName("Workflow " + id);
+        workflow.setEnabled(false);
+        workflow.setRuntimeOwner("legacy");
+        workflow.setDraftRevision(0);
+        workflow.setRecordType("deal");
+        workflow.setExecutionMode("user");
+        workflow.setRunAsUserId(41);
+        workflow.setNodeCount(4);
+        workflow.setActionCount(1);
+        workflow.setCreatedById(41);
+        workflow.setUpdatedById(41);
+        return workflow;
+    }
+
     private Workflow workflow(
             String name,
             String executionMode,
@@ -966,6 +1193,8 @@ class WorkflowServiceTest {
         workflow.setName(draft.name());
         workflow.setDescription(draft.description());
         workflow.setEnabled(enabled);
+        workflow.setRuntimeOwner("legacy");
+        workflow.setArchivedAt(null);
         workflow.setDraftRevision(revision);
         workflow.setDraftRecordType(draft.recordType());
         workflow.setDraftExecutionMode(draft.executionMode());

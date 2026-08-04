@@ -159,5 +159,7 @@ public final class TablePlaneRegistry {
         "user_dashboard",
         "warm_path_dismissal",
         "workflow",
+        "workflow_run",
+        "workflow_step_run",
         "workflow_version");
 }

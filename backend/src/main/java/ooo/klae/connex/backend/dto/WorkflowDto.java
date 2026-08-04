@@ -8,6 +8,8 @@ public record WorkflowDto(
     String name,
     String description,
     boolean enabled,
+    String runtimeOwner,
+    LocalDateTime archivedAt,
     int draftRevision,
     String recordType,
     String executionMode,

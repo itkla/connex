@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.controllers;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -70,5 +71,14 @@ class RuleControllerTest {
             .andExpect(jsonPath("$[1].latestExecution").doesNotExist());
 
         verify(ruleService).list();
+    }
+
+    @Test
+    void deletePreservesTheLegacyEmptyOkResponse() throws Exception {
+        mockMvc.perform(delete("/api/rules/42"))
+            .andExpect(status().isOk())
+            .andExpect(content().string(""));
+
+        verify(ruleService).delete(42);
     }
 }

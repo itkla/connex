@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,8 +16,6 @@ import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-import java.util.Map;
-
 /**
  * Periodically evaluates time-based (schedule) rules. Mirrors the notification scheduler: it fans out
  * over the workspaces that have enabled schedule rules and asks the engine to run each cadence. The
@@ -29,7 +29,7 @@ public class RuleScheduler {
     private final RuleMapper ruleMapper;
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
-    private final RuleEngineService ruleEngineService;
+    private final WorkflowTriggerIntake workflowTriggerIntake;
     private final JobRunRecorder jobRunRecorder;
 
     private static final Logger log = LoggerFactory.getLogger(RuleScheduler.class);
@@ -69,7 +69,10 @@ public class RuleScheduler {
                     int failedCadences = 0;
                     for (String cadence : CADENCES) {
                         try {
-                            ruleEngineService.runSchedule(workspaceId, cadence);
+                            workflowTriggerIntake.enqueue(new WorkflowTriggerDispatch.ScheduleTick(
+                                workspaceId,
+                                cadence,
+                                scheduleBucket(cadence)));
                             completedCadences++;
                         } catch (Exception e) {
                             failedCadences++;
@@ -98,5 +101,16 @@ public class RuleScheduler {
                 JobRunRecorder.RULE_SCHEDULER,
                 exception.getClass().getSimpleName());
         }
+    }
+
+    private static String scheduleBucket(String cadence) {
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
+        return switch (cadence) {
+            case "hourly" -> now.format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHH"));
+            case "weekly" -> now.get(java.time.temporal.IsoFields.WEEK_BASED_YEAR)
+                + "W" + now.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+            default -> now.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        };
     }
 }

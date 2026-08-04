@@ -69,7 +69,7 @@ public class LegacyWorkflowBackfillTransaction {
                 disableIfOperationalIdentityWasRedacted(rule, workflow);
                 backfillRule(rule, workflow, candidate.lockedVersion());
             } catch (RuntimeException exception) {
-                throw failure(catalog, workspaceId, candidate.rule().getId());
+                throw failure(catalog, workspaceId, candidate.rule().getId(), exception);
             }
         }
         requireComplete(catalog, workspaceId, List.copyOf(lockedRules.values()));
@@ -482,10 +482,16 @@ public class LegacyWorkflowBackfillTransaction {
     }
 
     private static IllegalStateException failure(String catalog, int workspaceId, int ruleId) {
+        return failure(catalog, workspaceId, ruleId, null);
+    }
+
+    private static IllegalStateException failure(
+            String catalog, int workspaceId, int ruleId, RuntimeException cause) {
         String catalogId = catalog == null ? "(default)" : catalog;
         return new IllegalStateException(
             "Legacy workflow backfill failed for catalog=" + catalogId
-                + " workspace=" + workspaceId + " rule=" + ruleId);
+                + " workspace=" + workspaceId + " rule=" + ruleId,
+            cause);
     }
 
     private static TreeSet<Integer> principalIds(List<BackfillCandidate> candidates) {

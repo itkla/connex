@@ -167,6 +167,13 @@ public class WorkspaceService {
         return workspaceMapper.getRole(workspaceId, userId);
     }
 
+    /** Returns whether the active member holds the built-in admin or owner role without a custom role. */
+    public boolean isBuiltInAdmin(int workspaceId, int userId) {
+        String role = workspaceMapper.getRole(workspaceId, userId);
+        return workspaceMapper.getMemberRoleId(workspaceId, userId) == null
+            && ("admin".equals(role) || "owner".equals(role));
+    }
+
     public List<WorkspaceMembershipDto> getMembershipsForCurrentUser() {
         return workspaceMapper.getMembershipsForUser(currentUser().getId());
     }

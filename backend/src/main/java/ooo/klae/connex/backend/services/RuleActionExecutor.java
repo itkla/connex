@@ -39,7 +39,7 @@ public class RuleActionExecutor {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final int DEFAULT_DUE_DAYS = 3;
 
-    public void execute(RuleAction action, RuleFireContext ctx) {
+    public void execute(RuleAction action, AutomationActionContext ctx) {
         String type = action.getType() == null ? "" : action.getType().trim().toLowerCase();
         switch (type) {
             case "create_task" -> createTask(action, ctx);
@@ -54,7 +54,7 @@ public class RuleActionExecutor {
         }
     }
 
-    private void createTask(RuleAction action, RuleFireContext ctx) {
+    private void createTask(RuleAction action, AutomationActionContext ctx) {
         Task task = new Task();
         task.setDescription(action.getTitle());
         int dueDays = action.getDueInDays() != null && action.getDueInDays() > 0 ? action.getDueInDays() : DEFAULT_DUE_DAYS;
@@ -70,7 +70,7 @@ public class RuleActionExecutor {
         taskService.create(task);
     }
 
-    private void logActivity(RuleAction action, RuleFireContext ctx) {
+    private void logActivity(RuleAction action, AutomationActionContext ctx) {
         Activity activity = new Activity();
         activity.setType(action.getActivityType());
         activity.setSubject(action.getTitle() != null && !action.getTitle().isBlank() ? action.getTitle() : "Automated activity");
@@ -83,7 +83,7 @@ public class RuleActionExecutor {
         activityService.create(activity);
     }
 
-    private void addTag(RuleAction action, RuleFireContext ctx) {
+    private void addTag(RuleAction action, AutomationActionContext ctx) {
         switch (ctx.recordType()) {
             case "company" -> companyService.addTag(ctx.entityId(), action.getTagId());
             case "person" -> personService.addTag(ctx.entityId(), action.getTagId());
@@ -92,7 +92,7 @@ public class RuleActionExecutor {
         }
     }
 
-    private void removeTag(RuleAction action, RuleFireContext ctx) {
+    private void removeTag(RuleAction action, AutomationActionContext ctx) {
         switch (ctx.recordType()) {
             case "company" -> companyService.removeTag(ctx.entityId(), action.getTagId());
             case "person" -> personService.removeTag(ctx.entityId(), action.getTagId());
@@ -101,7 +101,7 @@ public class RuleActionExecutor {
         }
     }
 
-    private void createNote(RuleAction action, RuleFireContext ctx) {
+    private void createNote(RuleAction action, AutomationActionContext ctx) {
         Note note = new Note();
         note.setContent(action.getBody());
         if ("person".equals(ctx.recordType())) {
@@ -112,7 +112,7 @@ public class RuleActionExecutor {
         noteService.create(note);
     }
 
-    private void notify(RuleAction action, RuleFireContext ctx) {
+    private void notify(RuleAction action, AutomationActionContext ctx) {
         Notification notification = new Notification();
         notification.setWorkspaceId(ctx.workspaceId());
         notification.setRecipientId(ctx.targetUserId());
@@ -124,7 +124,7 @@ public class RuleActionExecutor {
         notification.setActorLabel("Automation");
         notification.setSourceType(ctx.recordType());
         notification.setSourceId(ctx.entityId());
-        notification.setDedupeKey("rule:" + ctx.ruleId() + ":" + ctx.entityId() + ":" + ctx.dedupeSuffix());
+        notification.setDedupeKey(ctx.notificationDedupeKey());
         notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
         notificationDelivery.deliver(notification);
     }

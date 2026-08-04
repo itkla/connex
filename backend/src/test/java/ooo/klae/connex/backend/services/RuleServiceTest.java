@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -17,6 +18,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
@@ -290,10 +292,19 @@ class RuleServiceTest extends AbstractServiceTest {
             workspace.getId(), first.getId()).size());
 
         ruleService.delete(created.getId());
-        assertNull(ruleMapper.getById(workspace.getId(), created.getId()));
-        assertNull(workflowMapper.getByLegacyRuleId(workspace.getId(), created.getId()));
-        assertTrue(workflowVersionMapper.listByWorkflow(
-            workspace.getId(), first.getId()).isEmpty());
+        Rule retainedRule = ruleMapper.getById(workspace.getId(), created.getId());
+        Workflow archived = workflowMapper.getByLegacyRuleId(
+            workspace.getId(), created.getId());
+        assertNotNull(retainedRule);
+        assertFalse(retainedRule.isEnabled());
+        assertNotNull(archived);
+        assertFalse(archived.isEnabled());
+        assertNotNull(archived.getArchivedAt());
+        assertEquals(2, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), first.getId()).size());
+        assertTrue(ruleService.list().stream()
+            .noneMatch(rule -> rule.getId() == created.getId()));
+        assertDoesNotThrow(() -> ruleService.delete(created.getId()));
     }
 
     @Test
@@ -369,10 +380,79 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void delete_removesRule() {
-        RuleDto created = ruleService.create(req("company", entityChange("company.updated"), "user", action("notify")));
+    void deleteArchivesRuleAndRetainsAllExecutionHistory() {
+        Company company = newCompany();
+        RuleDto created = ruleService.create(
+            req("company", entityChange("company.updated"), "user", action("notify")));
+        Workflow workflow = workflowMapper.getByLegacyRuleId(
+            workspace.getId(), created.getId());
+        assertNotNull(workflow);
+        RuleExecution legacyExecution = new RuleExecution();
+        legacyExecution.setWorkspaceId(workspace.getId());
+        legacyExecution.setRuleId(created.getId());
+        legacyExecution.setTriggerEntityType("company");
+        legacyExecution.setTriggerEntityId(company.getId());
+        legacyExecution.setStatus("matched");
+        legacyExecution.setDedupeKey("archive-legacy-" + unique());
+        ruleMapper.insertExecution(legacyExecution);
+        String runDedupe = "archive-canonical-" + unique();
+        jdbcTemplate.update(
+            "INSERT INTO workflow_run"
+                + " (workspace_id, workflow_id, workflow_version_id, status, trigger_type,"
+                + " trigger_event, trigger_key, record_type, record_id, dedupe_key,"
+                + " execution_mode, actor_user_id, attribution_user_id, started_at, finished_at)"
+                + " VALUES (?, ?, ?, 'succeeded', 'entity_change', 'company.updated', ?,"
+                + " 'company', ?, ?, 'user', ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))",
+            workspace.getId(),
+            workflow.getId(),
+            workflow.getActiveVersionId(),
+            "archive-trigger-" + unique(),
+            company.getId(),
+            runDedupe,
+            currentUser.getId(),
+            currentUser.getId());
+        long workflowRunId = jdbcTemplate.queryForObject(
+            "SELECT id FROM workflow_run"
+                + " WHERE workspace_id = ? AND workflow_id = ? AND dedupe_key = ?",
+            Long.class,
+            workspace.getId(),
+            workflow.getId(),
+            runDedupe);
+        jdbcTemplate.update(
+            "INSERT INTO workflow_step_run"
+                + " (workspace_id, workflow_run_id, sequence_number, node_id, node_type,"
+                + " status, finished_at) VALUES (?, ?, 0, 'complete', 'end',"
+                + " 'succeeded', CURRENT_TIMESTAMP(6))",
+            workspace.getId(),
+            workflowRunId);
+
         ruleService.delete(created.getId());
-        assertThrows(ResourceNotFoundException.class, () -> ruleService.getById(created.getId()));
+
+        Workflow archived = workflowMapper.getByLegacyRuleId(
+            workspace.getId(), created.getId());
+        assertNotNull(archived);
+        assertNotNull(archived.getArchivedAt());
+        assertFalse(archived.isEnabled());
+        assertFalse(ruleMapper.getById(workspace.getId(), created.getId()).isEnabled());
+        assertEquals(created.getId(), ruleService.getById(created.getId()).getId());
+        assertTrue(ruleService.list().stream()
+            .noneMatch(rule -> rule.getId() == created.getId()));
+        assertEquals(1, workflowVersionMapper.listByWorkflow(
+            workspace.getId(), workflow.getId()).size());
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workflow_run WHERE workspace_id = ? AND workflow_id = ?",
+            Integer.class,
+            workspace.getId(),
+            workflow.getId()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workflow_step_run"
+                + " WHERE workspace_id = ? AND workflow_run_id = ?",
+            Integer.class,
+            workspace.getId(),
+            workflowRunId));
+        assertEquals(1, ruleMapper.getExecutionsByRule(
+            workspace.getId(), created.getId(), 50).size());
+        assertDoesNotThrow(() -> ruleService.delete(created.getId()));
     }
 
     @Test

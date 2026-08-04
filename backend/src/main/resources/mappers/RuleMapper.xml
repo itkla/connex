@@ -10,9 +10,16 @@
   </sql>
 
   <select id="getByWorkspace" resultType="Rule">
-    SELECT <include refid="columns"/> FROM rule
-    WHERE workspace_id = #{workspaceId}
-    ORDER BY created_at DESC, id DESC
+    SELECT r.id, r.workspace_id, r.name, r.description, r.enabled, r.record_type,
+      r.trigger_type, r.trigger_config, r.condition_json, r.actions_json,
+      r.execution_mode, r.run_as_user_id, r.created_by_id, r.created_at, r.updated_at
+    FROM rule r
+    LEFT JOIN workflow w
+      ON w.workspace_id = r.workspace_id
+     AND w.legacy_rule_id = r.id
+    WHERE r.workspace_id = #{workspaceId}
+      AND (w.id IS NULL OR w.archived_at IS NULL)
+    ORDER BY r.created_at DESC, r.id DESC
   </select>
 
   <select id="getByWorkspaceForUpdate" resultType="Rule">
@@ -93,18 +100,51 @@
       AND (run_as_user_id = #{userId} OR created_by_id = #{userId})
   </update>
 
-  <delete id="delete">
-    DELETE FROM rule WHERE workspace_id = #{workspaceId} AND id = #{id}
-  </delete>
-
   <select id="getEnabledByTrigger" resultType="Rule">
-    SELECT <include refid="columns"/> FROM rule
-    WHERE workspace_id = #{workspaceId} AND trigger_type = #{triggerType} AND enabled = TRUE
-    ORDER BY id
+    SELECT r.id, r.workspace_id, r.name, r.description, r.enabled, r.record_type,
+      r.trigger_type, r.trigger_config, r.condition_json, r.actions_json,
+      r.execution_mode, r.run_as_user_id, r.created_by_id, r.created_at, r.updated_at
+    FROM rule r
+    LEFT JOIN workflow w
+      ON w.workspace_id = r.workspace_id
+     AND w.legacy_rule_id = r.id
+    WHERE r.workspace_id = #{workspaceId}
+      AND r.trigger_type = #{triggerType}
+      AND r.enabled = TRUE
+      AND (w.id IS NULL OR (
+        w.runtime_owner = 'legacy'
+        AND w.archived_at IS NULL
+      ))
+    ORDER BY r.id
   </select>
 
   <select id="workspaceIdsWithEnabledScheduleRules" resultType="int">
-    SELECT DISTINCT workspace_id FROM rule WHERE trigger_type = 'schedule' AND enabled = TRUE
+    SELECT workspace_id
+    FROM (
+      SELECT r.workspace_id
+      FROM rule r
+      LEFT JOIN workflow w
+        ON w.workspace_id = r.workspace_id
+       AND w.legacy_rule_id = r.id
+      WHERE r.trigger_type = 'schedule'
+        AND r.enabled = TRUE
+        AND (w.id IS NULL OR (
+          w.runtime_owner = 'legacy'
+          AND w.archived_at IS NULL
+        ))
+      UNION
+      SELECT w.workspace_id
+      FROM workflow w
+      JOIN workflow_version v
+        ON v.workspace_id = w.workspace_id
+       AND v.workflow_id = w.id
+       AND v.id = w.active_version_id
+      WHERE v.trigger_type = 'schedule'
+        AND w.enabled = TRUE
+        AND w.runtime_owner = 'canonical'
+        AND w.archived_at IS NULL
+    ) scheduled_workspaces
+    ORDER BY workspace_id
   </select>
 
   <select id="workspaceIdsWithRules" resultType="int">
@@ -117,6 +157,39 @@
     VALUES
       (#{workspaceId}, #{ruleId}, #{triggerEntityType}, #{triggerEntityId}, #{status}, #{dedupeKey}, #{detail})
   </insert>
+
+  <select id="getExecutionByDedupe" resultType="RuleExecution">
+    SELECT id, workspace_id, rule_id, trigger_entity_type, trigger_entity_id,
+      status, dedupe_key, detail, executed_at
+    FROM rule_execution
+    WHERE workspace_id = #{workspaceId}
+      AND rule_id = #{ruleId}
+      AND dedupe_key = #{dedupeKey}
+  </select>
+
+  <select id="getExecutionById" resultType="RuleExecution">
+    SELECT id, workspace_id, rule_id, trigger_entity_type, trigger_entity_id,
+      status, dedupe_key, detail, executed_at
+    FROM rule_execution
+    WHERE workspace_id = #{workspaceId}
+      AND rule_id = #{ruleId}
+      AND id = #{id}
+  </select>
+
+  <select id="getExecutionPage" resultType="RuleExecution">
+    SELECT id, workspace_id, rule_id, trigger_entity_type, trigger_entity_id,
+      status, dedupe_key, detail, executed_at
+    FROM rule_execution
+    WHERE workspace_id = #{workspaceId}
+      AND rule_id = #{ruleId}
+      AND executed_at &lt;= #{asOf}
+      <if test="beforeExecutedAt != null and beforeId != null">
+        AND (executed_at &lt; #{beforeExecutedAt}
+          OR (executed_at = #{beforeExecutedAt} AND id &lt; #{beforeId}))
+      </if>
+    ORDER BY executed_at DESC, id DESC
+    LIMIT #{limit}
+  </select>
 
   <update id="updateExecution">
     UPDATE rule_execution SET status = #{status}, detail = #{detail} WHERE workspace_id = #{workspaceId} AND id = #{id}

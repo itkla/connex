@@ -9,7 +9,6 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -48,6 +47,7 @@ public class RuleEngineService {
     private final WorkspaceService workspaceService;
     private final SystemActor systemActor;
     private final ObjectMapper objectMapper;
+    private final WorkflowRuntimeClaimService workflowRuntimeClaimService;
 
     private static final Logger log = LoggerFactory.getLogger(RuleEngineService.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -55,6 +55,21 @@ public class RuleEngineService {
 
     /** Runs every enabled entity-change rule whose trigger matches this committed change. */
     public void onEntityChange(int workspaceId, String recordType, int entityId, String event) {
+        onEntityChange(new WorkflowTriggerDispatch.EntityChange(
+            workspaceId,
+            recordType,
+            entityId,
+            event,
+            java.util.UUID.randomUUID().toString(),
+            java.time.Instant.now()));
+    }
+
+    /** Runs legacy-owned entity-change rules for one replay-stable dispatch. */
+    public void onEntityChange(WorkflowTriggerDispatch.EntityChange dispatch) {
+        int workspaceId = dispatch.workspaceId();
+        String recordType = dispatch.recordType();
+        int entityId = dispatch.recordId();
+        String event = dispatch.event();
         if ("person".equals(recordType)
                 && personMapper.getProcessablePersonIds(workspaceId, List.of(entityId)).isEmpty()) {
             return;
@@ -71,19 +86,34 @@ public class RuleEngineService {
                 if (!stageMatches(trigger, workspaceId, recordType, entityId)) {
                     continue;
                 }
-                if (!conditionMatches(rule, workspaceId, entityId)) {
+                WorkflowRuntimeClaimService.LegacyClaim claim =
+                    workflowRuntimeClaimService.claimLegacyEntity(rule, trigger, dispatch);
+                if (!claim.started() || claim.execution() == null) {
                     continue;
                 }
-                fire(rule, workspaceId, recordType, entityId, dedupeSuffix(trigger, event));
+                if (!conditionMatches(rule, workspaceId, entityId)) {
+                    finishExecution(claim.execution(), "skipped", null);
+                    continue;
+                }
+                fireClaimed(rule, workspaceId, recordType, entityId, claim);
             } catch (Exception e) {
-                log.warn("Rule {} dispatch failed on {} {}: {}", rule.getId(), recordType, entityId, e.getMessage());
+                log.warn(
+                    "Rule dispatch failed ruleId={} recordType={} recordId={} exceptionClass={}",
+                    rule.getId(), recordType, entityId, e.getClass().getSimpleName());
             }
         }
     }
 
     /** Evaluates every enabled schedule rule of this cadence over the workspace's records. */
     public void runSchedule(int workspaceId, String cadence) {
-        String bucket = scheduleBucket(cadence);
+        runSchedule(new WorkflowTriggerDispatch.ScheduleTick(
+            workspaceId, cadence, scheduleBucket(cadence)));
+    }
+
+    /** Runs legacy-owned schedule rules for one deterministic cadence bucket. */
+    public void runSchedule(WorkflowTriggerDispatch.ScheduleTick dispatch) {
+        int workspaceId = dispatch.workspaceId();
+        String cadence = dispatch.cadence();
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "schedule")) {
             try {
                 RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
@@ -91,10 +121,12 @@ public class RuleEngineService {
                     continue;
                 }
                 for (int entityId : scheduleMatches(rule, workspaceId)) {
-                    fire(rule, workspaceId, rule.getRecordType(), entityId, bucket);
+                    fireSchedule(rule, dispatch, entityId);
                 }
             } catch (Exception e) {
-                log.warn("Schedule rule {} failed: {}", rule.getId(), e.getMessage());
+                log.warn(
+                    "Schedule rule failed ruleId={} exceptionClass={}",
+                    rule.getId(), e.getClass().getSimpleName());
             }
         }
     }
@@ -139,38 +171,38 @@ public class RuleEngineService {
         };
     }
 
-    private String dedupeSuffix(RuleTrigger trigger, String event) {
-        Integer throttle = trigger.getThrottleMinutes();
-        if (throttle != null && throttle > 0) {
-            long window = (System.currentTimeMillis() / 60000L) / throttle;
-            return event + ":t" + throttle + ":" + window;
-        }
-        return event + ":" + System.nanoTime();
+    private void fireSchedule(
+            Rule rule,
+            WorkflowTriggerDispatch.ScheduleTick dispatch,
+            int entityId) {
+        WorkflowRuntimeClaimService.LegacyClaim claim =
+            workflowRuntimeClaimService.claimLegacySchedule(rule, dispatch, entityId);
+        fireClaimed(rule, dispatch.workspaceId(), rule.getRecordType(), entityId, claim);
     }
 
-    private void fire(Rule rule, int workspaceId, String recordType, int entityId, String dedupeSuffix) {
-        RuleExecution execution = new RuleExecution();
-        execution.setWorkspaceId(workspaceId);
-        execution.setRuleId(rule.getId());
-        execution.setTriggerEntityType(recordType);
-        execution.setTriggerEntityId(entityId);
-        execution.setDedupeKey(entityId + ":" + dedupeSuffix);
-        execution.setStatus("running");
-        try {
-            ruleMapper.insertExecution(execution);
-        } catch (DuplicateKeyException alreadyClaimed) {
-            return;
-        } catch (Exception e) {
-            log.warn("Failed to claim execution for rule {}: {}", rule.getId(), e.getMessage());
+    private void fireClaimed(
+            Rule rule,
+            int workspaceId,
+            String recordType,
+            int entityId,
+            WorkflowRuntimeClaimService.LegacyClaim claim) {
+        if (!claim.started() || claim.execution() == null) {
             return;
         }
+        RuleExecution execution = claim.execution();
         Principal principal = resolvePrincipal(rule, workspaceId);
         if (principal == null) {
-            finishExecution(execution, "skipped", "actor is not an active member");
+            finishExecution(execution, "failed", "The configured automation actor is unavailable.");
             return;
         }
         List<RuleAction> actions = List.of(read(rule.getActionsJson(), RuleAction[].class));
-        RuleFireContext ctx = new RuleFireContext(workspaceId, rule.getId(), recordType, entityId, principal.targetUserId(), dedupeSuffix);
+        RuleFireContext ctx = new RuleFireContext(
+            workspaceId,
+            rule.getId(),
+            recordType,
+            entityId,
+            principal.targetUserId(),
+            claim.dedupeKey());
         List<String> failures = new ArrayList<>();
         try {
             automationExecutor.runAs(workspaceId, principal.user(), principal.role(), () -> {
@@ -178,8 +210,11 @@ public class RuleEngineService {
                     try {
                         actionExecutor.execute(action, ctx);
                     } catch (Exception actionError) {
-                        log.warn("Action {} failed for rule {}: {}", action.getType(), rule.getId(), actionError.getMessage());
-                        failures.add(action.getType() + ": " + actionError.getMessage());
+                        log.warn(
+                            "Rule action failed ruleId={} actionType={} exceptionClass={}",
+                            rule.getId(), action.getType(),
+                            actionError.getClass().getSimpleName());
+                        failures.add(action.getType() + ": action failed");
                     }
                 }
                 return null;
@@ -187,8 +222,10 @@ public class RuleEngineService {
             finishExecution(execution, failures.isEmpty() ? "matched" : "partial",
                 failures.isEmpty() ? null : String.join("; ", failures));
         } catch (Exception e) {
-            log.warn("Rule {} failed for {} {}: {}", rule.getId(), recordType, entityId, e.getMessage());
-            finishExecution(execution, "failed", e.getMessage());
+            log.warn(
+                "Rule execution failed ruleId={} recordType={} recordId={} exceptionClass={}",
+                rule.getId(), recordType, entityId, e.getClass().getSimpleName());
+            finishExecution(execution, "failed", "Rule execution failed.");
         }
     }
 
@@ -196,7 +233,9 @@ public class RuleEngineService {
         try {
             ruleMapper.updateExecution(execution.getWorkspaceId(), execution.getId(), status, writeDetail(detail));
         } catch (Exception e) {
-            log.warn("Failed to finalize execution {}: {}", execution.getId(), e.getMessage());
+            log.warn(
+                "Rule execution finalization failed executionId={} exceptionClass={}",
+                execution.getId(), e.getClass().getSimpleName());
         }
     }
 

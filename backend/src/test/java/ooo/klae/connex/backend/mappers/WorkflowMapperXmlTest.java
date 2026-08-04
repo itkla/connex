@@ -30,7 +30,16 @@ class WorkflowMapperXmlTest {
         Map<String, Object> identity = Map.of("workspaceId", 7, "id", 11);
         Map<String, Object> legacy = Map.of("workspaceId", 7, "legacyRuleId", 13);
 
-        assertScoped(configuration, WorkflowMapper.class, "listByWorkspace", workspace);
+        assertScoped(
+            configuration,
+            WorkflowMapper.class,
+            "listByWorkspace",
+            Map.of("workspaceId", 7, "archived", false));
+        assertScoped(
+            configuration,
+            WorkflowMapper.class,
+            "listItemsByWorkspace",
+            Map.of("workspaceId", 7, "archived", false));
         assertScoped(configuration, WorkflowMapper.class, "getById", identity);
         assertScoped(configuration, WorkflowMapper.class, "getByIdForUpdate", identity);
         assertScoped(configuration, WorkflowMapper.class, "getByLegacyRuleId", legacy);
@@ -54,6 +63,15 @@ class WorkflowMapperXmlTest {
         firstPublication.put("expectedRevision", 1);
         assertScoped(
             configuration, WorkflowMapper.class, "assignFirstPublication", firstPublication);
+        Map<String, Object> firstCanonicalPublication = new HashMap<>(identity);
+        firstCanonicalPublication.put("activeVersionId", 19L);
+        firstCanonicalPublication.put("updatedById", 17);
+        firstCanonicalPublication.put("expectedRevision", 1);
+        assertScoped(
+            configuration,
+            WorkflowMapper.class,
+            "assignFirstCanonicalPublication",
+            firstCanonicalPublication);
 
         Map<String, Object> laterPublication = new HashMap<>(identity);
         laterPublication.put("expectedLegacyRuleId", 13);
@@ -63,6 +81,16 @@ class WorkflowMapperXmlTest {
         laterPublication.put("expectedRevision", 1);
         assertScoped(
             configuration, WorkflowMapper.class, "advancePublication", laterPublication);
+        Map<String, Object> laterCanonicalPublication = new HashMap<>(identity);
+        laterCanonicalPublication.put("expectedActiveVersionId", 19L);
+        laterCanonicalPublication.put("activeVersionId", 23L);
+        laterCanonicalPublication.put("updatedById", 17);
+        laterCanonicalPublication.put("expectedRevision", 1);
+        assertScoped(
+            configuration,
+            WorkflowMapper.class,
+            "advanceCanonicalPublication",
+            laterCanonicalPublication);
 
         Map<String, Object> lifecycle = new HashMap<>(identity);
         lifecycle.put("enabled", true);
@@ -81,17 +109,24 @@ class WorkflowMapperXmlTest {
             "replaceLegacyPublication",
             legacyReplacement);
 
-        Map<String, Object> legacyDeletion = new HashMap<>(identity);
-        legacyDeletion.put("updatedById", 17);
-        legacyDeletion.put("expectedLegacyRuleId", 13);
-        legacyDeletion.put("expectedActiveVersionId", 19L);
-        legacyDeletion.put("expectedRevision", 1);
+        Map<String, Object> archive = new HashMap<>(identity);
+        archive.put("updatedById", 17);
+        assertScoped(configuration, WorkflowMapper.class, "archive", archive);
+        assertScoped(configuration, WorkflowMapper.class, "restore", archive);
+
+        Map<String, Object> owner = new HashMap<>(identity);
+        owner.put("expectedActiveVersionId", 19L);
+        owner.put("expectedOwner", "legacy");
+        owner.put("runtimeOwner", "canonical");
+        owner.put("updatedById", 17);
+        assertScoped(
+            configuration, WorkflowMapper.class, "compareAndSwapRuntimeOwner", owner);
+        owner.put("legacyRuleId", 13);
         assertScoped(
             configuration,
             WorkflowMapper.class,
-            "unlinkLegacyRuleForDeletion",
-            legacyDeletion);
-        assertScoped(configuration, WorkflowMapper.class, "delete", identity);
+            "attachLegacyRuleAndCompareAndSwapRuntimeOwner",
+            owner);
 
         Map<String, Object> active = new HashMap<>(identity);
         active.put("activeVersionId", 19L);
@@ -126,6 +161,17 @@ class WorkflowMapperXmlTest {
         assertTrue(legacySql.contains("r.workspace_id = ?"));
         assertTrue(legacySql.contains("w.workspace_id = ?"));
         assertTrue(legacySql.endsWith("ORDER BY r.id"));
+        String listItems = sql(
+            configuration,
+            WorkflowMapper.class,
+            "listItemsByWorkspace",
+            Map.of("workspaceId", 7, "archived", false));
+        assertTrue(listItems.contains("LEFT JOIN LATERAL"));
+        assertTrue(listItems.contains("wr.workspace_id = w.workspace_id"));
+        assertTrue(listItems.contains("re.workspace_id = w.workspace_id"));
+        assertTrue(listItems.contains("ORDER BY wr.started_at DESC, wr.id DESC LIMIT 1"));
+        assertTrue(listItems.contains("ORDER BY re.executed_at DESC, re.id DESC LIMIT 1"));
+        assertFalse(listItems.contains("draft_canvas_json"));
 
         String replacementSql = sql(
             configuration,
@@ -136,16 +182,10 @@ class WorkflowMapperXmlTest {
         assertTrue(replacementSql.contains("legacy_rule_id = ?"));
         assertTrue(replacementSql.contains("active_version_id = ?"));
         assertTrue(replacementSql.contains("draft_revision = ?"));
-        String deletionSql = sql(
-            configuration,
-            WorkflowMapper.class,
-            "unlinkLegacyRuleForDeletion",
-            legacyDeletion);
-        assertTrue(deletionSql.contains("legacy_rule_id = NULL"));
-        assertTrue(deletionSql.contains("active_version_id = NULL"));
-        assertTrue(deletionSql.contains("enabled = FALSE"));
-        assertTrue(deletionSql.contains("legacy_rule_id = ?"));
-        assertTrue(deletionSql.contains("active_version_id = ?"));
+        String mapperXml = resource("mappers/WorkflowMapper.xml");
+        assertFalse(mapperXml.contains("<delete"));
+        assertTrue(mapperXml.contains("archived_at IS NULL"));
+        assertTrue(mapperXml.contains("archived_at IS NOT NULL"));
     }
 
     @Test
@@ -187,6 +227,25 @@ class WorkflowMapperXmlTest {
         assertTrue(latestExecutions.contains(
             "ORDER BY re.executed_at DESC, re.id DESC LIMIT 1"));
         assertTrue(latestExecutions.endsWith("WHERE r.workspace_id = ? ORDER BY r.id"));
+
+        Map<String, Object> dispatch = Map.of(
+            "workspaceId", 7, "triggerType", "entity_change");
+        String enabledDispatch = sql(
+            configuration, RuleMapper.class, "getEnabledByTrigger", dispatch);
+        assertTrue(enabledDispatch.contains("LEFT JOIN workflow w"));
+        assertTrue(enabledDispatch.contains("w.id IS NULL"));
+        assertTrue(enabledDispatch.contains("w.runtime_owner = 'legacy'"));
+        assertTrue(enabledDispatch.contains("w.archived_at IS NULL"));
+        assertFalse(enabledDispatch.contains("w.enabled = TRUE"));
+
+        String scheduledWorkspaces = sql(
+            configuration,
+            RuleMapper.class,
+            "workspaceIdsWithEnabledScheduleRules",
+            Map.of());
+        assertTrue(scheduledWorkspaces.contains("LEFT JOIN workflow w"));
+        assertTrue(scheduledWorkspaces.contains("w.id IS NULL"));
+        assertFalse(scheduledWorkspaces.contains("w.enabled = TRUE AND w.runtime_owner = 'legacy'"));
 
         String latestIndex = resource(
             "db/migration/tenant/V121__rule_execution_latest_index.sql")

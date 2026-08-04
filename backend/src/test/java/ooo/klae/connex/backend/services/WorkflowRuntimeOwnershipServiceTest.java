@@ -1,0 +1,241 @@
+package ooo.klae.connex.backend.services;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Set;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import ooo.klae.connex.backend.beans.Rule;
+import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowVersion;
+import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
+import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
+
+@ExtendWith(MockitoExtension.class)
+class WorkflowRuntimeOwnershipServiceTest {
+
+    @Mock private WorkflowMapper workflowMapper;
+    @Mock private WorkflowVersionMapper workflowVersionMapper;
+    @Mock private RuleMapper ruleMapper;
+    @Mock private WorkflowPrincipalLockService principalLockService;
+    @Mock private WorkflowDefinitionValidator definitionValidator;
+    @Mock private WorkflowDraftCanonicalizer canonicalizer;
+    @Mock private LegacyWorkflowGraphConverter graphConverter;
+    @Mock private WorkflowRuntimeProperties runtimeProperties;
+    @Mock private WorkspaceService workspaceService;
+    @Mock private WorkflowService workflowService;
+    @Mock private AuditService auditService;
+
+    private WorkflowRuntimeOwnershipService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new WorkflowRuntimeOwnershipService(
+            workflowMapper,
+            workflowVersionMapper,
+            ruleMapper,
+            principalLockService,
+            definitionValidator,
+            canonicalizer,
+            graphConverter,
+            runtimeProperties,
+            workspaceService,
+            workflowService,
+            auditService);
+    }
+
+    @Test
+    void disabledDeploymentGateRefusesCanonicalOwnershipBeforeDatabaseAccess() {
+        when(runtimeProperties.enabled()).thenReturn(false);
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.cutOverToCanonical(11, 19L));
+
+        verifyNoInteractions(workflowMapper, ruleMapper, workflowVersionMapper);
+    }
+
+    @Test
+    void staleExpectedVersionFailsBeforeAnyOwnershipWrite() {
+        when(runtimeProperties.enabled()).thenReturn(true);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        Workflow workflow = workflow("legacy");
+        workflow.setActiveVersionId(20L);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.cutOverToCanonical(11, 19L));
+
+        verify(workflowMapper, never()).compareAndSwapRuntimeOwner(
+            anyInt(), anyInt(), anyLong(), any(), any(), anyInt());
+    }
+
+    @Test
+    void cutoverDisablesLegacyBeforeCompareAndSwap() {
+        when(runtimeProperties.enabled()).thenReturn(true);
+        Workflow workflow = workflow("legacy");
+        Rule rule = rule(true);
+        stubLock(workflow, rule);
+        stubCompiledVersion();
+        when(ruleMapper.updateEnabled(7, 13, false)).thenReturn(1);
+        when(workflowMapper.compareAndSwapRuntimeOwner(
+            7, 11, 19L, "legacy", "canonical", 9)).thenReturn(1);
+
+        service.cutOverToCanonical(11, 19L);
+
+        InOrder order = inOrder(ruleMapper, workflowMapper);
+        order.verify(ruleMapper).updateEnabled(7, 13, false);
+        order.verify(workflowMapper).compareAndSwapRuntimeOwner(
+            7, 11, 19L, "legacy", "canonical", 9);
+        verify(auditService).record(
+            eq("workflow.runtime.cutover"),
+            eq("workflow"),
+            eq(11),
+            eq("Workflow 11"),
+            eq("Workflow runtime changed to canonical"),
+            eq(java.util.Map.of("activeVersionId", 19L)));
+    }
+
+    @Test
+    void repeatedCutoverIsIdempotentAndDoesNotRewriteEitherLedger() {
+        when(runtimeProperties.enabled()).thenReturn(true);
+        Workflow workflow = workflow("canonical");
+        Rule rule = rule(false);
+        stubLock(workflow, rule);
+
+        service.cutOverToCanonical(11, 19L);
+
+        verify(ruleMapper, never()).updateEnabled(anyInt(), anyInt(), anyBoolean());
+        verify(workflowMapper, never()).compareAndSwapRuntimeOwner(
+            anyInt(), anyInt(), anyLong(), any(), any(), anyInt());
+    }
+
+    @Test
+    void incompatibleCanonicalGraphCannotRollbackToLegacy() {
+        Workflow workflow = workflow("canonical");
+        Rule rule = rule(false);
+        stubLock(workflow, rule);
+        stubCompiledVersion();
+        when(canonicalizer.parseCanvas("{}")).thenReturn(null);
+        when(graphConverter.project(any())).thenThrow(
+            new BadRequestException("branching graph"));
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.rollBackToLegacy(11, 19L));
+
+        verify(workflowMapper, never()).compareAndSwapRuntimeOwner(
+            anyInt(), anyInt(), anyLong(), any(), any(), anyInt());
+    }
+
+    @Test
+    void systemOwnershipTransitionRequiresTheBuiltInAdminGate() {
+        when(runtimeProperties.enabled()).thenReturn(true);
+        Workflow workflow = workflow("canonical");
+        WorkflowVersion version = version();
+        version.setExecutionMode("system");
+        version.setCreatedById(17);
+        Rule rule = rule(false);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        when(ruleMapper.getById(7, 13)).thenReturn(rule);
+        when(principalLockService.lockSystemMutation(7, 9, Set.of(17)))
+            .thenReturn(new LockedPrincipals(Set.of(17), Set.of(17)));
+        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
+        when(workflowVersionMapper.getByIdForUpdate(7, 11, 19L)).thenReturn(version);
+        when(ruleMapper.getByIdForUpdate(7, 13)).thenReturn(rule);
+
+        service.cutOverToCanonical(11, 19L);
+
+        verify(principalLockService).lockSystemMutation(7, 9, Set.of(17));
+        verify(principalLockService, never()).lockUserMutation(
+            anyInt(), anyInt(), any(), any());
+    }
+
+    private void stubLock(Workflow workflow, Rule rule) {
+        WorkflowVersion version = version();
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        when(ruleMapper.getById(7, 13)).thenReturn(rule);
+        when(principalLockService.lockUserMutation(7, 9, Set.of(), Set.of()))
+            .thenReturn(new LockedPrincipals(Set.of(), Set.of()));
+        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
+        when(workflowVersionMapper.getByIdForUpdate(7, 11, 19L)).thenReturn(version);
+        when(ruleMapper.getByIdForUpdate(7, 13)).thenReturn(rule);
+    }
+
+    private void stubCompiledVersion() {
+        CanonicalDraft canonical = new CanonicalDraft(
+            "Workflow", null, "company", "user", "{}", "{}", new byte[32]);
+        when(canonicalizer.canonicalizeDraftJson(
+            "Workflow", null, "company", "user", "{}", "{}"))
+            .thenReturn(canonical);
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1, "trigger", List.of(), List.of());
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+        when(definitionValidator.validate("company", "user", definition))
+            .thenReturn(null);
+    }
+
+    private static Workflow workflow(String owner) {
+        Workflow workflow = new Workflow();
+        workflow.setId(11);
+        workflow.setWorkspaceId(7);
+        workflow.setLegacyRuleId(13);
+        workflow.setActiveVersionId(19L);
+        workflow.setRuntimeOwner(owner);
+        workflow.setEnabled(true);
+        return workflow;
+    }
+
+    private static WorkflowVersion version() {
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(19L);
+        version.setWorkspaceId(7);
+        version.setWorkflowId(11);
+        version.setName("Workflow");
+        version.setRecordType("company");
+        version.setExecutionMode("user");
+        version.setDefinitionJson("{}");
+        version.setCanvasJson("{}");
+        version.setDefinitionHash(new byte[32]);
+        return version;
+    }
+
+    private static Rule rule(boolean enabled) {
+        Rule rule = new Rule();
+        rule.setId(13);
+        rule.setWorkspaceId(7);
+        rule.setEnabled(enabled);
+        return rule;
+    }
+}

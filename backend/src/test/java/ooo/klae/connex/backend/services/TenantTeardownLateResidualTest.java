@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +18,7 @@ import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.dto.TenantStorageResidual;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
@@ -130,5 +133,54 @@ class TenantTeardownLateResidualTest {
             WORKSPACE_ID,
             ACTOR_ID,
             lease);
+    }
+
+    @Test
+    void successfulTeardownRepeatsFkOrderedContentPurgeAfterStorageDrain() {
+        WorkspaceLifecycleRef workspace = new WorkspaceLifecycleRef(
+            WORKSPACE_ID,
+            ORG_ID,
+            "Workspace",
+            "workspace",
+            "active");
+        OperationLease lease = new OperationLease(
+            ORG_ID,
+            WORKSPACE_ID,
+            "teardown",
+            "lease-token");
+        Route route = new Route(ORG_ID, WORKSPACE_ID, null);
+        when(controlMapper.findWorkspaceOrCleanupInOrg(ORG_ID, WORKSPACE_ID))
+            .thenReturn(workspace);
+        when(controlOperations.acquireWorkspaceTeardown(
+                ORG_ID,
+                WORKSPACE_ID,
+                ACTOR_ID))
+            .thenReturn(new AcquiredWorkspace(workspace, lease));
+        when(lifecycleAccess.capture(workspace, ORG_ID)).thenReturn(route);
+
+        service.teardownWorkspace(
+            ORG_ID,
+            WORKSPACE_ID,
+            ACTOR_ID,
+            "workspace");
+
+        TableLifecycle step = TenantLifecycleRegistry.require("workflow_step_run");
+        TableLifecycle run = TenantLifecycleRegistry.require("workflow_run");
+        TableLifecycle version = TenantLifecycleRegistry.require("workflow_version");
+        TableLifecycle workflow = TenantLifecycleRegistry.require("workflow");
+        int batchSize = properties.getTableBatchSize();
+        verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, step, batchSize);
+        verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, run, batchSize);
+        verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, version, batchSize);
+        verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, workflow, batchSize);
+        InOrder order = inOrder(tenantTransaction);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, step, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, run, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, version, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, workflow, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, step, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, run, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, version, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, workflow, batchSize);
     }
 }

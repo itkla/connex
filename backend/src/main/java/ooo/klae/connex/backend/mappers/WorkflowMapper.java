@@ -6,11 +6,18 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowListView;
 
 /** Workspace-scoped persistence for mutable workflows and deterministic legacy-rule pairing. */
 public interface WorkflowMapper {
 
-    List<Workflow> listByWorkspace(@Param("workspaceId") int workspaceId);
+    List<Workflow> listByWorkspace(
+        @Param("workspaceId") int workspaceId,
+        @Param("archived") boolean archived);
+
+    List<WorkflowListView> listItemsByWorkspace(
+        @Param("workspaceId") int workspaceId,
+        @Param("archived") boolean archived);
 
     Workflow getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
@@ -48,10 +55,25 @@ public interface WorkflowMapper {
         @Param("updatedById") Integer updatedById,
         @Param("expectedRevision") int expectedRevision);
 
+    int assignFirstCanonicalPublication(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("activeVersionId") long activeVersionId,
+        @Param("updatedById") Integer updatedById,
+        @Param("expectedRevision") int expectedRevision);
+
     int advancePublication(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
         @Param("expectedLegacyRuleId") int expectedLegacyRuleId,
+        @Param("expectedActiveVersionId") long expectedActiveVersionId,
+        @Param("activeVersionId") long activeVersionId,
+        @Param("updatedById") Integer updatedById,
+        @Param("expectedRevision") int expectedRevision);
+
+    int advanceCanonicalPublication(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
         @Param("expectedActiveVersionId") long expectedActiveVersionId,
         @Param("activeVersionId") long activeVersionId,
         @Param("updatedById") Integer updatedById,
@@ -70,15 +92,36 @@ public interface WorkflowMapper {
         @Param("expectedActiveVersionId") long expectedActiveVersionId,
         @Param("expectedRevision") int expectedRevision);
 
-    int unlinkLegacyRuleForDeletion(
+    int archive(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
-        @Param("updatedById") int updatedById,
-        @Param("expectedLegacyRuleId") int expectedLegacyRuleId,
-        @Param("expectedActiveVersionId") long expectedActiveVersionId,
-        @Param("expectedRevision") int expectedRevision);
+        @Param("updatedById") int updatedById);
 
-    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    int restore(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("updatedById") int updatedById);
+
+    int compareAndSwapRuntimeOwner(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("expectedActiveVersionId") long expectedActiveVersionId,
+        @Param("expectedOwner") String expectedOwner,
+        @Param("runtimeOwner") String runtimeOwner,
+        @Param("updatedById") int updatedById);
+
+    int attachLegacyRuleAndCompareAndSwapRuntimeOwner(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("expectedActiveVersionId") long expectedActiveVersionId,
+        @Param("legacyRuleId") int legacyRuleId,
+        @Param("expectedOwner") String expectedOwner,
+        @Param("runtimeOwner") String runtimeOwner,
+        @Param("updatedById") int updatedById);
+
+    List<Integer> getEnabledCanonicalIdsByTrigger(
+        @Param("workspaceId") int workspaceId,
+        @Param("triggerType") String triggerType);
 
     int disableForOffboarding(
         @Param("workspaceId") int workspaceId,

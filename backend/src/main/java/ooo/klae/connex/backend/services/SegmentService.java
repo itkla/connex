@@ -22,7 +22,10 @@ import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SegmentFieldsDto;
 import ooo.klae.connex.backend.dto.TagDto;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
@@ -246,58 +249,134 @@ public class SegmentService {
         if (definition == null) {
             return;
         }
-        int total = countConditions(definition, 1);
+        int total = countValidationConditions(definition, 1, "");
         if (total > catalog.maxConditions()) {
-            throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_LIMIT_EXCEEDED,
+                "A rule may reference at most " + catalog.maxConditions() + " conditions",
+                null,
+                Map.of("maximum", Integer.toString(catalog.maxConditions())));
         }
-        validateGroup(definition, type);
+        validateGroup(definition, type, "");
     }
 
-    private void validateGroup(SegmentDefinition group, String recordType) {
+    private int countValidationConditions(
+            SegmentDefinition group, int depth, String path) {
+        if (depth > catalog.maxDepth()) {
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_DEPTH_EXCEEDED,
+                "Conditions are nested too deeply (max " + catalog.maxDepth() + " levels)",
+                path.isBlank() ? "groups" : path,
+                Map.of("maximum", Integer.toString(catalog.maxDepth())));
+        }
+        int count = group.getConditions() == null ? 0 : group.getConditions().size();
+        List<SegmentDefinition> groups = group.getGroups() == null
+            ? List.of() : group.getGroups();
+        for (int index = 0; index < groups.size(); index++) {
+            String nestedPath = indexed(path, "groups", index);
+            count += countValidationConditions(groups.get(index), depth + 1, nestedPath);
+        }
+        return count;
+    }
+
+    private void validateGroup(
+            SegmentDefinition group, String recordType, String path) {
         String match = normalize(group.getMatch());
         if (!"any".equals(match) && !"all".equals(match)) {
-            throw new BadRequestException("Invalid match (expected 'all' or 'any'): " + group.getMatch());
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_MATCH_INVALID,
+                "Invalid match (expected 'all' or 'any'): " + group.getMatch(),
+                property(path, "match"), Map.of());
         }
         List<SegmentCondition> conditions = group.getConditions() == null ? List.of() : group.getConditions();
         List<SegmentDefinition> groups = group.getGroups() == null ? List.of() : group.getGroups();
         if (conditions.isEmpty() && groups.isEmpty()) {
-            throw new BadRequestException("A condition group requires at least one condition or nested group");
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_GROUP_EMPTY,
+                "A condition group requires at least one condition or nested group",
+                path.isBlank() ? null : path, Map.of());
         }
-        for (SegmentCondition condition : conditions) {
-            validateCondition(condition, recordType);
+        for (int index = 0; index < conditions.size(); index++) {
+            validateCondition(
+                conditions.get(index), recordType, indexed(path, "conditions", index));
         }
-        for (SegmentDefinition nested : groups) {
-            validateGroup(nested, recordType);
+        for (int index = 0; index < groups.size(); index++) {
+            validateGroup(groups.get(index), recordType, indexed(path, "groups", index));
         }
     }
 
-    private void validateCondition(SegmentCondition condition, String recordType) {
+    private void validateCondition(
+            SegmentCondition condition, String recordType, String path) {
+        if (condition == null) {
+            throw invalid(
+                WorkflowDiagnosticCode.CONFIG_FIELD_INVALID,
+                "Condition configuration is invalid", path, Map.of());
+        }
         String type = normalize(condition.getType());
         if ("predicate".equals(type)) {
             String key = normalize(condition.getKey());
             if (key == null || !catalog.isPredicate(key)) {
-                throw new BadRequestException("Unknown predicate: " + condition.getKey());
+                throw invalid(
+                    WorkflowDiagnosticCode.CONDITION_PREDICATE_UNKNOWN,
+                    "Unknown predicate: " + condition.getKey(),
+                    property(path, "key"), Map.of());
             }
             if (!catalog.predicateAppliesTo(key, recordType)) {
-                throw new BadRequestException(
-                    "Predicate '" + condition.getKey() + "' is not available for " + recordType + " records");
+                throw invalid(
+                    WorkflowDiagnosticCode.CONDITION_PREDICATE_RECORD_TYPE_UNSUPPORTED,
+                    "Predicate '" + condition.getKey() + "' is not available for "
+                        + recordType + " records",
+                    property(path, "key"), Map.of("recordType", recordType));
             }
             return;
         }
         if ("field".equals(type)) {
             String field = normalize(condition.getField());
             String op = normalize(condition.getOp());
-            if (field == null || op == null) {
-                throw new BadRequestException("Field condition requires 'field' and 'op'");
+            if (field == null) {
+                throw invalid(
+                    WorkflowDiagnosticCode.CONDITION_FIELD_REQUIRED,
+                    "Field condition requires 'field'",
+                    property(path, "field"), Map.of());
             }
-            SegmentCatalog.Kind kind = fieldKind(recordType, field);
+            if (op == null) {
+                throw invalid(
+                    WorkflowDiagnosticCode.CONDITION_OPERATOR_REQUIRED,
+                    "Field condition requires 'op'",
+                    property(path, "op"), Map.of());
+            }
+            SegmentCatalog.Kind kind = catalog.fieldKind(recordType, field);
+            if (kind == null) {
+                throw invalid(
+                    WorkflowDiagnosticCode.CONDITION_FIELD_UNKNOWN,
+                    "Unknown field for " + recordType + ": " + field,
+                    property(path, "field"), Map.of("recordType", recordType));
+            }
             if (!catalog.operatorsFor(kind).contains(op)) {
-                throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
+                throw invalid(
+                    WorkflowDiagnosticCode.CONDITION_OPERATOR_UNSUPPORTED,
+                    "Unsupported operator for '" + field + "': " + condition.getOp(),
+                    property(path, "op"), Map.of());
             }
-            bindValue(kind, op, condition, new HashMap<>());
+            try {
+                bindValue(kind, op, condition, new HashMap<>());
+            } catch (BadRequestException exception) {
+                String valueField = "in".equals(op) ? "values"
+                    : "within_days".equals(op) ? "days" : "value";
+                WorkflowDiagnosticCode code = missingConditionValue(condition, valueField)
+                    ? WorkflowDiagnosticCode.CONDITION_VALUE_REQUIRED
+                    : WorkflowDiagnosticCode.CONDITION_VALUE_INVALID;
+                throw invalid(
+                    code,
+                    exception.getMessage(),
+                    property(path, valueField), Map.of());
+            }
             return;
         }
-        throw new BadRequestException("Unknown condition type (expected 'predicate' or 'field'): " + condition.getType());
+        throw invalid(
+            WorkflowDiagnosticCode.CONDITION_TYPE_INVALID,
+            "Unknown condition type (expected 'predicate' or 'field'): " + condition.getType(),
+            property(path, "type"), Map.of());
     }
 
     private Set<Integer> evaluateGroup(SegmentDefinition group, EvalContext ctx, int depth) {
@@ -663,6 +742,33 @@ public class SegmentService {
 
     private static String normalize(String value) {
         return value == null ? null : value.trim().toLowerCase();
+    }
+
+    private static boolean missingConditionValue(
+            SegmentCondition condition, String field) {
+        return switch (field) {
+            case "values" -> condition.getValues() == null || condition.getValues().isEmpty();
+            case "days" -> condition.getDays() == null;
+            default -> condition.getValue() == null || condition.getValue().isBlank();
+        };
+    }
+
+    private static String indexed(String path, String property, int index) {
+        return property(path, property) + "[" + index + "]";
+    }
+
+    private static String property(String path, String property) {
+        return path == null || path.isBlank() ? property : path + "." + property;
+    }
+
+    private static WorkflowDefinitionValidationException invalid(
+            WorkflowDiagnosticCode code,
+            String message,
+            String fieldPath,
+            Map<String, String> params) {
+        return new WorkflowDefinitionValidationException(
+            message,
+            new WorkflowDiagnosticDto(code, null, null, fieldPath, params));
     }
 
     private static final class EvalContext {

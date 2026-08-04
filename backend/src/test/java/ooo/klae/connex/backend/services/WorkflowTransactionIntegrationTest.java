@@ -14,7 +14,6 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,6 +52,9 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
@@ -60,18 +62,16 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
     @Autowired private WorkflowService workflowService;
     @Autowired private LegacyWorkflowBackfillTransaction backfillTransaction;
     @Autowired private WorkflowVersionMapper workflowVersionMapper;
+    @Autowired private TenantTeardownTenantTransaction tenantTeardownTransaction;
     @Autowired private ObjectMapper objectMapper;
     @MockitoBean private AuditService auditService;
     @MockitoSpyBean private RuleMapper ruleMapper;
     @MockitoSpyBean private WorkflowMapper workflowMapperSpy;
     @MockitoSpyBean private WorkflowPrincipalLockService workflowPrincipalLockServiceSpy;
 
-    private final List<Integer> workflowIds = new ArrayList<>();
-
     @Test
     void firstPublishPointerFailureRollsBackRuleAndVersion() {
         WorkflowDto created = workflowService.create(createRequest("Rollback workflow"));
-        workflowIds.add(created.id());
         int initialRuleCount = ruleMapper.countByWorkspace(workspace.getId());
         doReturn(0).when(workflowMapperSpy).assignFirstPublication(
             eq(workspace.getId()),
@@ -97,7 +97,6 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
     @Test
     void concurrentDraftSavesAllowOneCasWinner() throws Exception {
         WorkflowDto created = workflowService.create(createRequest("Concurrent workflow"));
-        workflowIds.add(created.id());
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -130,7 +129,6 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
     @Test
     void concurrentFirstPublicationCreatesOneVersionAndOneRule() throws Exception {
         WorkflowDto created = workflowService.create(createRequest("Concurrent publication"));
-        workflowIds.add(created.id());
         int initialRuleCount = ruleMapper.countByWorkspace(workspace.getId());
         CountDownLatch bothDiscovered = new CountDownLatch(2);
         doAnswer(invocation -> {
@@ -307,31 +305,23 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
 
     @AfterEach
     void deleteCreatedWorkflowsAndPrincipal() {
-        for (int workflowId : workflowIds) {
-            Workflow workflow = workflowMapperSpy.getById(workspace.getId(), workflowId);
-            if (workflow == null) {
-                continue;
-            }
-            Integer ruleId = workflow.getLegacyRuleId();
-            Long versionId = workflow.getActiveVersionId();
-            if (ruleId != null && versionId != null) {
-                workflowMapperSpy.unlinkLegacyRuleForDeletion(
-                    workspace.getId(),
-                    workflowId,
-                    currentUser.getId(),
-                    ruleId,
-                    versionId,
-                    workflow.getDraftRevision());
-            }
-            workflowMapperSpy.delete(workspace.getId(), workflowId);
-            if (ruleId != null) {
-                ruleMapper.delete(workspace.getId(), ruleId);
-            }
+        TableLifecycle workflow = TenantLifecycleRegistry.require("workflow");
+        for (var preparation : workflow.preparations()) {
+            tenantTeardownTransaction.prepare(
+                workspace.getId(), workflow, (NullifyReference) preparation);
         }
-        ruleMapper.getByWorkspace(workspace.getId()).stream()
-            .filter(rule -> Integer.valueOf(currentUser.getId()).equals(rule.getCreatedById()))
-            .forEach(rule -> ruleMapper.delete(workspace.getId(), rule.getId()));
+        for (String table : List.of(
+                "workflow_step_run", "workflow_run", "rule_execution",
+                "workflow_version", "workflow", "rule")) {
+            drain(TenantLifecycleRegistry.require(table));
+        }
         workspaceMapper.removeMember(workspace.getId(), currentUser.getId());
         userMapper.delete(currentUser.getId());
+    }
+
+    private void drain(TableLifecycle declaration) {
+        while (tenantTeardownTransaction.deleteBatch(
+                workspace.getId(), declaration, 100) > 0) {
+        }
     }
 }

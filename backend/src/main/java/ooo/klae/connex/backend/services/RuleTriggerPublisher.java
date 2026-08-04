@@ -23,6 +23,12 @@ public class RuleTriggerPublisher {
         if (automationScope.isActive()) {
             return;
         }
-        eventPublisher.publishEvent(new RuleTriggerEvent(workspaceId, recordType, entityId, event));
+        eventPublisher.publishEvent(new RuleTriggerEvent(
+            workspaceId,
+            recordType,
+            entityId,
+            event,
+            java.util.UUID.randomUUID().toString(),
+            java.time.Instant.now()));
     }
 }

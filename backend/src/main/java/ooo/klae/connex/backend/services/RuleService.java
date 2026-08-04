@@ -118,8 +118,8 @@ public class RuleService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         Rule rule = legacyRuleWorkflowService.delete(workspaceId, actorId, id);
-        auditService.record("rule.delete", "rule", id, rule.getName(),
-            "Deleted rule " + rule.getName(), null);
+        auditService.record("rule.archive", "rule", id, rule.getName(),
+            "Archived rule " + rule.getName(), null);
     }
 
     private Rule requireRule(int id) {

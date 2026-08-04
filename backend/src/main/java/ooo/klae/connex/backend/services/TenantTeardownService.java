@@ -306,6 +306,7 @@ public class TenantTeardownService {
             throw new ServiceUnavailableException(
                 "Tenant object deletion is still pending; retry teardown later");
         }
+        deleteStage(workspaceId, DeleteStage.CONTENT);
         deleteStage(workspaceId, DeleteStage.STORAGE_FINALIZATION);
     }
 

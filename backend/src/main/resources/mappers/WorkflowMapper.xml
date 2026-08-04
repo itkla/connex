@@ -4,7 +4,8 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.WorkflowMapper">
 
   <sql id="workflowColumns">
-    id, workspace_id, legacy_rule_id, name, description, enabled, draft_revision,
+    id, workspace_id, legacy_rule_id, name, description, enabled, runtime_owner,
+    archived_at, draft_revision,
     draft_record_type, draft_execution_mode, draft_run_as_user_id,
     draft_definition_json, draft_canvas_json, active_version_id,
     created_by_id, updated_by_id, created_at, updated_at
@@ -19,7 +20,69 @@
   <select id="listByWorkspace" resultType="Workflow">
     SELECT <include refid="workflowColumns"/> FROM workflow
     WHERE workspace_id = #{workspaceId}
+      AND archived_at IS <choose><when test="archived">NOT NULL</when><otherwise>NULL</otherwise></choose>
     ORDER BY updated_at DESC, id DESC
+  </select>
+
+  <select id="listItemsByWorkspace" resultType="WorkflowListView">
+    SELECT w.id,
+           w.workspace_id,
+           w.name,
+           w.description,
+           w.enabled,
+           w.runtime_owner,
+           w.archived_at,
+           w.draft_revision,
+           w.draft_record_type AS record_type,
+           w.draft_execution_mode AS execution_mode,
+           w.draft_run_as_user_id AS run_as_user_id,
+           w.active_version_id,
+           active_version.version_number AS active_version_number,
+           active_version.published_at AS active_version_published_at,
+           JSON_LENGTH(w.draft_definition_json, '$.nodes') AS node_count,
+           (
+             SELECT COUNT(*)
+             FROM JSON_TABLE(
+               w.draft_definition_json,
+               '$.nodes[*]' COLUMNS(node_type VARCHAR(16) PATH '$.type')
+             ) draft_node
+             WHERE draft_node.node_type = 'ACTION'
+           ) AS action_count,
+           canonical_run.id AS canonical_run_id,
+           canonical_run.status AS canonical_run_status,
+           canonical_run.started_at AS canonical_run_started_at,
+           canonical_run.finished_at AS canonical_run_finished_at,
+           legacy_run.id AS legacy_run_id,
+           legacy_run.status AS legacy_run_status,
+           legacy_run.executed_at AS legacy_run_executed_at,
+           w.created_by_id,
+           w.updated_by_id,
+           w.created_at,
+           w.updated_at
+    FROM workflow w
+    LEFT JOIN workflow_version active_version
+      ON active_version.workspace_id = w.workspace_id
+     AND active_version.workflow_id = w.id
+     AND active_version.id = w.active_version_id
+    LEFT JOIN LATERAL (
+      SELECT wr.id, wr.status, wr.started_at, wr.finished_at
+      FROM workflow_run wr
+      WHERE wr.workspace_id = w.workspace_id
+        AND wr.workflow_id = w.id
+      ORDER BY wr.started_at DESC, wr.id DESC
+      LIMIT 1
+    ) canonical_run ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT re.id, re.status, re.executed_at
+      FROM rule_execution re
+      WHERE re.workspace_id = w.workspace_id
+        AND re.rule_id = w.legacy_rule_id
+      ORDER BY re.executed_at DESC, re.id DESC
+      LIMIT 1
+    ) legacy_run ON TRUE
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.archived_at IS <choose><when test="archived">NOT NULL</when><otherwise>NULL</otherwise></choose>
+    ORDER BY w.updated_at DESC, w.id DESC
   </select>
 
   <select id="getById" resultType="Workflow">
@@ -110,12 +173,14 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workflow
-      (workspace_id, legacy_rule_id, name, description, enabled, draft_revision,
+      (workspace_id, legacy_rule_id, name, description, enabled, runtime_owner,
+       archived_at, draft_revision,
        draft_record_type, draft_execution_mode, draft_run_as_user_id,
        draft_definition_json, draft_canvas_json, active_version_id,
        created_by_id, updated_by_id)
     VALUES
-      (#{workspaceId}, #{legacyRuleId}, #{name}, #{description}, #{enabled}, #{draftRevision},
+      (#{workspaceId}, #{legacyRuleId}, #{name}, #{description}, #{enabled}, #{runtimeOwner},
+       #{archivedAt}, #{draftRevision},
        #{draftRecordType}, #{draftExecutionMode}, #{draftRunAsUserId},
        #{draftDefinitionJson}, #{draftCanvasJson}, #{activeVersionId},
        #{createdById}, #{updatedById})
@@ -134,6 +199,7 @@
         updated_by_id = #{workflow.updatedById}
     WHERE workspace_id = #{workflow.workspaceId}
       AND id = #{workflow.id}
+      AND archived_at IS NULL
       AND draft_revision = #{expectedRevision}
   </update>
 
@@ -144,6 +210,21 @@
         updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
+      AND archived_at IS NULL
+      AND draft_revision = #{expectedRevision}
+      AND legacy_rule_id IS NULL
+      AND active_version_id IS NULL
+  </update>
+
+  <update id="assignFirstCanonicalPublication">
+    UPDATE workflow
+    SET active_version_id = #{activeVersionId},
+        runtime_owner = 'canonical',
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND archived_at IS NULL
+      AND runtime_owner = 'legacy'
       AND draft_revision = #{expectedRevision}
       AND legacy_rule_id IS NULL
       AND active_version_id IS NULL
@@ -154,15 +235,30 @@
     SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
+      AND archived_at IS NULL
       AND draft_revision = #{expectedRevision}
       AND legacy_rule_id = #{expectedLegacyRuleId}
       AND active_version_id = #{expectedActiveVersionId}
   </update>
 
+  <update id="advanceCanonicalPublication">
+    UPDATE workflow
+    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND archived_at IS NULL
+      AND runtime_owner = 'canonical'
+      AND active_version_id = #{expectedActiveVersionId}
+      AND draft_revision = #{expectedRevision}
+  </update>
+
   <update id="updateLifecycle">
     UPDATE workflow
     SET enabled = #{enabled}, updated_by_id = #{updatedById}
-    WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled &lt;&gt; #{enabled}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND archived_at IS NULL
+      AND enabled &lt;&gt; #{enabled}
   </update>
 
   <update id="replaceLegacyPublication">
@@ -180,27 +276,69 @@
         updated_by_id = #{workflow.updatedById}
     WHERE workspace_id = #{workflow.workspaceId}
       AND id = #{workflow.id}
+      AND archived_at IS NULL
       AND legacy_rule_id = #{expectedLegacyRuleId}
       AND active_version_id = #{expectedActiveVersionId}
       AND draft_revision = #{expectedRevision}
   </update>
 
-  <update id="unlinkLegacyRuleForDeletion">
+  <update id="archive">
     UPDATE workflow
-    SET legacy_rule_id = NULL,
-        active_version_id = NULL,
-        enabled = FALSE,
+    SET enabled = FALSE,
+        archived_at = CURRENT_TIMESTAMP,
         updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
-      AND legacy_rule_id = #{expectedLegacyRuleId}
-      AND active_version_id = #{expectedActiveVersionId}
-      AND draft_revision = #{expectedRevision}
+      AND archived_at IS NULL
   </update>
 
-  <delete id="delete">
-    DELETE FROM workflow WHERE workspace_id = #{workspaceId} AND id = #{id}
-  </delete>
+  <update id="restore">
+    UPDATE workflow
+    SET enabled = FALSE,
+        archived_at = NULL,
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND archived_at IS NOT NULL
+  </update>
+
+  <update id="compareAndSwapRuntimeOwner">
+    UPDATE workflow
+    SET runtime_owner = #{runtimeOwner}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND active_version_id = #{expectedActiveVersionId}
+      AND runtime_owner = #{expectedOwner}
+      AND archived_at IS NULL
+  </update>
+
+  <update id="attachLegacyRuleAndCompareAndSwapRuntimeOwner">
+    UPDATE workflow
+    SET legacy_rule_id = #{legacyRuleId},
+        runtime_owner = #{runtimeOwner},
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND active_version_id = #{expectedActiveVersionId}
+      AND legacy_rule_id IS NULL
+      AND runtime_owner = #{expectedOwner}
+      AND archived_at IS NULL
+  </update>
+
+  <select id="getEnabledCanonicalIdsByTrigger" resultType="int">
+    SELECT w.id
+    FROM workflow w
+    JOIN workflow_version v
+      ON v.workspace_id = w.workspace_id
+     AND v.workflow_id = w.id
+     AND v.id = w.active_version_id
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.runtime_owner = 'canonical'
+      AND w.enabled = TRUE
+      AND w.archived_at IS NULL
+      AND v.trigger_type = #{triggerType}
+    ORDER BY w.id
+  </select>
 
   <update id="disableForOffboarding">
     UPDATE workflow SET enabled = FALSE

@@ -1,4 +1,21 @@
 package ooo.klae.connex.backend.dto;
 
-/** Successful read-only validation result for the current workflow draft revision. */
-public record WorkflowValidationDto(int draftRevision, boolean valid) { }
+import java.util.List;
+
+/** Authoritative structured validation and publication readiness for one saved draft revision. */
+public record WorkflowValidationDto(
+    int draftRevision,
+    boolean valid,
+    boolean canPublish,
+    boolean systemAuthoringAllowed,
+    List<String> requiredPermissions,
+    List<String> missingPermissions,
+    List<WorkflowDiagnosticDto> errors
+) {
+
+    public WorkflowValidationDto {
+        requiredPermissions = List.copyOf(requiredPermissions);
+        missingPermissions = List.copyOf(missingPermissions);
+        errors = List.copyOf(errors);
+    }
+}
