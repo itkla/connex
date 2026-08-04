@@ -292,20 +292,20 @@ class AuditServiceTest {
     }
 
     @Test
-    void recentPreservesRecognizableCustomModelNames() {
+    void recentPreservesSupportedGemmaModelNames() {
         AuditLog entry = new AuditLog();
         entry.setAction("ai.llm.call");
         entry.setEntityType("ai_call");
         entry.setOutcome("success");
         entry.setChanges("""
-                {"provider":"openai_compatible","region":"eastus2","model":"private-llama",
+                {"provider":"openai_compatible","region":"eastus2","model":"google/gemma-4-31b-it",
                 "outcome":"success"}
                 """);
         when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
 
         AuditLog result = service.recent(25, 0).getFirst();
 
-        assertTrue(result.getChanges().contains("private-llama"));
+        assertTrue(result.getChanges().contains("google/gemma-4-31b-it"));
         assertEquals("openai_compatible/eastus2", result.getTargetLabel());
     }
 

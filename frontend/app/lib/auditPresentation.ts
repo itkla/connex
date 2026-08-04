@@ -121,6 +121,7 @@ const AI_MODEL_MARKERS = [
     'anthropic',
     'claude',
     'gemini',
+    'gemma',
     'gpt',
     'model',
     'o1',

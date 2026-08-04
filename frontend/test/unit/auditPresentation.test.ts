@@ -182,13 +182,13 @@ describe('presentAuditEntry', () => {
             changes: {
                 provider: 'openai_compatible',
                 region: 'eastus2',
-                model: 'private-llama',
+                model: 'google/gemma-4-31b-it',
                 outcome: 'success',
             },
         }));
         expect(compatible.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'region', value: 'eastus2' }),
-            expect.objectContaining({ key: 'model', value: 'private-llama' }),
+            expect.objectContaining({ key: 'model', value: 'google/gemma-4-31b-it' }),
         ]));
     });
 });

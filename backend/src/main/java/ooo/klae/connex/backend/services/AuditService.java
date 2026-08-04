@@ -91,7 +91,7 @@ public class AuditService {
             "language", "other");
     private static final Set<String> AI_MEDIA_TYPES = Set.of("image/jpeg");
     private static final Set<String> AI_MODEL_MARKERS = Set.of(
-            "anthropic", "claude", "gemini", "gpt", "model", "o1", "o3", "o4", "llama",
+            "anthropic", "claude", "gemini", "gemma", "gpt", "model", "o1", "o3", "o4", "llama",
             "mistral", "mixtral", "deepseek", "qwen", "command", "cohere", "nova", "titan");
     private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}");
     private static final Pattern SAFE_REGION = Pattern.compile(
