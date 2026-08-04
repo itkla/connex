@@ -6,11 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceProvider, useWorkspace } from "@/app/hooks/useWorkspace";
 import {
-    createWorkspace,
     getActiveWorkspaceMembers,
     getWorkspaceMembers,
     leaveWorkspace,
-    switchWorkspace,
 } from "@/app/lib/api";
 
 const router = vi.hoisted(() => ({
@@ -21,15 +19,6 @@ const router = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
     useRouter: () => router,
 }));
-
-vi.mock("@/app/lib/api", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("@/app/lib/api")>();
-    return {
-        ...actual,
-        createWorkspace: vi.fn(),
-        switchWorkspace: vi.fn(),
-    };
-});
 
 const PROVIDER = "app/hooks/useWorkspace.tsx";
 const MEMBERSHIP_PANEL = "app/components/account/MembershipPanel.tsx";
@@ -45,12 +34,10 @@ function section(contents: string, start: string, end: string): string {
 
 function deferred() {
     let resolve: () => void = () => {};
-    let reject: (reason: Error) => void = () => {};
-    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    const promise = new Promise<void>((resolvePromise) => {
         resolve = resolvePromise;
-        reject = rejectPromise;
     });
-    return { promise, reject, resolve };
+    return { promise, resolve };
 }
 
 function renderWorkspaceProvider() {
@@ -71,17 +58,6 @@ function renderWorkspaceProvider() {
     return workspace;
 }
 
-async function expectActiveWorkspace(
-    workspace: ReturnType<typeof useWorkspace>,
-    id: number,
-) {
-    vi.mocked(switchWorkspace).mockClear();
-    const operation = vi.fn(async () => {});
-    await expect(workspace.runInWorkspace(id, operation)).resolves.toBe(true);
-    expect(switchWorkspace).not.toHaveBeenCalled();
-    expect(operation).toHaveBeenCalledWith(false);
-}
-
 afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
@@ -93,122 +69,86 @@ describe("authoritative workspace selection adoption", () => {
         const publisher = section(
             provider,
             "const publishActiveWorkspace",
-            "const runInWorkspace",
+            "const runSelectionChange",
         );
 
-        expect(provider).toContain("adoptActiveWorkspace: (id: number | null) => void;");
+        expect(provider).toContain("runSelectionChange: SelectionChangeRunner;");
         expect(publisher).toContain("activeWorkspaceIdRef.current = id;");
         expect(publisher).toContain("setActiveWorkspaceId(id);");
     });
 
-    it("keeps an adopted decision when an older in-flight switch fails", async () => {
-        const pendingSwitch = deferred();
-        vi.mocked(switchWorkspace).mockReturnValueOnce(pendingSwitch.promise);
+    it("admits only one selection-changing operation at a time", async () => {
+        const pendingSelection = deferred();
+        const firstOperation = vi.fn(() => pendingSelection.promise);
+        const blockedOperation = vi.fn(async () => {});
         const workspace = renderWorkspaceProvider();
 
-        const inFlightSwitch = workspace.runInWorkspace(9, async () => {});
-        workspace.adoptActiveWorkspace(22);
-        pendingSwitch.reject(new Error("switch failed"));
-        await expect(inFlightSwitch).rejects.toThrow("switch failed");
+        const inFlightSelection = workspace.runSelectionChange(firstOperation);
+        await vi.waitFor(() => expect(firstOperation).toHaveBeenCalledOnce());
 
-        await expectActiveWorkspace(workspace, 22);
+        await expect(workspace.runSelectionChange(blockedOperation)).rejects.toThrow(
+            "A workspace operation is already in progress",
+        );
+        expect(blockedOperation).not.toHaveBeenCalled();
+
+        pendingSelection.resolve();
+        await expect(inFlightSelection).resolves.toBeUndefined();
+        await expect(workspace.runSelectionChange(blockedOperation)).resolves.toBeUndefined();
+        expect(blockedOperation).toHaveBeenCalledOnce();
     });
 
-    it("lets a later in-flight switch decision replace an adopted decision", async () => {
-        const pendingSwitch = deferred();
-        vi.mocked(switchWorkspace).mockReturnValueOnce(pendingSwitch.promise);
-        const workspace = renderWorkspaceProvider();
-
-        const inFlightSwitch = workspace.runInWorkspace(9, async () => {});
-        workspace.adoptActiveWorkspace(22);
-        pendingSwitch.resolve();
-        await expect(inFlightSwitch).resolves.toBe(true);
-
-        await expectActiveWorkspace(workspace, 9);
-    });
-
-    it.each(["resolve", "reject"] as const)(
-        "keeps a later adoption when the switch callback will %s",
-        async (settlement) => {
-            vi.mocked(switchWorkspace).mockResolvedValueOnce(undefined);
-            const pendingOperation = deferred();
-            const operation = vi.fn(() => pendingOperation.promise);
-            const workspace = renderWorkspaceProvider();
-
-            const inFlightSwitch = workspace.runInWorkspace(9, operation);
-            await vi.waitFor(() => expect(operation).toHaveBeenCalledWith(true));
-            workspace.adoptActiveWorkspace(22);
-            if (settlement === "resolve") {
-                pendingOperation.resolve();
-                await expect(inFlightSwitch).resolves.toBe(true);
-            } else {
-                pendingOperation.reject(new Error("operation failed"));
-                await expect(inFlightSwitch).rejects.toThrow("operation failed");
-            }
-
-            await expectActiveWorkspace(workspace, 22);
-        },
-    );
-
-    it("keeps an adopted decision when an older in-flight creation fails", async () => {
-        const pendingCreation = deferred();
-        vi.mocked(createWorkspace).mockReturnValueOnce(pendingCreation.promise.then(() => {
-            throw new Error("creation unexpectedly resolved");
-        }));
-        const workspace = renderWorkspaceProvider();
-
-        const inFlightCreation = workspace.create("New workspace");
-        workspace.adoptActiveWorkspace(22);
-        pendingCreation.reject(new Error("creation failed"));
-        await expect(inFlightCreation).rejects.toThrow("creation failed");
-
-        await expectActiveWorkspace(workspace, 22);
-    });
-
-    it("lets a later in-flight creation decision replace an adopted decision", async () => {
-        const pendingCreation = deferred();
-        vi.mocked(createWorkspace).mockReturnValueOnce(pendingCreation.promise.then(() => ({
-            id: 33,
-            name: "New workspace",
-            slug: "new-workspace",
-            role: "owner",
-            orgId: 4,
-            orgName: "Organization",
-            orgRole: "owner",
-        })));
-        const workspace = renderWorkspaceProvider();
-
-        const inFlightCreation = workspace.create("New workspace");
-        workspace.adoptActiveWorkspace(22);
-        pendingCreation.resolve();
-        await expect(inFlightCreation).resolves.toMatchObject({ id: 33 });
-
-        await expectActiveWorkspace(workspace, 33);
-    });
-
-    it("routes switches and creation through the same publisher", () => {
+    it("routes switches, creation, acceptance, and leave through the same mutex", () => {
         const provider = source(PROVIDER);
         const switching = section(provider, "const runInWorkspace", "const switchTo");
         const creation = section(provider, "const create", "const activeWorkspace");
+        const panel = source(MEMBERSHIP_PANEL);
+        const acceptance = section(panel, "const accept =", "const decline =");
+        const leaving = section(panel, "const doLeave =", "return (");
 
+        expect(switching).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
+        expect(creation).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
+        expect(acceptance).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
+        expect(leaving).toContain("runSelectionChange(async (publishActiveWorkspace) =>");
         expect(switching).toContain("publishActiveWorkspace(id);");
         expect(creation).toContain("publishActiveWorkspace(workspace.id);");
         expect(switching).not.toContain("activeWorkspaceIdRef.current = id;");
         expect(creation).not.toContain("activeWorkspaceIdRef.current = workspace.id;");
     });
 
-    it("adopts accepted and remaining workspace decisions before refresh or navigation", () => {
+    it("publishes accepted and remaining workspace decisions before refresh or navigation", () => {
         const panel = source(MEMBERSHIP_PANEL);
         const acceptance = section(panel, "const accept =", "const decline =");
         const leaving = section(panel, "const doLeave =", "return (");
 
-        expect(acceptance).toMatch(/const accepted = await acceptWorkspace\(workspace\.id\);[\s\S]*adoptActiveWorkspace\(accepted\.id\);[\s\S]*router\.refresh\(\)/);
-        expect(leaving).toMatch(/const selection = await leaveWorkspace\(activeWorkspaceId\);[\s\S]*adoptActiveWorkspace\(selection\.activeWorkspaceId\);[\s\S]*router\.replace\(selection\.activeWorkspaceId !== null \? "\/dashboard" : "\/onboarding"\);[\s\S]*router\.refresh\(\)/);
+        expect(acceptance).toMatch(/const accepted = await acceptWorkspace\(workspace\.id\);[\s\S]*publishActiveWorkspace\(accepted\.id\);[\s\S]*router\.refresh\(\)/);
+        expect(leaving).toMatch(/const selection = await leaveWorkspace\(activeWorkspaceId\);[\s\S]*publishActiveWorkspace\(selection\.activeWorkspaceId\);[\s\S]*router\.replace\(selection\.activeWorkspaceId !== null \? "\/dashboard" : "\/onboarding"\);[\s\S]*router\.refresh\(\)/);
+    });
+
+    it("disables accept and leave while another selection change is in progress", () => {
+        const panel = source(MEMBERSHIP_PANEL);
+
+        expect(panel).toContain("activeWorkspace, runSelectionChange, switching");
+        expect(panel).toContain("disabled={busy || switching}");
+        expect(panel).toContain("disabled={!activeWorkspaceId || switching}");
+        expect(panel).toContain("disabled={leaving || switching}");
+    });
+
+    it("documents serialization without promising recovery from response-body failure", () => {
+        const provider = source(PROVIDER);
+        const contract = section(provider, "/**", "export function WorkspaceProvider");
+        const normalizedContract = contract.replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ");
+
+        expect(normalizedContract).toContain("one selection-changing operation at a time");
+        expect(normalizedContract).toContain("cookie is applied before that result is published");
+        expect(normalizedContract).toContain("body fails to read or parse");
+        expect(normalizedContract).toContain("#1023");
+        expect(normalizedContract).not.toContain("matching the order in which the browser");
+        expect(provider).not.toContain("setActiveWorkspaceId(initialActiveId)");
     });
 
     it("uses the returned selection for matching default and explicit workspace headers", async () => {
         expect(
-            source(MEMBERSHIP_PANEL).includes("adoptActiveWorkspace(selection.activeWorkspaceId);"),
+            source(MEMBERSHIP_PANEL).includes("publishActiveWorkspace(selection.activeWorkspaceId);"),
         ).toBe(true);
         const browserDocument = { cookie: "NEXT_LOCALE=en; connex_workspace=7" };
         const memberRequests: Array<{ path: string; workspaceId: string | null }> = [];

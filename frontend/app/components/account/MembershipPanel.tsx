@@ -32,7 +32,7 @@ import SectionHeader from "@/app/components/dashboard/SectionHeader";
 export default function MembershipPanel() {
     const t = useTranslations("AccountInvites");
     const router = useRouter();
-    const { activeWorkspaceId, activeWorkspace, adoptActiveWorkspace } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace, runSelectionChange, switching } = useWorkspace();
 
     const [pending, setPending] = useState<Workspace[]>([]);
     const [loading, setLoading] = useState(true);
@@ -61,11 +61,13 @@ export default function MembershipPanel() {
     const accept = async (workspace: Workspace) => {
         setBusyId(workspace.id);
         try {
-            const accepted = await acceptWorkspace(workspace.id);
-            adoptActiveWorkspace(accepted.id);
-            setPending((prev) => prev.filter((w) => w.id !== workspace.id));
-            toastSuccess(t("accepted", { workspace: workspace.name }));
-            router.refresh();
+            await runSelectionChange(async (publishActiveWorkspace) => {
+                const accepted = await acceptWorkspace(workspace.id);
+                publishActiveWorkspace(accepted.id);
+                setPending((prev) => prev.filter((w) => w.id !== workspace.id));
+                toastSuccess(t("accepted", { workspace: workspace.name }));
+                router.refresh();
+            });
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("acceptFailed"));
         } finally {
@@ -90,11 +92,13 @@ export default function MembershipPanel() {
         if (!activeWorkspaceId || leaving) return;
         setLeaving(true);
         try {
-            const selection = await leaveWorkspace(activeWorkspaceId);
-            adoptActiveWorkspace(selection.activeWorkspaceId);
-            toastSuccess(t("left"));
-            router.replace(selection.activeWorkspaceId !== null ? "/dashboard" : "/onboarding");
-            router.refresh();
+            await runSelectionChange(async (publishActiveWorkspace) => {
+                const selection = await leaveWorkspace(activeWorkspaceId);
+                publishActiveWorkspace(selection.activeWorkspaceId);
+                toastSuccess(t("left"));
+                router.replace(selection.activeWorkspaceId !== null ? "/dashboard" : "/onboarding");
+                router.refresh();
+            });
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("leaveFailed"));
             setLeaving(false);
@@ -146,7 +150,7 @@ export default function MembershipPanel() {
                                     <Button
                                         size="sm"
                                         variant="brand"
-                                        disabled={busy}
+                                        disabled={busy || switching}
                                         onClick={() => accept(workspace)}
                                     >
                                         {busy ? <Loader2Icon className="size-4 animate-spin" /> : t("accept")}
@@ -166,7 +170,7 @@ export default function MembershipPanel() {
                     </p>
                     <Button
                         variant="destructive"
-                        disabled={!activeWorkspaceId}
+                        disabled={!activeWorkspaceId || switching}
                         onClick={() => setLeaveOpen(true)}
                     >
                         {t("leave")}
@@ -189,7 +193,7 @@ export default function MembershipPanel() {
                         <Button
                             variant="destructive"
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            disabled={leaving}
+                            disabled={leaving || switching}
                             onClick={doLeave}
                         >
                             {leaving ? <Loader2Icon className="size-4 animate-spin" /> : t("leave")}
