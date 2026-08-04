@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -197,6 +198,141 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains("Review a note"));
         assertEquals("raw-row-hash", result.getRowHash());
         assertTrue(result.isContentRedacted());
+    }
+
+    @Test
+    void recentProjectsSecretMetadataWithoutDisclosingUncontrolledContent() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("secret_store.secret.use");
+        entry.setEntityType("organization");
+        entry.setTargetLabel("private CRM content");
+        entry.setOutcome("success");
+        entry.setSummary("secret token value");
+        entry.setChanges("""
+                {"secretId":17,"purpose":"org.ai.provider_credential","keyId":"raw-secret-token",
+                "rewrapped":false,"credential":"raw-secret-token"}
+                """);
+        entry.setContext("{\"error\":\"raw-secret-token\"}");
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals("org.ai.provider_credential", result.getTargetLabel());
+        assertEquals("Secret used", result.getSummary());
+        assertEquals("success", result.getOutcome());
+        assertTrue(result.getChanges().contains("secretId"));
+        assertTrue(result.getChanges().contains("org.ai.provider_credential"));
+        assertFalse(result.getChanges().contains("\"credential\""));
+        assertFalse(result.getChanges().contains("raw-secret-token"));
+        assertNull(result.getContext());
+        assertTrue(result.isContentRedacted());
+    }
+
+    @Test
+    void recentProjectsAiMetadataAndUsesTheDomainOutcome() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("ai.llm.call");
+        entry.setEntityType("ai_call");
+        entry.setTargetLabel("private CRM content");
+        entry.setOutcome("success");
+        entry.setSummary("private model output");
+        entry.setChanges("""
+                {"provider":"vertex","region":"secret region value","model":"claude-sonnet-4@20250514",
+                "feature":"deal.brief","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
+                "inputTokens":80,"prompt":"private CRM content","response":"private model output"}
+                """);
+        entry.setContext("{\"error\":\"ProviderException\",\"detail\":\"secret token value\"}");
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals("vertex", result.getTargetLabel());
+        assertEquals("blocked", result.getOutcome());
+        assertEquals("AI call blocked", result.getSummary());
+        assertTrue(result.getChanges().contains("claude-sonnet-4@20250514"));
+        assertTrue(result.getChanges().contains("deal.brief"));
+        assertFalse(result.getChanges().contains("prompt"));
+        assertFalse(result.getChanges().contains("response"));
+        assertFalse(result.getChanges().contains("secret region value"));
+        assertEquals("{\"error\":\"ProviderException\"}", result.getContext());
+        assertTrue(result.isContentRedacted());
+    }
+
+    @Test
+    void recentPreservesAControlledSecretPurposeForCurrentFailureRows() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("secret_store.secret.use_failed");
+        entry.setEntityType("organization");
+        entry.setTargetLabel("org.ai.provider_credential");
+        entry.setOutcome("failure");
+        entry.setSummary("Secret use failed");
+        entry.setContext("{\"error\":\"SecretUnavailableException\"}");
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals("org.ai.provider_credential", result.getTargetLabel());
+        assertEquals("Secret use failed", result.getSummary());
+        assertEquals("{\"error\":\"SecretUnavailableException\"}", result.getContext());
+    }
+
+    @Test
+    void recentProjectsFullyPartialSensitiveRowsWithoutFailing() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("secret_store.secret.use_failed");
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals("secret_store", result.getTargetLabel());
+        assertEquals("Secret use failed", result.getSummary());
+        assertNull(result.getEntityType());
+        assertNull(result.getOutcome());
+        assertTrue(result.isContentRedacted());
+    }
+
+    @Test
+    void recentPreservesSupportedGemmaModelNames() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("ai.llm.call");
+        entry.setEntityType("ai_call");
+        entry.setOutcome("success");
+        entry.setChanges("""
+                {"provider":"openai_compatible","region":"eastus2","model":"google/gemma-4-31b-it",
+                "outcome":"success"}
+                """);
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertTrue(result.getChanges().contains("google/gemma-4-31b-it"));
+        assertEquals("openai_compatible/eastus2", result.getTargetLabel());
+    }
+
+    @Test
+    void exportOmitsSensitiveIntegrityPayloadAndRawContent() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("ai.llm.call");
+        entry.setEntityType("ai_call");
+        entry.setTargetLabel("private CRM content");
+        entry.setOutcome("success");
+        entry.setSummary("private model output");
+        entry.setChanges("""
+                {"provider":"vertex","model":"sk-proj-abc123","feature":"report.narrative","outcome":"success",
+                "prompt":"private CRM content","credential":"raw-secret-token"}
+                """);
+        when(auditLogMapper.findWorkspaceExport(7, 25, 0)).thenReturn(List.of(entry));
+
+        String csv = service.exportRecent(25, 0);
+
+        verify(auditIntegrityService, never()).integrityPayload(entry);
+        assertTrue(csv.contains("contentRedacted,integrityPayloadRedacted,integrityPayload"));
+        assertTrue(csv.contains("AI call success"));
+        assertTrue(csv.contains("report.narrative"));
+        assertFalse(csv.contains("private CRM content"));
+        assertFalse(csv.contains("private model output"));
+        assertFalse(csv.contains("raw-secret-token"));
+        assertFalse(csv.contains("sk-proj-abc123"));
     }
 
     @Test

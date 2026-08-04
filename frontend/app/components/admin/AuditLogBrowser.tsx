@@ -43,7 +43,15 @@ import {
     formatShortDate,
     parseMysqlDateTime,
 } from "@/app/lib/utils";
-import { type AuditChange, type AuditLogEntry } from "@/app/lib/types";
+import {
+    auditError,
+    auditOutcome,
+    auditSummary,
+    auditTargetLabel,
+    presentAuditEntry,
+    type AuditMetadataRow,
+} from "@/app/lib/auditPresentation";
+import { type AuditLogEntry } from "@/app/lib/types";
 
 type Tone = "create" | "update" | "delete" | "auth" | "view" | "default";
 
@@ -126,7 +134,12 @@ function rangeCutoff(range: RangeFilter, now: number | null): number {
 }
 
 function isFailed(e: AuditLogEntry): boolean {
-    return e.outcome != null && e.outcome !== "success";
+    const outcome = auditOutcome(e);
+    return outcome != null && outcome !== "success" && outcome !== "attempt";
+}
+
+function isSuccessful(e: AuditLogEntry): boolean {
+    return auditOutcome(e) === "success";
 }
 
 export default function AuditLogBrowser({
@@ -247,9 +260,8 @@ export default function AuditLogBrowser({
                 }
                 if (except !== "outcome") {
                     if (filters.outcome !== "all") {
-                        const failed = isFailed(e);
-                        if (filters.outcome === "failed" && !failed) return false;
-                        if (filters.outcome === "success" && failed) return false;
+                        if (filters.outcome === "failed" && !isFailed(e)) return false;
+                        if (filters.outcome === "success" && !isSuccessful(e)) return false;
                     }
                 }
                 if (except !== "actors") {
@@ -274,14 +286,16 @@ export default function AuditLogBrowser({
     const actorCounts = useMemo(() => countBy(matches, entries, "actors", actorKeyOf), [matches, entries, actorKeyOf]);
 
     const outcomeCounts = useMemo(() => {
+        let all = 0;
         let success = 0;
         let failed = 0;
         for (const e of entries) {
             if (!matches(e, "outcome")) continue;
+            all++;
             if (isFailed(e)) failed++;
-            else success++;
+            if (isSuccessful(e)) success++;
         }
-        return { success, failed, all: success + failed };
+        return { success, failed, all };
     }, [matches, entries]);
 
     const rangeCounts = useMemo(() => {
@@ -828,6 +842,18 @@ function PulseStrip({
 
 type Translator = ReturnType<typeof useTranslations>;
 
+function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
+    if (row.value == null) return t("valueUnknown");
+    if (typeof row.value === "boolean") return t(row.value ? "valueYes" : "valueNo");
+    if (row.key === "result") {
+        if (row.value === "success") return t("outcomeSuccess");
+        if (row.value === "failure") return t("outcomeFailed");
+        if (row.value === "attempt") return t("outcomeAttempt");
+        if (row.value === "blocked") return t("outcomeBlocked");
+    }
+    return String(row.value);
+}
+
 function DayMarker({
     label,
     count,
@@ -907,19 +933,27 @@ function AuditRow({
     const verbText = meta ? t(meta.verbKey) : verb;
     const actorTag = (chunks: React.ReactNode) => <span className="font-semibold text-foreground">{chunks}</span>;
     const targetTag = (chunks: React.ReactNode) => <span className="font-medium text-foreground">{chunks}</span>;
-    const actionLine = entry.targetLabel && !PLAIN_VERBS.has(verb)
+    const targetLabel = auditTargetLabel(entry);
+    const summary = auditSummary(entry);
+    const actionLine = targetLabel && !PLAIN_VERBS.has(verb)
         ? t.rich("actionEntity", {
               actorName,
-              targetName: entry.targetLabel,
+              targetName: targetLabel,
               verb: verbText,
               actor: actorTag,
               target: targetTag,
           })
         : t.rich("actionPlain", { actorName, verb: verbText, actor: actorTag });
 
-    const changeEntries: [string, AuditChange][] = entry.changes ? Object.entries(entry.changes) : [];
-    const errorText = typeof entry.context?.error === "string" ? entry.context.error : null;
+    const presentation = presentAuditEntry(entry);
+    const errorText = auditError(entry);
+    const metadataRows = presentation.metadata.map((row) => ({
+        label: t(row.labelKey),
+        value: auditMetadataValue(row, t),
+        mono: row.mono,
+    }));
     const detailRows = [
+        ...metadataRows,
         entry.ipAddress && { label: t("metaIp"), value: entry.ipAddress, mono: true },
         entry.userAgent && { label: t("metaUserAgent"), value: entry.userAgent, mono: false },
         entry.requestId && { label: t("metaRequestId"), value: entry.requestId, mono: true },
@@ -962,8 +996,8 @@ function AuditRow({
                     <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
                             <p className="text-sm leading-snug text-foreground/75">{actionLine}</p>
-                            {entry.summary && (
-                                <p className="mt-0.5 truncate text-xs text-muted-foreground">{entry.summary}</p>
+                            {summary && (
+                                <p className="mt-0.5 truncate text-xs text-muted-foreground">{summary}</p>
                             )}
                         </div>
                         <div className="flex shrink-0 items-center gap-2 pt-0.5">
@@ -1001,14 +1035,14 @@ function AuditRow({
                                     <span className="min-w-0 break-words font-mono">{errorText}</span>
                                 </div>
                             )}
-                            {changeEntries.length > 0 ? (
+                            {presentation.diffs.length > 0 ? (
                                 <dl className="space-y-2">
-                                    {changeEntries.map(([field, delta]) => (
+                                    {presentation.diffs.map((delta) => (
                                         <div
-                                            key={field}
+                                            key={delta.field}
                                             className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1"
                                         >
-                                            <dt className="font-mono text-[11px] text-muted-foreground">{field}</dt>
+                                            <dt className="font-mono text-[11px] text-muted-foreground">{delta.field}</dt>
                                             <dd className="flex min-w-0 items-center gap-1.5">
                                                 <ValueChip value={delta.old} tone="old" empty={t("emptyValue")} />
                                                 <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground/50" />
@@ -1018,7 +1052,9 @@ function AuditRow({
                                     ))}
                                 </dl>
                             ) : (
-                                !errorText && <p className="text-xs text-muted-foreground">{t("noChanges")}</p>
+                                !errorText && metadataRows.length === 0
+                                    ? <p className="text-xs text-muted-foreground">{t("noChanges")}</p>
+                                    : null
                             )}
 
                             {detailRows.length > 0 && (

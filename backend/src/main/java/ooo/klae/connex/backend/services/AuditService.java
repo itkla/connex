@@ -28,10 +28,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -54,6 +56,52 @@ public class AuditService {
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
+
+    private static final Set<String> SECRET_PURPOSES = Set.of(
+            "workspace.smtp.password",
+            "workspace.delivery.provider_credential",
+            "workspace.delivery.webhook_secret",
+            "workspace.connector.credential",
+            "org.sso.oidc_client_secret",
+            "org.sso.saml_sp_private_key",
+            "org.ai.provider_credential",
+            "user.provider.google_token",
+            "user.provider.microsoft_token");
+    private static final Set<String> SECRET_ACTIONS = Set.of(
+            "secret_store.secret.use",
+            "secret_store.secret.use_failed",
+            "secret_store.secret.rewrap",
+            "secret_store.secret.rewrap_failed",
+            "secret_store.diagnostics.read");
+    private static final Set<String> SECRET_ENTITY_TYPES = Set.of("organization", "workspace", "user");
+    private static final Set<String> AI_PROVIDERS = Set.of(
+            "azure_openai", "bedrock", "openai_compatible", "vertex", "unresolved");
+    private static final Set<String> AI_FEATURES = Set.of(
+            "deal.brief", "deal.risk_rationale", "intro.rationale", "report.narrative",
+            "business_card.scan");
+    private static final Set<String> AI_OUTCOMES = Set.of("attempt", "success", "failure", "blocked");
+    private static final Set<String> AI_REASONS = Set.of(
+            "gate", "media_admission", "provider", "provider_capability", "serialization", "leak",
+            "provider_exception");
+    private static final Set<String> AI_PARSE_OUTCOMES = Set.of("parsed", "truncated", "malformed_output");
+    private static final Set<String> AI_STOP_REASONS = Set.of(
+            "stop", "length", "content_filter", "tool_calls", "function_call", "end_turn",
+            "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal", "safety",
+            "recitation", "blocklist", "prohibited_content", "spii", "malformed_function_call",
+            "language", "other");
+    private static final Set<String> AI_MEDIA_TYPES = Set.of("image/jpeg");
+    private static final Set<String> AI_MODEL_MARKERS = Set.of(
+            "anthropic", "claude", "gemini", "gemma", "gpt", "model", "o1", "o3", "o4", "llama",
+            "mistral", "mixtral", "deepseek", "qwen", "command", "cohere", "nova", "titan");
+    private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}");
+    private static final Pattern SAFE_REGION = Pattern.compile(
+            "(?:global|unresolved|[a-z]{2}(?:-gov)?-[a-z]+-[0-9]|[a-z]+-[a-z]+[0-9]|"
+                    + "(?:east|west|north|south|central)[a-z]*[0-9]?|"
+                    + "[a-z]+(?:east|west|north|south|central)[0-9]?)");
+    private static final Pattern SAFE_CORRELATION_ID = Pattern.compile(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}");
+    private static final Pattern SAFE_ERROR_TOKEN = Pattern.compile(
+            "[A-Za-z][A-Za-z0-9.$_]{0,119}(?:Exception|Error)");
 
     private final AuditLogMapper auditLogMapper;
     private final AuditIntegrityService auditIntegrityService;
@@ -501,6 +549,11 @@ public class AuditService {
     }
 
     private void redactAuditEntry(AuditLog entry) {
+        SensitiveAuditFamily family = sensitiveAuditFamily(entry);
+        if (family != SensitiveAuditFamily.NONE) {
+            redactSensitiveAuditEntry(entry, family);
+            return;
+        }
         String targetLabel = sanitizeAuditText(entry.getTargetLabel());
         String summary = sanitizeAuditText(entry.getSummary());
         SanitizedJson changes = sanitizeAuditJson(entry.getChanges());
@@ -515,6 +568,261 @@ public class AuditService {
         entry.setChanges(changes.value());
         entry.setContext(context.value());
         entry.setContentRedacted(redacted);
+    }
+
+    private void redactSensitiveAuditEntry(AuditLog entry, SensitiveAuditFamily family) {
+        String action = sensitiveAction(entry.getAction(), family);
+        Map<String, Object> metadata = projectSensitiveMetadata(entry.getChanges(), family);
+        String outcome = sensitiveOutcome(entry, family, metadata);
+        entry.setAction(action);
+        entry.setEntityType(sensitiveEntityType(entry.getEntityType(), family));
+        entry.setTargetLabel(sensitiveTarget(entry.getTargetLabel(), family, metadata));
+        entry.setOutcome(outcome);
+        entry.setSummary(sensitiveSummary(action, family, outcome));
+        entry.setChanges(toProjectedJson(metadata));
+        entry.setContext(projectSensitiveContext(entry.getContext()));
+        entry.setContentRedacted(true);
+    }
+
+    private Map<String, Object> projectSensitiveMetadata(String json, SensitiveAuditFamily family) {
+        Map<String, Object> projected = new LinkedHashMap<>();
+        Object parsed = readAuditJson(json);
+        if (!(parsed instanceof Map<?, ?> source)) {
+            return projected;
+        }
+        if (family == SensitiveAuditFamily.SECRET) {
+            copyNumber(source, projected, "secretId");
+            copyKnownString(source, projected, "purpose", SECRET_PURPOSES);
+            copyIdentifier(source, projected, "keyId");
+            copyIdentifier(source, projected, "previousKeyId");
+            copyIdentifier(source, projected, "newKeyId");
+            copyBoolean(source, projected, "rewrapped");
+            copyBoolean(source, projected, "healthy");
+            copyBoolean(source, projected, "available");
+            copyNumber(source, projected, "totalSecrets");
+            copyNumber(source, projected, "staleSecrets");
+            copyNumber(source, projected, "missingKeySecrets");
+            copyNumber(source, projected, "disabledKeySecrets");
+            copyNumber(source, projected, "mismatchedSecrets");
+            copyNumber(source, projected, "unsupportedAlgorithmSecrets");
+            return projected;
+        }
+        copyKnownString(source, projected, "provider", AI_PROVIDERS);
+        copyRegion(source, projected, "region");
+        copyModel(source, projected, "model");
+        copyKnownString(source, projected, "feature", AI_FEATURES);
+        copyKnownString(source, projected, "outcome", AI_OUTCOMES);
+        copyCorrelationId(source, projected, "correlationId");
+        copyNumber(source, projected, "messageCount");
+        copyNumber(source, projected, "mediaCount");
+        copyNumber(source, projected, "mediaBytes");
+        copyKnownStringList(source, projected, "mediaTypes", AI_MEDIA_TYPES);
+        copyBoolean(source, projected, "structured");
+        copyNumber(source, projected, "inputTokens");
+        copyNumber(source, projected, "outputTokens");
+        copyKnownString(source, projected, "stopReason", AI_STOP_REASONS);
+        copyNumber(source, projected, "demaskWarnings");
+        copyKnownString(source, projected, "parseOutcome", AI_PARSE_OUTCOMES);
+        copyKnownString(source, projected, "reason", AI_REASONS);
+        return projected;
+    }
+
+    private Object readAuditJson(String json) {
+        if (json == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private String toProjectedJson(Map<String, Object> metadata) {
+        if (metadata.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(metadata);
+        } catch (Exception exception) {
+            log.warn("Failed to serialize projected audit metadata", exception);
+            return null;
+        }
+    }
+
+    private String projectSensitiveContext(String json) {
+        Object parsed = readAuditJson(json);
+        if (!(parsed instanceof Map<?, ?> context)) {
+            return null;
+        }
+        Object error = metadataValue(context.get("error"));
+        if (!(error instanceof String string) || !SAFE_ERROR_TOKEN.matcher(string).matches()) {
+            return null;
+        }
+        return toProjectedJson(Map.of("error", string));
+    }
+
+    private static SensitiveAuditFamily sensitiveAuditFamily(AuditLog entry) {
+        if (entry.getAction() != null && entry.getAction().startsWith("secret_store.")) {
+            return SensitiveAuditFamily.SECRET;
+        }
+        if ("ai_call".equals(entry.getEntityType()) || "ai.llm.call".equals(entry.getAction())) {
+            return SensitiveAuditFamily.AI;
+        }
+        return SensitiveAuditFamily.NONE;
+    }
+
+    private static String sensitiveOutcome(
+            AuditLog entry, SensitiveAuditFamily family, Map<String, Object> metadata) {
+        if (family == SensitiveAuditFamily.AI && metadata.get("outcome") instanceof String outcome) {
+            return outcome;
+        }
+        Set<String> allowed = family == SensitiveAuditFamily.AI
+                ? AI_OUTCOMES
+                : Set.of(OUTCOME_SUCCESS, OUTCOME_FAILURE);
+        String outcome = entry.getOutcome();
+        return outcome != null && allowed.contains(outcome) ? outcome : null;
+    }
+
+    private static String sensitiveAction(String action, SensitiveAuditFamily family) {
+        if (family == SensitiveAuditFamily.AI) {
+            return "ai.llm.call";
+        }
+        return SECRET_ACTIONS.contains(action) ? action : "secret_store.operation";
+    }
+
+    private static String sensitiveEntityType(String entityType, SensitiveAuditFamily family) {
+        if (family == SensitiveAuditFamily.AI) {
+            return "ai_call";
+        }
+        return entityType != null && SECRET_ENTITY_TYPES.contains(entityType) ? entityType : null;
+    }
+
+    private static String sensitiveTarget(
+            String targetLabel, SensitiveAuditFamily family, Map<String, Object> metadata) {
+        if (family == SensitiveAuditFamily.SECRET) {
+            if (metadata.get("purpose") instanceof String purpose) {
+                return purpose;
+            }
+            return targetLabel != null && SECRET_PURPOSES.contains(targetLabel) ? targetLabel : "secret_store";
+        }
+        String provider = metadata.get("provider") instanceof String value ? value : "ai_call";
+        return metadata.get("region") instanceof String region ? provider + "/" + region : provider;
+    }
+
+    private static String sensitiveSummary(String action, SensitiveAuditFamily family, String outcome) {
+        if (family == SensitiveAuditFamily.AI) {
+            return outcome == null ? "AI call" : "AI call " + outcome;
+        }
+        return switch (action == null ? "" : action) {
+            case "secret_store.secret.use" -> "Secret used";
+            case "secret_store.secret.use_failed" -> "Secret use failed";
+            case "secret_store.secret.rewrap" -> "Secret rewrapped";
+            case "secret_store.secret.rewrap_failed" -> "Secret rewrap failed";
+            case "secret_store.diagnostics.read" -> "Secret store diagnostics read";
+            default -> "Secret store operation";
+        };
+    }
+
+    private static void copyKnownString(
+            Map<?, ?> source, Map<String, Object> target, String key, Set<String> allowed) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof String string && allowed.contains(string)) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyIdentifier(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof String string
+                && SAFE_IDENTIFIER.matcher(string).matches()
+                && !looksCredentialShaped(string)) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyRegion(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof String string && SAFE_REGION.matcher(string).matches()) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyModel(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (!(value instanceof String string)
+                || !SAFE_IDENTIFIER.matcher(string).matches()
+                || looksCredentialShaped(string)) {
+            return;
+        }
+        String normalized = string.toLowerCase(Locale.ROOT);
+        if (AI_MODEL_MARKERS.stream().anyMatch(normalized::contains)) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyCorrelationId(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof String string && SAFE_CORRELATION_ID.matcher(string).matches()) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyNumber(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if ((value instanceof Integer integer && integer >= 0)
+                || (value instanceof Long longValue && longValue >= 0)) {
+            target.put(key, value);
+        }
+    }
+
+    private static void copyBoolean(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof Boolean) {
+            target.put(key, value);
+        }
+    }
+
+    private static void copyKnownStringList(
+            Map<?, ?> source, Map<String, Object> target, String key, Set<String> allowed) {
+        Object value = metadataValue(source.get(key));
+        if (!(value instanceof List<?> list) || list.isEmpty() || list.size() > 16) {
+            return;
+        }
+        List<String> tokens = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof String string) || !allowed.contains(string)) {
+                return;
+            }
+            tokens.add(string);
+        }
+        target.put(key, tokens);
+    }
+
+    private static boolean looksCredentialShaped(String value) {
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return normalized.startsWith("sk-")
+                || normalized.startsWith("akia")
+                || normalized.startsWith("aiza")
+                || normalized.startsWith("ghp_")
+                || normalized.startsWith("xoxb-")
+                || normalized.startsWith("eyj")
+                || normalized.contains("raw-secret")
+                || normalized.contains("secret-token")
+                || normalized.contains("credential")
+                || normalized.contains("password")
+                || normalized.contains("api-key")
+                || normalized.contains("bearer");
+    }
+
+    private static Object metadataValue(Object value) {
+        if (!(value instanceof Map<?, ?> change)) {
+            return value;
+        }
+        if (change.containsKey("new")) {
+            return change.get("new");
+        }
+        return change.get("old");
     }
 
     private SanitizedJson sanitizeAuditJson(String json) {
@@ -704,9 +1012,12 @@ public class AuditService {
                 "actorId", "actorLabel", "currentActorLabel", "targetLabel", "outcome", "summary",
                 "changes", "context", "ipAddress", "userAgent", "sessionId", "requestId",
                 "chainScopeType", "chainScopeId", "chainIndex", "prevHash", "rowHash", "createdAt",
-                "contentRedacted", "integrityPayloadRedacted"));
+                "contentRedacted", "integrityPayloadRedacted", "integrityPayload"));
         for (AuditLog entry : entries) {
-            SanitizedJson integrityPayload = sanitizeAuditJson(auditIntegrityService.integrityPayload(entry));
+            boolean sensitive = sensitiveAuditFamily(entry) != SensitiveAuditFamily.NONE;
+            SanitizedJson integrityPayload = sensitive
+                    ? new SanitizedJson(null, true)
+                    : sanitizeAuditJson(auditIntegrityService.integrityPayload(entry));
             redactAuditEntry(entry);
             writeCsvRow(sb, List.of(
                     csvCell(entry.getId()),
@@ -733,7 +1044,8 @@ public class AuditService {
                     csvCell(entry.getPrevHash()),
                     csvCell(entry.getRowHash()),
                     csvCell(entry.getCreatedAt()),
-                    csvCell(entry.isContentRedacted() || integrityPayload.changed()),
+                    csvCell(entry.isContentRedacted()),
+                    csvCell(integrityPayload.changed()),
                     csvCell(integrityPayload.value())));
         }
         return sb.toString();
@@ -772,5 +1084,11 @@ public class AuditService {
     }
 
     private record SanitizedJson(String value, boolean changed) {
+    }
+
+    private enum SensitiveAuditFamily {
+        NONE,
+        SECRET,
+        AI
     }
 }
