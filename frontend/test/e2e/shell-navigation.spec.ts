@@ -78,23 +78,19 @@ test.describe("authenticated shell navigation", () => {
                 await route.fulfill({ response });
             });
 
-            await page.goto("/dashboard");
-            await expect.poll(() => requestCount).toBe(1);
-            await page.locator("#app-sidebar").getByRole("button", { name: /^E2E Harness/ }).click();
-            await page.getByRole("link", {
-                name: message("en", "common", "CommonSidebar.profile"),
-                exact: true,
-            }).click();
+            await page.goto("/me");
             await expect(page).toHaveURL(/\/me$/);
             await expect.poll(() => requestCount).toBe(1);
             expect(capturedWorkspaceHeader).toBe(String(workspaceId));
 
             releaseMedia();
+            await expect.poll(() => page.locator('img[src^="blob:"]').count()).toBeGreaterThanOrEqual(2);
             await expect(page.locator('img[src^="blob:"]').first()).toBeVisible();
             await page.getByRole("link", {
                 name: message("en", "common", "CommonSidebar.navDashboard"),
                 exact: true,
             }).click();
+            await expect(page).toHaveURL(/\/dashboard$/);
             await page.locator("#app-sidebar").getByRole("button", { name: /^E2E Harness/ }).click();
             await page.getByRole("link", {
                 name: message("en", "common", "CommonSidebar.profile"),
