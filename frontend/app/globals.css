@@ -349,6 +349,18 @@
   .note-prose :where(.selectedCell) {
     @apply bg-brand/10;
   }
+  .note-prose :where(.note-image-frame) {
+    @apply my-4 grid justify-items-center gap-2 rounded-lg border border-border bg-muted/20 p-2;
+  }
+  .note-prose :where(.note-image-frame img) {
+    @apply max-h-dvh max-w-full rounded-md object-contain;
+  }
+  .note-prose :where(.note-image-frame figcaption) {
+    @apply max-w-full truncate text-xs text-muted-foreground;
+  }
+  .note-prose :where(.note-image-fallback) {
+    @apply flex min-h-32 w-full items-center justify-center gap-2 rounded-md bg-muted px-4 py-8 text-sm text-muted-foreground;
+  }
   .note-prose :where(ul[data-type="taskList"]) {
     @apply my-2 list-none pl-0.5;
   }

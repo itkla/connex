@@ -18,6 +18,7 @@ import { Callout } from "./editor/Callout";
 import { Toggle, ToggleSummary } from "./editor/Toggle";
 import { NoteText, NoteUnderline } from "./editor/NoteUnderline";
 import { createMarkdownTableExtensions } from "./editor/MarkdownTable";
+import { createMarkdownImageExtension } from "./editor/MarkdownImage";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 
@@ -78,6 +79,7 @@ export default function RichNoteEditor({
             TaskList,
             TaskItem.configure({ nested: true }),
             ...createMarkdownTableExtensions(),
+            createMarkdownImageExtension(t("imageLoadError")),
             Markdown.configure({
                 html: false,
                 breaks: true,
@@ -150,6 +152,18 @@ export default function RichNoteEditor({
         tableDeleteRow: t("tableDeleteRow"),
         tableDeleteColumn: t("tableDeleteColumn"),
         tableDelete: t("tableDelete"),
+        image: t("image"),
+        imageTitle: t("imageTitle"),
+        imageDescription: t("imageDescription"),
+        imageSourceLabel: t("imageSourceLabel"),
+        imageSourcePlaceholder: t("imageSourcePlaceholder"),
+        imageAltLabel: t("imageAltLabel"),
+        imageAltPlaceholder: t("imageAltPlaceholder"),
+        imageInvalid: t("imageInvalid"),
+        imageAltRequired: t("imageAltRequired"),
+        imageApply: t("imageApply"),
+        imageUpdate: t("imageUpdate"),
+        imageRemove: t("imageRemove"),
     };
 
     return (

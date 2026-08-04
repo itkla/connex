@@ -12,6 +12,7 @@ import {
     Heading1,
     Heading2,
     Heading3,
+    ImagePlus,
     Italic,
     Link2,
     Link2Off,
@@ -46,6 +47,7 @@ import {
     DEFAULT_MARKDOWN_TABLE_OPTIONS,
     canDeleteMarkdownTableRow,
 } from "./MarkdownTable";
+import { normalizeNoteImageSource } from "./MarkdownImage";
 
 export type ToolbarLabels = {
     bold: string;
@@ -79,6 +81,18 @@ export type ToolbarLabels = {
     tableDeleteRow: string;
     tableDeleteColumn: string;
     tableDelete: string;
+    image: string;
+    imageTitle: string;
+    imageDescription: string;
+    imageSourceLabel: string;
+    imageSourcePlaceholder: string;
+    imageAltLabel: string;
+    imageAltPlaceholder: string;
+    imageInvalid: string;
+    imageAltRequired: string;
+    imageApply: string;
+    imageUpdate: string;
+    imageRemove: string;
 };
 
 type Props = { editor: Editor | null; labels: ToolbarLabels; compact?: boolean };
@@ -207,6 +221,123 @@ function LinkPopover({ editor, labels }: { editor: Editor; labels: ToolbarLabels
     );
 }
 
+function ImagePopover({ editor, labels }: { editor: Editor; labels: ToolbarLabels }) {
+    const sourceId = useId();
+    const altId = useId();
+    const sourceErrorId = `${sourceId}-error`;
+    const altErrorId = `${altId}-error`;
+    const [open, setOpen] = useState(false);
+    const [source, setSource] = useState("");
+    const [alt, setAlt] = useState("");
+    const [altTouched, setAltTouched] = useState(false);
+    const active = editor.isActive("image");
+    const normalizedSource = normalizeNoteImageSource(source);
+    const sourceInvalid = source.trim().length > 0 && normalizedSource === null;
+    const altMissing = alt.trim().length === 0;
+    const showAltError = altTouched && altMissing;
+    const canInsert = active || editor.can().setImage({ src: "https://connex.invalid/image", alt: "Image" });
+
+    const handleOpenChange = (nextOpen: boolean) => {
+        if (nextOpen) {
+            const attributes = editor.getAttributes("image");
+            setSource(typeof attributes.src === "string" ? attributes.src : "");
+            setAlt(typeof attributes.alt === "string" ? attributes.alt : "");
+            setAltTouched(false);
+        }
+        setOpen(nextOpen);
+    };
+
+    const applyImage = (event?: FormEvent) => {
+        event?.preventDefault();
+        const description = alt.trim();
+        if (!normalizedSource || !description) return;
+        if (active) {
+            editor.chain().focus().updateAttributes("image", { src: normalizedSource, alt: description }).run();
+        } else {
+            editor.chain().focus().setImage({ src: normalizedSource, alt: description }).run();
+        }
+        setOpen(false);
+    };
+
+    const removeImage = () => {
+        editor.chain().focus().deleteSelection().run();
+        setOpen(false);
+    };
+
+    return (
+        <Popover open={open} onOpenChange={handleOpenChange}>
+            <PopoverTrigger
+                type="button"
+                aria-label={labels.image}
+                aria-pressed={active}
+                title={labels.image}
+                disabled={!canInsert}
+                onMouseDown={(event) => event.preventDefault()}
+                className={cn(toolbarButtonClass(active), "disabled:pointer-events-none disabled:opacity-40")}
+            >
+                <ImagePlus className="size-4" />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80">
+                <PopoverTitle className="text-sm font-semibold text-foreground">{labels.imageTitle}</PopoverTitle>
+                <PopoverDescription className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {labels.imageDescription}
+                </PopoverDescription>
+                <form className="mt-4 grid gap-3" onSubmit={applyImage}>
+                    <div className="grid gap-1.5">
+                        <Label htmlFor={sourceId}>{labels.imageSourceLabel}</Label>
+                        <Input
+                            id={sourceId}
+                            value={source}
+                            onChange={(event) => setSource(event.target.value)}
+                            placeholder={labels.imageSourcePlaceholder}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            aria-invalid={sourceInvalid || undefined}
+                            aria-describedby={sourceInvalid ? sourceErrorId : undefined}
+                            autoFocus
+                        />
+                        {sourceInvalid ? (
+                            <p id={sourceErrorId} className="text-xs text-destructive" role="alert">
+                                {labels.imageInvalid}
+                            </p>
+                        ) : null}
+                    </div>
+                    <div className="grid gap-1.5">
+                        <Label htmlFor={altId}>{labels.imageAltLabel}</Label>
+                        <Input
+                            id={altId}
+                            value={alt}
+                            onChange={(event) => setAlt(event.target.value)}
+                            onBlur={() => setAltTouched(true)}
+                            placeholder={labels.imageAltPlaceholder}
+                            required
+                            aria-invalid={showAltError || undefined}
+                            aria-describedby={showAltError ? altErrorId : undefined}
+                        />
+                        {showAltError ? (
+                            <p id={altErrorId} className="text-xs text-destructive" role="alert">
+                                {labels.imageAltRequired}
+                            </p>
+                        ) : null}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        {active ? (
+                            <Button type="button" variant="ghost" size="sm" onClick={removeImage}>
+                                <Trash2 className="size-4" />
+                                {labels.imageRemove}
+                            </Button>
+                        ) : null}
+                        <Button type="submit" variant="brand" size="sm" disabled={!normalizedSource || altMissing}>
+                            {active ? labels.imageUpdate : labels.imageApply}
+                        </Button>
+                    </div>
+                </form>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
 export function InlineFormattingControls({
     editor,
     labels,
@@ -291,6 +422,7 @@ export function EditorToolbar({ editor, labels, compact = false }: Props) {
                     <ToolbarButton label={labels.tableDelete} disabled={!editor.can().deleteTable()} onClick={() => editor.chain().focus().deleteTable().run()} icon={Trash2} />
                 </>
             ) : null}
+            <ImagePopover editor={editor} labels={labels} />
         </div>
     );
 }
