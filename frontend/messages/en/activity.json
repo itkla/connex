@@ -119,7 +119,9 @@
     "standalone": "Standalone",
     "untitled": "Untitled",
     "open": "Open",
-    "actionsAria": "Note actions"
+    "actionsAria": "Note actions",
+    "showMore": "Show more notes",
+    "showingCount": "Showing {shown} of {total}"
   },
   "NotesQuickEditSheet": {
     "titleSingle": "Quick edit note",

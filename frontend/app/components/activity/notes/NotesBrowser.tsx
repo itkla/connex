@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
@@ -48,8 +48,11 @@ type Props = {
 type GroupBy = 'record' | 'none';
 type SortBy = 'updated' | 'created' | 'title';
 type NoteGroup = { id: string; label: string | null; notes: Note[] };
+type VisibleNoteGroup = NoteGroup & { total: number };
 
 const STANDALONE = '__standalone';
+const INITIAL_VISIBLE_NOTES = 40;
+const NOTES_PAGE_SIZE = 40;
 
 export default function NotesBrowser({ notes, persons, deals, users }: Props) {
     const router = useRouter();
@@ -62,7 +65,9 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
     const [sortBy, setSortBy] = useState<SortBy>('updated');
     const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
-    const returnSnapshot = useRecordReturnScroll('notes', true);
+    const visibleKey = `${query.trim()}|${groupBy}|${sortBy}`;
+    const [visibleState, setVisibleState] = useState({ key: visibleKey, count: INITIAL_VISIBLE_NOTES });
+    const visibleCount = visibleState.key === visibleKey ? visibleState.count : INITIAL_VISIBLE_NOTES;
 
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
@@ -94,6 +99,13 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
             return haystack.includes(needle);
         });
     }, [notes, query, personById, dealById, userById]);
+    const restoreVisibleCount = useCallback((count: number) => {
+        setVisibleState({
+            key: visibleKey,
+            count: Math.min(Math.max(count, INITIAL_VISIBLE_NOTES), filtered.length),
+        });
+    }, [filtered.length, visibleKey]);
+    const returnSnapshot = useRecordReturnScroll('notes', true, visibleCount, restoreVisibleCount);
 
     const groups = useMemo<NoteGroup[]>(() => {
         const sorted = [...filtered].sort((a, b) => {
@@ -136,6 +148,22 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
             return (b.notes[0]?.[key] ?? '').localeCompare(a.notes[0]?.[key] ?? '');
         });
     }, [filtered, groupBy, sortBy, locale, personById, dealById, t]);
+
+    const visibleGroups = useMemo<VisibleNoteGroup[]>(() => {
+        let remaining = visibleCount;
+        const visible: VisibleNoteGroup[] = [];
+        for (const group of groups) {
+            if (remaining === 0) break;
+            const groupNotes = group.notes.slice(0, remaining);
+            if (groupNotes.length > 0) {
+                visible.push({ ...group, notes: groupNotes, total: group.notes.length });
+                remaining -= groupNotes.length;
+            }
+        }
+        return visible;
+    }, [groups, visibleCount]);
+    const shownCount = Math.min(visibleCount, filtered.length);
+    const hasMore = shownCount < filtered.length;
 
     const hasActiveFilters = query.trim() !== '' || groupBy !== 'record' || sortBy !== 'updated';
     const chips: FilterChipData[] = query.trim()
@@ -249,12 +277,12 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                         </div>
                     ) : (
                         <div className="space-y-8">
-                            {groups.map((group) => (
+                            {visibleGroups.map((group) => (
                                 <section key={group.id}>
                                     {group.label && (
                                         <SectionHeader
                                             title={group.label}
-                                            action={<Badge variant="outline">{group.notes.length}</Badge>}
+                                            action={<Badge variant="outline">{group.total}</Badge>}
                                         />
                                     )}
                                     <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
@@ -287,6 +315,22 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                                     </ul>
                                 </section>
                             ))}
+                            <div className="flex flex-col items-center gap-3">
+                                <p className="text-xs text-muted-foreground">
+                                    {t('showingCount', { shown: shownCount, total: filtered.length })}
+                                </p>
+                                {hasMore ? (
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => setVisibleState({
+                                            key: visibleKey,
+                                            count: Math.min(visibleCount + NOTES_PAGE_SIZE, filtered.length),
+                                        })}
+                                    >
+                                        {t('showMore')}
+                                    </Button>
+                                ) : null}
+                            </div>
                         </div>
                     )}
                 </Rise>
@@ -333,7 +377,13 @@ function NoteRow({
     const RecordIcon = recordKind === 'deal' ? BriefcaseIcon : UserIcon;
 
     return (
-        <li className="group relative flex items-center gap-3 px-6 py-3.5 transition-colors hover:bg-muted/40">
+        <li className="group relative flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/40">
+            {author ? (
+                <Avatar size="sm" className="mt-0.5 hidden ring-1 ring-border sm:flex" title={authorName ?? undefined}>
+                    <AvatarImage src={author.profilePictureUrl} alt="" />
+                    <AvatarFallback>{(authorName ?? '?').slice(0, 1).toUpperCase()}</AvatarFallback>
+                </Avatar>
+            ) : null}
             <Link
                 href={`/activity/notes/${note.id}`}
                 onClick={(event) => {
@@ -354,50 +404,43 @@ function NoteRow({
             >
                 <span className="truncate font-medium text-foreground">{title}</span>
                 {snippet ? (
-                    <span className="mt-0.5 truncate text-sm text-muted-foreground">{snippet}</span>
+                    <span className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{snippet}</span>
                 ) : null}
-            </Link>
-            <div className="flex shrink-0 items-center gap-4">
-                {recordLabel ? (
-                    <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:inline-flex">
-                        <RecordIcon className="h-3.5 w-3.5" />
-                        <span className="max-w-[10rem] truncate">{recordLabel}</span>
-                    </span>
-                ) : null}
-                {author ? (
-                    <Avatar size="sm" className="hidden ring-1 ring-border md:flex" title={authorName ?? undefined}>
-                        <AvatarImage src={author.profilePictureUrl} alt={authorName ?? ''} />
-                        <AvatarFallback>{(authorName ?? '?').slice(0, 1).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                ) : null}
-                <span className="hidden w-20 shrink-0 text-right text-xs text-muted-foreground lg:block">
-                    {formatDate(note.updatedAt ?? note.createdAt, locale)}
+                <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {authorName ? <span>{authorName}</span> : null}
+                    {recordLabel ? (
+                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                            <RecordIcon className="size-3.5 shrink-0" />
+                            <span className="max-w-[12rem] truncate">{recordLabel}</span>
+                        </span>
+                    ) : null}
+                    <span>{formatDate(note.updatedAt ?? note.createdAt, locale)}</span>
                 </span>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <button
-                            type="button"
-                            aria-label={labels.actionsAria}
-                            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100"
-                        >
-                            <EllipsisHorizontalIcon className="h-5 w-5" />
-                        </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => onOpen()}>
-                            <ArrowUpRightIcon className="h-4 w-4" />
-                            {labels.open}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            className="text-destructive hover:bg-destructive/10"
-                            onSelect={() => onDelete()}
-                        >
-                            <TrashIcon className="h-4 w-4" />
-                            {labels.delete}
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </div>
+            </Link>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        aria-label={labels.actionsAria}
+                        className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-100 transition hover:bg-accent hover:text-foreground focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                    >
+                        <EllipsisHorizontalIcon className="size-5" />
+                    </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => onOpen()}>
+                        <ArrowUpRightIcon className="size-4" />
+                        {labels.open}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                        className="text-destructive hover:bg-destructive/10"
+                        onSelect={() => onDelete()}
+                    >
+                        <TrashIcon className="size-4" />
+                        {labels.delete}
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
         </li>
     );
 }

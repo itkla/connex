@@ -44,6 +44,7 @@ const RETURN_SELECTION_KEY = 'connex:record-return-selection';
 const RETURN_HISTORY_STATE_KEY = 'connexRecordReturn';
 const RETURN_CONTEXT_MAX_AGE_MS = 30 * 60 * 1000;
 const MAX_RETURN_SELECTION_SIZE = 1000;
+const MAX_RETURN_VISIBLE_COUNT = 100_000;
 
 type RecordReturnContext = {
     detailPath: string;
@@ -56,6 +57,7 @@ export type RecordReturnSelectionSnapshot = {
     userId: number;
     workspaceId: number;
     ids: readonly number[];
+    visibleCount?: number;
 };
 
 type RecordReturnSelection = {
@@ -65,6 +67,7 @@ type RecordReturnSelection = {
     workspaceId: number;
     selectedIds: number[];
     scrollTop: number;
+    visibleCount?: number;
     navigationId: string;
     createdAt: number;
 };
@@ -72,6 +75,7 @@ type RecordReturnSelection = {
 export type RestoredRecordSelection = {
     ids: number[];
     scrollTop: number;
+    visibleCount?: number;
 };
 
 function isRecordReturnContext(value: unknown): value is RecordReturnContext {
@@ -134,6 +138,7 @@ function isRecordReturnSelection(value: unknown): value is RecordReturnSelection
         && typeof value.scrollTop === 'number'
         && Number.isFinite(value.scrollTop)
         && value.scrollTop >= 0
+        && (!('visibleCount' in value) || isReturnVisibleCount(value.visibleCount))
         && 'navigationId' in value
         && typeof value.navigationId === 'string'
         && value.navigationId.length > 0
@@ -181,6 +186,7 @@ function normalizeSelection(
         || !isPositiveSafeInteger(selection.userId)
         || !isPositiveSafeInteger(selection.workspaceId)
         || selection.ids.length > MAX_RETURN_SELECTION_SIZE
+        || (selection.visibleCount !== undefined && !isReturnVisibleCount(selection.visibleCount))
     ) {
         return null;
     }
@@ -188,6 +194,10 @@ function normalizeSelection(
     return ids.length <= MAX_RETURN_SELECTION_SIZE && ids.every(isPositiveSafeInteger)
         ? ids
         : null;
+}
+
+function isReturnVisibleCount(value: unknown): value is number {
+    return isPositiveSafeInteger(value) && value <= MAX_RETURN_VISIBLE_COUNT;
 }
 
 /** Builds a record-detail URL carrying its exact originating list state. */
@@ -233,6 +243,7 @@ export function recordDetailNavigationPath(
                 workspaceId: selection.workspaceId,
                 selectedIds,
                 scrollTop,
+                visibleCount: selection.visibleCount,
                 navigationId,
                 createdAt,
             };
@@ -326,6 +337,7 @@ export function consumeRecordReturnSelection(
         return {
             ids: [...new Set(selection.selectedIds)],
             scrollTop: selection.scrollTop,
+            ...(selection.visibleCount !== undefined ? { visibleCount: selection.visibleCount } : {}),
         };
     } catch {
         discard();

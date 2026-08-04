@@ -119,7 +119,9 @@
     "standalone": "スタンドアロン",
     "untitled": "無題",
     "open": "開く",
-    "actionsAria": "ノートの操作"
+    "actionsAria": "ノートの操作",
+    "showMore": "さらにノートを表示",
+    "showingCount": "{total} 件中 {shown} 件を表示"
   },
   "NotesQuickEditSheet": {
     "titleSingle": "メモをクイック編集",
