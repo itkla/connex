@@ -33,13 +33,7 @@ export type CustomRangeLabels = {
     apply: string;
 };
 
-function formatWindow(window: AnalyticsWindow, locale: string, includeYear: boolean): string {
-    const formatter = new Intl.DateTimeFormat(locale, {
-        ...(includeYear ? { year: 'numeric' as const } : {}),
-        month: 'short',
-        day: 'numeric',
-        timeZone: 'UTC',
-    });
+function formatWindow(window: AnalyticsWindow, formatter: Intl.DateTimeFormat): string {
     return `${formatter.format(new Date(`${window.from}T00:00:00Z`))} – ${formatter.format(new Date(`${window.to}T00:00:00Z`))}`;
 }
 
@@ -64,6 +58,15 @@ export default function CustomRangePopover({
     const [open, setOpen] = useState(false);
     const [from, setFrom] = useState(value.from);
     const [to, setTo] = useState(value.to);
+    const formatters = useMemo(() => ({
+        compact: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+        full: new Intl.DateTimeFormat(locale, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            timeZone: 'UTC',
+        }),
+    }), [locale]);
     const parsed = useMemo(() => parseCustomAnalyticsWindow(from, to), [from, to]);
     const complete = from.length > 0 && to.length > 0;
     const days = analyticsWindowDays({ from, to });
@@ -86,13 +89,13 @@ export default function CustomRangePopover({
             <PopoverTrigger
                 type="button"
                 aria-pressed={active}
-                aria-label={active ? `${labels.custom}: ${formatWindow(value, locale, true)}` : labels.custom}
+                aria-label={active ? `${labels.custom}: ${formatWindow(value, formatters.full)}` : labels.custom}
                 className={className}
             >
                 {active ? thumb : null}
                 <span className="relative z-10 inline-flex items-center gap-1.5">
                     <CalendarDaysIcon className="size-3.5 text-muted-foreground" />
-                    {active ? formatWindow(value, locale, false) : labels.custom}
+                    {active ? formatWindow(value, formatters.compact) : labels.custom}
                 </span>
             </PopoverTrigger>
             <PopoverContent align="end">
