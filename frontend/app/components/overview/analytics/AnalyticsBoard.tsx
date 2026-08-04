@@ -569,7 +569,7 @@ export default function AnalyticsBoard({
                                 currency={currency}
                                 snapshot={{
                                     activityCount: activityTotal,
-                                    warmth: ownerScope.mode === 'all'
+                                    warmth: ownerScope.mode === 'all' && warm.tracked > 0
                                         ? { share: warm.share, trackedContacts: warm.tracked }
                                         : undefined,
                                 }}
