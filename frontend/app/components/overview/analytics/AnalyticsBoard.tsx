@@ -56,7 +56,7 @@ import { formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
 import TopDeals from '@/app/components/records/deals/TopDeals';
 
-import Panel from '@/app/components/overview/analytics/Panel';
+import PanelBase from '@/app/components/overview/analytics/Panel';
 import RangeControl from '@/app/components/overview/analytics/RangeControl';
 import KpiCluster from '@/app/components/overview/analytics/KpiCluster';
 import RevenueTrend from '@/app/components/overview/analytics/RevenueTrend';
@@ -147,6 +147,19 @@ function Reveal({
             {children}
         </motion.div>
     );
+}
+
+function SectionHeading({ title, description }: { title: string; description: string }) {
+    return (
+        <div>
+            <h2 className="text-xl font-bold tracking-tight text-foreground md:text-2xl">{title}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        </div>
+    );
+}
+
+function Panel(props: Omit<React.ComponentProps<typeof PanelBase>, 'headingLevel'>) {
+    return <PanelBase {...props} headingLevel={3} />;
 }
 
 export default function AnalyticsBoard({
@@ -434,7 +447,14 @@ export default function AnalyticsBoard({
         introLineage.length > 0 ||
         recentMoves.length > 0 ||
         tasksTracked > 0;
-    const relBase = hasDeals ? 6 : 0;
+    const activityTotal = useMemo(
+        () => activityBuckets.reduce(
+            (total, bucket) => total + bucket.call + bucket.email + bucket.meeting + bucket.note + bucket.other,
+            0,
+        ),
+        [activityBuckets],
+    );
+    const relationshipRevealBase = hasDeals ? 8 : 3;
 
     const rangeOptions: { key: RangeKey; label: string }[] = [
         { key: '30d', label: t('range30d') },
@@ -538,200 +558,215 @@ export default function AnalyticsBoard({
                 <FirstRun />
             ) : (
                 <>
-            {hasDeals && (
-                <>
-            <Reveal index={0} reduce={reduce}>
-                <KpiCluster kpis={kpis} currency={currency} />
-            </Reveal>
-
-            <Reveal index={1} reduce={reduce}>
-                <Panel
-                    title={t('revenueTitle')}
-                    subtitle={tRevenue('subtitle')}
-                    info={t('revenueInfo')}
-                    infoLabel={t('infoAria')}
-                    action={
-                        <div className="text-right">
-                            <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                                {tRevenue('openPipeline')}
-                            </div>
-                            <div className="mt-0.5 text-lg font-semibold tabular-nums text-foreground">
-                                {formatCompactCurrency(openPipeline, currency, locale)}
-                            </div>
-                        </div>
-                    }
-                >
-                    <RevenueTrend periods={revenuePeriods} currency={currency} timezone={timezone} />
-                </Panel>
-            </Reveal>
-
-            <Reveal index={2} reduce={reduce}>
-                <Panel
-                    title={t('pipelineValueTitle')}
-                    info={t('pipelineValueInfo')}
-                    infoLabel={t('infoAria')}
-                >
-                    <PipelineValue
-                        values={pipelineValues}
-                        pipelines={pipelines}
-                        currency={currency}
-                    />
-                </Panel>
-            </Reveal>
-
-            <Reveal index={3} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-                <Panel
-                    title={t('stageTitle')}
-                    info={t('stageInfo')}
-                    infoLabel={t('infoAria')}
-                    className="lg:col-span-3"
-                >
-                    <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />
-                </Panel>
-                <Panel
-                    title={t('winRateTitle')}
-                    subtitle={tWinRate('subtitle')}
-                    info={t('winRateInfo')}
-                    infoLabel={t('infoAria')}
-                    className="lg:col-span-2"
-                >
-                    <WinRateDonut kpis={kpis} currency={currency} />
-                </Panel>
-            </Reveal>
-
-            <Reveal index={4} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-                <Panel
-                    title={t('activityTitle')}
-                    subtitle={tActivity('subtitle')}
-                    info={t('activityInfo')}
-                    infoLabel={t('infoAria')}
-                    className="lg:col-span-3"
-                >
-                    <ActivityVolume buckets={activityBuckets} granularity={granularity} />
-                </Panel>
-                <Panel
-                    title={t('teamTitle')}
-                    subtitle={tTeam('subtitle')}
-                    info={t('teamInfo')}
-                    infoLabel={t('infoAria')}
-                    className="lg:col-span-2"
-                >
-                    <TeamLeaderboard users={users} standings={leaderboard} />
-                </Panel>
-            </Reveal>
-
-            <Reveal index={5} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-                <Panel
-                    title={t('agingTitle')}
-                    info={t('agingInfo')}
-                    infoLabel={t('infoAria')}
-                    className="lg:col-span-3"
-                >
-                    <DealsAging aging={aging} stageById={stageById} />
-                </Panel>
-                <Panel
-                    title={t('topDealsTitle')}
-                    info={t('topDealsInfo')}
-                    infoLabel={t('infoAria')}
-                    className="lg:col-span-2"
-                >
-                    <TopDeals data={topDeals} />
-                </Panel>
-            </Reveal>
-                </>
-            )}
-
-            {hasRelationshipData && (
-                <>
-                    <Reveal index={relBase} reduce={reduce}>
-                        <div className={hasDeals ? 'pt-4' : undefined}>
-                            <h2 className="text-xl font-bold tracking-tight text-foreground md:text-2xl">
-                                {t('relationshipsTitle')}
-                            </h2>
-                            <p className="mt-1 text-sm text-muted-foreground">{t('relationshipsSubtitle')}</p>
-                        </div>
+                    <Reveal index={0} reduce={reduce}>
+                        <SectionHeading title={t('overviewTitle')} description={t('overviewSubtitle')} />
                     </Reveal>
 
-                    <Reveal index={relBase + 1} reduce={reduce}>
-                        <RelationshipKpis data={relationshipKpis} currency={currency} />
-                    </Reveal>
-
-                    <Reveal index={relBase + 2} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-                        <Panel
-                            title={t('warmthTitle')}
-                            subtitle={t('warmthSubtitle')}
-                            info={t('warmthInfo')}
-                            infoLabel={t('infoAria')}
-                            className="lg:col-span-3"
-                        >
-                            <WarmthDistribution summary={warmth} />
-                        </Panel>
-                        <Panel
-                            title={t('decayTitle')}
-                            info={t('decayInfo')}
-                            infoLabel={t('infoAria')}
-                            className="lg:col-span-2"
-                        >
-                            <RelationshipDecay decay={warmth.contactDecay} />
-                        </Panel>
-                    </Reveal>
-
-                    <Reveal index={relBase + 3} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-                        <Panel
-                            title={t('dealRiskTitle')}
-                            info={t('dealRiskInfo')}
-                            infoLabel={t('infoAria')}
-                            className="lg:col-span-3"
-                        >
-                            <DealRiskBreakdown
-                                summary={riskSummary}
+                    <Reveal index={1} reduce={reduce}>
+                        {hasDeals ? (
+                            <KpiCluster
+                                kpis={kpis}
                                 currency={currency}
-                                truncated={riskAnalytics.truncated}
-                            />
-                        </Panel>
-                        <Panel
-                            title={t('taskStatusTitle')}
-                            subtitle={t('taskStatusSubtitle')}
-                            info={t('taskStatusInfo')}
-                            infoLabel={t('infoAria')}
-                            className="lg:col-span-2"
-                        >
-                            <TaskStatusDonut
-                                counts={{
-                                    todo: tasks.todo,
-                                    inProgress: tasks.inProgress,
-                                    done: tasks.done,
+                                snapshot={{
+                                    activityCount: activityTotal,
+                                    warmth: ownerScope.mode === 'all'
+                                        ? { share: warm.share, trackedContacts: warm.tracked }
+                                        : undefined,
                                 }}
                             />
-                        </Panel>
+                        ) : (
+                            <RelationshipKpis data={relationshipKpis} currency={currency} />
+                        )}
                     </Reveal>
 
-                    <Reveal index={relBase + 4} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-                        <Panel
-                            title={t('introsTitle')}
-                            subtitle={t('introsSubtitle')}
-                            info={t('introsInfo')}
-                            infoLabel={t('infoAria')}
-                            className="lg:col-span-3"
-                        >
-                            <IntroActivity
-                                suggestions={introSuggestions}
-                                lineage={introLineage}
-                                analyticsWindow={analyticsWindow}
-                                granularity={granularity}
-                            />
-                        </Panel>
-                        <Panel
-                            title={t('movesTitle')}
-                            info={t('movesInfo')}
-                            infoLabel={t('infoAria')}
-                            className="lg:col-span-2"
-                        >
-                            <RecentMovesList moves={recentMoves} />
-                        </Panel>
+                    {hasDeals && (
+                        <>
+                            <Reveal index={2} reduce={reduce}>
+                                <SectionHeading title={t('trendsTitle')} description={t('trendsSubtitle')} />
+                            </Reveal>
+
+                            <Reveal index={3} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                <Panel
+                                    title={t('revenueTitle')}
+                                    subtitle={tRevenue('subtitle')}
+                                    info={t('revenueInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-3"
+                                    action={
+                                        <div className="text-right">
+                                            <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                                {tRevenue('openPipeline')}
+                                            </div>
+                                            <div className="mt-0.5 text-lg font-semibold tabular-nums text-foreground">
+                                                {formatCompactCurrency(openPipeline, currency, locale)}
+                                            </div>
+                                        </div>
+                                    }
+                                >
+                                    <RevenueTrend periods={revenuePeriods} currency={currency} timezone={timezone} />
+                                </Panel>
+                                <Panel
+                                    title={t('activityTitle')}
+                                    subtitle={tActivity('subtitle')}
+                                    info={t('activityInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-2"
+                                >
+                                    <ActivityVolume buckets={activityBuckets} granularity={granularity} />
+                                </Panel>
+                            </Reveal>
+                        </>
+                    )}
+
+                    <Reveal index={hasDeals ? 4 : 2} reduce={reduce}>
+                        <SectionHeading title={t('diagnosticsTitle')} description={t('diagnosticsSubtitle')} />
                     </Reveal>
-                </>
-            )}
+
+                    {hasDeals && (
+                        <>
+                            <Reveal index={5} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                <Panel
+                                    title={t('pipelineValueTitle')}
+                                    info={t('pipelineValueInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-3"
+                                >
+                                    <PipelineValue
+                                        values={pipelineValues}
+                                        pipelines={pipelines}
+                                        currency={currency}
+                                    />
+                                </Panel>
+                                <Panel
+                                    title={t('topDealsTitle')}
+                                    info={t('topDealsInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-2"
+                                >
+                                    <TopDeals data={topDeals} />
+                                </Panel>
+                            </Reveal>
+
+                            <Reveal index={6} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                <Panel
+                                    title={t('stageTitle')}
+                                    info={t('stageInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-3"
+                                >
+                                    <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />
+                                </Panel>
+                                <Panel
+                                    title={t('winRateTitle')}
+                                    subtitle={tWinRate('subtitle')}
+                                    info={t('winRateInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-2"
+                                >
+                                    <WinRateDonut kpis={kpis} currency={currency} />
+                                </Panel>
+                            </Reveal>
+
+                            <Reveal index={7} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                <Panel
+                                    title={t('agingTitle')}
+                                    info={t('agingInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-3"
+                                >
+                                    <DealsAging aging={aging} stageById={stageById} />
+                                </Panel>
+                                <Panel
+                                    title={t('teamTitle')}
+                                    subtitle={tTeam('subtitle')}
+                                    info={t('teamInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-2"
+                                >
+                                    <TeamLeaderboard users={users} standings={leaderboard} />
+                                </Panel>
+                            </Reveal>
+                        </>
+                    )}
+
+                    {hasRelationshipData && (
+                        <>
+                            <Reveal index={relationshipRevealBase} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                <Panel
+                                    title={t('warmthTitle')}
+                                    subtitle={t('warmthSubtitle')}
+                                    info={t('warmthInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-3"
+                                >
+                                    <WarmthDistribution summary={warmth} />
+                                </Panel>
+                                <Panel
+                                    title={t('decayTitle')}
+                                    info={t('decayInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-2"
+                                >
+                                    <RelationshipDecay decay={warmth.contactDecay} />
+                                </Panel>
+                            </Reveal>
+
+                            <Reveal index={relationshipRevealBase + 1} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                <Panel
+                                    title={t('dealRiskTitle')}
+                                    info={t('dealRiskInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-3"
+                                >
+                                    <DealRiskBreakdown
+                                        summary={riskSummary}
+                                        currency={currency}
+                                        truncated={riskAnalytics.truncated}
+                                    />
+                                </Panel>
+                                <Panel
+                                    title={t('taskStatusTitle')}
+                                    subtitle={t('taskStatusSubtitle')}
+                                    info={t('taskStatusInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-2"
+                                >
+                                    <TaskStatusDonut
+                                        counts={{
+                                            todo: tasks.todo,
+                                            inProgress: tasks.inProgress,
+                                            done: tasks.done,
+                                        }}
+                                    />
+                                </Panel>
+                            </Reveal>
+
+                            <Reveal index={relationshipRevealBase + 2} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                <Panel
+                                    title={t('introsTitle')}
+                                    subtitle={t('introsSubtitle')}
+                                    info={t('introsInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-3"
+                                >
+                                    <IntroActivity
+                                        suggestions={introSuggestions}
+                                        lineage={introLineage}
+                                        analyticsWindow={analyticsWindow}
+                                        granularity={granularity}
+                                    />
+                                </Panel>
+                                <Panel
+                                    title={t('movesTitle')}
+                                    info={t('movesInfo')}
+                                    infoLabel={t('infoAria')}
+                                    className="lg:col-span-2"
+                                >
+                                    <RecentMovesList moves={recentMoves} />
+                                </Panel>
+                            </Reveal>
+                        </>
+                    )}
                 </>
             )}
         </div>

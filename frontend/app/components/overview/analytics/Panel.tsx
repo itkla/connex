@@ -10,6 +10,7 @@ export default function Panel({
     infoLabel,
     className,
     bodyClassName,
+    headingLevel = 2,
     children,
 }: {
     title?: string;
@@ -19,8 +20,11 @@ export default function Panel({
     infoLabel?: string;
     className?: string;
     bodyClassName?: string;
+    headingLevel?: 2 | 3;
     children: ReactNode;
 }) {
+    const Heading = headingLevel === 3 ? 'h3' : 'h2';
+
     return (
         <section className={cn('flex h-full flex-col rounded-2xl border border-border bg-card p-6', className)}>
             {(title || action) && (
@@ -28,9 +32,9 @@ export default function Panel({
                     <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                             {title && (
-                                <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                <Heading className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                     {title}
-                                </h2>
+                                </Heading>
                             )}
                             {info && title && <InfoTip title={title} body={info} label={infoLabel ?? title} />}
                         </div>

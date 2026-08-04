@@ -17,14 +17,23 @@ function PanelSkeleton({ className, chart = 'h-64' }: { className?: string; char
 
 function KpiRowSkeleton() {
     return (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="flex flex-col gap-4 rounded-2xl border border-border bg-card px-5 py-4">
                     <Skeleton className="h-3 w-20" />
                     <Skeleton className="h-8 w-24" />
                     <Skeleton className="h-3 w-16" />
                 </div>
             ))}
+        </div>
+    );
+}
+
+function SectionHeadingSkeleton() {
+    return (
+        <div className="space-y-2">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-4 w-80 max-w-full" />
         </div>
     );
 }
@@ -40,10 +49,17 @@ export default function AnalyticsLoading() {
                 <Skeleton className="h-9 w-56 rounded-full" />
             </header>
 
+            <SectionHeadingSkeleton />
             <KpiRowSkeleton />
 
-            <PanelSkeleton chart="h-72" />
-            <PanelSkeleton chart="h-56" />
+            <SectionHeadingSkeleton />
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                <PanelSkeleton className="lg:col-span-3" chart="h-72" />
+                <PanelSkeleton className="lg:col-span-2" />
+            </div>
+
+            <SectionHeadingSkeleton />
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
                 <PanelSkeleton className="lg:col-span-3" />
@@ -53,18 +69,6 @@ export default function AnalyticsLoading() {
                 <PanelSkeleton className="lg:col-span-3" />
                 <PanelSkeleton className="lg:col-span-2" chart="h-48" />
             </div>
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-                <PanelSkeleton className="lg:col-span-3" />
-                <PanelSkeleton className="lg:col-span-2" chart="h-48" />
-            </div>
-
-            <div className="space-y-2 pt-4">
-                <Skeleton className="h-7 w-56" />
-                <Skeleton className="h-4 w-80" />
-            </div>
-
-            <KpiRowSkeleton />
-
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
                 <PanelSkeleton className="lg:col-span-3" />
                 <PanelSkeleton className="lg:col-span-2" chart="h-48" />
