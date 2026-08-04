@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.controllers;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -10,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.WorkflowRunDetailDto;
 import ooo.klae.connex.backend.dto.WorkflowRunPageDto;
+import ooo.klae.connex.backend.dto.WorkflowRunOperationDto;
+import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 
 /** HTTP read contract for merged canonical and retained legacy workflow run history. */
@@ -19,6 +22,7 @@ import ooo.klae.connex.backend.services.WorkflowRunReadService;
 public class WorkflowRunController {
 
     private final WorkflowRunReadService runReadService;
+    private final WorkflowRunOperationService runOperationService;
 
     @GetMapping
     public WorkflowRunPageDto list(
@@ -33,5 +37,19 @@ public class WorkflowRunController {
             @PathVariable int workflowId,
             @PathVariable String runKey) {
         return runReadService.getRun(workflowId, runKey);
+    }
+
+    @PostMapping("/{runKey}/cancel")
+    public WorkflowRunOperationDto cancel(
+            @PathVariable int workflowId,
+            @PathVariable String runKey) {
+        return runOperationService.cancel(workflowId, runKey);
+    }
+
+    @PostMapping("/{runKey}/retry")
+    public WorkflowRunOperationDto retry(
+            @PathVariable int workflowId,
+            @PathVariable String runKey) {
+        return runOperationService.retry(workflowId, runKey);
     }
 }

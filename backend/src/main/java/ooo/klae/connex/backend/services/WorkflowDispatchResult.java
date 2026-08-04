@@ -8,7 +8,7 @@ public record WorkflowDispatchResult(
     int rejected
 ) {
 
-    /** Empty result for a disabled canonical runtime or an unsupported dispatch. */
+    /** Empty result for an unsupported dispatch. */
     public static WorkflowDispatchResult empty() {
         return new WorkflowDispatchResult(0, 0, 0, 0);
     }

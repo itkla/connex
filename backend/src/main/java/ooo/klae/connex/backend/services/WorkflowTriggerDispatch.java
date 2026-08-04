@@ -2,7 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.time.Instant;
 
-/** Stable trigger envelope consumed by the immediate runtime and the future durable outbox. */
+/** Stable trigger envelope persisted by durable workflow intake. */
 public interface WorkflowTriggerDispatch {
 
     int workspaceId();

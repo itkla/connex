@@ -36,11 +36,25 @@ class WorkflowRunMapperXmlTest {
         assertScoped(configuration, "getById", workflowIdentity);
         assertScoped(configuration, "getByIdInWorkspace", runIdentity);
         assertScoped(configuration, "getByIdForUpdate", runIdentity);
+        assertScoped(configuration, "getOwnedByIdForUpdate", Map.of(
+            "workspaceId", 7, "id", 31L, "leaseOwner", "owner"));
         assertScoped(configuration, "getRunningByTrigger", Map.of(
             "workspaceId", 7, "workflowId", 11, "triggerKey", "bucket", "limit", 129));
         assertScoped(configuration, "nextSequence", Map.of(
             "workspaceId", 7, "workflowRunId", 31L));
         assertScoped(configuration, "insertStep", step);
+        assertScoped(configuration, "findDueRunForUpdate", Map.of("workspaceId", 7));
+        assertScoped(configuration, "leaseRun", Map.of(
+            "workspaceId", 7,
+            "id", 31L,
+            "leaseOwner", "owner",
+            "leaseSeconds", 120L,
+            "maxDispatches", 256));
+        assertScoped(configuration, "clearClaimedRetryWait", Map.of(
+            "workspaceId", 7,
+            "id", 31L,
+            "expectedNodeId", "action",
+            "leaseOwner", "owner"));
         assertScoped(configuration, "advanceRun", Map.of(
             "workspaceId", 7,
             "id", 31L,
@@ -104,6 +118,14 @@ class WorkflowRunMapperXmlTest {
             "expectedNodeId", "action",
             "nextNodeId", "end"))
             .contains("status = 'running' AND current_node_id = ?"));
+        String lease = sql(configuration, "leaseRun", Map.of(
+            "workspaceId", 7,
+            "id", 31L,
+            "leaseOwner", "owner",
+            "leaseSeconds", 120L,
+            "maxDispatches", 256));
+        assertFalse(lease.contains("wait_kind = NULL"));
+        assertFalse(lease.contains("resume_at = NULL"));
     }
 
     private static Configuration configuration() throws Exception {

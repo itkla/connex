@@ -17,6 +17,7 @@ public record WorkflowRunDetailDto(
     Version version,
     Execution execution,
     WorkflowRunSummaryDto.Trigger trigger,
+    WorkflowRunSummaryDto.RuntimeState runtimeState,
     LocalDateTime startedAt,
     LocalDateTime finishedAt,
     Long durationMs,

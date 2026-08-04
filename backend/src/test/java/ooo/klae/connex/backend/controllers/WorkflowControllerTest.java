@@ -57,6 +57,7 @@ import ooo.klae.connex.backend.dto.WorkflowListItemDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowRunDetailDto;
 import ooo.klae.connex.backend.dto.WorkflowRunPageDto;
+import ooo.klae.connex.backend.dto.WorkflowRunOperationDto;
 import ooo.klae.connex.backend.dto.WorkflowRunSummaryDto;
 import ooo.klae.connex.backend.dto.WorkflowSimulationDto;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
@@ -68,6 +69,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
+import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.services.WorkflowSimulationService;
@@ -100,6 +102,7 @@ class WorkflowControllerTest {
 
     @MockitoBean private WorkflowService workflowService;
     @MockitoBean private WorkflowRunReadService workflowRunReadService;
+    @MockitoBean private WorkflowRunOperationService workflowRunOperationService;
     @MockitoBean private WorkflowRuntimeOwnershipService runtimeOwnershipService;
     @MockitoBean private WorkflowSimulationService simulationService;
     @MockitoBean private WorkspaceService workspaceService;
@@ -150,14 +153,20 @@ class WorkflowControllerTest {
             "entity_change", "company.updated", "company", 91);
         WorkflowRunSummaryDto run = new WorkflowRunSummaryDto(
             "canonical-301", "canonical", "succeeded", null, null, runTrigger,
-            startedAt, startedAt.plusSeconds(1), 1_000L, null, true);
+            null, startedAt, startedAt.plusSeconds(1), 1_000L, null, true);
         when(workflowRunReadService.listRuns(42, 10, "frozen"))
             .thenReturn(new WorkflowRunPageDto(List.of(run), "next"));
         when(workflowRunReadService.getRun(42, "canonical-301"))
             .thenReturn(new WorkflowRunDetailDto(
                 "canonical-301", "canonical", 42, "succeeded", null, null, null,
-                runTrigger, startedAt, startedAt.plusSeconds(1), 1_000L, null, true,
+                runTrigger, null, startedAt, startedAt.plusSeconds(1), 1_000L, null, true,
                 List.of()));
+        when(workflowRunOperationService.cancel(42, "canonical-301"))
+            .thenReturn(new WorkflowRunOperationDto(
+                "canonical-301", "cancelled", true));
+        when(workflowRunOperationService.retry(42, "canonical-301"))
+            .thenReturn(new WorkflowRunOperationDto(
+                "canonical-301", "waiting", false));
 
         mockMvc.perform(get("/api/workflows"))
             .andExpect(status().isOk())
@@ -231,12 +240,22 @@ class WorkflowControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.runKey").value("canonical-301"))
             .andExpect(jsonPath("$.stepDetailAvailable").value(true));
+        mockMvc.perform(post("/api/workflows/42/runs/canonical-301/cancel")
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("cancelled"));
+        mockMvc.perform(post("/api/workflows/42/runs/canonical-301/retry")
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("waiting"));
 
         verify(workflowService).list(false);
         verify(workflowService).getById(42);
         verify(workflowService).versions(42);
         verify(workflowRunReadService).listRuns(42, 10, "frozen");
         verify(workflowRunReadService).getRun(42, "canonical-301");
+        verify(workflowRunOperationService).cancel(42, "canonical-301");
+        verify(workflowRunOperationService).retry(42, "canonical-301");
     }
 
     @Test

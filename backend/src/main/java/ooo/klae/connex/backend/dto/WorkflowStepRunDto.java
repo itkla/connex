@@ -13,6 +13,7 @@ public record WorkflowStepRunDto(
     String nodeType,
     String status,
     int attempts,
+    String retrySafety,
     String selectedOutcome,
     String selectedEdgeId,
     String nextNodeId,

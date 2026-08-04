@@ -100,6 +100,8 @@ class WorkflowSimulationIntegrationTest extends AbstractServiceTest {
         counts.put("workflow_version", count("workflow_version"));
         counts.put("workflow_run", count("workflow_run"));
         counts.put("workflow_step_run", count("workflow_step_run"));
+        counts.put("workflow_step_attempt", count("workflow_step_attempt"));
+        counts.put("workflow_runtime_workspace", count("workflow_runtime_workspace"));
         counts.put("rule", count("rule"));
         counts.put("rule_execution", count("rule_execution"));
         counts.put("task", count("task"));
@@ -110,9 +112,7 @@ class WorkflowSimulationIntegrationTest extends AbstractServiceTest {
         counts.put("company_tag", countJunction("company_tag", "company", "company_id"));
         counts.put("deal_tag", countJunction("deal_tag", "deal", "deal_id"));
         counts.put("audit_log", count("audit_log"));
-        if (tableExists("workflow_trigger_outbox")) {
-            counts.put("workflow_trigger_outbox", count("workflow_trigger_outbox"));
-        }
+        counts.put("workflow_trigger_outbox", count("workflow_trigger_outbox"));
         return Map.copyOf(counts);
     }
 
@@ -131,12 +131,4 @@ class WorkflowSimulationIntegrationTest extends AbstractServiceTest {
             workspace.getId());
     }
 
-    private boolean tableExists(String table) {
-        Long count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM information_schema.tables"
-                + " WHERE table_schema = DATABASE() AND table_name = ?",
-            Long.class,
-            table);
-        return count != null && count > 0;
-    }
 }

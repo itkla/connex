@@ -336,6 +336,29 @@ connex:
         scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
+    workflows:
+        runtime:
+            enabled: ${CONNEX_WORKFLOWS_RUNTIME_ENABLED:false}
+            scheduling-enabled: ${CONNEX_WORKFLOWS_RUNTIME_SCHEDULING_ENABLED:true}
+            scheduler-delay-ms: ${CONNEX_WORKFLOWS_RUNTIME_SCHEDULER_DELAY_MS:5000}
+            initial-delay-ms: ${CONNEX_WORKFLOWS_RUNTIME_INITIAL_DELAY_MS:30000}
+            max-workspaces-per-sweep: ${CONNEX_WORKFLOWS_RUNTIME_MAX_WORKSPACES_PER_SWEEP:32}
+            workspace-quantum: ${CONNEX_WORKFLOWS_RUNTIME_WORKSPACE_QUANTUM:4}
+            max-outbox-leases-per-workspace: ${CONNEX_WORKFLOWS_RUNTIME_MAX_OUTBOX_LEASES_PER_WORKSPACE:2}
+            max-active-runs-per-workspace: ${CONNEX_WORKFLOWS_RUNTIME_MAX_ACTIVE_RUNS_PER_WORKSPACE:4}
+            max-global-workers: ${CONNEX_WORKFLOWS_RUNTIME_MAX_GLOBAL_WORKERS:16}
+            max-steps-per-slice: ${CONNEX_WORKFLOWS_RUNTIME_MAX_STEPS_PER_SLICE:8}
+            max-trigger-fanout: ${CONNEX_WORKFLOWS_RUNTIME_MAX_TRIGGER_FANOUT:128}
+            max-schedule-records-per-page: ${CONNEX_WORKFLOWS_RUNTIME_MAX_SCHEDULE_RECORDS_PER_PAGE:100}
+            lease-duration: ${CONNEX_WORKFLOWS_RUNTIME_LEASE_DURATION:PT2M}
+            max-trigger-delivery-attempts: ${CONNEX_WORKFLOWS_RUNTIME_MAX_TRIGGER_DELIVERY_ATTEMPTS:8}
+            max-run-dispatches: ${CONNEX_WORKFLOWS_RUNTIME_MAX_RUN_DISPATCHES:256}
+            max-action-attempts: ${CONNEX_WORKFLOWS_RUNTIME_MAX_ACTION_ATTEMPTS:3}
+            retry-base: ${CONNEX_WORKFLOWS_RUNTIME_RETRY_BASE:PT30S}
+            retry-maximum: ${CONNEX_WORKFLOWS_RUNTIME_RETRY_MAXIMUM:PT15M}
+            completed-outbox-retention: ${CONNEX_WORKFLOWS_RUNTIME_COMPLETED_OUTBOX_RETENTION:P7D}
+            dead-outbox-retention: ${CONNEX_WORKFLOWS_RUNTIME_DEAD_OUTBOX_RETENTION:P30D}
+            max-retention-deletes-per-workspace: ${CONNEX_WORKFLOWS_RUNTIME_MAX_RETENTION_DELETES_PER_WORKSPACE:100}
     reports:
         scheduling-enabled: ${CONNEX_REPORTS_SCHEDULING_ENABLED:true}
         delivery-delay-ms: ${CONNEX_REPORTS_DELIVERY_DELAY_MS:300000}

@@ -28,10 +28,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -64,6 +67,9 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
     @Autowired private WorkflowVersionMapper workflowVersionMapper;
     @Autowired private TenantTeardownTenantTransaction tenantTeardownTransaction;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private WorkflowTriggerIntake workflowTriggerIntake;
+    @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoBean private AuditService auditService;
     @MockitoSpyBean private RuleMapper ruleMapper;
     @MockitoSpyBean private WorkflowMapper workflowMapperSpy;
@@ -196,6 +202,29 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
         assertNull(workflowMapperSpy.getByLegacyRuleId(workspace.getId(), rule.getId()));
     }
 
+    @Test
+    void durableEntityIntakeCommitsAndRollsBackWithItsCallingTransaction() {
+        WorkflowDto created = workflowService.create(createRequest("Durable intake"));
+        workflowService.publish(created.id(), publishRequest(0));
+        workflowService.enable(created.id());
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        int baseline = outboxCount(created.id());
+        WorkflowTriggerDispatch.EntityChange rolledBack = entityDispatch("rolled-back");
+
+        transaction.executeWithoutResult(status -> {
+            workflowTriggerIntake.enqueue(rolledBack);
+            status.setRollbackOnly();
+        });
+
+        assertEquals(baseline, outboxCount(created.id()));
+
+        transaction.executeWithoutResult(status ->
+            workflowTriggerIntake.enqueue(entityDispatch("committed")));
+
+        assertEquals(baseline + 1, outboxCount(created.id()));
+        assertEquals(1, runtimeWorkspaceCount());
+    }
+
     private boolean saveAfterRelease(
             int workflowId,
             String name,
@@ -222,6 +251,34 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
             SecurityContextHolder.clearContext();
             tenantContext.clear();
         }
+    }
+
+    private WorkflowTriggerDispatch.EntityChange entityDispatch(String key) {
+        return new WorkflowTriggerDispatch.EntityChange(
+            workspace.getId(),
+            "deal",
+            41,
+            "deal.won",
+            key,
+            java.time.Instant.parse("2026-08-02T12:00:00Z"));
+    }
+
+    private int outboxCount(int workflowId) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workflow_trigger_outbox"
+                + " WHERE workspace_id = ? AND workflow_id = ?",
+            Integer.class,
+            workspace.getId(),
+            workflowId);
+        return count == null ? 0 : count;
+    }
+
+    private int runtimeWorkspaceCount() {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workflow_runtime_workspace WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId());
+        return count == null ? 0 : count;
     }
 
     private boolean publish(int workflowId) {
@@ -311,7 +368,8 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
                 workspace.getId(), workflow, (NullifyReference) preparation);
         }
         for (String table : List.of(
-                "workflow_step_run", "workflow_run", "rule_execution",
+                "workflow_step_attempt", "workflow_step_run", "workflow_run",
+                "workflow_trigger_outbox", "workflow_runtime_workspace", "rule_execution",
                 "workflow_version", "workflow", "rule")) {
             drain(TenantLifecycleRegistry.require(table));
         }

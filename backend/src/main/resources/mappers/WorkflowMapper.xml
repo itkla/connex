@@ -5,7 +5,7 @@
 
   <sql id="workflowColumns">
     id, workspace_id, legacy_rule_id, name, description, enabled, runtime_owner,
-    archived_at, draft_revision,
+    archived_at, runtime_generation, draft_revision,
     draft_record_type, draft_execution_mode, draft_run_as_user_id,
     draft_definition_json, draft_canvas_json, active_version_id,
     created_by_id, updated_by_id, created_at, updated_at
@@ -207,6 +207,7 @@
     UPDATE workflow
     SET legacy_rule_id = #{legacyRuleId},
         active_version_id = #{activeVersionId},
+        runtime_generation = runtime_generation + 1,
         updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
@@ -220,6 +221,7 @@
     UPDATE workflow
     SET active_version_id = #{activeVersionId},
         runtime_owner = 'canonical',
+        runtime_generation = runtime_generation + 1,
         updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
@@ -232,7 +234,9 @@
 
   <update id="advancePublication">
     UPDATE workflow
-    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    SET active_version_id = #{activeVersionId},
+        runtime_generation = runtime_generation + 1,
+        updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND archived_at IS NULL
@@ -243,7 +247,9 @@
 
   <update id="advanceCanonicalPublication">
     UPDATE workflow
-    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    SET active_version_id = #{activeVersionId},
+        runtime_generation = runtime_generation + 1,
+        updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND archived_at IS NULL
@@ -254,7 +260,9 @@
 
   <update id="updateLifecycle">
     UPDATE workflow
-    SET enabled = #{enabled}, updated_by_id = #{updatedById}
+    SET enabled = #{enabled},
+        runtime_generation = runtime_generation + 1,
+        updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND archived_at IS NULL
@@ -273,6 +281,7 @@
         draft_definition_json = #{workflow.draftDefinitionJson},
         draft_canvas_json = #{workflow.draftCanvasJson},
         active_version_id = #{activeVersionId},
+        runtime_generation = runtime_generation + 1,
         updated_by_id = #{workflow.updatedById}
     WHERE workspace_id = #{workflow.workspaceId}
       AND id = #{workflow.id}
@@ -286,6 +295,7 @@
     UPDATE workflow
     SET enabled = FALSE,
         archived_at = CURRENT_TIMESTAMP,
+        runtime_generation = runtime_generation + 1,
         updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
@@ -296,6 +306,7 @@
     UPDATE workflow
     SET enabled = FALSE,
         archived_at = NULL,
+        runtime_generation = runtime_generation + 1,
         updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
@@ -340,8 +351,23 @@
     ORDER BY w.id
   </select>
 
+  <select id="workspaceIdsWithEnabledScheduleWorkflows" resultType="int">
+    SELECT DISTINCT w.workspace_id
+    FROM workflow w
+    JOIN workflow_version v
+      ON v.workspace_id = w.workspace_id
+     AND v.workflow_id = w.id
+     AND v.id = w.active_version_id
+    WHERE w.enabled = TRUE
+      AND w.archived_at IS NULL
+      AND v.trigger_type = 'schedule'
+    ORDER BY w.workspace_id
+  </select>
+
   <update id="disableForOffboarding">
-    UPDATE workflow SET enabled = FALSE
+    UPDATE workflow
+    SET enabled = FALSE,
+        runtime_generation = runtime_generation + 1
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND enabled = TRUE
   </update>
 
@@ -359,7 +385,9 @@
 
   <update id="updateActiveVersion">
     UPDATE workflow
-    SET active_version_id = #{activeVersionId}, updated_by_id = #{updatedById}
+    SET active_version_id = #{activeVersionId},
+        runtime_generation = runtime_generation + 1,
+        updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 

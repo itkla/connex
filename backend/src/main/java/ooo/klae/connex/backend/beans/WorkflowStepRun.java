@@ -17,6 +17,7 @@ public class WorkflowStepRun {
     private String nodeType;
     private String status;
     private int attemptCount;
+    private String retrySafety;
     private String selectedOutcome;
     private String selectedEdgeId;
     private String nextNodeId;

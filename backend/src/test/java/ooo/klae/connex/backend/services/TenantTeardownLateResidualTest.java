@@ -164,22 +164,38 @@ class TenantTeardownLateResidualTest {
             ACTOR_ID,
             "workspace");
 
+        TableLifecycle attempt = TenantLifecycleRegistry.require("workflow_step_attempt");
         TableLifecycle step = TenantLifecycleRegistry.require("workflow_step_run");
         TableLifecycle run = TenantLifecycleRegistry.require("workflow_run");
+        TableLifecycle outbox = TenantLifecycleRegistry.require("workflow_trigger_outbox");
+        TableLifecycle runtimeWorkspace =
+            TenantLifecycleRegistry.require("workflow_runtime_workspace");
         TableLifecycle version = TenantLifecycleRegistry.require("workflow_version");
         TableLifecycle workflow = TenantLifecycleRegistry.require("workflow");
         int batchSize = properties.getTableBatchSize();
+        verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, attempt, batchSize);
         verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, step, batchSize);
         verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, run, batchSize);
+        verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, outbox, batchSize);
+        verify(tenantTransaction, times(2)).deleteBatch(
+            WORKSPACE_ID, runtimeWorkspace, batchSize);
         verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, version, batchSize);
         verify(tenantTransaction, times(2)).deleteBatch(WORKSPACE_ID, workflow, batchSize);
         InOrder order = inOrder(tenantTransaction);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, attempt, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, step, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, run, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, outbox, batchSize);
+        order.verify(tenantTransaction).deleteBatch(
+            WORKSPACE_ID, runtimeWorkspace, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, version, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, workflow, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, attempt, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, step, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, run, batchSize);
+        order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, outbox, batchSize);
+        order.verify(tenantTransaction).deleteBatch(
+            WORKSPACE_ID, runtimeWorkspace, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, version, batchSize);
         order.verify(tenantTransaction).deleteBatch(WORKSPACE_ID, workflow, batchSize);
     }

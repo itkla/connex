@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.annotation.Isolation;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
+import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -153,5 +155,39 @@ class WorkflowStepTransactionServiceTest {
         assertNotNull(transaction);
         assertEquals(Propagation.REQUIRES_NEW, transaction.propagation());
         assertEquals(Isolation.READ_COMMITTED, transaction.isolation());
+    }
+
+    @Test
+    void delayAtomicallyPersistsOneWaitingStepAndDatabaseTimedRunWait() {
+        run.setCurrentNodeId("delay");
+        WorkflowNode.Delay delay = new WorkflowNode.Delay(
+            "delay", new WorkflowDelayConfig(3_600));
+        WorkflowEdge edge = new WorkflowEdge(
+            "delay-end", "delay", "end", WorkflowEdge.Outcome.NEXT);
+        CompiledWorkflow delayWorkflow = new CompiledWorkflow(
+            "trigger",
+            Map.of("delay", delay),
+            Map.of("delay", NodeType.DELAY),
+            Map.of("delay", Map.of(WorkflowEdge.Outcome.NEXT, edge)),
+            java.util.List.of("delay"),
+            null);
+        when(workflowRunMapper.getOwnedByIdForUpdate(7, 31L, "owner"))
+            .thenReturn(run);
+        when(workflowRunMapper.nextSequence(7, 31L)).thenReturn(2);
+        when(workflowRunMapper.waitForDelay(
+            7, 31L, "delay", "owner", 3_600)).thenReturn(1);
+
+        WorkflowStepTransactionService.StepResult result = service.executeClaimed(
+            7, 31L, "delay", delayWorkflow, "owner");
+
+        assertTrue(result.suspended());
+        ArgumentCaptor<ooo.klae.connex.backend.beans.WorkflowStepRun> step =
+            ArgumentCaptor.forClass(
+                ooo.klae.connex.backend.beans.WorkflowStepRun.class);
+        verify(workflowRunMapper).insertStep(step.capture());
+        assertEquals("waiting", step.getValue().getStatus());
+        assertEquals("none", step.getValue().getRetrySafety());
+        verify(workflowRunMapper).waitForDelay(
+            7, 31L, "delay", "owner", 3_600);
     }
 }

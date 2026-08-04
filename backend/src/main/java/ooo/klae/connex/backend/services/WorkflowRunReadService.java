@@ -10,8 +10,6 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,7 +44,6 @@ public class WorkflowRunReadService {
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 50;
     private static final int MAX_CURSOR_LENGTH = 512;
-    private static final Pattern RUN_KEY = Pattern.compile("^(canonical|legacy)-([1-9][0-9]*)$");
 
     private final WorkflowMapper workflowMapper;
     private final WorkflowRunMapper workflowRunMapper;
@@ -92,7 +89,7 @@ public class WorkflowRunReadService {
     public WorkflowRunDetailDto getRun(int workflowId, String runKey) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Workflow workflow = requireWorkflow(workspaceId, workflowId);
-        ParsedRunKey parsed = parseRunKey(runKey);
+        WorkflowRunKey parsed = WorkflowRunKey.parse(runKey);
         if ("canonical".equals(parsed.source())) {
             return canonicalDetail(workspaceId, workflowId, parsed.id());
         }
@@ -172,6 +169,10 @@ public class WorkflowRunReadService {
                 run.getTriggerEvent(),
                 run.getRecordType(),
                 run.getRecordId()),
+            new WorkflowRunSummaryDto.RuntimeState(
+                run.getWaitKind(),
+                run.getResumeAt(),
+                run.getCancelRequestedAt() != null),
             run.getStartedAt(),
             run.getFinishedAt(),
             duration(run.getStartedAt(), run.getFinishedAt()),
@@ -194,6 +195,7 @@ public class WorkflowRunReadService {
                 null,
                 execution.getTriggerEntityType(),
                 execution.getTriggerEntityId()),
+            null,
             executedAt,
             executedAt,
             0L,
@@ -253,6 +255,10 @@ public class WorkflowRunReadService {
                 run.getTriggerEvent(),
                 run.getRecordType(),
                 run.getRecordId()),
+            new WorkflowRunSummaryDto.RuntimeState(
+                run.getWaitKind(),
+                run.getResumeAt(),
+                run.getCancelRequestedAt() != null),
             run.getStartedAt(),
             run.getFinishedAt(),
             duration(run.getStartedAt(), run.getFinishedAt()),
@@ -277,6 +283,7 @@ public class WorkflowRunReadService {
                 null,
                 execution.getTriggerEntityType(),
                 execution.getTriggerEntityId()),
+            null,
             executedAt,
             executedAt,
             0L,
@@ -292,6 +299,7 @@ public class WorkflowRunReadService {
             step.getNodeType(),
             step.getStatus(),
             step.getAttemptCount(),
+            step.getRetrySafety(),
             step.getSelectedOutcome(),
             step.getSelectedEdgeId(),
             step.getNextNodeId(),
@@ -396,18 +404,6 @@ public class WorkflowRunReadService {
         return new RunCursor(1, cursor.asOf(), canonical, legacy);
     }
 
-    private static ParsedRunKey parseRunKey(String runKey) {
-        Matcher matcher = runKey == null ? null : RUN_KEY.matcher(runKey);
-        if (matcher == null || !matcher.matches()) {
-            throw new BadRequestException("Malformed workflow run key");
-        }
-        try {
-            return new ParsedRunKey(matcher.group(1), Long.parseLong(matcher.group(2)));
-        } catch (NumberFormatException exception) {
-            throw new BadRequestException("Malformed workflow run key");
-        }
-    }
-
     private Workflow requireWorkflow(int workspaceId, int workflowId) {
         Workflow workflow = workflowMapper.getById(workspaceId, workflowId);
         if (workflow == null) {
@@ -470,5 +466,4 @@ public class WorkflowRunReadService {
         WorkflowRunSummaryDto dto
     ) { }
 
-    private record ParsedRunKey(String source, long id) { }
 }

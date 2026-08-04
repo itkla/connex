@@ -52,6 +52,8 @@ class TenantScopeArchTest {
         assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
             "ooo.klae.connex.backend.mappers.WorkflowRunMapper"));
         assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
+            "ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
             "ooo.klae.connex.backend.mappers.WorkflowVersionMapper"));
     }
 
@@ -89,6 +91,8 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithRules",
+        "ooo.klae.connex.backend.mappers.WorkflowMapper.workspaceIdsWithEnabledScheduleWorkflows",
+        "ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper.workspaceIdsPage",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",
         "ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.workspaceIdsWithDueTasks",
         "ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper.workspaceIdsWithExpired",

@@ -33,6 +33,7 @@ public class JobRunRecorder {
     public static final String BUSINESS_CARD_IMPORT_CLEANUP = "business_card_import_cleanup";
     public static final String PROVIDER_CAPTURE = "provider_capture";
     public static final String OBJECT_DELETION_RETRY = "object_deletion_retry";
+    public static final String WORKFLOW_RUNTIME = "workflow_runtime";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**
@@ -56,7 +57,8 @@ public class JobRunRecorder {
         CAMPAIGN_SEND,
         BUSINESS_CARD_IMPORT_CLEANUP,
         PROVIDER_CAPTURE,
-        OBJECT_DELETION_RETRY);
+        OBJECT_DELETION_RETRY,
+        WORKFLOW_RUNTIME);
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",
@@ -65,6 +67,7 @@ public class JobRunRecorder {
         "deletedCount",
         "dueCount",
         "attemptedCount",
+        "claimedCount",
         "failedCount",
         "scheduleId",
         "snapshotId",

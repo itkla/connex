@@ -41,6 +41,57 @@
         )
     </select>
 
+    <select id="maximumEntityId" resultType="int">
+        <choose>
+            <when test="recordType == 'company'">
+                SELECT MAX(id) FROM company
+                WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+            </when>
+            <when test="recordType == 'person'">
+                SELECT MAX(id) FROM person
+                WHERE workspace_id = #{workspaceId}
+                  AND suspended_at IS NULL AND archived_at IS NULL
+            </when>
+            <when test="recordType == 'deal'">
+                SELECT MAX(id) FROM deal WHERE workspace_id = #{workspaceId}
+            </when>
+            <otherwise>
+                SELECT NULL
+                FROM workflow
+                WHERE workspace_id = #{workspaceId}
+                LIMIT 1
+            </otherwise>
+        </choose>
+    </select>
+
+    <select id="entityIdsPage" resultType="int">
+        <choose>
+            <when test="recordType == 'company'">
+                SELECT id FROM company
+                WHERE workspace_id = #{workspaceId}
+                  AND archived_at IS NULL
+                  AND id &gt; #{afterId} AND id &lt;= #{upperId}
+            </when>
+            <when test="recordType == 'person'">
+                SELECT id FROM person
+                WHERE workspace_id = #{workspaceId}
+                  AND suspended_at IS NULL AND archived_at IS NULL
+                  AND id &gt; #{afterId} AND id &lt;= #{upperId}
+            </when>
+            <when test="recordType == 'deal'">
+                SELECT id FROM deal
+                WHERE workspace_id = #{workspaceId}
+                  AND id &gt; #{afterId} AND id &lt;= #{upperId}
+            </when>
+            <otherwise>
+                SELECT id FROM workflow
+                WHERE workspace_id = #{workspaceId} AND 1 = 0
+            </otherwise>
+        </choose>
+        ORDER BY id
+        LIMIT #{limit}
+    </select>
+
     <select id="companyIdsWithOpenDeal" resultType="int">
         SELECT DISTINCT company_id
         FROM deal

@@ -8,38 +8,43 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import lombok.RequiredArgsConstructor;
+
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-/**
- * Runs entity-change rules after the triggering mutation commits, off the request thread. Mirrors the
- * notification subsystem's after-commit async pattern, so rules only ever see committed state and
- * never block the originating request. Never propagates failures back to the publisher.
- */
+/** Preserves legacy after-commit execution while the durable worker gate is disabled. */
 @Component
 @RequiredArgsConstructor
 public class RuleTriggerListener {
 
-    private final WorkflowTriggerIntake workflowTriggerIntake;
-    private final TenantWorkScope tenantWorkScope;
     private static final Logger log = LoggerFactory.getLogger(RuleTriggerListener.class);
+
+    private final WorkflowRuntimeProperties properties;
+    private final RuleEngineService ruleEngineService;
+    private final TenantWorkScope tenantWorkScope;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onTrigger(RuleTriggerEvent event) {
+        if (properties.enabled()) {
+            return;
+        }
         try {
             tenantWorkScope.inWorkspace(event.workspaceId(), () ->
-                workflowTriggerIntake.enqueue(new WorkflowTriggerDispatch.EntityChange(
+                ruleEngineService.onEntityChange(new WorkflowTriggerDispatch.EntityChange(
                     event.workspaceId(),
                     event.recordType(),
                     event.entityId(),
                     event.event(),
                     event.triggerKey(),
                     event.occurredAt())));
-        } catch (Exception e) {
+        } catch (RuntimeException failure) {
             log.warn(
-                "Workflow intake failed recordType={} recordId={} event={} exceptionClass={}",
-                event.recordType(), event.entityId(), event.event(),
-                e.getClass().getSimpleName());
+                "Legacy workflow trigger failed recordType={} recordId={} event={} "
+                    + "exceptionClass={}",
+                event.recordType(),
+                event.entityId(),
+                event.event(),
+                failure.getClass().getSimpleName());
         }
     }
 }

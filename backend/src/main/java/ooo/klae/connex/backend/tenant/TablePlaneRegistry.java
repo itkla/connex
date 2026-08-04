@@ -160,6 +160,9 @@ public final class TablePlaneRegistry {
         "warm_path_dismissal",
         "workflow",
         "workflow_run",
+        "workflow_runtime_workspace",
+        "workflow_step_attempt",
         "workflow_step_run",
+        "workflow_trigger_outbox",
         "workflow_version");
 }

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.Map;
+import java.util.TreeSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
@@ -27,9 +29,12 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 public class RuleScheduler {
 
     private final RuleMapper ruleMapper;
+    private final WorkflowMapper workflowMapper;
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final WorkflowTriggerIntake workflowTriggerIntake;
+    private final WorkflowRuntimeProperties workflowRuntimeProperties;
+    private final RuleEngineService ruleEngineService;
     private final JobRunRecorder jobRunRecorder;
 
     private static final Logger log = LoggerFactory.getLogger(RuleScheduler.class);
@@ -61,7 +66,12 @@ public class RuleScheduler {
      * so one bad placement never starves the rest of the fleet.
      */
     private void evaluateCatalog(String catalog) {
-        for (int workspaceId : tenantWorkScope.withCatalog(catalog, ruleMapper::workspaceIdsWithEnabledScheduleRules)) {
+        TreeSet<Integer> workspaceIds = tenantWorkScope.withCatalog(catalog, () -> {
+            TreeSet<Integer> ids = new TreeSet<>(ruleMapper.workspaceIdsWithEnabledScheduleRules());
+            ids.addAll(workflowMapper.workspaceIdsWithEnabledScheduleWorkflows());
+            return ids;
+        });
+        for (int workspaceId : workspaceIds) {
             JobRunDetail detail = JobRunDetail.startedUtc();
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {
@@ -69,10 +79,15 @@ public class RuleScheduler {
                     int failedCadences = 0;
                     for (String cadence : CADENCES) {
                         try {
-                            workflowTriggerIntake.enqueue(new WorkflowTriggerDispatch.ScheduleTick(
+                            WorkflowTriggerDispatch.ScheduleTick dispatch =
+                                new WorkflowTriggerDispatch.ScheduleTick(
                                 workspaceId,
                                 cadence,
-                                scheduleBucket(cadence)));
+                                scheduleBucket(cadence));
+                            workflowTriggerIntake.enqueue(dispatch);
+                            if (!workflowRuntimeProperties.enabled()) {
+                                ruleEngineService.runSchedule(dispatch);
+                            }
                             completedCadences++;
                         } catch (Exception e) {
                             failedCadences++;

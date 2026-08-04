@@ -1,20 +1,22 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * Publishes a {@link RuleTriggerEvent} for a committed entity change. Mutating services call this
- * after a successful write; {@link RuleTriggerListener} consumes it once the transaction commits.
- * A mutation made <em>by</em> a rule action (i.e. while {@link AutomationScope} is active) does not
- * publish, so automation cannot re-trigger rules and loop.
+ * Persists a durable trigger envelope in the source mutation transaction. A mutation made
+ * <em>by</em> a workflow action does not enqueue another trigger, preventing automation loops.
  */
 @Component
 @RequiredArgsConstructor
 public class RuleTriggerPublisher {
 
+    private final WorkflowTriggerIntake workflowTriggerIntake;
     private final ApplicationEventPublisher eventPublisher;
     private final AutomationScope automationScope;
 
@@ -23,12 +25,21 @@ public class RuleTriggerPublisher {
         if (automationScope.isActive()) {
             return;
         }
+        String triggerKey = UUID.randomUUID().toString();
+        Instant occurredAt = Instant.now();
+        workflowTriggerIntake.enqueue(new WorkflowTriggerDispatch.EntityChange(
+            workspaceId,
+            recordType,
+            entityId,
+            event,
+            triggerKey,
+            occurredAt));
         eventPublisher.publishEvent(new RuleTriggerEvent(
             workspaceId,
             recordType,
             entityId,
             event,
-            java.util.UUID.randomUUID().toString(),
-            java.time.Instant.now()));
+            triggerKey,
+            occurredAt));
     }
 }
