@@ -330,7 +330,7 @@ export default function SegmentBuilder({
     return (
         <ResponsiveDialog open={open} onOpenChange={setOpen}>
             <ResponsiveDialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5" {...triggerProps}>
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" {...triggerProps}>
                     <SparklesIcon className="size-4" />
                     {t("title")}
                     {total > 0 && (
