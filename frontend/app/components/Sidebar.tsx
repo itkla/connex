@@ -42,8 +42,8 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
-import { instant, springSnappy } from "@/app/lib/motion";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { easeOut, instant, springSnappy } from "@/app/lib/motion";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -235,6 +235,7 @@ function NavGroup({
     const manualStateCurrent = manualState?.navigationKey === navigationKey && manualState.collapsed === collapsed;
     const open = manualStateCurrent ? !manualState.collapsed : groupActive || !collapsed;
     const sectionId = `nav-group-${section.id}`;
+    const reduce = useReducedMotion() ?? false;
     if (rail) {
         return (
             <ul aria-label={section.label} className="flex flex-col items-center gap-1">
@@ -245,7 +246,10 @@ function NavGroup({
         );
     }
     return (
-        <div>
+        <motion.div
+            layout={reduce ? false : "position"}
+            transition={reduce ? instant : springSnappy}
+        >
             <button
                 type="button"
                 onClick={() => {
@@ -262,22 +266,32 @@ function NavGroup({
             >
                 <span>{section.label}</span>
                 <ChevronDownIcon
-                    className={`size-3 transition-transform ${open ? "" : "-rotate-90"}`}
+                    className={`size-3 transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`}
                 />
             </button>
-            {open && (
-                <ul id={sectionId} className="mt-1 flex flex-col gap-0.5">
-                    {section.items.map((item) => (
-                        <NavLink
-                            key={item.href}
-                            item={item}
-                            active={item.active ?? item.href === activeHref}
-                            rail={false}
-                        />
-                    ))}
-                </ul>
-            )}
-        </div>
+            <AnimatePresence initial={false} mode="popLayout">
+                {open && (
+                    <motion.ul
+                        key={section.id}
+                        id={sectionId}
+                        className="mt-1 flex origin-top flex-col gap-0.5"
+                        initial={reduce ? false : { opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={reduce ? instant : { duration: 0.18, ease: easeOut }}
+                    >
+                        {section.items.map((item) => (
+                            <NavLink
+                                key={item.href}
+                                item={item}
+                                active={item.active ?? item.href === activeHref}
+                                rail={false}
+                            />
+                        ))}
+                    </motion.ul>
+                )}
+            </AnimatePresence>
+        </motion.div>
     );
 }
 
