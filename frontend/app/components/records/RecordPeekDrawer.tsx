@@ -28,18 +28,20 @@ import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
 import type { ActionId } from '@/app/lib/actions/types';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
-import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealById, getDealSummary, getTasksForDeal } from '@/app/lib/api';
+import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealById, getDealRisk, getDealSummary, getTasksForDeal } from '@/app/lib/api';
 import {
     recordDetailNavigationPath,
     type RecordCollection,
     type RecordReturnSelectionSnapshot,
 } from '@/app/lib/recordReturnPath';
 import { useLiveNow } from '@/app/hooks/useNow';
-import { formatCurrency, formatRelativeTime } from '@/app/lib/utils';
+import { formatCurrency, formatRelativeTime, formatShortDate } from '@/app/lib/utils';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import DealAvatar from '@/app/components/records/deals/DealAvatar';
-import type { Activity, Company, CompanyEngagement, Contact, DealSummary, Task } from '@/app/lib/types';
+import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
+import { useRiskText } from '@/app/components/records/deals/dealRisk';
+import type { Activity, Company, CompanyEngagement, Contact, DealRisk, DealSummary, Task } from '@/app/lib/types';
 
 type Props = {
     target: PeekTarget | null;
@@ -56,7 +58,7 @@ type Props = {
 type PeekData =
     | { kind: 'person'; contact: Contact }
     | { kind: 'company'; company: Company; engagement: CompanyEngagement | null }
-    | { kind: 'deal'; summary: DealSummary; company: Company | null; tasks: Task[]; activities: Activity[] };
+    | { kind: 'deal'; summary: DealSummary; company: Company | null; risk: DealRisk | null; tasks: Task[]; activities: Activity[] };
 
 const PEEK_COLLECTIONS = {
     person: 'contacts',
@@ -216,7 +218,7 @@ function RecordPeekDrawer({
                 {target && !error && (
                     <div className="grid grid-cols-2 gap-2 border-t p-3">
                         <Button
-                            variant="outline"
+                            variant={browserType === 'deal' ? 'brand' : 'outline'}
                             size="sm"
                             onClick={openFull}
                             className={!actionRecord || canLogActivity ? 'col-span-2 justify-start' : 'justify-start'}
@@ -276,6 +278,7 @@ function PeekAvatar({ target, data }: { target: PeekTarget | null; data: PeekDat
 }
 
 function PeekBody({ data, locale, t }: { data: PeekData; locale: string; t: ReturnType<typeof useTranslations> }) {
+    const { factorText } = useRiskText();
     if (data.kind === 'person') {
         const openTasks = (data.contact.tasks ?? []).filter((task) => !task.completed);
         const activities = data.contact.activities ?? [];
@@ -309,20 +312,40 @@ function PeekBody({ data, locale, t }: { data: PeekData; locale: string; t: Retu
         );
     }
     const openTasks = data.tasks.filter((task) => !task.completed);
+    const topRiskFactor = data.risk?.factors[0] ?? null;
     return (
         <>
             <Facts
                 rows={[
+                    [t('status'), dealStatusLabel(data.summary.status, t)],
                     [t('stage'), data.summary.stageName ?? '—'],
                     [t('value'), formatCurrency(data.summary.value, data.summary.currency, locale)],
+                    [t('expectedClose'), data.summary.expectedCloseDate ? formatShortDate(data.summary.expectedCloseDate, locale) : '—'],
                     [t('company'), data.summary.companyName ?? '—'],
                     [t('owner'), data.summary.ownerName ?? '—'],
                 ]}
             />
+            {topRiskFactor ? (
+                <section className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                        {t('dealRiskTitle')}
+                    </h3>
+                    <div className="flex items-start gap-2">
+                        <DealRiskPill risk={data.risk} />
+                        <p className="text-sm text-foreground">{factorText(topRiskFactor)}</p>
+                    </div>
+                </section>
+            ) : null}
             <TaskSection tasks={openTasks} locale={locale} t={t} />
             <ActivitySection activities={data.activities} locale={locale} t={t} />
         </>
     );
+}
+
+function dealStatusLabel(status: string, t: ReturnType<typeof useTranslations>): string {
+    if (status === 'won') return t('statusWon');
+    if (status === 'lost') return t('statusLost');
+    return t('statusOpen');
 }
 
 function Facts({ rows }: { rows: [string, string][] }) {
@@ -437,14 +460,15 @@ async function loadPeek(target: PeekTarget): Promise<PeekData> {
         ]);
         return { kind: 'company', company, engagement };
     }
-    const [deal, summary, tasks, activities] = await Promise.all([
+    const [deal, summary, tasks, activities, risk] = await Promise.all([
         getDealById(target.id),
         getDealSummary(target.id),
         getTasksForDeal(target.id).catch(() => [] as Task[]),
         getActivitiesForDeal(target.id).catch(() => [] as Activity[]),
+        getDealRisk(target.id).catch(() => null),
     ]);
     const company = deal.company == null
         ? null
         : await getCompanyById(deal.company).catch(() => null);
-    return { kind: 'deal', summary, company, tasks, activities: sortActivities(activities) };
+    return { kind: 'deal', summary, company, risk, tasks, activities: sortActivities(activities) };
 }
