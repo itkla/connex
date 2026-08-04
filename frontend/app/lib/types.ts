@@ -2811,6 +2811,10 @@ export type MyWorkspaces = {
     activeWorkspaceId: number | null;
 };
 
+export type WorkspaceSelection = {
+    activeWorkspaceId: number | null;
+};
+
 export type WorkspaceMember = {
     id: number;
     username: string;

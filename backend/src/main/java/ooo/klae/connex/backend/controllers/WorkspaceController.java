@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
 import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
@@ -100,15 +101,15 @@ public class WorkspaceController {
     }
 
     @PostMapping("/{id}/leave")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void leave(@PathVariable int id, HttpServletResponse response) {
+    public WorkspaceSelectionDto leave(@PathVariable int id, HttpServletResponse response) {
         int userId = authService.getCurrentUser().getId();
         Integer nextWorkspaceId = workspaceService.leaveWorkspaceAndSelectNext(id, userId);
         if (nextWorkspaceId == null) {
             workspaceCookie.clear(response);
-            return;
+        } else {
+            workspaceCookie.set(response, nextWorkspaceId);
         }
-        workspaceCookie.set(response, nextWorkspaceId);
+        return new WorkspaceSelectionDto(nextWorkspaceId);
     }
 
     @PostMapping("/{id}/invites")

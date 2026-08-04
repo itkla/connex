@@ -56,14 +56,14 @@ describe("the workspace snapshot follows the server, not only the first render",
         expect(provider.match(/^export /gm) ?? []).toHaveLength(2);
     });
 
-    it("does not adopt the active workspace, and does not claim it cannot diverge", () => {
+    it("does not blindly adopt the active workspace from a refreshed prop", () => {
         const provider = source(PROVIDER);
 
         expect(providerBodyBeforeItsHandlers()).not.toContain("setActiveWorkspaceId(initialActiveId)");
         expect(provider).toContain(
             "const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId)",
         );
-        expect(provider).toContain("known gap rather than an\n * invariant");
+        expect(provider).toContain("never adopted from a refreshed prop");
         expect(provider).not.toMatch(/props can only ever echo a decision/);
     });
 });
@@ -76,6 +76,7 @@ describe("a payload cannot erase a workspace the server has not seen yet", () =>
     const a = workspace(1, "Alpha");
     const b = workspace(2, "Beta");
     const created = workspace(3, "Created");
+    const accepted = workspace(4, "Accepted");
 
     it("takes the server's list when it has nothing local to preserve", () => {
         expect(adoptWorkspaces([a], [a], [a, b])).toEqual([a, b]);
@@ -89,6 +90,10 @@ describe("a payload cannot erase a workspace the server has not seen yet", () =>
 
     it("keeps a just-created workspace an older payload does not mention", () => {
         expect(adoptWorkspaces([a, created], [a], [a])).toEqual([a, created]);
+    });
+
+    it("keeps a just-accepted workspace absent from both consumed and arriving payloads", () => {
+        expect(adoptWorkspaces([a, accepted], [a], [a])).toEqual([a, accepted]);
     });
 
     it("drops a workspace the viewer left, rather than resurrecting it", () => {
