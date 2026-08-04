@@ -61,10 +61,13 @@ function WorkflowNodeImpl({ data }: NodeProps<WorkflowFlowNode>) {
                     id="in"
                     type="target"
                     position={Position.Top}
-                    className="!size-3 !border-2 !border-card !bg-chart-axis"
+                    className="!grid !size-12 !place-items-center !border-0 !bg-transparent focus-visible:!ring-2 focus-visible:!ring-ring [&.connectingto>span]:!bg-destructive [&.connectingto>span]:!ring-4 [&.connectingto>span]:!ring-destructive/20 [&.valid>span]:!bg-brand [&.valid>span]:!ring-brand/20"
                     isConnectable={!data.readOnly}
+                    isConnectableStart={false}
                     aria-label={data.inputHandleLabel}
-                />
+                >
+                    <span className="pointer-events-none size-3 rounded-full border-2 border-card bg-chart-axis transition-colors duration-150 motion-reduce:transition-none" />
+                </Handle>
             ) : null}
             <div className="flex items-start gap-2.5">
                 <span
@@ -106,10 +109,13 @@ function WorkflowNodeImpl({ data }: NodeProps<WorkflowFlowNode>) {
                         id={outcome}
                         type="source"
                         position={Position.Bottom}
-                        className="!relative !inset-auto !size-3 !translate-x-0 !translate-y-0 !border-2 !border-card !bg-chart-axis"
+                        className="!relative !inset-auto !grid !size-12 !translate-x-0 !translate-y-0 !place-items-center !border-0 !bg-transparent focus-visible:!ring-4 focus-visible:!ring-brand/20 [&.connectingfrom>span]:!bg-brand [&.connectingfrom>span]:!ring-4 [&.connectingfrom>span]:!ring-brand/20"
                         isConnectable={!data.readOnly}
+                        isConnectableEnd={false}
                         aria-label={data.branchLabels[outcome]}
-                    />
+                    >
+                        <span className="pointer-events-none size-3 rounded-full border-2 border-card bg-chart-axis transition-colors duration-150 motion-reduce:transition-none" />
+                    </Handle>
                     <span className="mt-0.5 rounded bg-background px-1 text-xs font-medium text-muted-foreground">
                         {data.branchLabels[outcome]}
                     </span>

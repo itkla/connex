@@ -1,0 +1,217 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+import { csrfBootstrap } from "./support/api";
+import { runFixture } from "./support/fixtures";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function workflowId(value: unknown): number {
+    if (!isRecord(value) || typeof value.id !== "number") {
+        throw new Error("Workflow response is missing a numeric id");
+    }
+    return value.id;
+}
+
+function workflowDefinition(value: unknown): Record<string, unknown> {
+    if (!isRecord(value) || !isRecord(value.definition)) {
+        throw new Error("Workflow response is missing its definition");
+    }
+    return value.definition;
+}
+
+function edgeTarget(value: unknown, sourceNodeId: string, outcome: string): string {
+    const edges = workflowDefinition(value).edges;
+    if (!Array.isArray(edges)) {
+        throw new Error("Workflow definition is missing edges");
+    }
+    const edge = edges.find((candidate) => isRecord(candidate)
+        && candidate.sourceNodeId === sourceNodeId
+        && candidate.outcome === outcome);
+    if (!isRecord(edge) || typeof edge.targetNodeId !== "string") {
+        throw new Error(`Workflow branch ${sourceNodeId}.${outcome} is missing`);
+    }
+    return edge.targetNodeId;
+}
+
+function nodeIdByType(value: unknown, type: string): string {
+    const nodes = workflowDefinition(value).nodes;
+    if (!Array.isArray(nodes)) {
+        throw new Error("Workflow definition is missing nodes");
+    }
+    const node = nodes.find((candidate) => isRecord(candidate) && candidate.type === type);
+    if (!isRecord(node) || typeof node.id !== "string") {
+        throw new Error(`Workflow definition is missing a ${type} node`);
+    }
+    return node.id;
+}
+
+function canvasPosition(value: unknown, nodeId: string): { x: number; y: number } {
+    if (!isRecord(value) || !isRecord(value.canvas) || !isRecord(value.canvas.positions)) {
+        throw new Error("Workflow response is missing canvas positions");
+    }
+    const position = value.canvas.positions[nodeId];
+    if (!isRecord(position) || typeof position.x !== "number" || typeof position.y !== "number") {
+        throw new Error(`Workflow canvas is missing a position for ${nodeId}`);
+    }
+    return { x: position.x, y: position.y };
+}
+
+async function dragConnection(page: Page, source: Locator, target: Locator, valid: boolean): Promise<void> {
+    const sourceBox = await source.boundingBox();
+    const targetBox = await target.boundingBox();
+    if (!sourceBox || !targetBox) {
+        throw new Error("Workflow connection handles must be visible before dragging");
+    }
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 8 });
+    await expect(target).toHaveClass(/(?:^|\s)connectingto(?:\s|$)/);
+    if (valid) {
+        await expect(target).toHaveClass(/(?:^|\s)valid(?:\s|$)/);
+    } else {
+        await expect(target).not.toHaveClass(/(?:^|\s)valid(?:\s|$)/);
+    }
+    await page.mouse.up();
+}
+
+test.describe("workflow canvas", () => {
+    test("creates deterministic connections and inserts at the invoked canvas position", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const csrf = await csrfBootstrap(page.request);
+        const createdResponse = await page.request.post("/api/workflows", {
+            headers: {
+                "X-Workspace-Id": String(fixture.workspaceId),
+                [csrf.headerName]: csrf.token,
+            },
+            data: {
+                name: `Canvas interaction ${testInfo.retry}`,
+                description: null,
+                recordType: "deal",
+                executionMode: "user",
+                definition: {
+                    schemaVersion: 1,
+                    entryNodeId: "trigger",
+                    nodes: [
+                        { id: "trigger", type: "TRIGGER", config: { type: "entity_change", events: ["deal.updated"] } },
+                        { id: "condition", type: "CONDITION", config: { match: "all", conditions: [] } },
+                        { id: "end-yes", type: "END" },
+                        { id: "end-no", type: "END" },
+                    ],
+                    edges: [
+                        { id: "edge-trigger", sourceNodeId: "trigger", targetNodeId: "condition", outcome: "next" },
+                        { id: "edge-yes", sourceNodeId: "condition", targetNodeId: "end-yes", outcome: "yes" },
+                        { id: "edge-no", sourceNodeId: "condition", targetNodeId: "end-no", outcome: "no" },
+                    ],
+                },
+                canvas: {
+                    positions: {
+                        trigger: { x: 80, y: 20 },
+                        condition: { x: 80, y: 190 },
+                        "end-yes": { x: 0, y: 400 },
+                        "end-no": { x: 360, y: 400 },
+                    },
+                    viewport: { x: 120, y: 20, zoom: 0.75 },
+                },
+            },
+        });
+        expect(createdResponse.status(), await createdResponse.text()).toBe(201);
+        const created: unknown = await createdResponse.json();
+
+        await page.goto(`/workflows/${workflowId(created)}`);
+        const flow = page.locator(".react-flow");
+        await expect(flow).toBeVisible();
+        await expect(flow.locator(".react-flow__attribution")).toHaveCount(0);
+        await expect(flow.locator(".react-flow__background pattern")).toHaveCount(1);
+
+        const condition = flow.locator('.react-flow__node[data-id="condition"]');
+        const yesHandle = condition.locator('.react-flow__handle.source[data-handleid="yes"]');
+        const conditionInput = condition.locator('.react-flow__handle.target[data-handleid="in"]');
+        const noEndInput = flow.locator('.react-flow__node[data-id="end-no"] .react-flow__handle.target[data-handleid="in"]');
+        const handleBox = await yesHandle.boundingBox();
+        if (!handleBox) {
+            throw new Error("Workflow source handle must be visible");
+        }
+        expect(handleBox.width).toBeGreaterThanOrEqual(24);
+        expect(handleBox.height).toBeGreaterThanOrEqual(24);
+
+        const save = page.getByRole("button", { name: "Save draft" });
+        await expect(save).toBeDisabled();
+        await dragConnection(page, yesHandle, conditionInput, false);
+        await expect(page.getByText("That branch cannot connect to this node.")).toBeVisible();
+        await expect(save).toBeDisabled();
+
+        await dragConnection(page, yesHandle, noEndInput, true);
+        await expect(save).toBeEnabled();
+        await save.click();
+        await expect(save).toBeDisabled();
+
+        await condition.click();
+        const pane = flow.locator(".react-flow__pane");
+        const invoked = await pane.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            const viewport = element.querySelector<HTMLElement>(".react-flow__viewport");
+            if (!viewport) {
+                throw new Error("Workflow viewport is missing");
+            }
+            const matrix = new DOMMatrixReadOnly(getComputedStyle(viewport).transform);
+            const clientX = rect.left + rect.width * 0.78;
+            const clientY = rect.top + rect.height * 0.56;
+            return {
+                clientX,
+                clientY,
+                flowX: (clientX - rect.left - matrix.e) / matrix.a,
+                flowY: (clientY - rect.top - matrix.f) / matrix.d,
+            };
+        });
+        await page.mouse.click(invoked.clientX, invoked.clientY, { button: "right" });
+        const menu = page.getByRole("menu");
+        await expect(menu).toBeVisible();
+        await expect(flow.locator(".react-flow__node")).toHaveCount(4);
+        const yesGroup = menu.getByText("Yes", { exact: true }).locator("..");
+        await yesGroup.getByRole("menuitem", { name: "Delay" }).click();
+        await expect(flow.locator(".react-flow__node")).toHaveCount(5);
+
+        await save.click();
+        await expect(save).toBeDisabled();
+        const savedResponse = await page.request.get(`/api/workflows/${workflowId(created)}`, {
+            headers: { "X-Workspace-Id": String(fixture.workspaceId) },
+        });
+        expect(savedResponse.status(), await savedResponse.text()).toBe(200);
+        const saved: unknown = await savedResponse.json();
+        const delayId = nodeIdByType(saved, "DELAY");
+        const delayPosition = canvasPosition(saved, delayId);
+        expect(edgeTarget(saved, "condition", "yes")).toBe(delayId);
+        expect(edgeTarget(saved, delayId, "next")).toBe("end-no");
+        expect(Math.abs(delayPosition.x - invoked.flowX)).toBeLessThan(2);
+        expect(Math.abs(delayPosition.y - invoked.flowY)).toBeLessThan(2);
+
+        await page.getByRole("button", { name: "Zoom in" }).click({ button: "right" });
+        await expect(menu).toHaveCount(0);
+        await condition.click({ button: "right" });
+        await expect(menu).toHaveCount(0);
+
+        await testInfo.attach("workflow-canvas", {
+            body: await flow.screenshot(),
+            contentType: "image/png",
+        });
+        const zoomOut = page.getByRole("button", { name: "Zoom out" });
+        await zoomOut.click();
+        await zoomOut.click();
+        await zoomOut.click();
+        const minimumZoom = await flow.locator(".react-flow__viewport").evaluate((element) => (
+            new DOMMatrixReadOnly(getComputedStyle(element).transform).a
+        ));
+        expect(minimumZoom).toBeCloseTo(0.5, 2);
+        const minimumZoomHandleBox = await yesHandle.boundingBox();
+        if (!minimumZoomHandleBox) {
+            throw new Error("Workflow source handle must remain visible at minimum zoom");
+        }
+        expect(minimumZoomHandleBox.width).toBeGreaterThanOrEqual(24);
+        expect(minimumZoomHandleBox.height).toBeGreaterThanOrEqual(24);
+        await page.getByRole("button", { name: "Outline" }).click();
+        await expect(page.getByRole("list", { name: "Workflow steps" })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Insert" }).first()).toBeVisible();
+    });
+});

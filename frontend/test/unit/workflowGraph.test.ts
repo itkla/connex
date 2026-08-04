@@ -123,10 +123,28 @@ describe("canonical workflow graph editing", () => {
         if (!inserted) return;
         const condition = inserted.definition.nodes.find((node) => node.id === inserted.insertedNodeId);
         expect(condition?.type).toBe("CONDITION");
+        expect(inserted.canvas.positions[inserted.insertedNodeId]).toEqual({ x: 0, y: 200 });
         expect(inserted.definition.edges.find((edge) => edge.sourceNodeId === condition?.id && edge.outcome === "yes")?.targetNodeId)
             .toBe("end");
         const noEdge = inserted.definition.edges.find((edge) => edge.sourceNodeId === condition?.id && edge.outcome === "no");
         expect(inserted.definition.nodes.find((node) => node.id === noEdge?.targetNodeId)?.type).toBe("END");
+    });
+
+    it("positions an inserted node at the invoked canvas coordinate", () => {
+        const invokedPosition = { x: 240, y: 180 };
+        const inserted = insertWorkflowNode(
+            migratedDefinition,
+            migratedCanvas,
+            "action",
+            "next",
+            "DELAY",
+            "deal",
+            invokedPosition,
+        );
+
+        expect(inserted).not.toBeNull();
+        if (!inserted) return;
+        expect(inserted.canvas.positions[inserted.insertedNodeId]).toEqual(invokedPosition);
     });
 
     it("forces a schedule trigger to target one enrollment condition", () => {
