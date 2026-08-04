@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     CubeIcon,
@@ -51,6 +51,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
     const layoutT = useTranslations('RecordsProductsLayout');
     const tf = useTranslations('Filters');
     const locale = useLocale();
+    const numberFormatter = useMemo(() => new Intl.NumberFormat(locale), [locale]);
     const { activeWorkspaceId, switching } = useWorkspace();
     const [products, setProducts] = useState(initial);
     const [query, setQuery] = useState('');
@@ -285,7 +286,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                                         </div>
                                         <div className="hidden text-sm text-muted-foreground xl:col-start-5 xl:row-start-1 xl:block">
                                             <span className="sr-only">{t('columnTax')}: </span>
-                                            {formatTaxRate(product, locale)}
+                                            {formatTaxRate(product, numberFormatter)}
                                         </div>
                                         <dl className="col-span-3 mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3 text-xs xl:hidden">
                                             <div>
@@ -294,7 +295,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                                             </div>
                                             <div>
                                                 <dt className="text-muted-foreground">{t('columnTax')}</dt>
-                                                <dd className="mt-0.5 font-medium text-foreground">{formatTaxRate(product, locale)}</dd>
+                                                <dd className="mt-0.5 font-medium text-foreground">{formatTaxRate(product, numberFormatter)}</dd>
                                             </div>
                                             <div className="col-span-2">
                                                 <dt className="text-muted-foreground">{t('effectiveDates')}</dt>
@@ -378,8 +379,8 @@ function ProductActions({
     );
 }
 
-function formatTaxRate(product: Product, locale: string): string {
-    return product.taxRate == null ? '—' : `${new Intl.NumberFormat(locale).format(product.taxRate)}%`;
+function formatTaxRate(product: Product, numberFormatter: Intl.NumberFormat): string {
+    return product.taxRate == null ? '—' : `${numberFormatter.format(product.taxRate)}%`;
 }
 
 function formatEffectiveRange(product: Product, locale: string, t: ReturnType<typeof useTranslations>): string {
