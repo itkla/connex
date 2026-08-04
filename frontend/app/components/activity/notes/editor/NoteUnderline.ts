@@ -34,7 +34,6 @@ type MarkdownIt = {
 const configuredMarkdownInstances = new WeakSet<object>();
 
 type MarkdownTextState = {
-    esc: (value: string, startOfLine?: boolean) => string;
     text: (value: string, escape?: boolean) => void;
 };
 
@@ -44,7 +43,7 @@ function escapeHTML(value: string): string {
 
 /** Escapes literal underline delimiters before Markdown serialization. */
 export function escapeNoteUnderlineText(value: string): string {
-    return value.replaceAll('++', '\\+\\+');
+    return value.replaceAll('++', '&#43;&#43;');
 }
 
 function isEscaped(source: string, index: number): boolean {
@@ -143,8 +142,7 @@ export const NoteText = Node.create({
         return {
             markdown: {
                 serialize(state: MarkdownTextState, node: PMNode) {
-                    const escapedMarkdown = state.esc(escapeHTML(node.text ?? ''));
-                    state.text(escapeNoteUnderlineText(escapedMarkdown), false);
+                    state.text(escapeNoteUnderlineText(escapeHTML(node.text ?? '')));
                 },
                 parse: {},
             },

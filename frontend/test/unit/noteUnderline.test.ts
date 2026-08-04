@@ -38,10 +38,14 @@ describe('NoteUnderline', () => {
     });
 
     it.each([
-        ['++literal++', '\\+\\+literal\\+\\+'],
-        ['++++', '\\+\\+\\+\\+'],
-        ['C++++', 'C\\+\\+\\+\\+'],
-        ['<script>++literal++</script>', '&lt;script&gt;\\+\\+literal\\+\\+&lt;/script&gt;'],
+        ['++literal++', '&#43;&#43;literal&#43;&#43;'],
+        ['++++', '&#43;&#43;&#43;&#43;'],
+        ['C++++', 'C&#43;&#43;&#43;&#43;'],
+        ['<script>++literal++</script>', '&lt;script&gt;&#43;&#43;literal&#43;&#43;&lt;/script&gt;'],
+        ['# literal', '\\# literal'],
+        ['- literal', '\\- literal'],
+        ['+ literal', '\\+ literal'],
+        ['1. literal', '1\\. literal'],
     ])('serializes literal delimiter text safely: %s', (text, expected) => {
         const editor = new Editor({
             extensions: [
@@ -62,7 +66,7 @@ describe('NoteUnderline', () => {
     });
 
     it('escapes every complete literal delimiter pair', () => {
-        expect(escapeNoteUnderlineText('++one++ +++')).toBe('\\+\\+one\\+\\+ \\+\\++');
+        expect(escapeNoteUnderlineText('++one++ +++')).toBe('&#43;&#43;one&#43;&#43; &#43;&#43;+');
     });
 
     it('parses bounded underline delimiters', () => {
