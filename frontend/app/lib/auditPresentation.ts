@@ -62,8 +62,9 @@ type MetadataField = {
     mono?: boolean;
 };
 
-const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/;
-const SAFE_ERROR = /^[A-Za-z][A-Za-z0-9.$_-]{0,127}$/;
+const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/;
+const SAFE_CORRELATION_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+const SAFE_ERROR = /^[A-Za-z][A-Za-z0-9.$_]{0,119}(?:Exception|Error)$/;
 const SECRET_PURPOSES = new Set([
     'workspace.smtp.password',
     'workspace.delivery.provider_credential',
@@ -94,6 +95,48 @@ const AI_REASONS = new Set([
     'provider_exception',
 ]);
 const AI_PARSE_OUTCOMES = new Set(['parsed', 'truncated', 'malformed_output']);
+const AI_STOP_REASONS = new Set([
+    'stop',
+    'length',
+    'content_filter',
+    'tool_calls',
+    'function_call',
+    'end_turn',
+    'max_tokens',
+    'stop_sequence',
+    'tool_use',
+    'pause_turn',
+    'refusal',
+    'safety',
+    'recitation',
+    'blocklist',
+    'prohibited_content',
+    'spii',
+    'malformed_function_call',
+    'language',
+    'other',
+]);
+const AI_MEDIA_TYPES = new Set(['image/jpeg']);
+const AI_MODEL_MARKERS = [
+    'anthropic',
+    'claude',
+    'gemini',
+    'gpt',
+    'model',
+    'o1',
+    'o3',
+    'o4',
+    'llama',
+    'mistral',
+    'mixtral',
+    'deepseek',
+    'qwen',
+    'command',
+    'cohere',
+    'nova',
+    'titan',
+];
+const SAFE_REGION = /^(?:global|unresolved|[a-z]{2}(?:-gov)?-[a-z]+-[0-9]|[a-z]+-[a-z]+[0-9]|(?:east|west|north|south|central)[a-z]*[0-9]?|[a-z]+(?:east|west|north|south|central)[0-9]?)$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -114,9 +157,48 @@ function knownString(allowed: ReadonlySet<string>): (value: unknown) => AuditMet
     };
 }
 
-function token(value: unknown): AuditMetadataValue {
+function looksCredentialShaped(value: string): boolean {
+    const normalized = value.toLowerCase();
+    return normalized.startsWith('sk-')
+        || normalized.startsWith('akia')
+        || normalized.startsWith('aiza')
+        || normalized.startsWith('ghp_')
+        || normalized.startsWith('xoxb-')
+        || normalized.startsWith('eyj')
+        || normalized.includes('raw-secret')
+        || normalized.includes('secret-token')
+        || normalized.includes('credential')
+        || normalized.includes('password')
+        || normalized.includes('api-key')
+        || normalized.includes('bearer');
+}
+
+function identifier(value: unknown): AuditMetadataValue {
     const resolved = resolvedMetadataValue(value);
-    return typeof resolved === 'string' && SAFE_TOKEN.test(resolved) ? resolved : null;
+    return typeof resolved === 'string' && SAFE_IDENTIFIER.test(resolved) && !looksCredentialShaped(resolved)
+        ? resolved
+        : null;
+}
+
+function region(value: unknown): AuditMetadataValue {
+    const resolved = resolvedMetadataValue(value);
+    return typeof resolved === 'string' && SAFE_REGION.test(resolved) ? resolved : null;
+}
+
+function model(value: unknown): AuditMetadataValue {
+    const resolved = resolvedMetadataValue(value);
+    if (typeof resolved !== 'string'
+        || !SAFE_IDENTIFIER.test(resolved)
+        || looksCredentialShaped(resolved)) {
+        return null;
+    }
+    const normalized = resolved.toLowerCase();
+    return AI_MODEL_MARKERS.some((marker) => normalized.includes(marker)) ? resolved : null;
+}
+
+function correlationId(value: unknown): AuditMetadataValue {
+    const resolved = resolvedMetadataValue(value);
+    return typeof resolved === 'string' && SAFE_CORRELATION_ID.test(resolved) ? resolved : null;
 }
 
 function nonNegativeInteger(value: unknown): AuditMetadataValue {
@@ -129,20 +211,22 @@ function booleanValue(value: unknown): AuditMetadataValue {
     return typeof resolved === 'boolean' ? resolved : null;
 }
 
-function tokenList(value: unknown): AuditMetadataValue {
-    const resolved = resolvedMetadataValue(value);
-    if (!Array.isArray(resolved) || resolved.length === 0 || resolved.length > 16) return null;
-    return resolved.every((item) => typeof item === 'string' && SAFE_TOKEN.test(item))
-        ? resolved.join(', ')
-        : null;
+function knownStringList(allowed: ReadonlySet<string>): (value: unknown) => AuditMetadataValue {
+    return (value) => {
+        const resolved = resolvedMetadataValue(value);
+        if (!Array.isArray(resolved) || resolved.length === 0 || resolved.length > 16) return null;
+        return resolved.every((item) => typeof item === 'string' && allowed.has(item))
+            ? resolved.join(', ')
+            : null;
+    };
 }
 
 const SECRET_FIELDS: readonly MetadataField[] = [
     { key: 'secretId', labelKey: 'metaSecretReference', validate: nonNegativeInteger, mono: true },
     { key: 'purpose', labelKey: 'metaPurpose', validate: knownString(SECRET_PURPOSES) },
-    { key: 'keyId', labelKey: 'metaKeyId', validate: token, mono: true },
-    { key: 'previousKeyId', labelKey: 'metaPreviousKeyId', validate: token, mono: true },
-    { key: 'newKeyId', labelKey: 'metaNewKeyId', validate: token, mono: true },
+    { key: 'keyId', labelKey: 'metaKeyId', validate: identifier, mono: true },
+    { key: 'previousKeyId', labelKey: 'metaPreviousKeyId', validate: identifier, mono: true },
+    { key: 'newKeyId', labelKey: 'metaNewKeyId', validate: identifier, mono: true },
     { key: 'rewrapped', labelKey: 'metaRewrapped', validate: booleanValue },
     { key: 'healthy', labelKey: 'metaHealthy', validate: booleanValue },
     { key: 'available', labelKey: 'metaAvailable', validate: booleanValue },
@@ -156,18 +240,18 @@ const SECRET_FIELDS: readonly MetadataField[] = [
 
 const AI_FIELDS: readonly MetadataField[] = [
     { key: 'provider', labelKey: 'metaProvider', validate: knownString(AI_PROVIDERS) },
-    { key: 'region', labelKey: 'metaRegion', validate: token },
-    { key: 'model', labelKey: 'metaModel', validate: token, mono: true },
+    { key: 'region', labelKey: 'metaRegion', validate: region },
+    { key: 'model', labelKey: 'metaModel', validate: model, mono: true },
     { key: 'feature', labelKey: 'metaFeature', validate: knownString(AI_FEATURES) },
-    { key: 'correlationId', labelKey: 'metaCorrelationId', validate: token, mono: true },
+    { key: 'correlationId', labelKey: 'metaCorrelationId', validate: correlationId, mono: true },
     { key: 'messageCount', labelKey: 'metaMessageCount', validate: nonNegativeInteger },
     { key: 'mediaCount', labelKey: 'metaMediaCount', validate: nonNegativeInteger },
     { key: 'mediaBytes', labelKey: 'metaMediaBytes', validate: nonNegativeInteger },
-    { key: 'mediaTypes', labelKey: 'metaMediaTypes', validate: tokenList },
+    { key: 'mediaTypes', labelKey: 'metaMediaTypes', validate: knownStringList(AI_MEDIA_TYPES) },
     { key: 'structured', labelKey: 'metaStructured', validate: booleanValue },
     { key: 'inputTokens', labelKey: 'metaInputTokens', validate: nonNegativeInteger },
     { key: 'outputTokens', labelKey: 'metaOutputTokens', validate: nonNegativeInteger },
-    { key: 'stopReason', labelKey: 'metaStopReason', validate: token },
+    { key: 'stopReason', labelKey: 'metaStopReason', validate: knownString(AI_STOP_REASONS) },
     { key: 'demaskWarnings', labelKey: 'metaDemaskWarnings', validate: nonNegativeInteger },
     { key: 'parseOutcome', labelKey: 'metaParseOutcome', validate: knownString(AI_PARSE_OUTCOMES) },
     { key: 'reason', labelKey: 'metaReason', validate: knownString(AI_REASONS) },
@@ -223,9 +307,9 @@ export function auditTargetLabel(
     }
     if (entry.entityType === 'ai_call' || entry.action === 'ai.llm.call') {
         const provider = knownString(AI_PROVIDERS)(entry.changes?.provider);
-        const region = token(entry.changes?.region);
+        const safeRegion = region(entry.changes?.region);
         const safeProvider = typeof provider === 'string' ? provider : 'ai_call';
-        return typeof region === 'string' ? `${safeProvider}/${region}` : safeProvider;
+        return typeof safeRegion === 'string' ? `${safeProvider}/${safeRegion}` : safeProvider;
     }
     return entry.targetLabel;
 }

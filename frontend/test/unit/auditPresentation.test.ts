@@ -33,7 +33,7 @@ describe('presentAuditEntry', () => {
             changes: {
                 secretId: 17,
                 purpose: 'org.ai.provider_credential',
-                keyId: 'primary-v2',
+                keyId: 'primary',
                 rewrapped: false,
             },
         }));
@@ -42,7 +42,7 @@ describe('presentAuditEntry', () => {
         expect(presentation.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'secretId', value: 17 }),
             expect.objectContaining({ key: 'purpose', value: 'org.ai.provider_credential' }),
-            expect.objectContaining({ key: 'keyId', value: 'primary-v2' }),
+            expect.objectContaining({ key: 'keyId', value: 'primary' }),
             expect.objectContaining({ key: 'rewrapped', value: false }),
         ]));
     });
@@ -57,7 +57,7 @@ describe('presentAuditEntry', () => {
                 provider: 'bedrock',
                 model: 'claude-sonnet-4@20250514',
                 feature: 'deal_brief',
-                correlationId: 'corr-123',
+                correlationId: '123e4567-e89b-42d3-a456-426614174000',
                 outcome: 'blocked',
                 inputTokens: 80,
                 outputTokens: 25,
@@ -70,7 +70,7 @@ describe('presentAuditEntry', () => {
         expect(presentation.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'provider', value: 'bedrock' }),
             expect.objectContaining({ key: 'model', value: 'claude-sonnet-4@20250514' }),
-            expect.objectContaining({ key: 'correlationId', value: 'corr-123' }),
+            expect.objectContaining({ key: 'correlationId', value: '123e4567-e89b-42d3-a456-426614174000' }),
             expect.objectContaining({ key: 'result', value: 'blocked' }),
         ]));
         expect(presentation.metadata.map((row) => row.key)).not.toEqual(expect.arrayContaining([
@@ -149,16 +149,16 @@ describe('presentAuditEntry', () => {
             entityType: 'ai_call',
             targetLabel: 'private CRM content',
             summary: 'private model output',
-            context: { error: 'secret token value' },
+            context: { error: 'raw-secret-token' },
             changes: {
-                provider: 'secret provider value',
-                region: 'private CRM content',
-                model: 'private model output',
+                provider: 'raw-secret-token',
+                region: 'raw-secret-token',
+                model: 'sk-proj-abc123',
                 feature: 'untrusted_feature',
-                correlationId: 'secret token value',
+                correlationId: 'raw-secret-token',
                 outcome: 'blocked',
                 inputTokens: -1,
-                mediaTypes: ['image/png', 'secret media value'],
+                mediaTypes: ['image/jpeg', 'raw-secret-token'],
             },
         });
         const presentation = presentAuditEntry(unsafe);
@@ -175,5 +175,20 @@ describe('presentAuditEntry', () => {
         expect(auditTargetLabel(unsafe)).toBe('ai_call');
         expect(auditSummary(unsafe)).toBe('AI call blocked');
         expect(auditError(unsafe)).toBeNull();
+
+        const compatible = presentAuditEntry(entry({
+            action: 'ai.llm.call',
+            entityType: 'ai_call',
+            changes: {
+                provider: 'openai_compatible',
+                region: 'eastus2',
+                model: 'private-llama',
+                outcome: 'success',
+            },
+        }));
+        expect(compatible.metadata).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'region', value: 'eastus2' }),
+            expect.objectContaining({ key: 'model', value: 'private-llama' }),
+        ]));
     });
 });

@@ -209,10 +209,10 @@ class AuditServiceTest {
         entry.setOutcome("success");
         entry.setSummary("secret token value");
         entry.setChanges("""
-                {"secretId":17,"purpose":"org.ai.provider_credential","keyId":"secret token value",
+                {"secretId":17,"purpose":"org.ai.provider_credential","keyId":"raw-secret-token",
                 "rewrapped":false,"credential":"raw-secret-token"}
                 """);
-        entry.setContext("{\"error\":\"secret token value\"}");
+        entry.setContext("{\"error\":\"raw-secret-token\"}");
         when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
 
         AuditLog result = service.recent(25, 0).getFirst();
@@ -224,7 +224,6 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains("org.ai.provider_credential"));
         assertFalse(result.getChanges().contains("\"credential\""));
         assertFalse(result.getChanges().contains("raw-secret-token"));
-        assertFalse(result.getChanges().contains("secret token value"));
         assertNull(result.getContext());
         assertTrue(result.isContentRedacted());
     }
@@ -239,7 +238,7 @@ class AuditServiceTest {
         entry.setSummary("private model output");
         entry.setChanges("""
                 {"provider":"vertex","region":"secret region value","model":"claude-sonnet-4@20250514",
-                "feature":"deal.brief","outcome":"blocked","correlationId":"corr-123",
+                "feature":"deal.brief","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
                 "inputTokens":80,"prompt":"private CRM content","response":"private model output"}
                 """);
         entry.setContext("{\"error\":\"ProviderException\",\"detail\":\"secret token value\"}");
@@ -278,6 +277,39 @@ class AuditServiceTest {
     }
 
     @Test
+    void recentProjectsFullyPartialSensitiveRowsWithoutFailing() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("secret_store.secret.use_failed");
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals("secret_store", result.getTargetLabel());
+        assertEquals("Secret use failed", result.getSummary());
+        assertNull(result.getEntityType());
+        assertNull(result.getOutcome());
+        assertTrue(result.isContentRedacted());
+    }
+
+    @Test
+    void recentPreservesRecognizableCustomModelNames() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("ai.llm.call");
+        entry.setEntityType("ai_call");
+        entry.setOutcome("success");
+        entry.setChanges("""
+                {"provider":"openai_compatible","region":"eastus2","model":"private-llama",
+                "outcome":"success"}
+                """);
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertTrue(result.getChanges().contains("private-llama"));
+        assertEquals("openai_compatible/eastus2", result.getTargetLabel());
+    }
+
+    @Test
     void exportOmitsSensitiveIntegrityPayloadAndRawContent() {
         AuditLog entry = new AuditLog();
         entry.setAction("ai.llm.call");
@@ -286,7 +318,7 @@ class AuditServiceTest {
         entry.setOutcome("success");
         entry.setSummary("private model output");
         entry.setChanges("""
-                {"provider":"vertex","feature":"report.narrative","outcome":"success",
+                {"provider":"vertex","model":"sk-proj-abc123","feature":"report.narrative","outcome":"success",
                 "prompt":"private CRM content","credential":"raw-secret-token"}
                 """);
         when(auditLogMapper.findWorkspaceExport(7, 25, 0)).thenReturn(List.of(entry));
@@ -300,6 +332,7 @@ class AuditServiceTest {
         assertFalse(csv.contains("private CRM content"));
         assertFalse(csv.contains("private model output"));
         assertFalse(csv.contains("raw-secret-token"));
+        assertFalse(csv.contains("sk-proj-abc123"));
     }
 
     @Test

@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -83,8 +84,24 @@ public class AuditService {
             "gate", "media_admission", "provider", "provider_capability", "serialization", "leak",
             "provider_exception");
     private static final Set<String> AI_PARSE_OUTCOMES = Set.of("parsed", "truncated", "malformed_output");
-    private static final Pattern SAFE_METADATA_TOKEN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}");
-    private static final Pattern SAFE_ERROR_TOKEN = Pattern.compile("[A-Za-z][A-Za-z0-9.$_-]{0,127}");
+    private static final Set<String> AI_STOP_REASONS = Set.of(
+            "stop", "length", "content_filter", "tool_calls", "function_call", "end_turn",
+            "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal", "safety",
+            "recitation", "blocklist", "prohibited_content", "spii", "malformed_function_call",
+            "language", "other");
+    private static final Set<String> AI_MEDIA_TYPES = Set.of("image/jpeg");
+    private static final Set<String> AI_MODEL_MARKERS = Set.of(
+            "anthropic", "claude", "gemini", "gpt", "model", "o1", "o3", "o4", "llama",
+            "mistral", "mixtral", "deepseek", "qwen", "command", "cohere", "nova", "titan");
+    private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}");
+    private static final Pattern SAFE_REGION = Pattern.compile(
+            "(?:global|unresolved|[a-z]{2}(?:-gov)?-[a-z]+-[0-9]|[a-z]+-[a-z]+[0-9]|"
+                    + "(?:east|west|north|south|central)[a-z]*[0-9]?|"
+                    + "[a-z]+(?:east|west|north|south|central)[0-9]?)");
+    private static final Pattern SAFE_CORRELATION_ID = Pattern.compile(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}");
+    private static final Pattern SAFE_ERROR_TOKEN = Pattern.compile(
+            "[A-Za-z][A-Za-z0-9.$_]{0,119}(?:Exception|Error)");
 
     private final AuditLogMapper auditLogMapper;
     private final AuditIntegrityService auditIntegrityService;
@@ -576,9 +593,9 @@ public class AuditService {
         if (family == SensitiveAuditFamily.SECRET) {
             copyNumber(source, projected, "secretId");
             copyKnownString(source, projected, "purpose", SECRET_PURPOSES);
-            copyToken(source, projected, "keyId");
-            copyToken(source, projected, "previousKeyId");
-            copyToken(source, projected, "newKeyId");
+            copyIdentifier(source, projected, "keyId");
+            copyIdentifier(source, projected, "previousKeyId");
+            copyIdentifier(source, projected, "newKeyId");
             copyBoolean(source, projected, "rewrapped");
             copyBoolean(source, projected, "healthy");
             copyBoolean(source, projected, "available");
@@ -591,19 +608,19 @@ public class AuditService {
             return projected;
         }
         copyKnownString(source, projected, "provider", AI_PROVIDERS);
-        copyToken(source, projected, "region");
-        copyToken(source, projected, "model");
+        copyRegion(source, projected, "region");
+        copyModel(source, projected, "model");
         copyKnownString(source, projected, "feature", AI_FEATURES);
         copyKnownString(source, projected, "outcome", AI_OUTCOMES);
-        copyToken(source, projected, "correlationId");
+        copyCorrelationId(source, projected, "correlationId");
         copyNumber(source, projected, "messageCount");
         copyNumber(source, projected, "mediaCount");
         copyNumber(source, projected, "mediaBytes");
-        copyTokenList(source, projected, "mediaTypes");
+        copyKnownStringList(source, projected, "mediaTypes", AI_MEDIA_TYPES);
         copyBoolean(source, projected, "structured");
         copyNumber(source, projected, "inputTokens");
         copyNumber(source, projected, "outputTokens");
-        copyToken(source, projected, "stopReason");
+        copyKnownString(source, projected, "stopReason", AI_STOP_REASONS);
         copyNumber(source, projected, "demaskWarnings");
         copyKnownString(source, projected, "parseOutcome", AI_PARSE_OUTCOMES);
         copyKnownString(source, projected, "reason", AI_REASONS);
@@ -663,7 +680,8 @@ public class AuditService {
         Set<String> allowed = family == SensitiveAuditFamily.AI
                 ? AI_OUTCOMES
                 : Set.of(OUTCOME_SUCCESS, OUTCOME_FAILURE);
-        return allowed.contains(entry.getOutcome()) ? entry.getOutcome() : null;
+        String outcome = entry.getOutcome();
+        return outcome != null && allowed.contains(outcome) ? outcome : null;
     }
 
     private static String sensitiveAction(String action, SensitiveAuditFamily family) {
@@ -677,7 +695,7 @@ public class AuditService {
         if (family == SensitiveAuditFamily.AI) {
             return "ai_call";
         }
-        return SECRET_ENTITY_TYPES.contains(entityType) ? entityType : null;
+        return entityType != null && SECRET_ENTITY_TYPES.contains(entityType) ? entityType : null;
     }
 
     private static String sensitiveTarget(
@@ -686,7 +704,7 @@ public class AuditService {
             if (metadata.get("purpose") instanceof String purpose) {
                 return purpose;
             }
-            return SECRET_PURPOSES.contains(targetLabel) ? targetLabel : "secret_store";
+            return targetLabel != null && SECRET_PURPOSES.contains(targetLabel) ? targetLabel : "secret_store";
         }
         String provider = metadata.get("provider") instanceof String value ? value : "ai_call";
         return metadata.get("region") instanceof String region ? provider + "/" + region : provider;
@@ -714,9 +732,38 @@ public class AuditService {
         }
     }
 
-    private static void copyToken(Map<?, ?> source, Map<String, Object> target, String key) {
+    private static void copyIdentifier(Map<?, ?> source, Map<String, Object> target, String key) {
         Object value = metadataValue(source.get(key));
-        if (value instanceof String string && SAFE_METADATA_TOKEN.matcher(string).matches()) {
+        if (value instanceof String string
+                && SAFE_IDENTIFIER.matcher(string).matches()
+                && !looksCredentialShaped(string)) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyRegion(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof String string && SAFE_REGION.matcher(string).matches()) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyModel(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (!(value instanceof String string)
+                || !SAFE_IDENTIFIER.matcher(string).matches()
+                || looksCredentialShaped(string)) {
+            return;
+        }
+        String normalized = string.toLowerCase(Locale.ROOT);
+        if (AI_MODEL_MARKERS.stream().anyMatch(normalized::contains)) {
+            target.put(key, string);
+        }
+    }
+
+    private static void copyCorrelationId(Map<?, ?> source, Map<String, Object> target, String key) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof String string && SAFE_CORRELATION_ID.matcher(string).matches()) {
             target.put(key, string);
         }
     }
@@ -736,19 +783,36 @@ public class AuditService {
         }
     }
 
-    private static void copyTokenList(Map<?, ?> source, Map<String, Object> target, String key) {
+    private static void copyKnownStringList(
+            Map<?, ?> source, Map<String, Object> target, String key, Set<String> allowed) {
         Object value = metadataValue(source.get(key));
         if (!(value instanceof List<?> list) || list.isEmpty() || list.size() > 16) {
             return;
         }
         List<String> tokens = new ArrayList<>();
         for (Object item : list) {
-            if (!(item instanceof String string) || !SAFE_METADATA_TOKEN.matcher(string).matches()) {
+            if (!(item instanceof String string) || !allowed.contains(string)) {
                 return;
             }
             tokens.add(string);
         }
         target.put(key, tokens);
+    }
+
+    private static boolean looksCredentialShaped(String value) {
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return normalized.startsWith("sk-")
+                || normalized.startsWith("akia")
+                || normalized.startsWith("aiza")
+                || normalized.startsWith("ghp_")
+                || normalized.startsWith("xoxb-")
+                || normalized.startsWith("eyj")
+                || normalized.contains("raw-secret")
+                || normalized.contains("secret-token")
+                || normalized.contains("credential")
+                || normalized.contains("password")
+                || normalized.contains("api-key")
+                || normalized.contains("bearer");
     }
 
     private static Object metadataValue(Object value) {
