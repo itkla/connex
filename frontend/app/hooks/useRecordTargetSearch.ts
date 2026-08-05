@@ -70,12 +70,13 @@ function useRecordTargetSearch<T extends RecordTarget>(
             ])
                 .then(([page]) => {
                     if (controller.signal.aborted) return;
-                    setTargets((current) => mergeTargets(
-                        hydrated,
-                        current.filter((target) => stableIdSet.has(target.id)),
-                        seeds,
-                        page.items,
-                    ));
+                    setTargets((current) => {
+                        const retained = current.filter((target) => stableIdSet.has(target.id));
+                        if (query.trim()) {
+                            return mergeTargets(hydrated, retained, page.items);
+                        }
+                        return mergeTargets(hydrated, retained, seeds, page.items);
+                    });
                 })
                 .catch((nextError: unknown) => {
                     if (controller.signal.aborted) return;

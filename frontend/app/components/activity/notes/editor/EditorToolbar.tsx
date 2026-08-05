@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent } from "react";
 import type { Editor } from "@tiptap/core";
 import {
     ArrowDownToLine,
@@ -21,6 +21,7 @@ import {
     List,
     ListOrdered,
     ListTodo,
+    LoaderCircle,
     Redo2,
     Rows3,
     SquareCode,
@@ -32,6 +33,7 @@ import {
     Undo2,
     type LucideIcon,
 } from "lucide-react";
+import { PhotoIcon } from "@heroicons/react/24/outline";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +46,9 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { uploadAttachment } from "@/app/lib/api";
+import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from "@/app/lib/managed-image";
+import { toastError } from "@/app/lib/toast";
 import { canMoveTopLevelBlock, moveTopLevelBlock } from "./BlockReorder";
 import { normalizeEditorLinkHref } from "./editorLinks";
 import {
@@ -98,9 +103,23 @@ export type ToolbarLabels = {
     imageApply: string;
     imageUpdate: string;
     imageRemove: string;
+    imageDropHint: string;
+    imageUploading: string;
+    imageUploadFailed: string;
+    imageUnsupportedType: string;
 };
 
-type Props = { editor: Editor | null; labels: ToolbarLabels; compact?: boolean };
+type Props = {
+    editor: Editor | null;
+    labels: ToolbarLabels;
+    compact?: boolean;
+    ensureNoteId?: () => Promise<number>;
+};
+
+function defaultAltFromFileName(fileName: string): string {
+    const base = fileName.replace(/\.[^.]+$/u, "").replace(/[_-]+/gu, " ").trim();
+    return base || fileName;
+}
 
 function toolbarButtonClass(active = false) {
     return cn(
@@ -226,15 +245,26 @@ function LinkPopover({ editor, labels }: { editor: Editor; labels: ToolbarLabels
     );
 }
 
-function ImagePopover({ editor, labels }: { editor: Editor; labels: ToolbarLabels }) {
+function ImagePopover({
+    editor,
+    labels,
+    ensureNoteId,
+}: {
+    editor: Editor;
+    labels: ToolbarLabels;
+    ensureNoteId?: () => Promise<number>;
+}) {
     const sourceId = useId();
     const altId = useId();
     const sourceErrorId = `${sourceId}-error`;
     const altErrorId = `${altId}-error`;
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const [open, setOpen] = useState(false);
     const [source, setSource] = useState("");
     const [alt, setAlt] = useState("");
     const [altTouched, setAltTouched] = useState(false);
+    const [dragActive, setDragActive] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const active = editor.isActive("image");
     const normalizedSource = normalizeNoteImageSource(source);
     const sourceInvalid = source.trim().length > 0 && normalizedSource === null;
@@ -243,30 +273,82 @@ function ImagePopover({ editor, labels }: { editor: Editor; labels: ToolbarLabel
     const canInsert = active || editor.can().setImage({ src: "https://connex.invalid/image", alt: "Image" });
 
     const handleOpenChange = (nextOpen: boolean) => {
+        if (uploading) return;
         if (nextOpen) {
             const attributes = editor.getAttributes("image");
             setSource(typeof attributes.src === "string" ? attributes.src : "");
             setAlt(typeof attributes.alt === "string" ? attributes.alt : "");
             setAltTouched(false);
+            setDragActive(false);
         }
         setOpen(nextOpen);
+    };
+
+    const applyImageAttrs = (nextSource: string, nextAlt: string) => {
+        if (active) {
+            editor.chain().focus().updateAttributes("image", { src: nextSource, alt: nextAlt }).run();
+        } else {
+            editor.chain().focus().setImage({ src: nextSource, alt: nextAlt }).run();
+        }
     };
 
     const applyImage = (event?: FormEvent) => {
         event?.preventDefault();
         const description = alt.trim();
         if (!normalizedSource || !description) return;
-        if (active) {
-            editor.chain().focus().updateAttributes("image", { src: normalizedSource, alt: description }).run();
-        } else {
-            editor.chain().focus().setImage({ src: normalizedSource, alt: description }).run();
-        }
+        applyImageAttrs(normalizedSource, description);
         setOpen(false);
     };
 
     const removeImage = () => {
         editor.chain().focus().deleteSelection().run();
         setOpen(false);
+    };
+
+    const uploadImageFile = async (file: File) => {
+        if (!ensureNoteId) {
+            toastError(labels.imageUploadFailed);
+            return;
+        }
+        if (!(await isManagedImageFile(file))) {
+            toastError(labels.imageUnsupportedType);
+            return;
+        }
+        setUploading(true);
+        try {
+            const noteId = await ensureNoteId();
+            const attachment = await uploadAttachment("note", noteId, file);
+            const nextSource = normalizeNoteImageSource(attachment.url);
+            if (!nextSource) {
+                toastError(labels.imageUploadFailed);
+                return;
+            }
+            const nextAlt = alt.trim() || defaultAltFromFileName(file.name || attachment.fileName);
+            setSource(nextSource);
+            setAlt(nextAlt);
+            applyImageAttrs(nextSource, nextAlt);
+            setOpen(false);
+        } catch {
+            toastError(labels.imageUploadFailed);
+        } finally {
+            setUploading(false);
+            setDragActive(false);
+        }
+    };
+
+    const onDropZoneDragOver = (event: DragEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        if (!dragActive) setDragActive(true);
+    };
+    const onDropZoneDragLeave = (event: DragEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        setDragActive(false);
+    };
+    const onDropZoneDrop = (event: DragEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        setDragActive(false);
+        const file = event.dataTransfer.files?.[0];
+        if (file) void uploadImageFile(file);
     };
 
     return (
@@ -287,57 +369,103 @@ function ImagePopover({ editor, labels }: { editor: Editor; labels: ToolbarLabel
                 <PopoverDescription className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     {labels.imageDescription}
                 </PopoverDescription>
-                <form className="mt-4 grid gap-3" onSubmit={applyImage}>
-                    <div className="grid gap-1.5">
-                        <Label htmlFor={sourceId}>{labels.imageSourceLabel}</Label>
-                        <Input
-                            id={sourceId}
-                            value={source}
-                            onChange={(event) => setSource(event.target.value)}
-                            placeholder={labels.imageSourcePlaceholder}
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            spellCheck={false}
-                            aria-invalid={sourceInvalid || undefined}
-                            aria-describedby={sourceInvalid ? sourceErrorId : undefined}
-                            autoFocus
-                        />
-                        {sourceInvalid ? (
-                            <p id={sourceErrorId} className="text-xs text-destructive" role="alert">
-                                {labels.imageInvalid}
-                            </p>
-                        ) : null}
-                    </div>
-                    <div className="grid gap-1.5">
-                        <Label htmlFor={altId}>{labels.imageAltLabel}</Label>
-                        <Input
-                            id={altId}
-                            value={alt}
-                            onChange={(event) => setAlt(event.target.value)}
-                            onBlur={() => setAltTouched(true)}
-                            placeholder={labels.imageAltPlaceholder}
-                            required
-                            aria-invalid={showAltError || undefined}
-                            aria-describedby={showAltError ? altErrorId : undefined}
-                        />
-                        {showAltError ? (
-                            <p id={altErrorId} className="text-xs text-destructive" role="alert">
-                                {labels.imageAltRequired}
-                            </p>
-                        ) : null}
-                    </div>
-                    <div className="flex justify-end gap-2">
-                        {active ? (
-                            <Button type="button" variant="ghost" size="sm" onClick={removeImage}>
-                                <Trash2 className="size-4" />
-                                {labels.imageRemove}
+                <div className="mt-4 grid gap-3">
+                    {ensureNoteId ? (
+                        <>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept={MANAGED_IMAGE_ACCEPT}
+                                className="hidden"
+                                onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    event.target.value = "";
+                                    if (file) void uploadImageFile(file);
+                                }}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                onDragOver={onDropZoneDragOver}
+                                onDragLeave={onDropZoneDragLeave}
+                                onDrop={onDropZoneDrop}
+                                disabled={uploading}
+                                className={cn(
+                                    "flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-xs transition-colors",
+                                    dragActive
+                                        ? "border-brand bg-brand/5 text-brand"
+                                        : "border-border text-muted-foreground hover:border-muted-foreground/40 hover:bg-muted/60",
+                                    "disabled:pointer-events-none disabled:opacity-60",
+                                )}
+                            >
+                                {uploading ? (
+                                    <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                    <PhotoIcon className="size-4" />
+                                )}
+                                <span>{uploading ? labels.imageUploading : labels.imageDropHint}</span>
+                            </button>
+                        </>
+                    ) : null}
+                    <form className="grid gap-3" onSubmit={applyImage}>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor={sourceId}>{labels.imageSourceLabel}</Label>
+                            <Input
+                                id={sourceId}
+                                value={source}
+                                onChange={(event) => setSource(event.target.value)}
+                                placeholder={labels.imageSourcePlaceholder}
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                spellCheck={false}
+                                disabled={uploading}
+                                aria-invalid={sourceInvalid || undefined}
+                                aria-describedby={sourceInvalid ? sourceErrorId : undefined}
+                                autoFocus
+                            />
+                            {sourceInvalid ? (
+                                <p id={sourceErrorId} className="text-xs text-destructive" role="alert">
+                                    {labels.imageInvalid}
+                                </p>
+                            ) : null}
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor={altId}>{labels.imageAltLabel}</Label>
+                            <Input
+                                id={altId}
+                                value={alt}
+                                onChange={(event) => setAlt(event.target.value)}
+                                onBlur={() => setAltTouched(true)}
+                                placeholder={labels.imageAltPlaceholder}
+                                required
+                                disabled={uploading}
+                                aria-invalid={showAltError || undefined}
+                                aria-describedby={showAltError ? altErrorId : undefined}
+                            />
+                            {showAltError ? (
+                                <p id={altErrorId} className="text-xs text-destructive" role="alert">
+                                    {labels.imageAltRequired}
+                                </p>
+                            ) : null}
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            {active ? (
+                                <Button type="button" variant="ghost" size="sm" onClick={removeImage} disabled={uploading}>
+                                    <Trash2 className="size-4" />
+                                    {labels.imageRemove}
+                                </Button>
+                            ) : null}
+                            <Button
+                                type="submit"
+                                variant="brand"
+                                size="sm"
+                                disabled={uploading || !normalizedSource || altMissing}
+                            >
+                                {active ? labels.imageUpdate : labels.imageApply}
                             </Button>
-                        ) : null}
-                        <Button type="submit" variant="brand" size="sm" disabled={!normalizedSource || altMissing}>
-                            {active ? labels.imageUpdate : labels.imageApply}
-                        </Button>
-                    </div>
-                </form>
+                        </div>
+                    </form>
+                </div>
             </PopoverContent>
         </Popover>
     );
@@ -369,7 +497,7 @@ export function InlineFormattingControls({
     );
 }
 
-export function EditorToolbar({ editor, labels, compact = false }: Props) {
+export function EditorToolbar({ editor, labels, compact = false, ensureNoteId }: Props) {
     const [, setTick] = useState(0);
 
     useEffect(() => {
@@ -433,7 +561,7 @@ export function EditorToolbar({ editor, labels, compact = false }: Props) {
                     <ToolbarButton label={labels.tableDelete} disabled={!editor.can().deleteTable()} onClick={() => editor.chain().focus().deleteTable().run()} icon={Trash2} />
                 </>
             ) : null}
-            <ImagePopover editor={editor} labels={labels} />
+            <ImagePopover editor={editor} labels={labels} ensureNoteId={ensureNoteId} />
         </div>
     );
 }

@@ -36,6 +36,7 @@ type Props = {
     className?: string;
     /** Miniaturized layout for embedding in a dialog: shorter body, condensed toolbar, no drag handle. */
     compact?: boolean;
+    ensureNoteId?: () => Promise<number>;
 };
 
 /**
@@ -51,6 +52,7 @@ export default function RichNoteEditor({
     autofocus = false,
     className,
     compact = false,
+    ensureNoteId,
 }: Props) {
     const t = useTranslations("ActivityNotesEditor");
     const onChangeRef = useRef(onChange);
@@ -166,11 +168,22 @@ export default function RichNoteEditor({
         imageApply: t("imageApply"),
         imageUpdate: t("imageUpdate"),
         imageRemove: t("imageRemove"),
+        imageDropHint: t("imageDropHint"),
+        imageUploading: t("imageUploading"),
+        imageUploadFailed: t("imageUploadFailed"),
+        imageUnsupportedType: t("imageUnsupportedType"),
     };
 
     return (
         <div className={className}>
-            {editable ? <EditorToolbar editor={editor} labels={labels} compact={compact} /> : null}
+            {editable ? (
+                <EditorToolbar
+                    editor={editor}
+                    labels={labels}
+                    compact={compact}
+                    ensureNoteId={ensureNoteId}
+                />
+            ) : null}
             {editable && !compact && editor ? <SelectionToolbar editor={editor} labels={labels} /> : null}
             {editable && !compact && editor ? (
                 <DragHandle editor={editor} className="note-drag-handle">

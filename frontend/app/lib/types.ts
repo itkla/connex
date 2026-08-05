@@ -2463,7 +2463,7 @@ export type NotificationPreference = {
     enabled: boolean;
 };
 
-export type AttachmentEntityType = 'company' | 'person' | 'deal' | 'user';
+export type AttachmentEntityType = 'company' | 'person' | 'deal' | 'user' | 'note';
 
 export type Attachment = {
     id: number;
