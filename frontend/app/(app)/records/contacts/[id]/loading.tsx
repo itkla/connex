@@ -24,6 +24,7 @@ export default function ContactPageLoading() {
                                 <div className="flex flex-row flex-wrap items-center gap-3">
                                     <Skeleton className="h-9 w-56" />
                                     <Skeleton className="h-6 w-16 rounded-full" />
+                                    <Skeleton className="h-6 w-16 rounded-full" />
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <Skeleton className="h-6 w-28 rounded-md" />
@@ -61,16 +62,6 @@ export default function ContactPageLoading() {
                                 </div>
                             ))}
                         </div>
-
-                        <div className="mt-6">
-                            <SectionLabel />
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card px-6 py-5">
-                                <div className="flex items-center justify-between gap-4">
-                                    <Skeleton className="h-4 w-28" />
-                                    <Skeleton className="h-4 w-16" />
-                                </div>
-                            </div>
-                        </div>
                     </aside>
 
                     <section>
@@ -90,57 +81,85 @@ export default function ContactPageLoading() {
                                 </div>
                             ))}
                         </div>
-
-                        <div className="mt-6">
-                            <SectionLabel />
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                {Array.from({ length: 2 }).map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className="flex items-center justify-between border-b border-border px-6 py-4 last:border-b-0"
-                                    >
-                                        <Skeleton className="h-4 w-40" />
-                                        <Skeleton className="h-4 w-16" />
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="mt-6">
-                            <SectionLabel />
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                {Array.from({ length: 3 }).map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className="flex items-center gap-4 border-b border-border px-6 py-4 last:border-b-0"
-                                    >
-                                        <Skeleton className="size-10 shrink-0 rounded-full" />
-                                        <div className="flex-1 space-y-2">
-                                            <Skeleton className="h-4 w-1/3" />
-                                            <Skeleton className="h-3 w-1/2" />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="mt-6">
-                            <SectionLabel />
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                <div className="space-y-5 p-6">
-                                    {Array.from({ length: 5 }).map((_, i) => (
-                                        <div key={i} className="flex gap-4">
-                                            <Skeleton className="size-8 shrink-0 rounded-full" />
-                                            <div className="flex-1 space-y-2">
-                                                <Skeleton className="h-4 w-1/2" />
-                                                <Skeleton className="h-3 w-3/4" />
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
                     </section>
+                </div>
+
+                <div>
+                    <SectionLabel />
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                        {Array.from({ length: 2 }).map((_, i) => (
+                            <div
+                                key={i}
+                                className="flex items-center justify-between border-b border-border px-6 py-4 last:border-b-0"
+                            >
+                                <Skeleton className="h-4 w-40" />
+                                <Skeleton className="h-4 w-16" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-border bg-card px-5 py-5">
+                    <div className="flex items-center justify-between gap-4">
+                        <Skeleton className="h-3 w-36" />
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                    </div>
+                    <Skeleton className="mt-4 h-4 w-2/3" />
+                </div>
+
+                <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+                    <div>
+                        <SectionLabel />
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            {Array.from({ length: 3 }).map((_, i) => (
+                                <div
+                                    key={i}
+                                    className="flex items-center gap-4 border-b border-border px-6 py-4 last:border-b-0"
+                                >
+                                    <Skeleton className="size-10 shrink-0 rounded-full" />
+                                    <div className="flex-1 space-y-2">
+                                        <Skeleton className="h-4 w-1/3" />
+                                        <Skeleton className="h-3 w-1/2" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <SectionLabel />
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            {Array.from({ length: 2 }).map((_, i) => (
+                                <div key={i} className="space-y-2 border-b border-border px-6 py-4 last:border-b-0">
+                                    <Skeleton className="h-4 w-1/2" />
+                                    <Skeleton className="h-3 w-1/3" />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <SectionLabel />
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card px-6 py-8">
+                        <Skeleton className="h-4 w-40" />
+                    </div>
+                </div>
+
+                <div>
+                    <SectionLabel />
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                        <div className="space-y-5 p-6">
+                            {Array.from({ length: 5 }).map((_, i) => (
+                                <div key={i} className="flex gap-4">
+                                    <Skeleton className="size-8 shrink-0 rounded-full" />
+                                    <div className="flex-1 space-y-2">
+                                        <Skeleton className="h-4 w-1/2" />
+                                        <Skeleton className="h-3 w-3/4" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
         </PageShell>
     );
