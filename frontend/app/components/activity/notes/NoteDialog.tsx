@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -38,6 +38,7 @@ import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
+import { filterByNameQuery } from '@/app/lib/filterByNameQuery';
 import { noteContentToVisibleText } from '@/app/lib/references';
 import type { Contact, Deal, Note, NoteVisibility } from '@/app/lib/types';
 
@@ -350,17 +351,36 @@ function NoteLinkFields({
     documentStyle?: boolean;
 }) {
     const t = useTranslations('ActivityNotesDialog');
+    const [personQuery, setPersonQuery] = useState('');
+    const [dealQuery, setDealQuery] = useState('');
+    const filteredPersons = useMemo(
+        () => filterByNameQuery(persons, personQuery),
+        [personQuery, persons],
+    );
+    const filteredDeals = useMemo(
+        () => filterByNameQuery(deals, dealQuery),
+        [dealQuery, deals],
+    );
+
+    const handlePersonQueryChange = (query: string) => {
+        setPersonQuery(query);
+        onPersonQueryChange?.(query);
+    };
+    const handleDealQueryChange = (query: string) => {
+        setDealQuery(query);
+        onDealQueryChange?.(query);
+    };
 
     return (
         <div className={cn(documentStyle ? 'flex min-w-0 flex-1 flex-wrap items-center gap-2' : 'grid grid-cols-1 gap-3 md:grid-cols-2')}>
             <div className={cn(documentStyle ? 'min-w-48 flex-1' : 'grid gap-1.5')}>
                 <Label htmlFor="note-person" className={documentStyle ? 'sr-only' : undefined}>{t('personLabel')}</Label>
                 <Combobox
-                    items={persons}
-                    filter={onPersonQueryChange ? null : undefined}
+                    items={filteredPersons}
+                    filter={null}
                     itemToStringLabel={(person: Contact) => person.name}
                     value={selectedPerson}
-                    onInputValueChange={onPersonQueryChange}
+                    onInputValueChange={handlePersonQueryChange}
                     onValueChange={(person) => onPersonSelect(person?.id ?? null)}
                 >
                     <ComboboxInput
@@ -378,7 +398,7 @@ function NoteLinkFields({
                     <ComboboxContent className="pointer-events-auto">
                         <ComboboxList onWheel={handleListWheel}>
                             <ComboboxEmpty>{personOptionsLoading ? t('searching') : t('noPersonFound')}</ComboboxEmpty>
-                            {persons.map((person) => (
+                            {filteredPersons.map((person) => (
                                 <ComboboxItem key={person.id} value={person}>{person.name}</ComboboxItem>
                             ))}
                         </ComboboxList>
@@ -389,11 +409,11 @@ function NoteLinkFields({
             <div className={cn(documentStyle ? 'min-w-48 flex-1' : 'grid gap-1.5')}>
                 <Label htmlFor="note-deal" className={documentStyle ? 'sr-only' : undefined}>{t('dealLabel')}</Label>
                 <Combobox
-                    items={deals}
-                    filter={onDealQueryChange ? null : undefined}
+                    items={filteredDeals}
+                    filter={null}
                     itemToStringLabel={(deal: Deal) => deal.name}
                     value={selectedDeal}
-                    onInputValueChange={onDealQueryChange}
+                    onInputValueChange={handleDealQueryChange}
                     onValueChange={(deal) => onDealSelect(deal?.id ?? null)}
                 >
                     <ComboboxInput
@@ -411,7 +431,7 @@ function NoteLinkFields({
                     <ComboboxContent className="pointer-events-auto">
                         <ComboboxList onWheel={handleListWheel}>
                             <ComboboxEmpty>{dealOptionsLoading ? t('searching') : t('noDealFound')}</ComboboxEmpty>
-                            {deals.map((deal) => (
+                            {filteredDeals.map((deal) => (
                                 <ComboboxItem key={deal.id} value={deal}>{deal.name}</ComboboxItem>
                             ))}
                         </ComboboxList>
@@ -467,6 +487,28 @@ export function NoteDialogForm({
     const [visibility, setVisibility] = useState<NoteVisibility>(
         () => note?.visibility ?? defaultVisibility ?? (defaultPerson || defaultDeal ? 'workspace' : 'private'),
     );
+    const [persistedNoteId, setPersistedNoteId] = useState<number | null>(() => note?.id ?? null);
+    const persistedNoteIdRef = useRef(persistedNoteId);
+    const ensureNoteIdInFlightRef = useRef<Promise<number> | null>(null);
+    const formSnapshotRef = useRef({
+        title,
+        content,
+        visibility,
+        personId: selectedPersonId,
+        dealId: selectedDealId,
+    });
+    useEffect(() => {
+        persistedNoteIdRef.current = persistedNoteId;
+    }, [persistedNoteId]);
+    useEffect(() => {
+        formSnapshotRef.current = {
+            title,
+            content,
+            visibility,
+            personId: selectedPersonId,
+            dealId: selectedDealId,
+        };
+    }, [content, selectedDealId, selectedPersonId, title, visibility]);
     const selectedPerson = useMemo(
         () => persons.find((person) => person.id === selectedPersonId)
             ?? (defaultPerson?.id === selectedPersonId ? defaultPerson : null),
@@ -524,6 +566,37 @@ export function NoteDialogForm({
         });
     }, [content, formChanged, isEdit, onClearDraft, onPersistDraft, selectedDealId, selectedPersonId, succeeded, title, visibility]);
 
+    const ensureNoteId = useCallback(async (): Promise<number> => {
+        const existing = persistedNoteIdRef.current;
+        if (existing != null) return existing;
+        if (ensureNoteIdInFlightRef.current) return ensureNoteIdInFlightRef.current;
+
+        const snapshot = formSnapshotRef.current;
+        const body = snapshot.content.trim() ? snapshot.content : '\u200B';
+        const promise = createNote(
+            {
+                content: body,
+                title: snapshot.title.trim() || null,
+                visibility: snapshot.visibility,
+                author: currentUserId,
+                person: snapshot.personId,
+                deal: snapshot.dealId,
+            },
+            requestInit,
+        ).then((saved) => {
+            if (!saved?.id) throw new Error('missing-note-id');
+            persistedNoteIdRef.current = saved.id;
+            setPersistedNoteId(saved.id);
+            return saved.id;
+        });
+        ensureNoteIdInFlightRef.current = promise;
+        try {
+            return await promise;
+        } finally {
+            ensureNoteIdInFlightRef.current = null;
+        }
+    }, [currentUserId, requestInit]);
+
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         resetFieldErrors();
@@ -532,21 +605,26 @@ export function NoteDialogForm({
         setSubmitting(true);
         onSubmittingChange(true);
         try {
-            if (isEdit && note) {
+            if (persistedNoteId != null) {
                 await updateNote(
-                    note.id,
+                    persistedNoteId,
                     {
                         content: trimmed,
                         title: normalizedTitle,
                         visibility,
-                        author: note.author,
+                        author: note?.author ?? currentUserId,
                         person: selectedPersonId,
                         deal: selectedDealId,
                     },
                     requestInit,
                 );
                 if (requestInit?.signal?.aborted) return;
-                toastSuccess(t('toastUpdated'));
+                if (isEdit) {
+                    toastSuccess(t('toastUpdated'));
+                } else {
+                    onClearDraft?.();
+                    toastSuccess(t('toastCreated'));
+                }
             } else {
                 await createNote(
                     {
@@ -703,6 +781,7 @@ export function NoteDialogForm({
                                 }}
                                 excludeUserId={currentUserId}
                                 autofocus
+                                ensureNoteId={ensureNoteId}
                             />
                         </div>
                         {fieldErrors.content && <p id="note-content-error" className="text-sm text-destructive">{fieldErrors.content}</p>}

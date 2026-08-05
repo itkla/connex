@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
@@ -30,6 +31,7 @@ public class AttachmentWriteOperations {
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
+    private final NoteMapper noteMapper;
     private final AuditService auditService;
     private final ManagedObjectService managedObjectService;
 
@@ -107,6 +109,7 @@ public class AttachmentWriteOperations {
             case "company" -> companyMapper.exists(workspaceId, entityId);
             case "person" -> personMapper.exists(workspaceId, entityId);
             case "deal" -> dealMapper.exists(workspaceId, entityId);
+            case "note" -> noteMapper.exists(workspaceId, entityId);
             case "user" -> true;
             default -> throw new BadRequestException("Unsupported attachment entity type");
         };

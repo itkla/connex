@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 
@@ -28,6 +29,7 @@ class AttachmentServiceUserTargetTest {
     @Mock private AttachmentReadService attachmentReadService;
     @Mock private AttachmentWriteOperations attachmentWriteOperations;
     @Mock private TagMapper tagMapper;
+    @Mock private NoteMapper noteMapper;
     @Mock private AuditService auditService;
     @Mock private WorkspaceService workspaceService;
     @Mock private ReferenceService referenceService;
@@ -43,6 +45,7 @@ class AttachmentServiceUserTargetTest {
             attachmentReadService,
             attachmentWriteOperations,
             tagMapper,
+            noteMapper,
             auditService,
             workspaceService,
             referenceService,

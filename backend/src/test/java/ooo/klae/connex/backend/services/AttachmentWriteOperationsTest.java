@@ -20,11 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
@@ -37,6 +37,7 @@ class AttachmentWriteOperationsTest {
     @Mock private CompanyMapper companyMapper;
     @Mock private PersonMapper personMapper;
     @Mock private DealMapper dealMapper;
+    @Mock private NoteMapper noteMapper;
     @Mock private AuditService auditService;
     @Mock private ManagedObjectService managedObjectService;
 
@@ -49,6 +50,7 @@ class AttachmentWriteOperationsTest {
             companyMapper,
             personMapper,
             dealMapper,
+            noteMapper,
             auditService,
             managedObjectService);
     }
@@ -69,18 +71,28 @@ class AttachmentWriteOperationsTest {
     }
 
     @Test
-    void createExternalRejectsMissingAndUnsupportedTargetsBeforeInsert() {
+    void createExternalRejectsMissingTargetsBeforeInsert() {
         Attachment missing = attachment("person", 42, "https://example.com/missing.pdf");
-        Attachment unsupported = attachment("note", 43, "https://example.com/note.pdf");
         when(personMapper.exists(5, 42)).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class,
             () -> operations.createExternal(5, missing));
-        assertThrows(BadRequestException.class,
-            () -> operations.createExternal(5, unsupported));
 
         verify(attachmentMapper, never()).insert(missing);
-        verify(attachmentMapper, never()).insert(unsupported);
+    }
+
+    @Test
+    void createExternalAllowsExistingNoteTarget() {
+        Attachment attachment = attachment("note", 43, "https://example.com/note.pdf");
+        attachment.setId(77);
+        when(noteMapper.exists(5, 43)).thenReturn(true);
+        when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
+
+        Attachment created = operations.createExternal(5, attachment);
+
+        assertEquals(attachment, created);
+        verify(noteMapper).exists(5, 43);
+        verify(attachmentMapper).insert(attachment);
     }
 
     @Test

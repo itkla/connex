@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -38,6 +39,7 @@ public class AttachmentService {
     private final AttachmentReadService attachmentReadService;
     private final AttachmentWriteOperations attachmentWriteOperations;
     private final TagMapper tagMapper;
+    private final NoteMapper noteMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
@@ -54,8 +56,11 @@ public class AttachmentService {
     }
 
     public List<Attachment> getByEntity(String entityType, int entityId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String normalizedType = normalizeType(entityType);
+        requireVisibleNoteTarget(workspaceId, normalizedType, entityId);
         return attachmentReadService.getByEntity(
-            workspaceService.getCurrentWorkspaceId(), normalizeType(entityType), entityId);
+            workspaceId, normalizedType, entityId);
     }
 
     public List<Attachment> getAll() {
@@ -143,6 +148,7 @@ public class AttachmentService {
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found with id: " + attachmentId);
         }
+        requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         List<String> before = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId).stream().map(Tag::getName).toList();
         attachmentMapper.clearTags(workspaceId, attachmentId);
         if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(workspaceId, attachmentId, tagIds);
@@ -159,9 +165,10 @@ public class AttachmentService {
      * @return
      */
     public Attachment getById(int id) {
-        Attachment attachment = attachmentReadService.getById(
-            workspaceService.getCurrentWorkspaceId(), id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Attachment attachment = attachmentReadService.getById(workspaceId, id);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return attachment;
     }
 
@@ -172,6 +179,7 @@ public class AttachmentService {
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found for managed content");
         }
+        requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return managedObjectService.openAttachment(workspaceId, attachment);
     }
 
@@ -248,6 +256,7 @@ public class AttachmentService {
 
     private UserDisplayNameDto requireVisibleUserTarget(
             int workspaceId, String entityType, int entityId) {
+        requireVisibleNoteTarget(workspaceId, entityType, entityId);
         if (!"user".equals(entityType)) {
             return null;
         }
@@ -257,6 +266,14 @@ public class AttachmentService {
             throw new ResourceNotFoundException("Attachment target was not found");
         }
         return target;
+    }
+
+    private void requireVisibleNoteTarget(int workspaceId, String entityType, int entityId) {
+        if ("note".equals(entityType)
+                && noteMapper.getVisibleNoteById(
+                    workspaceId, entityId, workspaceService.getCurrentUserId()) == null) {
+            throw new ResourceNotFoundException("Attachment target was not found");
+        }
     }
 
     /**
@@ -269,6 +286,7 @@ public class AttachmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getMetadataById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        requireVisibleNoteTarget(workspaceId, before.getEntityType(), before.getEntityId());
         List<Integer> referenceIds = attachmentMapper.lockIdsByUrl(workspaceId, before.getUrl());
         if (!referenceIds.contains(id)) {
             throw new ResourceNotFoundException("Attachment not found with id: " + id);

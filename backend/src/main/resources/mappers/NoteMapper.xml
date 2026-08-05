@@ -271,6 +271,12 @@
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
   </select>
 
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM note WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
+  </select>
+
   <select id="searchVisible" resultMap="NoteResult">
     SELECT <include refid="qualifiedNoteColumns"/>
     FROM note n

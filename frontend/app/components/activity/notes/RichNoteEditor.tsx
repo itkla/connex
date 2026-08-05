@@ -38,6 +38,7 @@ type Props = {
     className?: string;
     /** Miniaturized layout for embedding in a dialog: shorter body, condensed toolbar, no drag handle. */
     compact?: boolean;
+    ensureNoteId?: () => Promise<number>;
 };
 
 /**
@@ -57,6 +58,7 @@ export default function RichNoteEditor({
     autofocus = false,
     className,
     compact = false,
+    ensureNoteId,
 }: Props) {
     const t = useTranslations("ActivityNotesEditor");
     const onChangeRef = useRef(onChange);
@@ -185,6 +187,10 @@ export default function RichNoteEditor({
         imageApply: t("imageApply"),
         imageUpdate: t("imageUpdate"),
         imageRemove: t("imageRemove"),
+        imageDropHint: t("imageDropHint"),
+        imageUploading: t("imageUploading"),
+        imageUploadFailed: t("imageUploadFailed"),
+        imageUnsupportedType: t("imageUnsupportedType"),
         file: t("slashFileCmd"),
         fileTitle: t("fileTitle"),
         fileDescription: t("fileDescription"),
@@ -204,6 +210,7 @@ export default function RichNoteEditor({
                     editor={editor}
                     labels={labels}
                     compact={compact}
+                    ensureNoteId={ensureNoteId}
                     filePickerOpen={filePickerOpen}
                     onFilePickerOpenChange={setFilePickerOpen}
                 />

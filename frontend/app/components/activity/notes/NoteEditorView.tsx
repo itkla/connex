@@ -113,6 +113,54 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             });
     }, [currentUserId, t]);
 
+    const ensureNoteId = useCallback(async (): Promise<number> => {
+        const existing = stateRef.current.noteId;
+        if (existing != null) return existing;
+
+        while (savingRef.current) {
+            await new Promise<void>((resolve) => {
+                window.setTimeout(resolve, 40);
+            });
+            const createdWhileWaiting = stateRef.current.noteId;
+            if (createdWhileWaiting != null) return createdWhileWaiting;
+        }
+
+        const snapshot = stateRef.current;
+        const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
+        if (nextTitle != null && titleIsTooLong(nextTitle)) {
+            setTitleError(t("titleTooLong", { max: MAX_NOTE_TITLE_LENGTH }));
+            setStatus("error");
+            throw new Error("title-too-long");
+        }
+
+        savingRef.current = true;
+        setTitleError(null);
+        setStatus("saving");
+        try {
+            const body = snapshot.content.trim() ? snapshot.content : "\u200B";
+            const saved = await createNote({
+                content: body,
+                title: nextTitle,
+                visibility: snapshot.visibility,
+                author: currentUserId,
+            });
+            if (!saved?.id) throw new Error("missing-note-id");
+            stateRef.current = { ...stateRef.current, noteId: saved.id };
+            setNoteId(saved.id);
+            window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+            dirtyRef.current = false;
+            setStatus("saved");
+            return saved.id;
+        } catch (error) {
+            dirtyRef.current = true;
+            setStatus("error");
+            throw error;
+        } finally {
+            savingRef.current = false;
+            if (dirtyRef.current) saveRef.current();
+        }
+    }, [currentUserId, t]);
+
     useEffect(() => {
         saveRef.current = save;
     }, [save]);
@@ -236,6 +284,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                             }}
                             excludeUserId={currentUserId}
                             autofocus={noteId == null}
+                            ensureNoteId={ensureNoteId}
                         />
                     </div>
 
