@@ -56,6 +56,7 @@ import {
     canDeleteMarkdownTableRow,
 } from "./MarkdownTable";
 import { normalizeNoteImageSource } from "./MarkdownImage";
+import { FileReferencePopover, type FileReferenceLabels } from "./FileReferencePopover";
 
 export type ToolbarLabels = {
     bold: string;
@@ -107,13 +108,15 @@ export type ToolbarLabels = {
     imageUploading: string;
     imageUploadFailed: string;
     imageUnsupportedType: string;
-};
+} & FileReferenceLabels;
 
 type Props = {
     editor: Editor | null;
     labels: ToolbarLabels;
     compact?: boolean;
     ensureNoteId?: () => Promise<number>;
+    filePickerOpen?: boolean;
+    onFilePickerOpenChange?: (open: boolean) => void;
 };
 
 function defaultAltFromFileName(fileName: string): string {
@@ -497,7 +500,14 @@ export function InlineFormattingControls({
     );
 }
 
-export function EditorToolbar({ editor, labels, compact = false, ensureNoteId }: Props) {
+export function EditorToolbar({
+    editor,
+    labels,
+    compact = false,
+    ensureNoteId,
+    filePickerOpen = false,
+    onFilePickerOpenChange,
+}: Props) {
     const [, setTick] = useState(0);
 
     useEffect(() => {
@@ -562,6 +572,14 @@ export function EditorToolbar({ editor, labels, compact = false, ensureNoteId }:
                 </>
             ) : null}
             <ImagePopover editor={editor} labels={labels} ensureNoteId={ensureNoteId} />
+            {onFilePickerOpenChange ? (
+                <FileReferencePopover
+                    editor={editor}
+                    labels={labels}
+                    open={filePickerOpen}
+                    onOpenChange={onFilePickerOpenChange}
+                />
+            ) : null}
         </div>
     );
 }

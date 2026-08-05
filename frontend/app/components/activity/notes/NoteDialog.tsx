@@ -110,7 +110,7 @@ function NoteDrawerPullBar({
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
             onClick={handleClick}
-            className="flex shrink-0 touch-none cursor-grab justify-center rounded-md py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-brand/60 active:cursor-grabbing"
+            className="flex min-h-11 shrink-0 touch-none cursor-grab justify-center rounded-md py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-brand/60 active:cursor-grabbing"
         >
             <span aria-hidden className="h-1.5 w-12 rounded-full bg-border transition-colors" />
         </button>
