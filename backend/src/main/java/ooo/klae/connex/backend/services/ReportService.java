@@ -1186,6 +1186,10 @@ public class ReportService {
         return new ValidatedDefinition(cadence, templateKey, configJson);
     }
 
+    void validateProposal(ReportDefinitionRequest request) {
+        validate(request);
+    }
+
     static void validateConfig(String cadence, String templateKey, ReportConfig config) {
         if (!CADENCES.contains(cadence)) {
             throw new BadRequestException("Invalid report cadence: " + cadence);

@@ -28,6 +28,8 @@
       "title": "Reports",
       "subtitle": "Turn deterministic CRM figures into a review-ready narrative with charts, recommendations, an appendix, and traceable sources.",
       "newReport": "New report",
+      "blankBuilder": "Blank builder",
+      "otherWays": "Build another way",
       "manageGoals": "Manage goals",
       "yourReportsTitle": "Your reports",
       "yourReportsSubtitle": "Saved report definitions shared across this workspace.",
@@ -54,6 +56,48 @@
       "deleteTitle": "Delete report?",
       "deleteBody": "{name} and all of its frozen snapshots will be permanently deleted.",
       "deleted": "Deleted {name}"
+    },
+    "composer": {
+      "eyebrow": "Ask Connex",
+      "title": "Describe the report you need",
+      "subtitle": "Ask in plain language. Connex will propose a report definition for review before anything is saved.",
+      "grounding": "This step defines fields, filters, and scope only. Figures are computed by the report engine after you save and run it.",
+      "requestLabel": "What should this report help you understand?",
+      "placeholder": "Show monthly pipeline health, at-risk revenue, and single-threaded deals grouped by stage.",
+      "requestHint": "Do not include contact details or other sensitive personal information.",
+      "generate": "Preview definition",
+      "regenerate": "Update preview",
+      "generating": "Composing…",
+      "previewEyebrow": "Definition preview",
+      "generatedDescription": "A server-validated report definition created from your request.",
+      "fields": "Fields",
+      "fieldCount": "{count, plural, one {# evidence block} other {# evidence blocks}}",
+      "filters": "Filters",
+      "allCompatible": "All compatible records",
+      "dateRange": "Date range",
+      "evidence": "Definition evidence",
+      "scope": "Scope",
+      "scopeValue": "Current workspace and records the current actor may access.",
+      "assumptions": "Assumptions",
+      "assumption": {
+        "current_workspace": "Use the current workspace.",
+        "accessible_records": "Include only records available to the current actor.",
+        "current_owners": "Use current record ownership.",
+        "server_computed_figures": "Compute every figure only after save and run.",
+        "date_range_inferred": "Infer the date range from the selected cadence."
+      },
+      "freshness": "Definition generated and validated {date}. Figures have not been computed.",
+      "save": "Save and run",
+      "saving": "Saving…",
+      "created": "Report created",
+      "unavailableTitle": "Ask Connex is unavailable",
+      "unavailable": {
+        "not_configured": "Use a template or the blank builder while AI is disabled or not configured.",
+        "input_restricted": "This request contains content that cannot be sent to the configured provider. Remove sensitive details and try again.",
+        "rate_limited": "The AI generation limit has been reached. Try again later or use the deterministic builder.",
+        "invalid_definition": "Connex could not map this request to a valid report definition. Rephrase it or use the builder.",
+        "provider_error": "The provider could not produce a definition. Try again or use a deterministic starting point."
+      }
     },
     "templates": {
       "sales-performance": {
