@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import {
     ArrowPathIcon,
     CalendarDaysIcon,
@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 export default function AskConnexComposer() {
     const t = useTranslations('Reports.composer');
     const reportsT = useTranslations('Reports');
-    const locale = useLocale();
+    const format = useFormatter();
     const router = useRouter();
     const [prompt, setPrompt] = useState('');
     const [preview, setPreview] = useState<ReportComposerPreview | null>(null);
@@ -77,6 +77,7 @@ export default function AskConnexComposer() {
             router.push(`/overview/reports/${created.id}`);
         } catch (error) {
             toastError(error instanceof Error ? error.message : reportsT('common.requestFailed'));
+        } finally {
             setSaving(false);
         }
     };
@@ -225,10 +226,10 @@ export default function AskConnexComposer() {
                                 <p className="text-xs text-muted-foreground">
                                     {t('freshness', {
                                         date: preview.generatedAt
-                                            ? new Intl.DateTimeFormat(locale, {
+                                            ? format.dateTime(new Date(preview.generatedAt), {
                                                 dateStyle: 'medium',
                                                 timeStyle: 'short',
-                                            }).format(new Date(preview.generatedAt))
+                                            })
                                             : '',
                                     })}
                                 </p>
