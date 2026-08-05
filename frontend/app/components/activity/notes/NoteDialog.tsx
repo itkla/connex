@@ -572,9 +572,10 @@ export function NoteDialogForm({
         if (ensureNoteIdInFlightRef.current) return ensureNoteIdInFlightRef.current;
 
         const snapshot = formSnapshotRef.current;
+        const body = snapshot.content.trim() ? snapshot.content : '\u200B';
         const promise = createNote(
             {
-                content: snapshot.content,
+                content: body,
                 title: snapshot.title.trim() || null,
                 visibility: snapshot.visibility,
                 author: currentUserId,

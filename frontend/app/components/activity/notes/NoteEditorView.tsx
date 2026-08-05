@@ -137,8 +137,9 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         setTitleError(null);
         setStatus("saving");
         try {
+            const body = snapshot.content.trim() ? snapshot.content : "\u200B";
             const saved = await createNote({
-                content: snapshot.content,
+                content: body,
                 title: nextTitle,
                 visibility: snapshot.visibility,
                 author: currentUserId,

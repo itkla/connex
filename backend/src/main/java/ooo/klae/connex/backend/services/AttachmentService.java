@@ -148,6 +148,7 @@ public class AttachmentService {
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found with id: " + attachmentId);
         }
+        requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         List<String> before = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId).stream().map(Tag::getName).toList();
         attachmentMapper.clearTags(workspaceId, attachmentId);
         if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(workspaceId, attachmentId, tagIds);
@@ -164,9 +165,10 @@ public class AttachmentService {
      * @return
      */
     public Attachment getById(int id) {
-        Attachment attachment = attachmentReadService.getById(
-            workspaceService.getCurrentWorkspaceId(), id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Attachment attachment = attachmentReadService.getById(workspaceId, id);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return attachment;
     }
 
@@ -177,6 +179,7 @@ public class AttachmentService {
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found for managed content");
         }
+        requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return managedObjectService.openAttachment(workspaceId, attachment);
     }
 
@@ -283,6 +286,7 @@ public class AttachmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getMetadataById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        requireVisibleNoteTarget(workspaceId, before.getEntityType(), before.getEntityId());
         List<Integer> referenceIds = attachmentMapper.lockIdsByUrl(workspaceId, before.getUrl());
         if (!referenceIds.contains(id)) {
             throw new ResourceNotFoundException("Attachment not found with id: " + id);

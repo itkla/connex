@@ -85,6 +85,30 @@ class AttachmentServiceNoteTargetTest {
     }
 
     @Test
+    void getByIdRequiresVisibleNoteForNoteAttachment() {
+        Attachment attachment = noteAttachment(41);
+        attachment.setId(88);
+        when(attachmentReadService.getById(5, 88)).thenReturn(attachment);
+        when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class, () -> service.getById(88));
+    }
+
+    @Test
+    void getManagedContentRequiresVisibleNoteForNoteAttachment() {
+        Attachment attachment = noteAttachment(41);
+        attachment.setUrl("/api/attachments/content/token.png");
+        when(attachmentMapper.getMetadataByUrl(5, "/api/attachments/content/token.png"))
+            .thenReturn(attachment);
+        when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> service.getManagedContent("token.png"));
+
+        verify(managedObjectService, never()).openAttachment(5, attachment);
+    }
+
+    @Test
     void createAllowsVisibleNoteBeforeTenantWrite() {
         Attachment attachment = noteAttachment(41);
         Note note = new Note();
