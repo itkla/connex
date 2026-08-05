@@ -3,9 +3,9 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The three canonical page-width tiers. `wide` for lists, dashboards, overviews, and settings; `reading`
- * for record-detail and long-form pages; `form` for focused single-column forms. Full-bleed surfaces (the
- * relationship map) don't use PageShell.
+ * The three canonical page-width tiers. `wide` for lists, dashboards, overviews, settings, and Deal detail
+ * (commercial workbench); `reading` for Contact/Company detail and long-form pages; `form` for focused
+ * single-column forms. Full-bleed surfaces (the relationship map) don't use PageShell.
  */
 export type PageTier = "wide" | "reading" | "form";
 

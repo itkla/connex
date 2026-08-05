@@ -211,7 +211,7 @@ export default async function DealPage({ params }: DealPageProps) {
     for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
     return (
-        <PageShell tier="reading">
+        <PageShell tier="wide">
                 <RecordStickyContext
                     anchorId="deal-record-identity"
                     name={deal.name}
@@ -221,72 +221,80 @@ export default async function DealPage({ params }: DealPageProps) {
                     <CrumbLabel value={deal.name} />
                     <RecentRecordBridge type="deal" id={deal.id} label={deal.name} />
                     <ActionRecordBridge type="deal" id={deal.id} label={deal.name} />
-                    <RecordDetailSection recordKind="deal" section="identity">
-                        <header id="deal-record-identity" className="flex flex-wrap items-center justify-between gap-6">
-                            <div className="flex flex-col gap-2 py-8">
-                                <div className="flex flex-row flex-wrap items-center gap-3">
-                                    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{deal.name}</h1>
-                                    {tags.map((tag) => (
-                                        <span
-                                            key={tag.id}
-                                            className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
-                                            style={{ backgroundColor: tag.color || 'var(--muted-foreground)' }}
-                                        >
-                                            {tag.name}
-                                        </span>
-                                    ))}
-                                </div>
-                                <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                                    {company ? (
-                                        <Link
-                                            href={`/records/companies/${company.id}`}
-                                            className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
-                                        >
-                                            <BuildingOffice2Icon className="size-3.5" />
-                                            {company.name}
-                                        </Link>
-                                    ) : null}
-                                    {pipeline ? (
-                                        <span className="inline-flex items-center gap-2">
-                                            {pipeline.name}
-                                            {currentStage ? <> · {currentStage.name}</> : null}
+                    <div className="flex flex-col gap-6 py-4 xl:flex-row xl:items-end xl:justify-between">
+                        <RecordDetailSection recordKind="deal" section="identity" className="min-w-0 flex-1">
+                            <header
+                                id="deal-record-identity"
+                                className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between"
+                            >
+                                <div className="flex min-w-0 flex-col gap-3 py-4">
+                                    <div className="flex flex-row flex-wrap items-center gap-3">
+                                        <h1 className="text-balance text-4xl font-extrabold tracking-tight text-foreground">
+                                            {deal.name}
+                                        </h1>
+                                        {tags.map((tag) => (
+                                            <span
+                                                key={tag.id}
+                                                className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                                                style={{ backgroundColor: tag.color || 'var(--muted-foreground)' }}
+                                            >
+                                                {tag.name}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                                        {company ? (
+                                            <Link
+                                                href={`/records/companies/${company.id}`}
+                                                className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
+                                            >
+                                                <BuildingOffice2Icon className="size-3.5" />
+                                                {company.name}
+                                            </Link>
+                                        ) : null}
+                                        {pipeline ? (
+                                            <span className="inline-flex items-center gap-2">
+                                                {pipeline.name}
+                                                {currentStage ? <> · {currentStage.name}</> : null}
+                                                <StatusPill outcome={outcome} t={t} />
+                                            </span>
+                                        ) : (
                                             <StatusPill outcome={outcome} t={t} />
-                                        </span>
-                                    ) : (
-                                        <StatusPill outcome={outcome} t={t} />
-                                    )}
-                                    {deal.expectedCloseDate ? (
-                                        <span className="inline-flex items-center gap-1">
-                                            <CalendarIcon className="size-3.5" />
-                                            {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
-                                        </span>
-                                    ) : null}
-                                    <DealRiskPill risk={risk} />
-                                </h3>
-                            </div>
-
-                            <div className="flex flex-col items-end gap-2">
-                                <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                                    {closed ? t('actual') : t('projected')} · {currency}
-                                </span>
-                                <div className="text-3xl font-extrabold text-foreground">
-                                    {formatCurrency(closed ? deal.actualValue : deal.value, currency, locale)}
+                                        )}
+                                        {deal.expectedCloseDate ? (
+                                            <span className="inline-flex items-center gap-1">
+                                                <CalendarIcon className="size-3.5" />
+                                                {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
+                                            </span>
+                                        ) : null}
+                                        <DealRiskPill risk={risk} />
+                                    </h3>
                                 </div>
-                            </div>
-                        </header>
-                    </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex justify-end">
-                        <DealActionsMenu
-                            deal={deal}
-                            pipelines={pipelines}
-                            stagesByPipeline={stagesByPipeline}
-                            currentUserId={currentUser.id}
-                            personSeeds={personSeeds}
-                            dealSeeds={dealSeeds}
-                            collaborators={collaborators}
-                        />
-                    </RecordDetailSection>
+                                <div className="flex flex-col items-end gap-1 sm:pb-4">
+                                    <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                                        {closed ? t('actual') : t('projected')} · {currency}
+                                    </span>
+                                    <div className="text-3xl font-extrabold tracking-tight text-foreground tabular-nums">
+                                        {formatCurrency(closed ? deal.actualValue : deal.value, currency, locale)}
+                                    </div>
+                                </div>
+                            </header>
+                        </RecordDetailSection>
+
+                        <RecordDetailSection recordKind="deal" section="actions" className="shrink-0 xl:pb-4">
+                            <DealActionsMenu
+                                deal={deal}
+                                pipelines={pipelines}
+                                stagesByPipeline={stagesByPipeline}
+                                currentUserId={currentUser.id}
+                                personSeeds={personSeeds}
+                                dealSeeds={dealSeeds}
+                                collaborators={collaborators}
+                            />
+                        </RecordDetailSection>
+                    </div>
+
                     <RecordDetailSection recordKind="deal" section="notifications">
                         <EntityNotificationBanner
                             key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(',')}`}
@@ -299,7 +307,7 @@ export default async function DealPage({ params }: DealPageProps) {
                 </Rise>
 
                 <Rise delay={0.06}>
-                    <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                    <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
                         <RecordDetailSection recordKind="deal" section="profile">
                             <aside>
                                 <SectionHeader title={t('details')} />
@@ -317,31 +325,38 @@ export default async function DealPage({ params }: DealPageProps) {
                             </aside>
                         </RecordDetailSection>
 
-                        <RecordDetailSection recordKind="deal" section="metrics" aria-label={t('performance')}>
-                            <SectionLabelWithTooltip
-                                title={t('pipelineProgress')}
-                                tooltip={
-                                    <div className="flex flex-col gap-2">
-                                        <h2 className="text-sm font-medium">{t('pipelineProgress')}</h2>
-                                        <p className="text-xs text-muted-foreground">
-                                            {t('pipelineProgressTooltip')}
-                                        </p>
-                                    </div>
-                                }
-                            />
-                            <DealLifecycleProgress
-                                stages={stages}
-                                currentStageId={deal.stage ?? null}
-                                outcome={outcome}
-                                createdAt={deal.createdAt}
-                                expectedCloseDate={deal.expectedCloseDate}
-                                closedAt={deal.closedAt}
-                                closedReason={deal.closedReason}
-                                references={deal.references}
-                                stageHistory={stageHistory}
-                            />
+                        <RecordDetailSection
+                            recordKind="deal"
+                            section="metrics"
+                            aria-label={t('performance')}
+                            className="flex min-w-0 flex-col gap-8"
+                        >
+                            <div>
+                                <SectionLabelWithTooltip
+                                    title={t('pipelineProgress')}
+                                    tooltip={
+                                        <div className="flex flex-col gap-2">
+                                            <h2 className="text-sm font-medium">{t('pipelineProgress')}</h2>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('pipelineProgressTooltip')}
+                                            </p>
+                                        </div>
+                                    }
+                                />
+                                <DealLifecycleProgress
+                                    stages={stages}
+                                    currentStageId={deal.stage ?? null}
+                                    outcome={outcome}
+                                    createdAt={deal.createdAt}
+                                    expectedCloseDate={deal.expectedCloseDate}
+                                    closedAt={deal.closedAt}
+                                    closedReason={deal.closedReason}
+                                    references={deal.references}
+                                    stageHistory={stageHistory}
+                                />
+                            </div>
 
-                            <div className="mt-6">
+                            <div>
                                 <SectionLabelWithTooltip
                                     title={t('performance')}
                                     tooltip={
@@ -358,7 +373,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         </div>
                                     }
                                 />
-                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                                     <SummaryTile label={t('projectedValue')} value={formatCompactCurrency(deal.value, currency, locale)} />
                                     <SummaryTile
                                         label={t('actualValue')}
@@ -383,13 +398,13 @@ export default async function DealPage({ params }: DealPageProps) {
                 </Rise>
 
                 <Rise delay={0.08}>
-                    <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-6">
+                    <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-8">
                         <div>
                             <SectionLabelWithTooltip
                                 title={t('engagement')}
                                 tooltip={
                                     <div className="flex flex-col gap-2">
-                                        <h2 className="text-sm font-medium">{t('performance')}</h2>
+                                        <h2 className="text-sm font-medium">{t('engagement')}</h2>
                                         <p className="text-xs text-muted-foreground">
                                             {t('engagementTooltip')}
                                         </p>
@@ -402,25 +417,26 @@ export default async function DealPage({ params }: DealPageProps) {
                             </div>
                         </div>
 
-                        <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
-
-                        <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
+                        <div className="grid grid-cols-1 gap-8 xl:grid-cols-2 xl:items-start">
+                            <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
+                            <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
+                        </div>
                     </RecordDetailSection>
                 </Rise>
 
                 <Rise delay={0.1}>
                     <RecordDetailSection recordKind="deal" section="relationship" className="flex flex-col gap-6">
                         <DealRiskPanel risk={risk} />
-                        <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch lg:gap-4">
+                        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] xl:items-stretch">
                             <DealBriefPanel
                                 key={`deal-brief-${deal.id}`}
                                 dealId={deal.id}
-                                className="min-w-0 lg:flex-[2]"
+                                className="min-w-0"
                             />
                             <DealRationalePanel
                                 key={`deal-rationale-${deal.id}`}
                                 dealId={deal.id}
-                                className="min-w-0 lg:flex-[1]"
+                                className="min-w-0"
                             />
                         </div>
                         <EngineEvaluationPanel
@@ -486,7 +502,11 @@ export default async function DealPage({ params }: DealPageProps) {
                 </Rise>
 
                 <Rise delay={0.14}>
-                    <RecordDetailSection recordKind="deal" section="files" className="flex flex-col gap-6">
+                    <RecordDetailSection
+                        recordKind="deal"
+                        section="files"
+                        className="grid grid-cols-1 gap-8 xl:grid-cols-2 xl:items-start"
+                    >
                         <DealDocuments
                             dealId={deal.id}
                             initial={documents}
