@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -10,21 +9,22 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.Attachment;
-import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.UploadSource;
 
-/** Pins active-member provenance before a user-target attachment can expose a label. */
+/** Verifies note attachments require visibility to the current workspace member. */
 @ExtendWith(MockitoExtension.class)
-class AttachmentServiceUserTargetTest {
+class AttachmentServiceNoteTargetTest {
     @Mock private AttachmentMapper attachmentMapper;
     @Mock private AttachmentReadService attachmentReadService;
     @Mock private AttachmentWriteOperations attachmentWriteOperations;
@@ -40,6 +40,7 @@ class AttachmentServiceUserTargetTest {
     @BeforeEach
     void setUp() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
         service = new AttachmentService(
             attachmentMapper,
             attachmentReadService,
@@ -53,9 +54,9 @@ class AttachmentServiceUserTargetTest {
     }
 
     @Test
-    void createRejectsNonmemberUserTargetBeforeTenantWrite() {
-        Attachment attachment = userAttachment(41);
-        when(attachmentReadService.getActiveWorkspaceMemberLabel(5, 41)).thenReturn(null);
+    void createRejectsInvisibleNoteBeforeTenantWrite() {
+        Attachment attachment = noteAttachment(41);
+        when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(null);
 
         assertThrows(ResourceNotFoundException.class, () -> service.create(attachment));
 
@@ -63,30 +64,46 @@ class AttachmentServiceUserTargetTest {
     }
 
     @Test
-    void createAllowsActiveUserTargetAndHydratesOnlyAfterWriteReturns() {
-        Attachment attachment = userAttachment(41);
-        attachment.setId(77);
-        UserDisplayNameDto target = new UserDisplayNameDto(41, "Target User");
-        when(attachmentReadService.getActiveWorkspaceMemberLabel(5, 41)).thenReturn(target);
+    void uploadRequiresVisibleNoteBeforeTenantWrite() {
+        UploadSource source = UploadSource.from("note.png", "image/png", new byte[] {1});
+        User uploader = new User();
+        when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> service.upload("note", 41, source, uploader));
+
+        verify(attachmentWriteOperations, never()).upload(5, "note", 41, source, uploader);
+    }
+
+    @Test
+    void getByEntityRequiresVisibleNoteBeforeReadingAttachments() {
+        when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class, () -> service.getByEntity("note", 41));
+
+        verify(attachmentReadService, never()).getByEntity(5, "note", 41);
+    }
+
+    @Test
+    void createAllowsVisibleNoteBeforeTenantWrite() {
+        Attachment attachment = noteAttachment(41);
+        Note note = new Note();
+        when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(note);
         when(attachmentWriteOperations.createExternal(5, attachment)).thenReturn(attachment);
-        when(attachmentReadService.hydrateKnown(5, attachment, null, target))
-            .thenReturn(attachment);
+        when(attachmentReadService.hydrateKnown(5, attachment, null, null)).thenReturn(attachment);
 
         Attachment created = service.create(attachment);
 
         assertSame(attachment, created);
-        InOrder operations = inOrder(attachmentReadService, attachmentWriteOperations);
-        operations.verify(attachmentReadService).getActiveWorkspaceMemberLabel(5, 41);
-        operations.verify(attachmentWriteOperations).createExternal(5, attachment);
-        operations.verify(attachmentReadService).hydrateKnown(5, attachment, null, target);
+        verify(attachmentWriteOperations).createExternal(5, attachment);
     }
 
-    private static Attachment userAttachment(int userId) {
+    private static Attachment noteAttachment(int noteId) {
         Attachment attachment = new Attachment();
-        attachment.setEntityType("user");
-        attachment.setEntityId(userId);
-        attachment.setFileName("user.pdf");
-        attachment.setUrl("https://example.com/user.pdf");
+        attachment.setEntityType("note");
+        attachment.setEntityId(noteId);
+        attachment.setFileName("note.pdf");
+        attachment.setUrl("https://example.com/note.pdf");
         return attachment;
     }
 }
