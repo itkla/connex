@@ -78,6 +78,7 @@ import DealDocuments from '@/app/components/records/deals/DealDocuments';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
+import RecordDetailSection from '@/app/components/records/RecordDetailSection';
 import RecordStickyContext from '@/app/components/records/RecordStickyContext';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -220,60 +221,62 @@ export default async function DealPage({ params }: DealPageProps) {
                     <CrumbLabel value={deal.name} />
                     <RecentRecordBridge type="deal" id={deal.id} label={deal.name} />
                     <ActionRecordBridge type="deal" id={deal.id} label={deal.name} />
-                    <header id="deal-record-identity" className="flex flex-wrap items-center justify-between gap-6">
-                        <div className="flex flex-col gap-2 py-8">
-                            <div className="flex flex-row flex-wrap items-center gap-3">
-                                <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{deal.name}</h1>
-                                {tags.map((tag) => (
-                                    <span
-                                        key={tag.id}
-                                        className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
-                                        style={{ backgroundColor: tag.color || 'var(--muted-foreground)' }}
-                                    >
-                                        {tag.name}
-                                    </span>
-                                ))}
-                            </div>
-                            <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                                {company ? (
-                                    <Link
-                                        href={`/records/companies/${company.id}`}
-                                        className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
-                                    >
-                                        <BuildingOffice2Icon className="size-3.5" />
-                                        {company.name}
-                                    </Link>
-                                ) : null}
-                                {pipeline ? (
-                                    <span className="inline-flex items-center gap-2">
-                                        {pipeline.name}
-                                        {currentStage ? <> · {currentStage.name}</> : null}
+                    <RecordDetailSection recordKind="deal" section="identity">
+                        <header id="deal-record-identity" className="flex flex-wrap items-center justify-between gap-6">
+                            <div className="flex flex-col gap-2 py-8">
+                                <div className="flex flex-row flex-wrap items-center gap-3">
+                                    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{deal.name}</h1>
+                                    {tags.map((tag) => (
+                                        <span
+                                            key={tag.id}
+                                            className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                                            style={{ backgroundColor: tag.color || 'var(--muted-foreground)' }}
+                                        >
+                                            {tag.name}
+                                        </span>
+                                    ))}
+                                </div>
+                                <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                                    {company ? (
+                                        <Link
+                                            href={`/records/companies/${company.id}`}
+                                            className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
+                                        >
+                                            <BuildingOffice2Icon className="size-3.5" />
+                                            {company.name}
+                                        </Link>
+                                    ) : null}
+                                    {pipeline ? (
+                                        <span className="inline-flex items-center gap-2">
+                                            {pipeline.name}
+                                            {currentStage ? <> · {currentStage.name}</> : null}
+                                            <StatusPill outcome={outcome} t={t} />
+                                        </span>
+                                    ) : (
                                         <StatusPill outcome={outcome} t={t} />
-                                    </span>
-                                ) : (
-                                    <StatusPill outcome={outcome} t={t} />
-                                )}
-                                {deal.expectedCloseDate ? (
-                                    <span className="inline-flex items-center gap-1">
-                                        <CalendarIcon className="size-3.5" />
-                                        {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
-                                    </span>
-                                ) : null}
-                                <DealRiskPill risk={risk} />
-                            </h3>
-                        </div>
-
-                        <div className="flex flex-col items-end gap-2">
-                            <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                                {closed ? t('actual') : t('projected')} · {currency}
-                            </span>
-                            <div className="text-3xl font-extrabold text-foreground">
-                                {formatCurrency(closed ? deal.actualValue : deal.value, currency, locale)}
+                                    )}
+                                    {deal.expectedCloseDate ? (
+                                        <span className="inline-flex items-center gap-1">
+                                            <CalendarIcon className="size-3.5" />
+                                            {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
+                                        </span>
+                                    ) : null}
+                                    <DealRiskPill risk={risk} />
+                                </h3>
                             </div>
-                        </div>
-                    </header>
 
-                    <div className="mt-4 flex justify-end">
+                            <div className="flex flex-col items-end gap-2">
+                                <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                                    {closed ? t('actual') : t('projected')} · {currency}
+                                </span>
+                                <div className="text-3xl font-extrabold text-foreground">
+                                    {formatCurrency(closed ? deal.actualValue : deal.value, currency, locale)}
+                                </div>
+                            </div>
+                        </header>
+                    </RecordDetailSection>
+
+                    <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex justify-end">
                         <DealActionsMenu
                             deal={deal}
                             pipelines={pipelines}
@@ -283,246 +286,249 @@ export default async function DealPage({ params }: DealPageProps) {
                             dealSeeds={dealSeeds}
                             collaborators={collaborators}
                         />
-                    </div>
-                    <EntityNotificationBanner
-                        key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(',')}`}
-                        initialNotifications={notificationPage.items}
-                        contextType="deal"
-                        contextId={id}
-                        initialStateVersion={notificationPage.stateVersion}
-                    />
-                    <DealRiskPanel risk={risk} />
+                    </RecordDetailSection>
+                    <RecordDetailSection recordKind="deal" section="notifications">
+                        <EntityNotificationBanner
+                            key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(',')}`}
+                            initialNotifications={notificationPage.items}
+                            contextType="deal"
+                            contextId={id}
+                            initialStateVersion={notificationPage.stateVersion}
+                        />
+                    </RecordDetailSection>
                 </Rise>
 
                 <Rise delay={0.06}>
-                    <section>
-                        <SectionLabelWithTooltip
-                            title={t('pipelineProgress')}
-                            tooltip={
-                                <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">{t('pipelineProgress')}</h2>
-                                    <p className="text-xs text-muted-foreground">
-                                        {t('pipelineProgressTooltip')}
-                                    </p>
-                                </div>
-                            }
-                        />
-                        <DealLifecycleProgress
-                            stages={stages}
-                            currentStageId={deal.stage ?? null}
-                            outcome={outcome}
-                            createdAt={deal.createdAt}
-                            expectedCloseDate={deal.expectedCloseDate}
-                            closedAt={deal.closedAt}
-                            closedReason={deal.closedReason}
-                            references={deal.references}
-                            stageHistory={stageHistory}
-                        />
-                    </section>
-                </Rise>
+                    <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                        <RecordDetailSection recordKind="deal" section="profile">
+                            <aside>
+                                <SectionHeader title={t('details')} />
+                                <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                    <InfoRow label={t('pipeline')} value={pipeline?.name ?? '—'} />
+                                    <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
+                                    <InfoRow label={t('company')} value={company?.name ?? '—'} />
+                                    <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
+                                    <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale)} />
+                                    <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt, locale) : '—'} />
+                                    <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
+                                    <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
+                                    <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
+                                </dl>
+                            </aside>
+                        </RecordDetailSection>
 
-                <Rise delay={0.12}>
-                    <section>
-                        <SectionLabelWithTooltip
-                            title={t('performance')}
-                            tooltip={
-                                <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">{t('performance')}</h2>
-                                    <p className="text-xs text-muted-foreground">
-                                        {t('performanceTooltip')}
-                                    </p>
-                                    <ul className="list-disc list-inside text-xs text-muted-foreground">
-                                        <li>{t('performanceBulletProjected')}</li>
-                                        <li>{t('performanceBulletActual')}</li>
-                                        <li>{t('performanceBulletVariance')}</li>
-                                    </ul>
-                                </div>
-                            }
-                        />
-                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                            <SummaryTile label={t('projectedValue')} value={formatCompactCurrency(deal.value, currency, locale)} />
-                            <SummaryTile
-                                label={t('actualValue')}
-                                value={closed ? formatCompactCurrency(deal.actualValue, currency, locale) : '—'}
-                            />
-                            <SummaryTile
-                                label={t('variance')}
-                                value={
-                                    variance != null
-                                        ? `${variance >= 0 ? '+' : ''}${(variance * 100).toFixed(1)}%`
-                                        : '—'
-                                }
-                            />
-                            <SummaryTile
-                                label={closed ? t('closed') : t('expectedClose')}
-                                value={closed ? formatDate(deal.closedAt, locale) : formatDate(deal.expectedCloseDate, locale)}
-                            />
-                        </div>
-                    </section>
-                </Rise>
-
-                <Rise delay={0.15}>
-                    <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch lg:gap-4">
-                        <DealBriefPanel
-                            key={`deal-brief-${deal.id}`}
-                            dealId={deal.id}
-                            className="min-w-0 lg:flex-[2]"
-                        />
-                        <DealRationalePanel
-                            key={`deal-rationale-${deal.id}`}
-                            dealId={deal.id}
-                            className="min-w-0 lg:flex-[1]"
-                        />
-                    </div>
-                </Rise>
-
-                <Rise delay={0.18}>
-                    <section>
-                        <SectionLabelWithTooltip
-                            title={t('engagement')}
-                            tooltip={
-                                <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">{t('performance')}</h2>
-                                    <p className="text-xs text-muted-foreground">
-                                        {t('engagementTooltip')}
-                                    </p>
-                                </div>
-                            }
-                        />
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                            <EngagementSparkline data={weeklyEngagement} />
-                            <DealActivityBreakdown activities={activities} />
-                        </div>
-                    </section>
-                </Rise>
-
-                <Rise delay={0.21}>
-                    <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
-                </Rise>
-
-                <Rise delay={0.24}>
-                    <DealDocuments
-                        dealId={deal.id}
-                        initial={documents}
-                        canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
-                        canDeleteDocuments={effectivePermissions.includes('DEAL_UPDATE')}
-                        currentUserId={currentUser.id}
-                    />
-                </Rise>
-
-                <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                    <Rise delay={0.27}>
-                        <aside>
-                            <SectionHeader title={t('details')} />
-                            <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                <InfoRow label={t('pipeline')} value={pipeline?.name ?? '—'} />
-                                <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
-                                <InfoRow label={t('company')} value={company?.name ?? '—'} />
-                                <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
-                                <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale)} />
-                                <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt, locale) : '—'} />
-                                <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
-                                <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
-                                <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
-                            </dl>
-
-                            <EngineEvaluationPanel
-                                kind="deal"
-                                id={deal.id}
-                                riskExcluded={deal.riskExcluded ?? false}
-                            />
-
-                            <Attachments
-                                entityType="deal"
-                                entityId={deal.id}
-                                initialAttachments={attachments}
-                                className="mt-6"
-                            />
-                        </aside>
-                    </Rise>
-
-                    <Rise delay={0.3}>
-                        <section>
+                        <RecordDetailSection recordKind="deal" section="metrics" aria-label={t('performance')}>
                             <SectionLabelWithTooltip
-                                title={t('peopleOnThisDeal')}
+                                title={t('pipelineProgress')}
                                 tooltip={
                                     <div className="flex flex-col gap-2">
-                                        <h2 className="text-sm font-medium">{t('peopleOnThisDeal')}</h2>
+                                        <h2 className="text-sm font-medium">{t('pipelineProgress')}</h2>
                                         <p className="text-xs text-muted-foreground">
-                                            {t('peopleOnThisDealTooltipShort')}
-                                        </p>
-                                        <p>
-                                            {t('peopleOnThisDealTooltipLong')}
+                                            {t('pipelineProgressTooltip')}
                                         </p>
                                     </div>
                                 }
                             />
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                {dealPeople.length === 0 ? (
-                                    <p className="px-6 py-6 text-sm text-muted-foreground">
-                                        {t('noPeopleAssociated')}
-                                    </p>
-                                ) : (
-                                    <ul className="divide-y divide-border">
-                                        {dealPeople.map(({ person, role }) => (
-                                            <li key={person.id}>
-                                                <Link
-                                                    href={`/records/contacts/${person.id}`}
-                                                    className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-muted/60"
-                                                >
-                                                    <ContactAvatar contact={person} type="medium" />
-                                                    <div className="min-w-0 flex-1">
-                                                        <p className="truncate text-sm font-medium text-foreground">
-                                                            {person.name}
-                                                        </p>
-                                                        {person.title ? (
-                                                            <p className="truncate text-xs text-muted-foreground">
-                                                                {person.title}
-                                                            </p>
-                                                        ) : null}
-                                                    </div>
-                                                    {role ? (
-                                                        <span className="rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
-                                                            {role}
-                                                        </span>
-                                                    ) : null}
-                                                </Link>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </div>
-
-                            <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
+                            <DealLifecycleProgress
+                                stages={stages}
+                                currentStageId={deal.stage ?? null}
+                                outcome={outcome}
+                                createdAt={deal.createdAt}
+                                expectedCloseDate={deal.expectedCloseDate}
+                                closedAt={deal.closedAt}
+                                closedReason={deal.closedReason}
+                                references={deal.references}
+                                stageHistory={stageHistory}
+                            />
 
                             <div className="mt-6">
                                 <SectionLabelWithTooltip
-                                    title={t('timeline')}
+                                    title={t('performance')}
                                     tooltip={
                                         <div className="flex flex-col gap-2">
-                                            <h2 className="text-sm font-medium">{t('timeline')}</h2>
+                                            <h2 className="text-sm font-medium">{t('performance')}</h2>
                                             <p className="text-xs text-muted-foreground">
-                                                {t('timelineTooltip')}
+                                                {t('performanceTooltip')}
                                             </p>
+                                            <ul className="list-disc list-inside text-xs text-muted-foreground">
+                                                <li>{t('performanceBulletProjected')}</li>
+                                                <li>{t('performanceBulletActual')}</li>
+                                                <li>{t('performanceBulletVariance')}</li>
+                                            </ul>
                                         </div>
                                     }
                                 />
-                                <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                    <Timeline
-                                        tasks={tasks}
-                                        activities={activities}
-                                        notes={notes}
-                                        users={relatedUsers}
-                                        persons={personSeeds}
-                                        deals={dealSeeds}
-                                        currentUserId={currentUser.id}
-                                        companyId={deal.company ?? null}
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    <SummaryTile label={t('projectedValue')} value={formatCompactCurrency(deal.value, currency, locale)} />
+                                    <SummaryTile
+                                        label={t('actualValue')}
+                                        value={closed ? formatCompactCurrency(deal.actualValue, currency, locale) : '—'}
+                                    />
+                                    <SummaryTile
+                                        label={t('variance')}
+                                        value={
+                                            variance != null
+                                                ? `${variance >= 0 ? '+' : ''}${(variance * 100).toFixed(1)}%`
+                                                : '—'
+                                        }
+                                    />
+                                    <SummaryTile
+                                        label={closed ? t('closed') : t('expectedClose')}
+                                        value={closed ? formatDate(deal.closedAt, locale) : formatDate(deal.expectedCloseDate, locale)}
                                     />
                                 </div>
                             </div>
-                        </section>
-                    </Rise>
-                </div>
+                        </RecordDetailSection>
+                    </div>
+                </Rise>
+
+                <Rise delay={0.08}>
+                    <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-6">
+                        <div>
+                            <SectionLabelWithTooltip
+                                title={t('engagement')}
+                                tooltip={
+                                    <div className="flex flex-col gap-2">
+                                        <h2 className="text-sm font-medium">{t('performance')}</h2>
+                                        <p className="text-xs text-muted-foreground">
+                                            {t('engagementTooltip')}
+                                        </p>
+                                    </div>
+                                }
+                            />
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                <EngagementSparkline data={weeklyEngagement} />
+                                <DealActivityBreakdown activities={activities} />
+                            </div>
+                        </div>
+
+                        <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
+
+                        <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
+                    </RecordDetailSection>
+                </Rise>
+
+                <Rise delay={0.1}>
+                    <RecordDetailSection recordKind="deal" section="relationship" className="flex flex-col gap-6">
+                        <DealRiskPanel risk={risk} />
+                        <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch lg:gap-4">
+                            <DealBriefPanel
+                                key={`deal-brief-${deal.id}`}
+                                dealId={deal.id}
+                                className="min-w-0 lg:flex-[2]"
+                            />
+                            <DealRationalePanel
+                                key={`deal-rationale-${deal.id}`}
+                                dealId={deal.id}
+                                className="min-w-0 lg:flex-[1]"
+                            />
+                        </div>
+                        <EngineEvaluationPanel
+                            kind="deal"
+                            id={deal.id}
+                            riskExcluded={deal.riskExcluded ?? false}
+                        />
+                    </RecordDetailSection>
+                </Rise>
+
+                <Rise delay={0.12}>
+                    <RecordDetailSection recordKind="deal" section="related">
+                        <SectionLabelWithTooltip
+                            title={t('peopleOnThisDeal')}
+                            tooltip={
+                                <div className="flex flex-col gap-2">
+                                    <h2 className="text-sm font-medium">{t('peopleOnThisDeal')}</h2>
+                                    <p className="text-xs text-muted-foreground">
+                                        {t('peopleOnThisDealTooltipShort')}
+                                    </p>
+                                    <p>
+                                        {t('peopleOnThisDealTooltipLong')}
+                                    </p>
+                                </div>
+                            }
+                        />
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            {dealPeople.length === 0 ? (
+                                <p className="px-6 py-6 text-sm text-muted-foreground">
+                                    {t('noPeopleAssociated')}
+                                </p>
+                            ) : (
+                                <ul className="divide-y divide-border">
+                                    {dealPeople.map(({ person, role }) => (
+                                        <li key={person.id}>
+                                            <Link
+                                                href={`/records/contacts/${person.id}`}
+                                                className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-muted/60"
+                                            >
+                                                <ContactAvatar contact={person} type="medium" />
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-sm font-medium text-foreground">
+                                                        {person.name}
+                                                    </p>
+                                                    {person.title ? (
+                                                        <p className="truncate text-xs text-muted-foreground">
+                                                            {person.title}
+                                                        </p>
+                                                    ) : null}
+                                                </div>
+                                                {role ? (
+                                                    <span className="rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                        {role}
+                                                    </span>
+                                                ) : null}
+                                            </Link>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </RecordDetailSection>
+                </Rise>
+
+                <Rise delay={0.14}>
+                    <RecordDetailSection recordKind="deal" section="files" className="flex flex-col gap-6">
+                        <DealDocuments
+                            dealId={deal.id}
+                            initial={documents}
+                            canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
+                            canDeleteDocuments={effectivePermissions.includes('DEAL_UPDATE')}
+                            currentUserId={currentUser.id}
+                        />
+                        <Attachments
+                            entityType="deal"
+                            entityId={deal.id}
+                            initialAttachments={attachments}
+                        />
+                    </RecordDetailSection>
+                </Rise>
+
+                <Rise delay={0.16}>
+                    <RecordDetailSection recordKind="deal" section="history">
+                        <SectionLabelWithTooltip
+                            title={t('timeline')}
+                            tooltip={
+                                <div className="flex flex-col gap-2">
+                                    <h2 className="text-sm font-medium">{t('timeline')}</h2>
+                                    <p className="text-xs text-muted-foreground">
+                                        {t('timelineTooltip')}
+                                    </p>
+                                </div>
+                            }
+                        />
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            <Timeline
+                                tasks={tasks}
+                                activities={activities}
+                                notes={notes}
+                                users={relatedUsers}
+                                persons={personSeeds}
+                                deals={dealSeeds}
+                                currentUserId={currentUser.id}
+                                companyId={deal.company ?? null}
+                            />
+                        </div>
+                    </RecordDetailSection>
+                </Rise>
         </PageShell>
     );
 }
