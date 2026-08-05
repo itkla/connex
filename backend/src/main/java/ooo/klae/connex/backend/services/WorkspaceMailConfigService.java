@@ -173,7 +173,8 @@ public class WorkspaceMailConfigService {
         } catch (BadRequestException e) {
             return MailTestResult.failure(e.getMessage());
         } catch (Exception e) {
-            log.warn("Test email for workspace {} failed: {}", workspaceId, e.getMessage());
+            log.warn("Test email for workspace {} failed: exception={}",
+                    workspaceId, e.getClass().getName());
             return MailTestResult.failure("Could not send the test email. Check the host, port, and credentials.");
         }
     }

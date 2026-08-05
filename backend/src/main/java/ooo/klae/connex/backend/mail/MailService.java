@@ -75,8 +75,8 @@ public class MailService {
         try {
             deliver(config, message);
         } catch (Exception e) {
-            log.error("Failed to send email to {} ({}): {}",
-                    ContactMask.maskEmail(message.to()), source, e.getMessage());
+            log.error("Failed to send email to {} ({}): exception={}",
+                    ContactMask.maskEmail(message.to()), source, e.getClass().getName());
         }
     }
 
@@ -99,7 +99,7 @@ public class MailService {
             }
             sender.send(mime);
         } catch (Exception e) {
-            throw new IllegalStateException("SMTP delivery failed: " + e.getMessage(), e);
+            throw new IllegalStateException("SMTP delivery failed", e);
         }
     }
 }
