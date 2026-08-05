@@ -142,7 +142,8 @@ public class IntroductionService {
         }
         Set<Integer> excludedPersonIds =
             new HashSet<>(introductionMapper.findIntroExcludedPersonIds(workspaceId));
-        List<PersonEdge> edges = eligibleEdges(edgeReader.getAllEdges(workspaceId), excludedPersonIds);
+        List<PersonEdge> allEdges = edgeReader.getAllEdges(workspaceId);
+        List<PersonEdge> edges = eligibleEdges(allEdges, excludedPersonIds);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
         List<IntroCandidatePerson> suggestionCandidates =
             introductionMapper.findCandidatePersons(workspaceId);
@@ -170,7 +171,13 @@ public class IntroductionService {
             timestamp,
             suggestions.isEmpty()
                 ? diagnoseSuggestionsEmpty(
-                    workspaceId, suggestionCandidates, edges, employment, existingPairs, warmth)
+                    workspaceId,
+                    suggestionCandidates,
+                    edges,
+                    allEdges,
+                    employment,
+                    existingPairs,
+                    warmth)
                 : null,
             paths.isEmpty()
                 ? warmPathService.diagnoseEmpty(
@@ -627,6 +634,7 @@ public class IntroductionService {
             int workspaceId,
             List<IntroCandidatePerson> candidates,
             List<PersonEdge> edges,
+            List<PersonEdge> allEdges,
             List<IntroEmploymentRow> employment,
             Set<Long> existingPairs,
             Map<Integer, RelationshipTemperatureDto> temperatures) {
@@ -640,6 +648,13 @@ public class IntroductionService {
         if (!beforePairPolicy.isEmpty() && beforePairPolicy.stream().allMatch(suggestion ->
                 existingPairs.contains(pairKey(suggestion.getPersonAId(), suggestion.getPersonBId())))) {
             return EMPTY_POLICY_EXCLUSION;
+        }
+        if (beforePairPolicy.isEmpty() && allEdges.size() != edges.size()) {
+            List<IntroSuggestionDto> includingRestrictedConnectors = rankSuggestions(
+                candidates, allEdges, employment, Set.of(), temperatures, Integer.MAX_VALUE);
+            if (!includingRestrictedConnectors.isEmpty()) {
+                return EMPTY_POLICY_EXCLUSION;
+            }
         }
         if (!hasPotentialSuggestionEvidence(candidates, edges, employment)) {
             return EMPTY_MISSING_RELATIONSHIP_EVIDENCE;

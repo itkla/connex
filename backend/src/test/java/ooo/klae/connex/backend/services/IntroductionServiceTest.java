@@ -131,6 +131,22 @@ class IntroductionServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void overviewExplainsPolicyExclusionWhenConnectorIsRestricted() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+        personMapper.updateEvaluationExclusions(workspace.getId(), hub.getId(), null, true);
+
+        IntroOverviewDto restricted = introductionService.getOverview(50, 50);
+
+        assertTrue(restricted.getSuggestions().isEmpty());
+        assertEquals(IntroductionService.EMPTY_POLICY_EXCLUSION,
+            restricted.getSuggestionsEmptyReason());
+    }
+
+    @Test
     void doesNotSuggestSameEmployerContactsWithoutAnotherSignal() {
         Company acme = newCompany();
         Person p1 = engagedPerson(acme);
