@@ -5,6 +5,7 @@ import type { Editor } from "@tiptap/core";
 import { NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import { PluginKey } from "@tiptap/pm/state";
 import Suggestion from "@tiptap/suggestion";
 import { createSuggestionRenderer } from "./suggestionRenderer";
@@ -56,17 +57,12 @@ function mentionSuggestion(editor: Editor, char: MentionTrigger, excludeUserId?:
         },
         items: ({ query }) => queryMentions(char, query, excludeUserId),
         command: ({ editor: instance, range, props }) => {
-            instance
-                .chain()
-                .focus()
-                .insertContentAt(range, [
-                    {
-                        type: "mention",
-                        attrs: { refType: props.type, refId: props.id, label: props.label },
-                    },
-                    { type: "text", text: " " },
-                ])
-                .run();
+            instance.chain().focus().deleteRange(range).run();
+            insertMention(instance, {
+                refType: props.type,
+                refId: props.id,
+                label: props.label,
+            });
         },
         render: createSuggestionRenderer(MentionList),
     });
@@ -155,6 +151,21 @@ export const Mention = Node.create<MentionOptions>({
         ];
     },
 });
+
+/**
+ * Insert a mention chip at the current selection and leave a trailing space so
+ * the caret stays outside the atom — same shape as the @/# suggestion command.
+ * Uses a ProseMirror transaction so Markdown's `insertContent` override cannot
+ * re-parse the chip as Markdown HTML.
+ */
+export function insertMention(editor: Editor, attrs: MentionAttrs): void {
+    const mentionType = editor.schema.nodes.mention;
+    if (!mentionType) return;
+    const { state } = editor;
+    const content = Fragment.from([mentionType.create(attrs), state.schema.text(" ")]);
+    const tr = state.tr.replaceSelection(new Slice(content, 0, 0));
+    editor.view.dispatch(tr.scrollIntoView());
+}
 
 /**
  * Replace `[Label](type:id)` tokens with private-use sentinels so Markdown

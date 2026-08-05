@@ -36,7 +36,11 @@ function adjacentBlock(editor: Editor, selected: SelectedBlock, direction: Block
     return node ? { node, position } : null;
 }
 
-/** Reports whether the selected top-level block can move in the requested direction. */
+/**
+ * Reports whether the selected top-level block can move in the requested
+ * direction. Toolbar Move up/down is the accessible reorder path; the drag grip
+ * remains decorative.
+ */
 export function canMoveTopLevelBlock(editor: Editor, direction: BlockMoveDirection): boolean {
     const selected = selectedTopLevelBlock(editor);
     return selected !== null && adjacentBlock(editor, selected, direction) !== null;

@@ -447,7 +447,17 @@
     @apply z-20 flex items-center;
   }
   .note-drag-handle-grip {
-    @apply flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing;
+    @apply flex size-8 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,transform] duration-150 ease-out active:cursor-grabbing active:scale-[0.97];
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .note-drag-handle-grip:hover {
+      @apply bg-accent text-foreground;
+    }
+  }
+  @media (pointer: coarse) {
+    .note-drag-handle-grip {
+      @apply size-11;
+    }
   }
 
   .font-display {
