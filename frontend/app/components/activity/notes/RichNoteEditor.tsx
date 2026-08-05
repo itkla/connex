@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -21,6 +21,8 @@ import { createMarkdownTableExtensions } from "./editor/MarkdownTable";
 import { createMarkdownImageExtension } from "./editor/MarkdownImage";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
+import { NOTE_EDITOR_MARKDOWN_OPTIONS } from "./editor/noteEditorMarkdown";
+import { FileReference } from "./editor/FileReference";
 
 function readMarkdown(editor: Editor): string {
     const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
@@ -41,7 +43,11 @@ type Props = {
 /**
  * WYSIWYG note editor built on Tiptap. Stores Markdown with inline
  * `[Label](type:id)` reference tokens so the backend ReferenceService keeps
- * resolving @/# mentions unchanged.
+ * resolving @/# mentions unchanged. Supported file embeds are attachment
+ * references (`[Label](file:id)`), not binary uploads into the body.
+ *
+ * Block reorder for assistive tech uses the toolbar Move up/down controls; the
+ * drag grip is decorative (`aria-hidden`) and is not the accessible path.
  */
 export default function RichNoteEditor({
     value,
@@ -55,6 +61,8 @@ export default function RichNoteEditor({
     const t = useTranslations("ActivityNotesEditor");
     const onChangeRef = useRef(onChange);
     const loadingRef = useRef(false);
+    const [filePickerOpen, setFilePickerOpen] = useState(false);
+    const lastFileOpenRequest = useRef(0);
 
     useEffect(() => {
         onChangeRef.current = onChange;
@@ -80,19 +88,14 @@ export default function RichNoteEditor({
             TaskItem.configure({ nested: true }),
             ...createMarkdownTableExtensions(),
             createMarkdownImageExtension(t("imageLoadError")),
-            Markdown.configure({
-                html: false,
-                breaks: true,
-                linkify: false,
-                transformPastedText: true,
-                transformCopiedText: true,
-            }),
+            Markdown.configure(NOTE_EDITOR_MARKDOWN_OPTIONS),
             Mention.configure({ excludeUserId }),
             Callout.configure({ cycleLabel: t("calloutCycleAria") }),
             ToggleSummary,
             Toggle.configure({ expandLabel: t("toggleExpand"), collapseLabel: t("toggleCollapse") }),
             NoteText,
             NoteUnderline,
+            FileReference,
             SlashCommand.configure({ commands: buildSlashCommands(t) }),
         ],
         editorProps: {
@@ -119,6 +122,22 @@ export default function RichNoteEditor({
     useEffect(() => {
         editor?.setEditable(editable);
     }, [editor, editable]);
+
+    useEffect(() => {
+        if (!editor) return;
+        const syncFilePicker = () => {
+            const storage = editor.storage as { fileReference?: { openRequest?: number } };
+            const request = storage.fileReference?.openRequest ?? 0;
+            if (request > lastFileOpenRequest.current) {
+                lastFileOpenRequest.current = request;
+                setFilePickerOpen(true);
+            }
+        };
+        editor.on("transaction", syncFilePicker);
+        return () => {
+            editor.off("transaction", syncFilePicker);
+        };
+    }, [editor]);
 
     const labels = {
         bold: t("bold"),
@@ -166,15 +185,33 @@ export default function RichNoteEditor({
         imageApply: t("imageApply"),
         imageUpdate: t("imageUpdate"),
         imageRemove: t("imageRemove"),
+        file: t("slashFileCmd"),
+        fileTitle: t("fileTitle"),
+        fileDescription: t("fileDescription"),
+        fileSearchLabel: t("fileSearchLabel"),
+        fileSearchPlaceholder: t("slashPickerPrompt"),
+        fileSearching: t("slashPickerSearching"),
+        fileNoResults: t("slashPickerNoResults"),
+        fileSearchError: t("slashPickerSearchError"),
+        fileRetry: t("slashPickerRetry"),
+        filePickerAria: t("slashReferencePickerAria"),
     };
 
     return (
         <div className={className}>
-            {editable ? <EditorToolbar editor={editor} labels={labels} compact={compact} /> : null}
+            {editable ? (
+                <EditorToolbar
+                    editor={editor}
+                    labels={labels}
+                    compact={compact}
+                    filePickerOpen={filePickerOpen}
+                    onFilePickerOpenChange={setFilePickerOpen}
+                />
+            ) : null}
             {editable && !compact && editor ? <SelectionToolbar editor={editor} labels={labels} /> : null}
             {editable && !compact && editor ? (
                 <DragHandle editor={editor} className="note-drag-handle">
-                    <span className="note-drag-handle-grip" title={t("dragHandleAria")} aria-hidden="true">
+                    <span className="note-drag-handle-grip" aria-hidden="true">
                         <GripVertical className="size-4" />
                     </span>
                 </DragHandle>

@@ -10,6 +10,7 @@ import {
     ListTodo,
     type LucideIcon,
     Minus,
+    Paperclip,
     SquareCode,
     Table2,
     TextQuote,
@@ -32,7 +33,8 @@ type Translate = (key: string) => string;
 /**
  * Build the slash-command registry with translated labels. Selecting a command
  * clears the typed `/query` range, then applies its block transform to the
- * current line — mirroring the toolbar's command chains.
+ * current line — mirroring the toolbar's command chains. The file command opens
+ * the attachment-reference picker (canonical `[Label](file:id)`), not an upload.
  */
 export function buildSlashCommands(t: Translate): SlashCommandItem[] {
     return [
@@ -138,6 +140,15 @@ export function buildSlashCommands(t: Translate): SlashCommandItem[] {
                     .deleteRange(range)
                     .insertTable(DEFAULT_MARKDOWN_TABLE_OPTIONS)
                     .run(),
+        },
+        {
+            id: "file",
+            title: t("slashFileCmd"),
+            subtitle: t("slashFileCmdHint"),
+            keywords: ["file", "attachment", "document", "ファイル", "添付"],
+            icon: Paperclip,
+            run: (editor, range) =>
+                editor.chain().focus().deleteRange(range).openFileReference().run(),
         },
         {
             id: "callout",

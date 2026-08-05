@@ -14,6 +14,18 @@ const MAX_HEIGHT = 288;
 const GAP = 6;
 
 /**
+ * True while an IME composition is active. Suggestion menus must ignore these
+ * key events so Enter/Arrow keys during EN/JA composition do not commit or move
+ * the selection mid-composition.
+ */
+export function isSuggestionCompositionEvent(event: {
+    isComposing?: boolean;
+    keyCode?: number;
+}): boolean {
+    return Boolean(event.isComposing || event.keyCode === 229);
+}
+
+/**
  * Build a Tiptap suggestion `render` handler that mounts a React list component
  * in a fixed-position portal anchored to the caret, flipping above the caret
  * when there is not enough room below. Shared by the mention and slash menus.
@@ -59,7 +71,7 @@ export function createSuggestionRenderer<Item>(
                 place(props.clientRect?.());
             },
             onKeyDown: (props: SuggestionKeyDownProps) => {
-                if (props.event.isComposing || props.event.keyCode === 229) return false;
+                if (isSuggestionCompositionEvent(props.event)) return false;
                 if (props.event.key === "Escape") return false;
                 return renderer?.ref?.onKeyDown(props) ?? false;
             },

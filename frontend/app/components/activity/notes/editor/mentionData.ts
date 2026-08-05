@@ -1,5 +1,6 @@
 import {
     getActiveWorkspaceMembers,
+    getAllAttachments,
     getCompanies,
     getDeals,
     search as globalSearch,
@@ -49,6 +50,7 @@ function workspaceKey(): string {
 let cacheKey = "";
 let membersPromise: Promise<MentionItem[]> | null = null;
 let recordsPromise: Promise<MentionItem[]> | null = null;
+let filesPromise: Promise<MentionItem[]> | null = null;
 
 function resetWhenWorkspaceChanged(): void {
     const key = workspaceKey();
@@ -56,6 +58,7 @@ function resetWhenWorkspaceChanged(): void {
         cacheKey = key;
         membersPromise = null;
         recordsPromise = null;
+        filesPromise = null;
     }
 }
 
@@ -156,6 +159,16 @@ function recordsPool(): Promise<MentionItem[]> {
     return recordsPromise;
 }
 
+function filesPool(): Promise<MentionItem[]> {
+    resetWhenWorkspaceChanged();
+    if (!filesPromise) {
+        filesPromise = getAllAttachments()
+            .then((files) => files.map(fileItem))
+            .catch(() => []);
+    }
+    return filesPromise;
+}
+
 function fromSearchResults(results: SearchResults): MentionItem[] {
     return [
         ...results.users.map(userItem),
@@ -205,4 +218,26 @@ export async function queryMentions(
     return local
         .filter((item) => allowed.includes(item.type) && matches(item, needle))
         .slice(0, MAX_SUGGESTIONS);
+}
+
+/**
+ * Resolve file-attachment suggestions for the note editor's file-reference
+ * picker. Empty queries return a short local pool; typed queries prefer global
+ * search results scoped to attachments, falling back to the local pool.
+ */
+export async function queryFileMentions(query: string): Promise<MentionItem[]> {
+    const needle = query.trim().toLowerCase();
+    const pool = await filesPool();
+
+    if (!needle) {
+        return pool.slice(0, MAX_SUGGESTIONS);
+    }
+
+    const results = await globalSearch(query.trim()).catch(() => null);
+    if (results) {
+        const remote = results.attachments.map(fileItem);
+        if (remote.length) return remote.slice(0, MAX_SUGGESTIONS);
+    }
+
+    return pool.filter((item) => matches(item, needle)).slice(0, MAX_SUGGESTIONS);
 }
