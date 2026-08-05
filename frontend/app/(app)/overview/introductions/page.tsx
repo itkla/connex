@@ -45,8 +45,13 @@ export default async function IntroductionsPage() {
             key={`${overviewResult.ok ? 'o' : 'ox'}-${lineageResult.ok ? 'l' : 'lx'}`}
             initialSuggestions={overviewResult.ok ? overviewResult.data.suggestions : []}
             suggestionsFailed={!overviewResult.ok}
+            suggestionsEmptyReason={
+                overviewResult.ok ? overviewResult.data.suggestionsEmptyReason : 'unavailable_data'
+            }
             initialPaths={overviewResult.ok ? overviewResult.data.paths : []}
             pathsFailed={!overviewResult.ok}
+            pathsEmptyReason={overviewResult.ok ? overviewResult.data.pathsEmptyReason : 'unavailable_data'}
+            asOf={overviewResult.ok ? overviewResult.data.asOf : null}
             initialLineage={lineageResult.ok ? lineageResult.data.items : []}
             initialLineageTotal={lineageResult.ok ? lineageResult.data.total : 0}
             lineageFailed={!lineageResult.ok}

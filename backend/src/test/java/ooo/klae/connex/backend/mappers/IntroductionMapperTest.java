@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.User;
 
 class IntroductionMapperTest extends AbstractMapperTest {
@@ -18,6 +19,7 @@ class IntroductionMapperTest extends AbstractMapperTest {
     @Autowired IntroductionMapper introductionMapper;
     @Autowired ActivityMapper activityMapper;
     @Autowired NoteMapper noteMapper;
+    @Autowired PersonEdgeMapper personEdgeMapper;
 
     /**
      * An engaged contact is an introduction candidate until they opt out of intro suggestions;
@@ -65,6 +67,20 @@ class IntroductionMapperTest extends AbstractMapperTest {
         assertTrue(candidates.contains(workspaceVisible.getId()));
     }
 
+    @Test
+    void graphEvidenceRequiresAnEligibleConnector() {
+        Person candidate = newPerson(newCompany());
+        Person connector = newPerson(newCompany());
+        connect(candidate, connector);
+
+        assertTrue(candidateIds().contains(candidate.getId()));
+
+        personMapper.updateEvaluationExclusions(workspace.getId(), connector.getId(), null, true);
+
+        assertFalse(candidateIds().contains(candidate.getId()));
+        assertFalse(reportCandidateIds().contains(candidate.getId()));
+    }
+
     private List<Integer> candidateIds() {
         return introductionMapper.findCandidatePersons(workspace.getId()).stream()
             .map(IntroCandidatePerson::getId)
@@ -75,6 +91,16 @@ class IntroductionMapperTest extends AbstractMapperTest {
         return introductionMapper.findCandidatePersonsForReport(workspace.getId(), 1_000).stream()
             .map(IntroCandidatePerson::getId)
             .toList();
+    }
+
+    private void connect(Person first, Person second) {
+        PersonEdge edge = new PersonEdge();
+        edge.setWorkspaceId(workspace.getId());
+        edge.setSourcePersonId(Math.min(first.getId(), second.getId()));
+        edge.setTargetPersonId(Math.max(first.getId(), second.getId()));
+        edge.setType("knows");
+        edge.setStrength(2);
+        personEdgeMapper.upsert(edge);
     }
 
     private void engage(Person person) {

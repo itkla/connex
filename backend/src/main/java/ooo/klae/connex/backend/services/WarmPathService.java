@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -8,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
@@ -57,6 +59,7 @@ public class WarmPathService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final TaskService taskService;
+    private final Clock clock;
 
     /** A dormant relationship must be untouched at least this long to surface as a re-warm target. */
     private static final int MIN_DORMANT_DAYS = 30;
@@ -95,7 +98,11 @@ public class WarmPathService {
 
     /** Ranked warm introduction paths for the active workspace. */
     public List<WarmPathDto> getPaths(int limit) {
-        return computePaths(workspaceService.getCurrentWorkspaceId(), resolveLimit(limit));
+        List<WarmPathDto> paths =
+            computePaths(workspaceService.getCurrentWorkspaceId(), resolveLimit(limit));
+        String asOf = clock.instant().toString();
+        paths.forEach(path -> path.setAsOf(asOf));
+        return paths;
     }
 
     /** Clamps a requested row limit to the feed's default/maximum bounds. */
@@ -124,7 +131,9 @@ public class WarmPathService {
         if (candidates.size() < 2) {
             return List.of();
         }
-        List<PersonEdge> edges = edgeReader.getAllEdges(workspaceId);
+        Set<Integer> excludedPersonIds =
+            new HashSet<>(introductionMapper.findIntroExcludedPersonIds(workspaceId));
+        List<PersonEdge> edges = eligibleEdges(edgeReader.getAllEdges(workspaceId), excludedPersonIds);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
         List<WarmPathDismissal> dismissals = introductionMapper.findWarmPathDismissals(workspaceId);
         Map<Integer, RelationshipTemperatureDto> warmth = temperatures;
@@ -135,6 +144,82 @@ public class WarmPathService {
             }
         }
         return rankPaths(candidates, edges, employment, dismissals, warmth, limit);
+    }
+
+    /** Classifies why the active workspace has no warm paths without weakening policy filters. */
+    String diagnoseEmpty(
+            int workspaceId,
+            List<IntroCandidatePerson> candidates,
+            List<PersonEdge> edges,
+            List<IntroEmploymentRow> employment,
+            List<WarmPathDismissal> dismissals,
+            Map<Integer, RelationshipTemperatureDto> temperatures) {
+        int excluded = introductionMapper.countIntroExcludedPersons(workspaceId);
+        if (candidates.size() < 2) {
+            return candidates.size() + excluded >= 2
+                ? IntroductionService.EMPTY_POLICY_EXCLUSION
+                : IntroductionService.EMPTY_INSUFFICIENT_CANDIDATES;
+        }
+        boolean hasBridge = candidates.stream()
+            .anyMatch(candidate -> bridgeEligible(temperatures.get(candidate.getId())));
+        boolean hasTarget = candidates.stream()
+            .anyMatch(candidate -> targetEligible(temperatures.get(candidate.getId())));
+        if (!hasBridge || !hasTarget) {
+            return IntroductionService.EMPTY_INSUFFICIENT_PATH_STRENGTH;
+        }
+        List<WarmPathDto> beforePathPolicy =
+            rankPaths(candidates, edges, employment, List.of(), temperatures, Integer.MAX_VALUE);
+        if (!beforePathPolicy.isEmpty() && !dismissals.isEmpty()) {
+            return IntroductionService.EMPTY_POLICY_EXCLUSION;
+        }
+        if (!hasPotentialPathEvidence(candidates, edges, employment)) {
+            return IntroductionService.EMPTY_MISSING_RELATIONSHIP_EVIDENCE;
+        }
+        return IntroductionService.EMPTY_INSUFFICIENT_PATH_STRENGTH;
+    }
+
+    private static boolean hasPotentialPathEvidence(
+            List<IntroCandidatePerson> candidates,
+            List<PersonEdge> edges,
+            List<IntroEmploymentRow> employment) {
+        Set<Integer> candidateIds = candidates.stream()
+            .map(IntroCandidatePerson::getId)
+            .collect(Collectors.toSet());
+        if (edges.stream().anyMatch(edge -> candidateIds.contains(edge.getSourcePersonId())
+                && candidateIds.contains(edge.getTargetPersonId()))) {
+            return true;
+        }
+        Map<Integer, Integer> currentCompanyCounts = new HashMap<>();
+        for (IntroCandidatePerson candidate : candidates) {
+            if (candidate.getCompanyId() != null) {
+                currentCompanyCounts.merge(candidate.getCompanyId(), 1, Integer::sum);
+            }
+        }
+        if (currentCompanyCounts.values().stream().anyMatch(count -> count >= 2)) {
+            return true;
+        }
+        Map<String, Set<Integer>> employmentCounts = new HashMap<>();
+        for (IntroEmploymentRow row : employment) {
+            if (!candidateIds.contains(row.getPersonId())) {
+                continue;
+            }
+            String identity = employerIdentity(row);
+            if (identity != null) {
+                employmentCounts.computeIfAbsent(identity, key -> new HashSet<>()).add(row.getPersonId());
+            }
+        }
+        return employmentCounts.values().stream().anyMatch(people -> people.size() >= 2);
+    }
+
+    private static List<PersonEdge> eligibleEdges(
+            List<PersonEdge> edges, Set<Integer> excludedPersonIds) {
+        if (excludedPersonIds.isEmpty()) {
+            return edges;
+        }
+        return edges.stream()
+            .filter(edge -> !excludedPersonIds.contains(edge.getSourcePersonId())
+                && !excludedPersonIds.contains(edge.getTargetPersonId()))
+            .toList();
     }
 
     /**
@@ -287,6 +372,9 @@ public class WarmPathService {
         dto.setOverlapStartYear(evidence.overlapStartYear());
         dto.setOverlapEndYear(evidence.overlapEndYear());
         dto.setScore(pathScore);
+        dto.setSupportingPersonIds(List.of(bridgeId, targetId));
+        dto.setSupportingEdgeIds(
+            evidence.edgeId() == null ? List.of() : List.of(evidence.edgeId()));
         byTarget.computeIfAbsent(targetId, key -> new ArrayList<>()).add(dto);
     }
 
@@ -328,7 +416,8 @@ public class WarmPathService {
                 continue;
             }
             evidence.merge(pairKey(edge.getSourcePersonId(), edge.getTargetPersonId()),
-                new Evidence(EVIDENCE_CONNECTION, edgeConfidence(edge.getStrength()), null, null, null),
+                new Evidence(EVIDENCE_CONNECTION, edgeConfidence(edge.getStrength()), null,
+                    null, null, edge.getId() > 0 ? edge.getId() : null),
                 Evidence::strongest);
         }
 
@@ -347,7 +436,8 @@ public class WarmPathService {
             for (int i = 0; i < group.size(); i++) {
                 for (int j = i + 1; j < group.size(); j++) {
                     evidence.merge(pairKey(group.get(i).getId(), group.get(j).getId()),
-                        new Evidence(EVIDENCE_COLLEAGUES, CONF_COLLEAGUES, company, null, null),
+                        new Evidence(EVIDENCE_COLLEAGUES, CONF_COLLEAGUES, company, null, null,
+                            null),
                         Evidence::strongest);
                 }
             }
@@ -407,7 +497,7 @@ public class WarmPathService {
                 String company = notBlank(a.getCompanyName()) ? a.getCompanyName().trim()
                     : (notBlank(b.getCompanyName()) ? b.getCompanyName().trim() : null);
                 return new Evidence(EVIDENCE_FORMER_COLLEAGUES, CONF_FORMER_COLLEAGUES, company,
-                    overlapStartYear(a, b), overlapEndYear(a, b));
+                    overlapStartYear(a, b), overlapEndYear(a, b), null);
             }
         }
         return null;
@@ -626,7 +716,8 @@ public class WarmPathService {
 
     /** One tier of bridge-to-target evidence; {@code strongest} keeps the higher-confidence tier. */
     record Evidence(String type, double confidence, String company,
-                    Integer overlapStartYear, Integer overlapEndYear) {
+                    Integer overlapStartYear, Integer overlapEndYear,
+                    Integer edgeId) {
         static Evidence strongest(Evidence a, Evidence b) {
             return b.confidence > a.confidence ? b : a;
         }

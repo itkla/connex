@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
     ArrowPathIcon,
     ArrowsRightLeftIcon,
@@ -14,10 +14,13 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { acceptWarmPath, dismissIntroSuggestion, dismissWarmPath, recordIntroduction } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import { formatRelativeTime } from '@/app/lib/utils';
 import type {
     Contact,
+    IntroEmptyReason,
     IntroSuggestion,
     IntroductionRecord,
     WarmPath,
@@ -42,21 +45,30 @@ function pairKey(personAId: number, personBId: number): string {
     return `${Math.min(personAId, personBId)}-${Math.max(personAId, personBId)}`;
 }
 
-function SectionHeading({ title, count }: { title: string; count: number | null }) {
+function SectionHeading({ title, count, asOf }: { title: string; count: number | null; asOf?: string | null }) {
     const t = useTranslations('Introductions');
+    const locale = useLocale();
+    const now = useLiveNow();
     return (
-        <div className="flex items-center gap-2.5">
-            <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">
-                {count === null ? (
-                    <>
-                        <span aria-hidden>—</span>
-                        <span className="sr-only">{t('statUnavailable')}</span>
-                    </>
-                ) : (
-                    count
-                )}
-            </span>
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <div className="flex items-center gap-2.5">
+                <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">
+                    {count === null ? (
+                        <>
+                            <span aria-hidden>—</span>
+                            <span className="sr-only">{t('statUnavailable')}</span>
+                        </>
+                    ) : (
+                        count
+                    )}
+                </span>
+            </div>
+            {asOf ? (
+                <span className="text-xs text-muted-foreground">
+                    {t('freshness', { time: formatRelativeTime(asOf, locale, now) })}
+                </span>
+            ) : null}
         </div>
     );
 }
@@ -109,8 +121,11 @@ function StatePanel({
 export default function IntroductionsBoard({
     initialSuggestions,
     suggestionsFailed = false,
+    suggestionsEmptyReason,
     initialPaths,
     pathsFailed = false,
+    pathsEmptyReason,
+    asOf,
     initialLineage,
     initialLineageTotal,
     lineageFailed = false,
@@ -118,8 +133,11 @@ export default function IntroductionsBoard({
 }: {
     initialSuggestions: IntroSuggestion[];
     suggestionsFailed?: boolean;
+    suggestionsEmptyReason?: IntroEmptyReason | null;
     initialPaths: WarmPath[];
     pathsFailed?: boolean;
+    pathsEmptyReason?: IntroEmptyReason | null;
+    asOf?: string | null;
     initialLineage: IntroductionRecord[];
     initialLineageTotal: number;
     lineageFailed?: boolean;
@@ -151,6 +169,47 @@ export default function IntroductionsBoard({
     const [madeTotal, setMadeTotal] = useState(initialLineageTotal);
     const [paths, setPaths] = useState(() => initialPaths.filter((p) => p.bridges.length > 0));
     const [pathFilter, setPathFilter] = useState<'all' | WarmPathReachType>('all');
+
+    const emptyCopy = (reason?: IntroEmptyReason | null) => {
+        switch (reason) {
+            case 'insufficient_candidates':
+                return {
+                    title: t('emptyInsufficientCandidatesTitle'),
+                    hint: t('emptyInsufficientCandidatesHint'),
+                };
+            case 'missing_relationship_evidence':
+                return {
+                    title: t('emptyMissingEvidenceTitle'),
+                    hint: t('emptyMissingEvidenceHint'),
+                };
+            case 'policy_exclusion':
+                return {
+                    title: t('emptyPolicyExclusionTitle'),
+                    hint: t('emptyPolicyExclusionHint'),
+                };
+            case 'insufficient_path_strength':
+                return {
+                    title: t('emptyInsufficientStrengthTitle'),
+                    hint: t('emptyInsufficientStrengthHint'),
+                };
+            case 'unavailable_data':
+                return {
+                    title: t('emptyUnavailableTitle'),
+                    hint: t('emptyUnavailableHint'),
+                };
+            default:
+                return {
+                    title: t('emptyQueueClearedTitle'),
+                    hint: t('emptyQueueClearedHint'),
+                };
+        }
+    };
+
+    const suggestionsEmptyCopy = emptyCopy(suggestionsEmptyReason);
+    const pathsEmptyCopy = emptyCopy(pathsEmptyReason);
+    const visiblePathsEmptyCopy = paths.length === 0
+        ? pathsEmptyCopy
+        : { title: t('pathsEmptyTitle'), hint: t('pathsEmptyHint') };
 
     const strongCount = useMemo(
         () => suggestions.filter((s) => tierFor(s.score).tier === 'strong').length,
@@ -357,7 +416,11 @@ export default function IntroductionsBoard({
 
             <Rise delay={0.12}>
                 <section className="space-y-3">
-                <SectionHeading title={t('toMake')} count={suggestionsFailed ? null : suggestions.length} />
+                <SectionHeading
+                    title={t('toMake')}
+                    count={suggestionsFailed ? null : suggestions.length}
+                    asOf={suggestionsFailed ? null : asOf}
+                />
                 {suggestionsFailed ? (
                     <StatePanel
                         icon={<ExclamationTriangleIcon className="size-6 text-destructive" aria-hidden />}
@@ -385,8 +448,8 @@ export default function IntroductionsBoard({
                 ) : suggestions.length === 0 ? (
                     <StatePanel
                         icon={<ArrowsRightLeftIcon className="size-6 text-muted-foreground" aria-hidden />}
-                        title={t('toMakeEmptyTitle')}
-                        hint={t('toMakeEmptyHint')}
+                        title={suggestionsEmptyCopy.title}
+                        hint={suggestionsEmptyCopy.hint}
                         dashed
                     />
                 ) : (
@@ -426,6 +489,7 @@ export default function IntroductionsBoard({
                         <SectionHeading
                             title={t('pathsTitle')}
                             count={pathsFailed ? null : visiblePaths.length}
+                            asOf={pathsFailed ? null : asOf}
                         />
                         {!pathsFailed && paths.length > 0 ? (
                             <div role="group" aria-label={t('pathsFilterLabel')} className="flex items-center gap-1">
@@ -462,8 +526,8 @@ export default function IntroductionsBoard({
                     ) : visiblePaths.length === 0 ? (
                         <StatePanel
                             icon={<MapIcon className="size-6 text-muted-foreground" aria-hidden />}
-                            title={t('pathsEmptyTitle')}
-                            hint={t('pathsEmptyHint')}
+                            title={visiblePathsEmptyCopy.title}
+                            hint={visiblePathsEmptyCopy.hint}
                             dashed
                         />
                     ) : (

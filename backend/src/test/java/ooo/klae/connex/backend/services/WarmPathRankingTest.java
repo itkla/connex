@@ -46,6 +46,8 @@ class WarmPathRankingTest {
         assertEquals(WarmPathService.EVIDENCE_CONNECTION, bridge.getEvidenceType());
         assertEquals(54, bridge.getScore());
         assertEquals(row.getScore(), bridge.getScore());
+        assertEquals(List.of(1, 2), bridge.getSupportingPersonIds());
+        assertEquals(List.of(102), bridge.getSupportingEdgeIds());
     }
 
     @Test
@@ -200,6 +202,23 @@ class WarmPathRankingTest {
 
         assertTrue(rows.isEmpty(),
             "a warm contact whose touches merely aged out of the recent window is not a reach target");
+    }
+
+    @Test
+    void staleTargetStillSurfacesWithCurrentEvaluationEvidence() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(1, "Bridge", 100, "Acme"),
+            person(2, "Stale target", 200, "Globex"));
+        Map<Integer, RelationshipTemperatureDto> temps = new HashMap<>();
+        temps.put(1, temp(1, 60, "hot", 5, 8));
+        temps.put(2, temp(2, 0, "cold", 365, 1));
+
+        List<WarmPathDto> rows = rank(
+            candidates, List.of(edge(1, 2, 2)), List.of(), List.of(), temps);
+
+        assertEquals(1, rows.size());
+        assertEquals(365, rows.get(0).getTargetDaysSinceTouch());
+        assertEquals(WarmPathService.REACH_REWARM, rows.get(0).getReachType());
     }
 
     @Test
@@ -393,6 +412,7 @@ class WarmPathRankingTest {
 
     private static PersonEdge edge(int a, int b, int strength) {
         PersonEdge edge = new PersonEdge();
+        edge.setId(Math.min(a, b) * 100 + Math.max(a, b));
         edge.setWorkspaceId(1);
         edge.setSourcePersonId(Math.min(a, b));
         edge.setTargetPersonId(Math.max(a, b));

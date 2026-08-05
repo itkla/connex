@@ -12,6 +12,21 @@
     AND c.archived_at IS NULL
   </sql>
 
+  <sql id="eligibleGraphEvidence">
+    EXISTS (
+      SELECT 1
+      FROM person_edge e
+      JOIN person peer
+        ON peer.id = IF(e.source_person_id = p.id, e.target_person_id, e.source_person_id)
+        AND peer.workspace_id = #{workspaceId}
+        AND peer.intro_excluded = FALSE
+        AND peer.suspended_at IS NULL
+        AND peer.archived_at IS NULL
+      WHERE e.workspace_id = #{workspaceId}
+        AND (e.source_person_id = p.id OR e.target_person_id = p.id)
+    )
+  </sql>
+
   <!-- Recording a made intro on an existing pair refreshes it (row-alias upsert; VALUES() is
        removed in MySQL 9). A dismissal of an already-made pair is a no-op, so lineage survives. -->
   <insert id="recordMade">
@@ -79,8 +94,8 @@
   </select>
 
   <!-- Workspace-OWNED contacts only (never shared-in records of another tenant), restricted to
-       those the team has actually engaged, so a suggestion always involves two contacts the user
-       has standing to introduce. -->
+       those with logged engagement or an eligible graph edge, so a suggestion always involves
+       contacts the user has standing to introduce. -->
   <select id="findCandidatePersons" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
     SELECT p.id         AS id,
            p.name       AS name,
@@ -99,6 +114,7 @@
         OR EXISTS (SELECT 1 FROM note n
           WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace' AND n.person_id = p.id)
         OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
+        OR <include refid="eligibleGraphEvidence"/>
       )
   </select>
 
@@ -120,6 +136,7 @@
         OR EXISTS (SELECT 1 FROM note n
           WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace' AND n.person_id = p.id)
         OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
+        OR <include refid="eligibleGraphEvidence"/>
       )
     ORDER BY p.id
     LIMIT #{limit}
@@ -198,6 +215,41 @@
       AND p.intro_excluded = FALSE
       AND p.suspended_at IS NULL
       AND p.archived_at IS NULL
+  </select>
+
+  <select id="countIntroExcludedPersons" resultType="int">
+    SELECT COUNT(*)
+    FROM person
+    WHERE workspace_id = #{workspaceId}
+      AND intro_excluded = TRUE
+      AND suspended_at IS NULL
+      AND archived_at IS NULL
+  </select>
+
+  <select id="countExcludedCandidatePersons" resultType="int">
+    SELECT COUNT(*)
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.intro_excluded = TRUE
+      AND p.suspended_at IS NULL
+      AND p.archived_at IS NULL
+      AND (
+        EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM note n
+          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace' AND n.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
+        OR <include refid="eligibleGraphEvidence"/>
+      )
+  </select>
+
+  <select id="findIntroExcludedPersonIds" resultType="int">
+    SELECT id
+    FROM person
+    WHERE workspace_id = #{workspaceId}
+      AND intro_excluded = TRUE
+      AND suspended_at IS NULL
+      AND archived_at IS NULL
+    ORDER BY id
   </select>
 
   <select id="findWarmPathDismissals" resultType="ooo.klae.connex.backend.beans.WarmPathDismissal">

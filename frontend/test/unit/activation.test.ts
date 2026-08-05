@@ -147,6 +147,9 @@ function suggestion(overrides: Partial<IntroSuggestion> = {}): IntroSuggestion {
         reasons: ["shared_company"],
         mutualConnections: 0,
         sharedCompany: "Kaisha",
+        asOf: "2026-07-26T00:00:00Z",
+        supportingPersonIds: [],
+        supportingEdgeIds: [],
         ...overrides,
     };
 }

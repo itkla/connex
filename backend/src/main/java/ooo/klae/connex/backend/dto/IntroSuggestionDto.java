@@ -31,4 +31,7 @@ public class IntroSuggestionDto {
     private List<String> reasons;
     private int mutualConnections;
     private String sharedCompany;
+    private String asOf;
+    private List<Integer> supportingPersonIds;
+    private List<Integer> supportingEdgeIds;
 }

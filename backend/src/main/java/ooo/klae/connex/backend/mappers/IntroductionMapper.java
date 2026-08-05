@@ -33,7 +33,7 @@ public interface IntroductionMapper {
     IntroductionDto findByPair(@Param("workspaceId") int workspaceId,
             @Param("personAId") int personAId, @Param("personBId") int personBId);
 
-    /** Workspace-owned contacts the team has engaged, with the attributes ranking/display need. */
+    /** Workspace-owned contacts with logged engagement or explicit graph evidence. */
     List<IntroCandidatePerson> findCandidatePersons(@Param("workspaceId") int workspaceId);
 
     List<IntroCandidatePerson> findCandidatePersonsForReport(
@@ -74,6 +74,15 @@ public interface IntroductionMapper {
      * can surface as reach targets.
      */
     List<IntroCandidatePerson> findWarmPathCandidates(@Param("workspaceId") int workspaceId);
+
+    /** Active, workspace-owned contacts excluded from introduction features by policy. */
+    int countIntroExcludedPersons(@Param("workspaceId") int workspaceId);
+
+    /** Active excluded contacts that otherwise meet reverse-introduction candidate evidence rules. */
+    int countExcludedCandidatePersons(@Param("workspaceId") int workspaceId);
+
+    /** Active workspace-owned contact ids excluded from introduction graph traversal. */
+    List<Integer> findIntroExcludedPersonIds(@Param("workspaceId") int workspaceId);
 
     /** Dismissed/accepted warm paths; a {@code null} bridge covers every path to the target. */
     List<WarmPathDismissal> findWarmPathDismissals(@Param("workspaceId") int workspaceId);

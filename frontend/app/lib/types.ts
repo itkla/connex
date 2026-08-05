@@ -546,6 +546,9 @@ export type IntroSuggestion = {
     reasons: string[];
     mutualConnections: number;
     sharedCompany?: string | null;
+    asOf: string;
+    supportingPersonIds: number[];
+    supportingEdgeIds: number[];
 };
 
 export type IntroRationaleUnavailableReason =
@@ -614,6 +617,8 @@ export type WarmPathBridge = {
     overlapStartYear?: number | null;
     overlapEndYear?: number | null;
     score: number;
+    supportingPersonIds: number[];
+    supportingEdgeIds: number[];
 };
 
 /**
@@ -632,6 +637,7 @@ export type WarmPath = {
     reachType: WarmPathReachType;
     score: number;
     bridges: WarmPathBridge[];
+    asOf: string;
 };
 
 /** Request body identifying the warm path an accept or dismiss targets. */
@@ -642,9 +648,19 @@ export type WarmPathPayload = {
 };
 
 /** Combined introductions feed — suggestions + warm paths from one backend warmth pass (#630). */
+export type IntroEmptyReason =
+    | 'insufficient_candidates'
+    | 'missing_relationship_evidence'
+    | 'policy_exclusion'
+    | 'insufficient_path_strength'
+    | 'unavailable_data';
+
 export type IntroOverview = {
     suggestions: IntroSuggestion[];
     paths: WarmPath[];
+    asOf: string;
+    suggestionsEmptyReason?: IntroEmptyReason | null;
+    pathsEmptyReason?: IntroEmptyReason | null;
 };
 
 export type User = {
