@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -41,10 +41,79 @@ import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
 import { noteContentToVisibleText } from '@/app/lib/references';
 import type { Contact, Deal, Note, NoteVisibility } from '@/app/lib/types';
 
+const NOTE_DRAWER_PULL_THRESHOLD = 36;
+
 function handleListWheel(event: WheelEvent<HTMLDivElement>) {
     const lineHeightPx = 16;
     const delta = event.deltaMode === 1 ? event.deltaY * lineHeightPx : event.deltaY;
     event.currentTarget.scrollTop += delta;
+}
+
+/**
+ * Grab bar at the top of the note composer drawer. Drag up or tap to expand to full screen; drag
+ * down or tap while expanded to return to the sheet; drag down from the sheet dismisses. Pointer
+ * events are captured so the bar does not fight the drawer's swipe-to-dismiss.
+ */
+function NoteDrawerPullBar({
+    expanded,
+    expandLabel,
+    collapseLabel,
+    onExpand,
+    onCollapse,
+    onDismiss,
+}: {
+    expanded: boolean;
+    expandLabel: string;
+    collapseLabel: string;
+    onExpand: () => void;
+    onCollapse: () => void;
+    onDismiss: () => void;
+}) {
+    const startY = useRef<number | null>(null);
+    const handledByDragRef = useRef(false);
+
+    const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        handledByDragRef.current = false;
+        startY.current = event.clientY;
+        event.currentTarget.setPointerCapture(event.pointerId);
+    };
+
+    const handlePointerUp = (event: PointerEvent<HTMLButtonElement>) => {
+        if (startY.current == null) return;
+        const dy = event.clientY - startY.current;
+        startY.current = null;
+        if (dy < -NOTE_DRAWER_PULL_THRESHOLD) {
+            handledByDragRef.current = true;
+            onExpand();
+        } else if (dy > NOTE_DRAWER_PULL_THRESHOLD) {
+            handledByDragRef.current = true;
+            if (expanded) onCollapse();
+            else onDismiss();
+        }
+    };
+
+    const handleClick = () => {
+        if (handledByDragRef.current) {
+            handledByDragRef.current = false;
+            return;
+        }
+        if (expanded) onCollapse();
+        else onExpand();
+    };
+
+    return (
+        <button
+            type="button"
+            aria-label={expanded ? collapseLabel : expandLabel}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onClick={handleClick}
+            className="flex shrink-0 touch-none cursor-grab justify-center rounded-md py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-brand/60 active:cursor-grabbing"
+        >
+            <span aria-hidden className="h-1.5 w-12 rounded-full bg-border transition-colors" />
+        </button>
+    );
 }
 
 /** The serializable note-composer fields persisted and restored as one workspace-scoped draft. */
@@ -137,27 +206,45 @@ function ScopedNoteDialog({
 
     const [prevOpen, setPrevOpen] = useState(open);
     const [openCount, setOpenCount] = useState(0);
+    const [expanded, setExpanded] = useState(false);
     if (open !== prevOpen) {
         setPrevOpen(open);
-        if (open) setOpenCount((count) => count + 1);
-        else setIsDirty(false);
+        if (open) {
+            setOpenCount((count) => count + 1);
+            setExpanded(false);
+        } else {
+            setIsDirty(false);
+        }
     }
 
     return (
         <>
-            <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="down" showSwipeHandle>
+            <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="down">
                 <DrawerContent
                     showCloseButton={false}
-                    className="h-[calc(100dvh-0.5rem)] max-h-[calc(100dvh-0.5rem)] gap-0 p-0 pt-[env(safe-area-inset-top)] sm:h-[min(90dvh,54rem)] sm:max-w-5xl"
+                    className={cn(
+                        'gap-0 p-0 pt-[env(safe-area-inset-top)] transition-[transform,height,max-height,width,max-width,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+                        expanded
+                            ? 'h-[100dvh] max-h-[100dvh] w-full max-w-none rounded-none'
+                            : 'h-[min(82dvh,48rem)] max-h-[min(82dvh,48rem)] w-full sm:max-w-6xl',
+                    )}
                 >
                     <DrawerTitle className="sr-only">{note ? t('titleEdit') : t('titleCreate')}</DrawerTitle>
                     <DrawerDescription className="sr-only">{t('description')}</DrawerDescription>
+                    <NoteDrawerPullBar
+                        expanded={expanded}
+                        expandLabel={t('expand')}
+                        collapseLabel={t('collapse')}
+                        onExpand={() => setExpanded(true)}
+                        onCollapse={() => setExpanded(false)}
+                        onDismiss={guard.requestClose}
+                    />
                     <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
                         aria-label={t('close')}
-                        className="absolute top-[max(1rem,env(safe-area-inset-top))] right-4 z-20"
+                        className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-4 z-20"
                         onClick={guard.requestClose}
                     >
                         <XMarkIcon className="size-4" />
@@ -188,6 +275,7 @@ function ScopedNoteDialog({
                             onClearDraft={isCreate ? draft.clear : undefined}
                             onCancel={guard.requestClose}
                             onClose={() => onOpenChange(false)}
+                            contentWidth={expanded ? 'wide' : 'default'}
                         />
                     </div>
                 </DrawerContent>
@@ -215,6 +303,8 @@ type FormProps = {
     defaultTitle?: string;
     defaultVisibility?: NoteVisibility;
     compact?: boolean;
+    /** Widens the document column when the composer drawer is expanded to full screen. */
+    contentWidth?: 'default' | 'wide';
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
     onPersonQueryChange?: (query: string) => void;
@@ -348,6 +438,7 @@ export function NoteDialogForm({
     defaultTitle = '',
     defaultVisibility,
     compact = false,
+    contentWidth = 'default',
     ownsInitialDraft = false,
     requestInit,
     onPersonQueryChange,
@@ -522,7 +613,15 @@ export function NoteDialogForm({
                             e.currentTarget.requestSubmit();
                         }
                     }}
-                    className={cn('grid', compact ? 'gap-5' : 'mx-auto w-full max-w-3xl gap-6')}
+                    className={cn(
+                        'grid',
+                        compact
+                            ? 'gap-5'
+                            : cn(
+                                'mx-auto w-full gap-6 transition-[max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+                                contentWidth === 'wide' ? 'max-w-5xl' : 'max-w-3xl',
+                            ),
+                    )}
                 >
                     {!compact ? (
                         <div>
