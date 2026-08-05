@@ -14,14 +14,23 @@ import { riskFactorIcon, useRiskText } from './dealRisk';
  * a localized sentence. Clear and unavailable states remain distinct and every valid assessment
  * exposes its freshness. There is no dismiss action; signals clear when their source state resolves.
  */
-export default function DealRiskPanel({ risk }: { risk?: DealRisk | null }) {
+export default function DealRiskPanel({
+    risk,
+    className,
+}: {
+    risk?: DealRisk | null;
+    className?: string;
+}) {
     const t = useTranslations('DealRisk');
     const locale = useLocale();
     const { factorText } = useRiskText();
 
     if (!risk) {
         return (
-            <section aria-label={t('panelTitle')} className="mt-8 rounded-2xl border border-border bg-card px-5 py-4">
+            <section
+                aria-label={t('panelTitle')}
+                className={cn('mt-8 rounded-2xl border border-border bg-card px-5 py-4', className)}
+            >
                 <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('panelTitle')}
                 </h2>
@@ -31,7 +40,7 @@ export default function DealRiskPanel({ risk }: { risk?: DealRisk | null }) {
     }
 
     return (
-        <section aria-label={t('panelTitle')} className="mt-8 grid gap-3">
+        <section aria-label={t('panelTitle')} className={cn('mt-8 grid gap-3', className)}>
             <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 {t('panelTitle')}
             </h2>

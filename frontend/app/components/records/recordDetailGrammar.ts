@@ -1,6 +1,7 @@
 /**
  * Canonical long-form record-detail section order from #843.
- * Domain adapters choose which slots to fill; they must not invent a competing hierarchy.
+ * Domain adapters choose which slots to fill; Contact/Company keep activity before relationship,
+ * while Deal places commercial AI intelligence between metrics and engagement activity.
  */
 export const RECORD_DETAIL_SECTION_ORDER = [
     'identity',

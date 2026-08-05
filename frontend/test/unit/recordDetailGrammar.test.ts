@@ -15,9 +15,6 @@ describe('record detail grammar', () => {
         expect(RECORD_DETAIL_SECTION_ORDER.indexOf('relationship')).toBeGreaterThan(
             RECORD_DETAIL_SECTION_ORDER.indexOf('metrics'),
         );
-        expect(RECORD_DETAIL_SECTION_ORDER.indexOf('relationship')).toBeGreaterThan(
-            RECORD_DETAIL_SECTION_ORDER.indexOf('activity'),
-        );
     });
 
     it('builds stable section ids for adapters', () => {
@@ -72,7 +69,7 @@ describe('record detail grammar', () => {
         expect(source.indexOf('<RelationshipEvidencePanel', evidence + 1)).toBe(-1);
     });
 
-    it('deal detail places commercial context before risk, brief, and history', () => {
+    it('deal detail places commercial KPIs, then AI intelligence, then engagement', () => {
         const source = readFileSync(
             path.resolve(process.cwd(), 'app/(app)/records/deals/[id]/page.tsx'),
             'utf8',
@@ -80,8 +77,8 @@ describe('record detail grammar', () => {
 
         const profile = source.indexOf('section="profile"');
         const metrics = source.indexOf('section="metrics"');
-        const activity = source.indexOf('section="activity"');
         const relationship = source.indexOf('section="relationship"');
+        const activity = source.indexOf('section="activity"');
         const related = source.indexOf('section="related"');
         const files = source.indexOf('section="files"');
         const history = source.indexOf('section="history"');
@@ -91,15 +88,16 @@ describe('record detail grammar', () => {
 
         expect(profile).toBeGreaterThan(-1);
         expect(metrics).toBeGreaterThan(profile);
-        expect(activity).toBeGreaterThan(metrics);
-        expect(relationship).toBeGreaterThan(activity);
-        expect(related).toBeGreaterThan(relationship);
+        expect(relationship).toBeGreaterThan(metrics);
+        expect(activity).toBeGreaterThan(relationship);
+        expect(related).toBeGreaterThan(activity);
         expect(files).toBeGreaterThan(related);
         expect(history).toBeGreaterThan(files);
-        expect(risk).toBeGreaterThan(metrics);
+        expect(risk).toBeGreaterThan(profile);
         expect(risk).toBeGreaterThan(identityClose);
+        expect(risk).toBeLessThan(metrics);
         expect(brief).toBeGreaterThan(metrics);
-        expect(brief).toBeGreaterThan(risk);
+        expect(brief).toBeLessThan(activity);
         expect(source.indexOf('<DealRiskPanel', risk + 1)).toBe(-1);
         expect(source.indexOf('<DealBriefPanel', brief + 1)).toBe(-1);
         expect(source).toContain('tier="wide"');

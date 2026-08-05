@@ -4,27 +4,29 @@ import { PageShell } from '@/app/components/PageShell';
 export default function DealDetailLoading() {
     return (
         <PageShell tier="wide">
-                <div className="flex flex-col gap-6 py-4 xl:flex-row xl:items-end xl:justify-between">
-                    <header className="flex min-w-0 flex-1 flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-                        <div className="flex flex-col gap-3 py-4">
-                            <div className="flex flex-row flex-wrap items-center gap-3">
-                                <Skeleton className="h-10 w-72" />
-                                <Skeleton className="h-5 w-16 rounded-full" />
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <Skeleton className="h-7 w-36 rounded-md" />
-                                <Skeleton className="h-4 w-40" />
-                                <Skeleton className="h-4 w-28" />
-                            </div>
+                <header className="flex flex-col gap-6 py-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="flex flex-col gap-3">
+                        <div className="flex flex-row flex-wrap items-center gap-3">
+                            <Skeleton className="h-10 w-72" />
+                            <Skeleton className="h-5 w-16 rounded-full" />
                         </div>
-                        <div className="flex flex-col gap-1 sm:items-end sm:pb-4">
-                            <Skeleton className="h-3 w-24" />
-                            <Skeleton className="h-8 w-40" />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Skeleton className="h-7 w-36 rounded-md" />
+                            <Skeleton className="h-4 w-40" />
+                            <Skeleton className="h-4 w-28" />
                         </div>
-                    </header>
-                    <div className="shrink-0 xl:pb-4">
-                        <Skeleton className="h-9 w-9 rounded-full" />
                     </div>
+                    <div className="flex flex-col items-end gap-1">
+                        <Skeleton className="h-3 w-24" />
+                        <Skeleton className="h-8 w-40" />
+                    </div>
+                </header>
+
+                <div className="flex justify-start gap-2">
+                    <Skeleton className="h-9 w-24 rounded-md" />
+                    <Skeleton className="h-9 w-28 rounded-md" />
+                    <Skeleton className="h-9 w-20 rounded-md" />
+                    <Skeleton className="h-9 w-9 rounded-md" />
                 </div>
 
                 <div className="min-h-0" aria-hidden>
@@ -32,17 +34,24 @@ export default function DealDetailLoading() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
-                    <aside>
-                        <div className="mb-3 flex h-8 items-center px-6">
-                            <Skeleton className="h-3 w-20" />
+                    <aside className="flex flex-col gap-6">
+                        <div>
+                            <div className="mb-3 flex h-8 items-center px-6">
+                                <Skeleton className="h-3 w-20" />
+                            </div>
+                            <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                {Array.from({ length: 8 }).map((_, i) => (
+                                    <div key={i} className="flex items-center justify-between px-6 py-3">
+                                        <Skeleton className="h-3 w-24" />
+                                        <Skeleton className="h-3 w-20" />
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                        <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                            {Array.from({ length: 8 }).map((_, i) => (
-                                <div key={i} className="flex items-center justify-between px-6 py-3">
-                                    <Skeleton className="h-3 w-24" />
-                                    <Skeleton className="h-3 w-20" />
-                                </div>
-                            ))}
+                        <div className="grid gap-2">
+                            <Skeleton className="h-3 w-28" />
+                            <Skeleton className="h-12 w-full rounded-lg" />
+                            <Skeleton className="h-12 w-full rounded-lg" />
                         </div>
                     </aside>
 
@@ -66,55 +75,47 @@ export default function DealDetailLoading() {
                                 ))}
                             </div>
                         </div>
-                    </section>
-                </div>
 
-                <section className="flex flex-col gap-8">
-                    <div>
-                        <div className="mb-3 flex h-8 items-center px-6">
-                            <Skeleton className="h-3 w-28" />
-                        </div>
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                            <div className="rounded-2xl border border-border bg-card p-3 md:col-span-2">
-                                <Skeleton className="h-3 w-32" />
-                                <Skeleton className="mt-3 h-28 w-full" />
+                        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                            <div className="rounded-2xl border border-border bg-card p-4">
+                                <Skeleton className="h-32 w-full rounded-xl" />
                             </div>
-                            <div className="rounded-2xl border border-border bg-card p-3">
-                                <Skeleton className="h-3 w-24" />
-                                <div className="mt-3 flex items-center gap-4">
-                                    <Skeleton className="size-28 shrink-0 rounded-full" />
-                                    <div className="flex-1 space-y-2">
-                                        <Skeleton className="h-3 w-full" />
-                                        <Skeleton className="h-3 w-4/5" />
-                                        <Skeleton className="h-3 w-3/5" />
+                            <div className="rounded-2xl border border-border bg-card p-4">
+                                <Skeleton className="h-32 w-full rounded-xl" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="mb-3 flex h-8 items-center px-6">
+                                <Skeleton className="h-3 w-28" />
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                <div className="rounded-2xl border border-border bg-card p-3 md:col-span-2">
+                                    <Skeleton className="h-3 w-32" />
+                                    <Skeleton className="mt-3 h-28 w-full" />
+                                </div>
+                                <div className="rounded-2xl border border-border bg-card p-3">
+                                    <Skeleton className="h-3 w-24" />
+                                    <div className="mt-3 flex items-center gap-4">
+                                        <Skeleton className="size-28 shrink-0 rounded-full" />
+                                        <div className="flex-1 space-y-2">
+                                            <Skeleton className="h-3 w-full" />
+                                            <Skeleton className="h-3 w-4/5" />
+                                            <Skeleton className="h-3 w-3/5" />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
-                        <div className="rounded-2xl border border-border bg-card p-4">
-                            <Skeleton className="h-16 w-full rounded-xl" />
-                        </div>
-                        <div className="rounded-2xl border border-border bg-card p-4">
-                            <Skeleton className="h-16 w-full rounded-xl" />
-                        </div>
-                    </div>
-                </section>
 
-                <section className="flex flex-col gap-6">
-                    <div className="rounded-2xl border border-border bg-card p-4">
-                        <Skeleton className="h-20 w-full rounded-xl" />
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                         <div className="rounded-2xl border border-border bg-card p-4">
-                            <Skeleton className="h-32 w-full rounded-xl" />
+                            <Skeleton className="h-16 w-full rounded-xl" />
                         </div>
                         <div className="rounded-2xl border border-border bg-card p-4">
-                            <Skeleton className="h-32 w-full rounded-xl" />
+                            <Skeleton className="h-16 w-full rounded-xl" />
                         </div>
-                    </div>
-                </section>
+                    </section>
+                </div>
 
                 <section>
                     <div className="mb-3 flex h-8 items-center px-6">
