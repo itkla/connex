@@ -153,6 +153,8 @@
     "titleCreate": "New note",
     "titleEdit": "Edit note",
     "close": "Close note editor",
+    "expand": "Expand note editor to full screen",
+    "collapse": "Collapse note editor",
     "description": "Capture a thought, follow-up, or context without losing your place.",
     "titleLabel": "Title",
     "titlePlaceholder": "Untitled note",

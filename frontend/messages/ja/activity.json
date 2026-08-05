@@ -153,6 +153,8 @@
     "titleCreate": "新しいメモ",
     "titleEdit": "メモを編集",
     "close": "メモエディターを閉じる",
+    "expand": "メモエディターを全画面に拡大",
+    "collapse": "メモエディターを縮小",
     "description": "一覧での位置を保ったまま、考えやフォローアップ、コンテキストを記録します。",
     "titleLabel": "タイトル",
     "titlePlaceholder": "無題のメモ",
