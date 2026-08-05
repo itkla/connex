@@ -71,7 +71,7 @@ public class BootstrapRunner implements ApplicationListener<ApplicationReadyEven
             request.setPassword(password);
             request.setTimezone(timezone);
             User owner = authService.provisionBootstrapOwner(request);
-            log.info("Bootstrap owner '{}' provisioned with an initial workspace.", owner.getUsername());
+            log.info("Bootstrap owner userId {} provisioned with an initial workspace.", owner.getId());
         } catch (Exception e) {
             log.error("Bootstrap owner provisioning failed; the instance still has no owner. "
                     + "Fix the connex.bootstrap.* configuration and restart.", e);
