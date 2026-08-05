@@ -27,7 +27,6 @@ import {
     ComboboxList,
 } from '@/components/ui/combobox';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SegmentedToggle } from '@/app/components/filters';
 import RichNoteEditor from './RichNoteEditor';
@@ -149,7 +148,7 @@ function ScopedNoteDialog({
             <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="down" showSwipeHandle>
                 <DrawerContent
                     showCloseButton={false}
-                    className="h-[calc(100dvh-0.5rem)] max-h-[calc(100dvh-0.5rem)] gap-0 p-0 pt-[env(safe-area-inset-top)] sm:h-[min(90dvh,50rem)] sm:max-w-4xl"
+                    className="h-[calc(100dvh-0.5rem)] max-h-[calc(100dvh-0.5rem)] gap-0 p-0 pt-[env(safe-area-inset-top)] sm:h-[min(90dvh,54rem)] sm:max-w-5xl"
                 >
                     <DrawerTitle className="sr-only">{note ? t('titleEdit') : t('titleCreate')}</DrawerTitle>
                     <DrawerDescription className="sr-only">{t('description')}</DrawerDescription>
@@ -235,60 +234,6 @@ type FormProps = {
     onClose: () => void;
 };
 
-function NoteMetadataFields({
-    title,
-    titleError,
-    visibility,
-    onTitleChange,
-    onVisibilityChange,
-}: {
-    title: string;
-    titleError?: string;
-    visibility: NoteVisibility;
-    onTitleChange: (value: string) => void;
-    onVisibilityChange: (value: NoteVisibility) => void;
-}) {
-    const t = useTranslations('ActivityNotesDialog');
-    return (
-        <>
-            <div className="grid gap-1.5">
-                <Label htmlFor="note-title">{t('titleLabel')}</Label>
-                <Input
-                    id="note-title"
-                    value={title}
-                    onChange={(event) => onTitleChange(event.target.value)}
-                    maxLength={255}
-                    placeholder={t('titlePlaceholder')}
-                    aria-invalid={titleError ? true : undefined}
-                    aria-describedby={titleError ? 'note-title-error' : undefined}
-                />
-                {titleError ? <p id="note-title-error" className="text-sm text-destructive">{titleError}</p> : null}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <Label>{t('visibilityLabel')}</Label>
-                <SegmentedToggle<NoteVisibility>
-                    value={visibility}
-                    onChange={onVisibilityChange}
-                    ariaLabel={t('visibilityAria')}
-                    options={[
-                        {
-                            value: 'private',
-                            label: t('visibilityPrivate'),
-                            icon: <LockClosedIcon className="size-3.5" />,
-                        },
-                        {
-                            value: 'workspace',
-                            label: t('visibilityWorkspace'),
-                            icon: <UsersIcon className="size-3.5" />,
-                        },
-                    ]}
-                />
-            </div>
-        </>
-    );
-}
-
 function NoteLinkFields({
     persons,
     deals,
@@ -300,6 +245,7 @@ function NoteLinkFields({
     onDealQueryChange,
     personOptionsLoading,
     dealOptionsLoading,
+    documentStyle = false,
 }: {
     persons: Contact[];
     deals: Deal[];
@@ -311,13 +257,14 @@ function NoteLinkFields({
     onDealQueryChange?: (query: string) => void;
     personOptionsLoading: boolean;
     dealOptionsLoading: boolean;
+    documentStyle?: boolean;
 }) {
     const t = useTranslations('ActivityNotesDialog');
 
     return (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="grid gap-1.5">
-                <Label htmlFor="note-person">{t('personLabel')}</Label>
+        <div className={cn(documentStyle ? 'flex min-w-0 flex-1 flex-wrap items-center gap-2' : 'grid grid-cols-1 gap-3 md:grid-cols-2')}>
+            <div className={cn(documentStyle ? 'min-w-48 flex-1' : 'grid gap-1.5')}>
+                <Label htmlFor="note-person" className={documentStyle ? 'sr-only' : undefined}>{t('personLabel')}</Label>
                 <Combobox
                     items={persons}
                     filter={onPersonQueryChange ? null : undefined}
@@ -329,7 +276,10 @@ function NoteLinkFields({
                     <ComboboxInput
                         id="note-person"
                         placeholder={t('personPlaceholder')}
-                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                        className={cn(
+                            'border-0 bg-muted shadow-none dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand',
+                            documentStyle ? 'h-11 rounded-md ring-0 sm:h-8' : 'rounded-lg ring-1 ring-border',
+                        )}
                     >
                         <InputGroupAddon align="inline-start">
                             <UserIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
@@ -346,8 +296,8 @@ function NoteLinkFields({
                 </Combobox>
             </div>
 
-            <div className="grid gap-1.5">
-                <Label htmlFor="note-deal">{t('dealLabel')}</Label>
+            <div className={cn(documentStyle ? 'min-w-48 flex-1' : 'grid gap-1.5')}>
+                <Label htmlFor="note-deal" className={documentStyle ? 'sr-only' : undefined}>{t('dealLabel')}</Label>
                 <Combobox
                     items={deals}
                     filter={onDealQueryChange ? null : undefined}
@@ -359,7 +309,10 @@ function NoteLinkFields({
                     <ComboboxInput
                         id="note-deal"
                         placeholder={t('dealPlaceholder')}
-                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                        className={cn(
+                            'border-0 bg-muted shadow-none dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand',
+                            documentStyle ? 'h-11 rounded-md ring-0 sm:h-8' : 'rounded-lg ring-1 ring-border',
+                        )}
                     >
                         <InputGroupAddon align="inline-start">
                             <BriefcaseIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
@@ -553,11 +506,13 @@ export function NoteDialogForm({
         <>
             <DialogStatusCover status={status} />
 
-            <div className="px-6 pb-6">
-                <div className="-mt-12 flex flex-col gap-2">
-                    <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('description')}</p>
-                </div>
+            <div className={cn('px-6', compact ? 'pb-6' : 'pt-10 sm:px-10')}>
+                {compact ? (
+                    <div className="-mt-12 flex flex-col gap-2">
+                        <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</h2>
+                        <p className="text-sm text-muted-foreground">{t('description')}</p>
+                    </div>
+                ) : null}
 
                 <form
                     onSubmit={handleSubmit}
@@ -567,33 +522,77 @@ export function NoteDialogForm({
                             e.currentTarget.requestSubmit();
                         }
                     }}
-                    className="grid gap-5"
+                    className={cn('grid', compact ? 'gap-5' : 'mx-auto w-full max-w-3xl gap-6')}
                 >
                     {!compact ? (
-                        <NoteMetadataFields
-                            title={title}
-                            titleError={fieldErrors.title}
-                            visibility={visibility}
-                            onTitleChange={(value) => {
-                                setTitle(value);
-                                clearError('title');
-                            }}
-                            onVisibilityChange={setVisibility}
-                        />
+                        <div>
+                            <input
+                                id="note-title"
+                                value={title}
+                                onChange={(event) => {
+                                    setTitle(event.target.value);
+                                    clearError('title');
+                                }}
+                                maxLength={255}
+                                placeholder={t('titlePlaceholder')}
+                                aria-label={t('titleLabel')}
+                                aria-invalid={fieldErrors.title ? true : undefined}
+                                aria-describedby={fieldErrors.title ? 'note-title-error' : undefined}
+                                className="w-full rounded-sm border-0 bg-transparent p-0 text-4xl font-extrabold tracking-tight text-foreground outline-none placeholder:text-muted-foreground/50 focus-visible:ring-2 focus-visible:ring-brand/60"
+                            />
+                            {fieldErrors.title ? <p id="note-title-error" className="mt-2 text-sm text-destructive">{fieldErrors.title}</p> : null}
+                        </div>
+                    ) : null}
+
+                    {!compact ? (
+                        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                            <NoteLinkFields
+                                persons={persons}
+                                deals={deals}
+                                selectedPerson={selectedPerson}
+                                selectedDeal={selectedDeal}
+                                onPersonSelect={setSelectedPersonId}
+                                onDealSelect={setSelectedDealId}
+                                onPersonQueryChange={onPersonQueryChange}
+                                onDealQueryChange={onDealQueryChange}
+                                personOptionsLoading={personOptionsLoading}
+                                dealOptionsLoading={dealOptionsLoading}
+                                documentStyle
+                            />
+                            <SegmentedToggle<NoteVisibility>
+                                value={visibility}
+                                onChange={setVisibility}
+                                ariaLabel={t('visibilityAria')}
+                                options={[
+                                    {
+                                        value: 'private',
+                                        label: t('visibilityPrivate'),
+                                        icon: <LockClosedIcon className="size-3.5" />,
+                                    },
+                                    {
+                                        value: 'workspace',
+                                        label: t('visibilityWorkspace'),
+                                        icon: <UsersIcon className="size-3.5" />,
+                                    },
+                                ]}
+                            />
+                        </div>
                     ) : null}
 
                     <div className="grid gap-1.5">
-                        <Label htmlFor="note-content">{t('contentLabel')}</Label>
+                        <Label htmlFor="note-content" className={compact ? undefined : 'sr-only'}>{t('contentLabel')}</Label>
                         <div
                             id="note-content"
                             tabIndex={-1}
                             aria-invalid={fieldErrors.content ? true : undefined}
                             aria-describedby={fieldErrors.content ? 'note-content-error' : undefined}
                             className={cn(
-                                'overflow-hidden rounded-xl border bg-background transition-[box-shadow,border-color] focus-within:ring-2 focus-within:ring-brand/60',
+                                compact
+                                    ? 'overflow-hidden rounded-xl border bg-background transition-[box-shadow,border-color] focus-within:ring-2 focus-within:ring-brand/60'
+                                    : 'min-h-80 rounded-xl',
                                 fieldErrors.content
-                                    ? 'border-destructive focus-within:ring-destructive/50'
-                                    : 'border-border focus-within:border-brand',
+                                    ? 'border-destructive ring-2 ring-destructive/50 focus-within:ring-destructive/50'
+                                    : compact && 'border-border focus-within:border-brand',
                             )}
                         >
                             <RichNoteEditor
@@ -610,23 +609,25 @@ export function NoteDialogForm({
                         {fieldErrors.content && <p id="note-content-error" className="text-sm text-destructive">{fieldErrors.content}</p>}
                     </div>
 
-                    <NoteLinkFields
-                        persons={persons}
-                        deals={deals}
-                        selectedPerson={selectedPerson}
-                        selectedDeal={selectedDeal}
-                        onPersonSelect={setSelectedPersonId}
-                        onDealSelect={setSelectedDealId}
-                        onPersonQueryChange={onPersonQueryChange}
-                        onDealQueryChange={onDealQueryChange}
-                        personOptionsLoading={personOptionsLoading}
-                        dealOptionsLoading={dealOptionsLoading}
-                    />
+                    {compact ? (
+                        <NoteLinkFields
+                            persons={persons}
+                            deals={deals}
+                            selectedPerson={selectedPerson}
+                            selectedDeal={selectedDeal}
+                            onPersonSelect={setSelectedPersonId}
+                            onDealSelect={setSelectedDealId}
+                            onPersonQueryChange={onPersonQueryChange}
+                            onDealQueryChange={onDealQueryChange}
+                            personOptionsLoading={personOptionsLoading}
+                            dealOptionsLoading={dealOptionsLoading}
+                        />
+                    ) : null}
 
                     <div
                         className={cn(
                             'flex flex-col-reverse gap-2 sm:flex-row sm:justify-end',
-                            !compact && 'sticky bottom-0 -mx-6 border-t border-border bg-popover px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]',
+                            !compact && 'sticky bottom-0 -mx-6 border-t border-border bg-popover px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:-mx-10 sm:px-10',
                         )}
                     >
                         <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
