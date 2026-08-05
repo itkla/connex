@@ -41,7 +41,7 @@ type Props = {
 
 function toolbarButtonClass(active = false) {
     return cn(
-        "flex size-8 items-center justify-center rounded-md transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.97]",
+        "flex size-11 items-center justify-center rounded-md transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.97] sm:size-8",
         active
             ? "bg-accent text-foreground"
             : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -66,7 +66,7 @@ export function FileReferencePopover({ editor, labels, open, onOpenChange }: Pro
             setQuery("");
             setItems([]);
             setActive(0);
-            setStatus("idle");
+            setStatus("loading");
             setAttempt(0);
         }
         onOpenChange(nextOpen);
@@ -75,7 +75,6 @@ export function FileReferencePopover({ editor, labels, open, onOpenChange }: Pro
     useEffect(() => {
         if (!open) return;
         const needle = query.trim();
-        if (!needle) return;
 
         let cancelled = false;
         const handle = window.setTimeout(() => {
@@ -91,7 +90,7 @@ export function FileReferencePopover({ editor, labels, open, onOpenChange }: Pro
                     setItems([]);
                     setStatus("error");
                 });
-        }, 180);
+        }, needle ? 180 : 0);
 
         return () => {
             cancelled = true;
@@ -101,12 +100,6 @@ export function FileReferencePopover({ editor, labels, open, onOpenChange }: Pro
 
     const updateQuery = (value: string) => {
         setQuery(value);
-        if (!value.trim()) {
-            setItems([]);
-            setActive(0);
-            setStatus("idle");
-            return;
-        }
         setStatus("loading");
     };
 
@@ -121,16 +114,16 @@ export function FileReferencePopover({ editor, labels, open, onOpenChange }: Pro
         if (item) selectItem(item);
     };
 
+    const activeOptionId = items[active] ? `${listId}-opt-${items[active].type}-${items[active].id}` : undefined;
+
     const statusLabel =
         status === "loading"
             ? labels.fileSearching
             : status === "error"
               ? labels.fileSearchError
-              : query.trim().length === 0
-                ? labels.fileSearchPlaceholder
-                : items.length === 0 && status === "ready"
-                  ? labels.fileNoResults
-                  : labels.filePickerAria;
+              : items.length === 0 && status === "ready"
+                ? labels.fileNoResults
+                : labels.filePickerAria;
 
     return (
         <Popover open={open} onOpenChange={handleOpenChange}>
@@ -164,15 +157,16 @@ export function FileReferencePopover({ editor, labels, open, onOpenChange }: Pro
                             aria-expanded={items.length > 0}
                             aria-controls={listId}
                             aria-autocomplete="list"
+                            aria-activedescendant={activeOptionId}
                             onKeyDown={(event) => {
                                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                                 if (!items.length) return;
-                                if (event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)) {
+                                if (event.key === "ArrowDown") {
                                     event.preventDefault();
                                     setActive((index) => (index + 1) % items.length);
                                     return;
                                 }
-                                if (event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)) {
+                                if (event.key === "ArrowUp") {
                                     event.preventDefault();
                                     setActive((index) => (index - 1 + items.length) % items.length);
                                 }
@@ -203,6 +197,7 @@ export function FileReferencePopover({ editor, labels, open, onOpenChange }: Pro
                         >
                             {items.map((item, index) => (
                                 <button
+                                    id={`${listId}-opt-${item.type}-${item.id}`}
                                     key={`${item.type}:${item.id}`}
                                     type="button"
                                     role="option"

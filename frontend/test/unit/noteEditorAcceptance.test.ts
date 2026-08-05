@@ -58,7 +58,11 @@ describe("note paste Markdown matrix", () => {
     });
 
     it("parses pasted-style lists and tables while rejecting raw HTML", () => {
-        const markdown = new MarkdownIt({ html: false, breaks: true, linkify: false });
+        const markdown = new MarkdownIt({
+            html: NOTE_EDITOR_MARKDOWN_OPTIONS.html,
+            breaks: NOTE_EDITOR_MARKDOWN_OPTIONS.breaks,
+            linkify: NOTE_EDITOR_MARKDOWN_OPTIONS.linkify,
+        });
         const html = markdown.render(
             [
                 "- Alpha",
