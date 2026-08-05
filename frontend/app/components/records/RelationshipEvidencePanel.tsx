@@ -19,6 +19,7 @@ import type {
     RelationshipEvidenceSourceType,
 } from '@/app/lib/types';
 import { formatDateTime } from '@/app/lib/utils';
+import { cn } from '@/lib/utils';
 
 const SOURCE_ICONS = {
     activity: BoltIcon,
@@ -62,8 +63,10 @@ function contributorLabel(
  */
 export default function RelationshipEvidencePanel({
     evidence,
+    className,
 }: {
     evidence?: RelationshipEvidence | null;
+    className?: string;
 }) {
     const t = useTranslations('RelationshipEvidence');
     const locale = useLocale();
@@ -74,7 +77,7 @@ export default function RelationshipEvidencePanel({
 
     if (!evidence) {
         return (
-            <section aria-label={t('title')} className="mt-6 rounded-2xl border border-border bg-card p-5">
+            <section aria-label={t('title')} className={cn('mt-6 rounded-2xl border border-border bg-card p-5', className)}>
                 <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('title')}
                 </h2>
@@ -87,7 +90,7 @@ export default function RelationshipEvidencePanel({
     const hasHistory = totals.contributorCount > 0 && Boolean(temperature.lastTouchAt);
 
     return (
-        <section aria-label={t('title')} className="mt-6 overflow-hidden rounded-2xl border border-border bg-card">
+        <section aria-label={t('title')} className={cn('mt-6 overflow-hidden rounded-2xl border border-border bg-card', className)}>
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
                 <div>
                     <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">

@@ -62,6 +62,8 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 
 **Page header.** The page title is a `PageHeader` (`app/components/PageHeader.tsx`), never a bare `<h1>`. Canon: `text-4xl font-extrabold tracking-tight`; the `compact` variant only for a genuinely secondary page. Optional `description` sits under the title; `actions` is the right-aligned cluster (the caller composes primary + secondary). Domain identity headers (record detail with a dynamic name/avatar, the Me and report-document heroes) are §17 domain expression and keep their bespoke header — they still adopt `PageShell`.
 
+**Record detail (#843).** Contact, Company, and Deal detail pages share a long-form grammar — not one rigid layout. Use `PageShell` `tier="reading"`, `RecordStickyContext`, and domain action menus; keep Peek triage-only. Section order is defined in `app/components/records/recordDetailGrammar.ts` and marked with `RecordDetailSection`: identity → actions → notifications → profile + key metrics → activity/work → relationship intelligence/evidence → related records → notes/files → history. Domain adapters fill slots differently; do not put Relationship Evidence as the first dominant block after the header, and do not convert these pages into a multi-panel console.
+
 **States.** Every list/collection ships all four:
 - Loading → `loading.tsx` skeletons (shape-matched), never a centered spinner over content.
 - Empty → `EmptyState` (`app/components/EmptyState.tsx`); `tone="brand"` teaches/encourages on a true first-run empty, `tone="muted"` for a neutral/no-results empty. Not "nothing here". Record browsers wire it through `RecordsRenderView`'s `emptyState` prop.
