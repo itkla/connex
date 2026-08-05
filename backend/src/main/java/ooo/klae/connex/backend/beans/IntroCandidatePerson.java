@@ -4,9 +4,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Projection of a workspace-owned contact the team has engaged (has any activity, note, or task),
- * carrying just the attributes the reverse-introduction ranking and display need. Populated by a
- * MyBatis projection in {@code IntroductionMapper}.
+ * Projection of a workspace-owned contact with logged engagement or explicit graph evidence,
+ * carrying just the attributes the introduction ranking and display need. Populated by a MyBatis
+ * projection in {@code IntroductionMapper}.
  */
 @Data
 @NoArgsConstructor

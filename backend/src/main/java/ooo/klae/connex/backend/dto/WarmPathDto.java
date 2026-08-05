@@ -25,4 +25,5 @@ public class WarmPathDto {
     private String reachType;
     private int score;
     private List<WarmPathBridgeDto> bridges;
+    private String asOf;
 }

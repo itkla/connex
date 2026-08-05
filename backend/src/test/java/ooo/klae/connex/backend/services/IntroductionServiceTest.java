@@ -66,6 +66,20 @@ class IntroductionServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void explicitGraphEvidenceQualifiesCandidatesWithoutLoggedActivity() {
+        Person p1 = newPerson(newCompany());
+        Person p2 = newPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+
+        IntroSuggestionDto pair = find(introductionService.getSuggestions(50), p1.getId(), p2.getId());
+
+        assertEquals(List.of(hub.getId()), pair.getSupportingPersonIds());
+        assertEquals(2, pair.getSupportingEdgeIds().size());
+    }
+
+    @Test
     void overviewServesBothFeedsFromOneWarmthPass() {
         Person p1 = engagedPerson(newCompany());
         Person p2 = engagedPerson(newCompany());
@@ -83,6 +97,53 @@ class IntroductionServiceTest extends AbstractServiceTest {
             "the overview must carry the give-side suggestions");
         assertTrue(overview.getPaths().stream().anyMatch(row -> row.getTargetId() == target.getId()),
             "the overview must carry the receive-side warm paths");
+        assertNotNull(overview.getAsOf());
+        assertTrue(overview.getSuggestions().stream()
+            .allMatch(suggestion -> overview.getAsOf().equals(suggestion.getAsOf())));
+        assertTrue(overview.getPaths().stream()
+            .allMatch(path -> overview.getAsOf().equals(path.getAsOf())));
+    }
+
+    @Test
+    void overviewExplainsMissingRelationshipEvidence() {
+        engagedPerson(newCompany());
+        engagedPerson(newCompany());
+
+        IntroOverviewDto noEvidence = introductionService.getOverview(50, 50);
+
+        assertEquals(IntroductionService.EMPTY_MISSING_RELATIONSHIP_EVIDENCE,
+            noEvidence.getSuggestionsEmptyReason());
+    }
+
+    @Test
+    void overviewExplainsPolicyExclusion() {
+        Person excludedA = engagedPerson(newCompany());
+        Person excludedB = engagedPerson(newCompany());
+        personMapper.updateEvaluationExclusions(workspace.getId(), excludedA.getId(), null, true);
+        personMapper.updateEvaluationExclusions(workspace.getId(), excludedB.getId(), null, true);
+
+        IntroOverviewDto restricted = introductionService.getOverview(50, 50);
+
+        assertEquals(IntroductionService.EMPTY_POLICY_EXCLUSION,
+            restricted.getSuggestionsEmptyReason());
+        assertEquals(IntroductionService.EMPTY_POLICY_EXCLUSION,
+            restricted.getPathsEmptyReason());
+    }
+
+    @Test
+    void overviewExplainsPolicyExclusionWhenConnectorIsRestricted() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+        personMapper.updateEvaluationExclusions(workspace.getId(), hub.getId(), null, true);
+
+        IntroOverviewDto restricted = introductionService.getOverview(50, 50);
+
+        assertTrue(restricted.getSuggestions().isEmpty());
+        assertEquals(IntroductionService.EMPTY_POLICY_EXCLUSION,
+            restricted.getSuggestionsEmptyReason());
     }
 
     @Test
@@ -146,6 +207,20 @@ class IntroductionServiceTest extends AbstractServiceTest {
         connect(hub.getId(), p2.getId());
         personMapper.updateProcessingRestrictions(workspace.getId(), hub.getId(), true, false);
 
+        assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
+    }
+
+    @Test
+    void introExcludedMutualConnectorDoesNotCreateSuggestion() {
+        Person p1 = newPerson(newCompany());
+        Person p2 = newPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+        personMapper.updateEvaluationExclusions(workspace.getId(), hub.getId(), null, true);
+
+        assertFalse(introductionMapper.findCandidatePersons(workspace.getId()).stream()
+            .anyMatch(candidate -> candidate.getId() == p1.getId() || candidate.getId() == p2.getId()));
         assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
     }
 

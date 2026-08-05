@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -13,6 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +30,7 @@ import ooo.klae.connex.backend.beans.Introduction;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.WarmPathDismissal;
 import ooo.klae.connex.backend.dto.IntroOverviewDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
@@ -35,6 +38,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.ReferenceDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.dto.WarmPathDto;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -107,6 +111,10 @@ public class IntroductionService {
 
     static final String REASON_MUTUAL = "mutual_connections";
     static final String REASON_SHARED_COMPANY = "shared_company";
+    static final String EMPTY_INSUFFICIENT_CANDIDATES = "insufficient_candidates";
+    static final String EMPTY_MISSING_RELATIONSHIP_EVIDENCE = "missing_relationship_evidence";
+    static final String EMPTY_POLICY_EXCLUSION = "policy_exclusion";
+    static final String EMPTY_INSUFFICIENT_PATH_STRENGTH = "insufficient_path_strength";
 
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -124,6 +132,7 @@ public class IntroductionService {
      */
     public IntroOverviewDto getOverview(int suggestionLimit, int pathLimit) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Instant asOf = clock.instant();
         int resolvedSuggestions = suggestionLimit <= 0
             ? DEFAULT_SUGGESTION_LIMIT
             : Math.min(suggestionLimit, MAX_SUGGESTION_LIMIT);
@@ -131,9 +140,49 @@ public class IntroductionService {
         for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
             warmth.put(temperature.getId(), temperature);
         }
+        Set<Integer> excludedPersonIds =
+            new HashSet<>(introductionMapper.findIntroExcludedPersonIds(workspaceId));
+        List<PersonEdge> allEdges = edgeReader.getAllEdges(workspaceId);
+        List<PersonEdge> edges = eligibleEdges(allEdges, excludedPersonIds);
+        List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
+        List<IntroCandidatePerson> suggestionCandidates =
+            introductionMapper.findCandidatePersons(workspaceId);
+        Set<Long> existingPairs =
+            existingPairKeys(introductionMapper.findExistingPairs(workspaceId));
+        List<IntroSuggestionDto> suggestions = rankSuggestions(
+            suggestionCandidates, edges, employment, existingPairs, warmth, resolvedSuggestions);
+        List<IntroCandidatePerson> pathCandidates =
+            introductionMapper.findWarmPathCandidates(workspaceId);
+        List<WarmPathDismissal> pathDismissals =
+            introductionMapper.findWarmPathDismissals(workspaceId);
+        List<WarmPathDto> paths = WarmPathService.rankPaths(
+            pathCandidates,
+            edges,
+            employment,
+            pathDismissals,
+            warmth,
+            WarmPathService.resolveLimit(pathLimit));
+        String timestamp = asOf.toString();
+        suggestions.forEach(suggestion -> suggestion.setAsOf(timestamp));
+        paths.forEach(path -> path.setAsOf(timestamp));
         return new IntroOverviewDto(
-            computeSuggestions(workspaceId, resolvedSuggestions, warmth),
-            warmPathService.computePaths(workspaceId, WarmPathService.resolveLimit(pathLimit), warmth));
+            suggestions,
+            paths,
+            timestamp,
+            suggestions.isEmpty()
+                ? diagnoseSuggestionsEmpty(
+                    workspaceId,
+                    suggestionCandidates,
+                    edges,
+                    allEdges,
+                    employment,
+                    existingPairs,
+                    warmth)
+                : null,
+            paths.isEmpty()
+                ? warmPathService.diagnoseEmpty(
+                    workspaceId, pathCandidates, edges, employment, pathDismissals, warmth)
+                : null);
     }
 
     /**
@@ -159,12 +208,11 @@ public class IntroductionService {
         if (candidates.size() < 2) {
             return List.of();
         }
-        List<PersonEdge> edges = edgeReader.getAllEdges(workspaceId);
+        Set<Integer> excludedPersonIds =
+            new HashSet<>(introductionMapper.findIntroExcludedPersonIds(workspaceId));
+        List<PersonEdge> edges = eligibleEdges(edgeReader.getAllEdges(workspaceId), excludedPersonIds);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
-        Set<Long> existing = new HashSet<>();
-        for (Introduction pair : introductionMapper.findExistingPairs(workspaceId)) {
-            existing.add(pairKey(pair.getPersonAId(), pair.getPersonBId()));
-        }
+        Set<Long> existing = existingPairKeys(introductionMapper.findExistingPairs(workspaceId));
         Map<Integer, RelationshipTemperatureDto> warmth = temperatures;
         if (warmth == null) {
             warmth = new HashMap<>();
@@ -172,7 +220,11 @@ public class IntroductionService {
                 warmth.put(temperature.getId(), temperature);
             }
         }
-        return rankSuggestions(candidates, edges, employment, existing, warmth, limit);
+        List<IntroSuggestionDto> suggestions =
+            rankSuggestions(candidates, edges, employment, existing, warmth, limit);
+        String asOf = clock.instant().toString();
+        suggestions.forEach(suggestion -> suggestion.setAsOf(asOf));
+        return suggestions;
     }
 
     /**
@@ -206,18 +258,18 @@ public class IntroductionService {
         }
         Set<Integer> candidateIds = byId.keySet();
 
-        Map<Integer, Set<Integer>> neighbors = new HashMap<>();
+        Map<Integer, Map<Integer, Integer>> neighborEdges = new HashMap<>();
         Set<Long> connected = new HashSet<>();
         for (PersonEdge edge : edges) {
             int source = edge.getSourcePersonId();
             int target = edge.getTargetPersonId();
-            neighbors.computeIfAbsent(source, key -> new HashSet<>()).add(target);
-            neighbors.computeIfAbsent(target, key -> new HashSet<>()).add(source);
+            neighborEdges.computeIfAbsent(source, key -> new HashMap<>()).put(target, edge.getId());
+            neighborEdges.computeIfAbsent(target, key -> new HashMap<>()).put(source, edge.getId());
             connected.add(pairKey(source, target));
         }
 
-        Map<Long, Integer> mutual = countMutualConnections(neighbors, candidateIds);
-        Map<Long, String> sharedCompany = sharedCompanyPairs(candidates, employment, candidateIds);
+        Map<Long, MutualEvidence> mutual = countMutualConnections(neighborEdges, candidateIds);
+        Map<Long, CompanyEvidence> sharedCompany = sharedCompanyPairs(candidates, employment, candidateIds);
 
         Set<Long> pairKeys = new HashSet<>(mutual.keySet());
         pairKeys.addAll(sharedCompany.keySet());
@@ -234,15 +286,17 @@ public class IntroductionService {
             if (partyA == null || partyB == null) {
                 continue;
             }
-            int mutualCount = mutual.getOrDefault(key, 0);
+            MutualEvidence mutualEvidence = mutual.get(key);
+            int mutualCount = mutualEvidence == null ? 0 : mutualEvidence.connectorIds().size();
             boolean sameCurrent = sameCurrentEmployer(partyA, partyB);
-            String shared = sameCurrent ? null : sharedCompany.get(key);
+            CompanyEvidence shared = sameCurrent ? null : sharedCompany.get(key);
             boolean hasShared = shared != null;
             boolean surfaced = sameCurrent ? mutualCount > 0 : (mutualCount > 0 || hasShared);
             if (!surfaced) {
                 continue;
             }
-            suggestions.add(suggestion(partyA, partyB, mutualCount, shared, hasShared, sameCurrent, temperatures));
+            suggestions.add(suggestion(
+                partyA, partyB, mutualEvidence, shared, hasShared, sameCurrent, temperatures));
         }
 
         suggestions.sort(Comparator
@@ -256,12 +310,12 @@ public class IntroductionService {
             : suggestions;
     }
 
-    private static Map<Long, Integer> countMutualConnections(
-            Map<Integer, Set<Integer>> neighbors, Set<Integer> candidateIds) {
-        Map<Long, Integer> mutual = new HashMap<>();
-        for (Set<Integer> connections : neighbors.values()) {
+    private static Map<Long, MutualEvidence> countMutualConnections(
+            Map<Integer, Map<Integer, Integer>> neighbors, Set<Integer> candidateIds) {
+        Map<Long, MutualEvidence> mutual = new HashMap<>();
+        for (Map.Entry<Integer, Map<Integer, Integer>> entry : neighbors.entrySet()) {
             List<Integer> shared = new ArrayList<>();
-            for (Integer neighbor : connections) {
+            for (Integer neighbor : entry.getValue().keySet()) {
                 if (candidateIds.contains(neighbor)) {
                     shared.add(neighbor);
                 }
@@ -271,14 +325,25 @@ public class IntroductionService {
             }
             for (int i = 0; i < shared.size(); i++) {
                 for (int j = i + 1; j < shared.size(); j++) {
-                    mutual.merge(pairKey(shared.get(i), shared.get(j)), 1, Integer::sum);
+                    MutualEvidence evidence = mutual.computeIfAbsent(
+                        pairKey(shared.get(i), shared.get(j)),
+                        key -> new MutualEvidence(new HashSet<>(), new HashSet<>()));
+                    evidence.connectorIds().add(entry.getKey());
+                    int firstEdgeId = entry.getValue().get(shared.get(i));
+                    int secondEdgeId = entry.getValue().get(shared.get(j));
+                    if (firstEdgeId > 0) {
+                        evidence.edgeIds().add(firstEdgeId);
+                    }
+                    if (secondEdgeId > 0) {
+                        evidence.edgeIds().add(secondEdgeId);
+                    }
                 }
             }
         }
         return mutual;
     }
 
-    private static Map<Long, String> sharedCompanyPairs(
+    private static Map<Long, CompanyEvidence> sharedCompanyPairs(
             List<IntroCandidatePerson> candidates,
             List<IntroEmploymentRow> employment,
             Set<Integer> candidateIds) {
@@ -307,7 +372,7 @@ public class IntroductionService {
             }
         }
 
-        Map<Long, String> pairs = new HashMap<>();
+        Map<Long, CompanyEvidence> pairs = new HashMap<>();
         for (Map.Entry<String, Set<Integer>> entry : members.entrySet()) {
             Set<Integer> group = entry.getValue();
             if (group.size() < 2 || group.size() > MAX_COMPANY_FANOUT) {
@@ -316,9 +381,10 @@ public class IntroductionService {
             List<Integer> ordered = new ArrayList<>(group);
             ordered.sort(Comparator.naturalOrder());
             String name = displayName.getOrDefault(entry.getKey(), "");
+            CompanyEvidence evidence = new CompanyEvidence(name);
             for (int i = 0; i < ordered.size(); i++) {
                 for (int j = i + 1; j < ordered.size(); j++) {
-                    pairs.putIfAbsent(pairKey(ordered.get(i), ordered.get(j)), name);
+                    pairs.putIfAbsent(pairKey(ordered.get(i), ordered.get(j)), evidence);
                 }
             }
         }
@@ -338,11 +404,12 @@ public class IntroductionService {
     private static IntroSuggestionDto suggestion(
             IntroCandidatePerson partyA,
             IntroCandidatePerson partyB,
-            int mutualCount,
-            String shared,
+            MutualEvidence mutualEvidence,
+            CompanyEvidence shared,
             boolean hasShared,
             boolean sameCurrentEmployer,
             Map<Integer, RelationshipTemperatureDto> temperatures) {
+        int mutualCount = mutualEvidence == null ? 0 : mutualEvidence.connectorIds().size();
         int scoreA = score(temperatures, partyA.getId());
         int scoreB = score(temperatures, partyB.getId());
         double mutualComponent = Math.min(mutualCount, MUTUAL_CAP) / (double) MUTUAL_CAP;
@@ -378,7 +445,13 @@ public class IntroductionService {
         dto.setScore((int) Math.round(100.0 * raw));
         dto.setReasons(reasons);
         dto.setMutualConnections(mutualCount);
-        dto.setSharedCompany(hasShared && notBlank(shared) ? shared : null);
+        dto.setSharedCompany(hasShared && notBlank(shared.name()) ? shared.name() : null);
+        dto.setSupportingPersonIds(mutualEvidence == null
+            ? List.of()
+            : mutualEvidence.connectorIds().stream().sorted().toList());
+        dto.setSupportingEdgeIds(mutualEvidence == null
+            ? List.of()
+            : mutualEvidence.edgeIds().stream().sorted().toList());
         return dto;
     }
 
@@ -557,6 +630,95 @@ public class IntroductionService {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).format(MYSQL_DATETIME);
     }
 
+    private String diagnoseSuggestionsEmpty(
+            int workspaceId,
+            List<IntroCandidatePerson> candidates,
+            List<PersonEdge> edges,
+            List<PersonEdge> allEdges,
+            List<IntroEmploymentRow> employment,
+            Set<Long> existingPairs,
+            Map<Integer, RelationshipTemperatureDto> temperatures) {
+        if (candidates.size() < 2) {
+            return candidates.size() + introductionMapper.countExcludedCandidatePersons(workspaceId) >= 2
+                ? EMPTY_POLICY_EXCLUSION
+                : EMPTY_INSUFFICIENT_CANDIDATES;
+        }
+        List<IntroSuggestionDto> beforePairPolicy =
+            rankSuggestions(candidates, edges, employment, Set.of(), temperatures, Integer.MAX_VALUE);
+        if (!beforePairPolicy.isEmpty() && beforePairPolicy.stream().allMatch(suggestion ->
+                existingPairs.contains(pairKey(suggestion.getPersonAId(), suggestion.getPersonBId())))) {
+            return EMPTY_POLICY_EXCLUSION;
+        }
+        if (beforePairPolicy.isEmpty() && allEdges.size() != edges.size()) {
+            List<IntroSuggestionDto> includingRestrictedConnectors = rankSuggestions(
+                candidates, allEdges, employment, Set.of(), temperatures, Integer.MAX_VALUE);
+            if (!includingRestrictedConnectors.isEmpty()) {
+                return EMPTY_POLICY_EXCLUSION;
+            }
+        }
+        if (!hasPotentialSuggestionEvidence(candidates, edges, employment)) {
+            return EMPTY_MISSING_RELATIONSHIP_EVIDENCE;
+        }
+        return EMPTY_INSUFFICIENT_PATH_STRENGTH;
+    }
+
+    private static boolean hasPotentialSuggestionEvidence(
+            List<IntroCandidatePerson> candidates,
+            List<PersonEdge> edges,
+            List<IntroEmploymentRow> employment) {
+        Set<Integer> candidateIds = candidates.stream()
+            .map(IntroCandidatePerson::getId)
+            .collect(Collectors.toSet());
+        Map<Integer, Integer> candidateNeighbors = new HashMap<>();
+        for (PersonEdge edge : edges) {
+            if (candidateIds.contains(edge.getSourcePersonId())) {
+                candidateNeighbors.merge(edge.getTargetPersonId(), 1, Integer::sum);
+            }
+            if (candidateIds.contains(edge.getTargetPersonId())) {
+                candidateNeighbors.merge(edge.getSourcePersonId(), 1, Integer::sum);
+            }
+        }
+        if (candidateNeighbors.values().stream().anyMatch(count -> count >= 2)) {
+            return true;
+        }
+        Map<String, Set<Integer>> byEmployer = new HashMap<>();
+        for (IntroCandidatePerson candidate : candidates) {
+            if (candidate.getCompanyId() != null) {
+                byEmployer.computeIfAbsent(
+                    "id:" + candidate.getCompanyId(), key -> new HashSet<>()).add(candidate.getId());
+            }
+        }
+        for (IntroEmploymentRow row : employment) {
+            if (!candidateIds.contains(row.getPersonId())) {
+                continue;
+            }
+            String identity = employerIdentity(row);
+            if (identity != null) {
+                byEmployer.computeIfAbsent(identity, key -> new HashSet<>()).add(row.getPersonId());
+            }
+        }
+        return byEmployer.values().stream().anyMatch(people -> people.size() >= 2);
+    }
+
+    private static List<PersonEdge> eligibleEdges(
+            List<PersonEdge> edges, Set<Integer> excludedPersonIds) {
+        if (excludedPersonIds.isEmpty()) {
+            return edges;
+        }
+        return edges.stream()
+            .filter(edge -> !excludedPersonIds.contains(edge.getSourcePersonId())
+                && !excludedPersonIds.contains(edge.getTargetPersonId()))
+            .toList();
+    }
+
+    private static Set<Long> existingPairKeys(List<Introduction> pairs) {
+        Set<Long> existing = new HashSet<>();
+        for (Introduction pair : pairs) {
+            existing.add(pairKey(pair.getPersonAId(), pair.getPersonBId()));
+        }
+        return existing;
+    }
+
     private static int score(Map<Integer, RelationshipTemperatureDto> temperatures, int id) {
         RelationshipTemperatureDto temperature = temperatures.get(id);
         return temperature == null ? 0 : temperature.getScore();
@@ -588,5 +750,11 @@ public class IntroductionService {
         int lower = Math.min(x, y);
         int higher = Math.max(x, y);
         return ((long) lower << 32) | (higher & 0xffffffffL);
+    }
+
+    private record MutualEvidence(Set<Integer> connectorIds, Set<Integer> edgeIds) {
+    }
+
+    private record CompanyEvidence(String name) {
     }
 }

@@ -18,4 +18,7 @@ import lombok.NoArgsConstructor;
 public class IntroOverviewDto {
     private List<IntroSuggestionDto> suggestions;
     private List<WarmPathDto> paths;
+    private String asOf;
+    private String suggestionsEmptyReason;
+    private String pathsEmptyReason;
 }

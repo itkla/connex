@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.List;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -24,4 +26,6 @@ public class WarmPathBridgeDto {
     private Integer overlapStartYear;
     private Integer overlapEndYear;
     private int score;
+    private List<Integer> supportingPersonIds;
+    private List<Integer> supportingEdgeIds;
 }

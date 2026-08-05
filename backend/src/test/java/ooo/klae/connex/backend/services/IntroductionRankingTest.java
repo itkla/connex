@@ -52,6 +52,8 @@ class IntroductionRankingTest {
         assertEquals(1, top.getMutualConnections());
         assertEquals("Initech", top.getSharedCompany());
         assertEquals(List.of("mutual_connections", "shared_company"), top.getReasons());
+        assertEquals(List.of(5), top.getSupportingPersonIds());
+        assertEquals(List.of(105, 205), top.getSupportingEdgeIds());
 
         IntroSuggestionDto sharedOnly = find(suggestions, 3, 4);
         assertEquals(0, sharedOnly.getMutualConnections());
@@ -177,6 +179,22 @@ class IntroductionRankingTest {
     }
 
     @Test
+    void ambiguousEqualScoresUseStablePersonOrdering() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(3, "Cho", 300, "Initrode"),
+            person(1, "Aoi", 100, "Acme"),
+            person(2, "Ben", 200, "Globex"));
+        List<PersonEdge> edges = List.of(edge(9, 3), edge(9, 1), edge(9, 2));
+
+        List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
+            candidates, edges, List.of(), Set.of(), warmAll(1, 2, 3), 10);
+
+        assertEquals(List.of("1-2", "1-3", "2-3"), suggestions.stream()
+            .map(suggestion -> suggestion.getPersonAId() + "-" + suggestion.getPersonBId())
+            .toList());
+    }
+
+    @Test
     void carriesWarmthBandsForBothParties() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Aoi", 100, "Acme"),
@@ -230,6 +248,7 @@ class IntroductionRankingTest {
 
     private static PersonEdge edge(int a, int b) {
         PersonEdge edge = new PersonEdge();
+        edge.setId(Math.min(a, b) * 100 + Math.max(a, b));
         edge.setWorkspaceId(1);
         edge.setSourcePersonId(Math.min(a, b));
         edge.setTargetPersonId(Math.max(a, b));
