@@ -377,6 +377,8 @@
     "selectionToolbar": "Text formatting",
     "undo": "Undo",
     "redo": "Redo",
+    "moveBlockUp": "Move block up",
+    "moveBlockDown": "Move block down",
     "heading1": "Heading 1",
     "heading2": "Heading 2",
     "heading3": "Heading 3",

@@ -138,6 +138,8 @@ export default function RichNoteEditor({
         selectionToolbar: t("selectionToolbar"),
         undo: t("undo"),
         redo: t("redo"),
+        moveBlockUp: t("moveBlockUp"),
+        moveBlockDown: t("moveBlockDown"),
         h1: t("heading1"),
         h2: t("heading2"),
         h3: t("heading3"),

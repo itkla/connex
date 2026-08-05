@@ -3,6 +3,8 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import type { Editor } from "@tiptap/core";
 import {
+    ArrowDownToLine,
+    ArrowUpToLine,
     BetweenHorizontalEnd,
     BetweenVerticalEnd,
     Bold,
@@ -42,6 +44,7 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { canMoveTopLevelBlock, moveTopLevelBlock } from "./BlockReorder";
 import { normalizeEditorLinkHref } from "./editorLinks";
 import {
     DEFAULT_MARKDOWN_TABLE_OPTIONS,
@@ -67,6 +70,8 @@ export type ToolbarLabels = {
     selectionToolbar: string;
     undo: string;
     redo: string;
+    moveBlockUp: string;
+    moveBlockDown: string;
     h1: string;
     h2: string;
     h3: string;
@@ -397,6 +402,12 @@ export function EditorToolbar({ editor, labels, compact = false }: Props) {
         >
             <ToolbarButton label={labels.undo} disabled={!editor.can().undo()} onClick={() => editor.chain().focus().undo().run()} icon={Undo2} />
             <ToolbarButton label={labels.redo} disabled={!editor.can().redo()} onClick={() => editor.chain().focus().redo().run()} icon={Redo2} />
+            {!compact ? (
+                <>
+                    <ToolbarButton label={labels.moveBlockUp} disabled={!canMoveTopLevelBlock(editor, "up")} onClick={() => moveTopLevelBlock(editor, "up")} icon={ArrowUpToLine} />
+                    <ToolbarButton label={labels.moveBlockDown} disabled={!canMoveTopLevelBlock(editor, "down")} onClick={() => moveTopLevelBlock(editor, "down")} icon={ArrowDownToLine} />
+                </>
+            ) : null}
             {divider("d1")}
             <ToolbarButton label={labels.h1} active={editor.isActive("heading", { level: 1 })} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} icon={Heading1} />
             <ToolbarButton label={labels.h2} active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} icon={Heading2} />
