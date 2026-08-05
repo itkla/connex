@@ -102,5 +102,15 @@ describe('record detail grammar', () => {
         expect(brief).toBeGreaterThan(risk);
         expect(source.indexOf('<DealRiskPanel', risk + 1)).toBe(-1);
         expect(source.indexOf('<DealBriefPanel', brief + 1)).toBe(-1);
+        expect(source).toContain('tier="wide"');
+    });
+
+    it('deal detail loading skeleton matches the wide PageShell tier', () => {
+        const source = readFileSync(
+            path.resolve(process.cwd(), 'app/(app)/records/deals/[id]/loading.tsx'),
+            'utf8',
+        );
+        expect(source).toContain('tier="wide"');
+        expect(source).not.toContain('tier="reading"');
     });
 });

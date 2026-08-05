@@ -54,8 +54,8 @@ When in doubt, open a reference page and mirror it.
 The signed-off 1.0 interaction contract (issue #842). A working checklist, not prose. The shared components named here are the enforcement surface — reuse them; do not hand-roll a wrapper, header, or state that one of them already owns.
 
 **Page shell & width tiers.** Every routed surface that renders inside the app shell `<main>` wraps its content in `PageShell` (`app/components/PageShell.tsx`) — never a hand-rolled `min-h-full … mx-auto max-w-* flex flex-col gap-*` div. Pick the `tier` by job, not by taste:
-- `wide` (`max-w-[100rem]`) — list/browser, dashboard, overview, settings, admin.
-- `reading` (`max-w-5xl`) — record detail and long-form pages.
+- `wide` (`max-w-[100rem]`) — list/browser, dashboard, overview, settings, admin, and **Deal detail** (commercial workbench: lifecycle rail, KPIs, line items, documents — same effective width as Analytics).
+- `reading` (`max-w-5xl`) — Contact/Company record detail and other long-form reading pages.
 - `form` (`max-w-3xl`) — focused single-column forms and narrow detail.
 - Full-bleed surfaces (the relationship map), marketing/docs shells, and **full-height editor shells** (the workflow editor, the document template builder, and their `loading.tsx`) do not use `PageShell` — they own their own height and vertical rhythm, and the shell's `gap-10` would fight it.
 Section rhythm (`gap-10` between stacked children) and page gutter/padding come from the shell — do not re-declare them, and do not override the gap per page: uniform rhythm is the point. A `loading.tsx` skeleton uses the same `PageShell` tier as the page it stands in for — a skeleton and its page must never disagree about the wrapper, or the page visibly jumps when data arrives.
