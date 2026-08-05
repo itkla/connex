@@ -44,8 +44,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
+import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import RelationshipEvidencePanel from "@/app/components/records/RelationshipEvidencePanel";
 import RecordStickyContext from "@/app/components/records/RecordStickyContext";
+import TemperaturePill from "@/app/components/records/TemperaturePill";
 
 type CompanyPageProps = {
     params: Promise<{ id: number }>;
@@ -121,106 +123,103 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                     <CrumbLabel value={company.name} />
                     <RecentRecordBridge type="company" id={company.id} label={company.name} />
                     <ActionRecordBridge type="company" id={company.id} label={company.name} />
-                    <header id="company-record-identity" className="flex flex-wrap items-center justify-between gap-6">
-                        <div className="flex items-center gap-6 py-8">
-                            <CompanyAvatar company={company} type="2xlarge" />
-                            <div className="flex flex-col gap-2">
-                                <div className="flex flex-row flex-wrap items-center gap-3">
-                                    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
-                                        {company.name}
-                                    </h1>
-                                    <TagEditor
-                                        companyId={company.id}
-                                        currentTags={companyTags}
-                                        allTags={allTags}
-                                    />
+                    <RecordDetailSection recordKind="company" section="identity">
+                        <header id="company-record-identity" className="flex flex-wrap items-center justify-between gap-6">
+                            <div className="flex items-center gap-6 py-8">
+                                <CompanyAvatar company={company} type="2xlarge" />
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex flex-row flex-wrap items-center gap-3">
+                                        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
+                                            {company.name}
+                                        </h1>
+                                        {evidence?.temperature ? (
+                                            <TemperaturePill temp={evidence.temperature} />
+                                        ) : null}
+                                        <TagEditor
+                                            companyId={company.id}
+                                            currentTags={companyTags}
+                                            allTags={allTags}
+                                        />
+                                    </div>
+                                    <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                                        {company.industry ? (
+                                            <Link
+                                                href={`/records/companies?industry=${company.industry}`}
+                                                className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
+                                            >
+                                                {company.industry}
+                                            </Link>
+                                        ) : null}
+                                    </h3>
                                 </div>
-                                <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                                    {company.industry ? (
-                                        <Link
-                                            href={`/records/companies?industry=${company.industry}`}
-                                            className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
-                                        >
-                                            {company.industry}
-                                        </Link>
-                                    ) : null}
-                                </h3>
                             </div>
-                        </div>
 
-                        <div className="flex flex-col items-end gap-2">
-                            <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                                {t("pastRelations")}
-                            </span>
-                            {interactionUsers.length === 0 ? (
-                                <span className="text-xs text-muted-foreground">{t("noRecordedInteractions")}</span>
-                            ) : (
-                                <AvatarGroup>
-                                    {interactionUsers.map((user) => (
-                                        <Tooltip key={user.id}>
-                                            <TooltipTrigger asChild>
-                                                <Link href={`/users/${user.id}`}>
-                                                    <Avatar className="h-12 w-12 bg-muted-foreground/40">
-                                                        {user.profilePictureUrl ? (
-                                                            <AvatarImage
-                                                                src={user.profilePictureUrl}
-                                                                alt={user.displayName || user.username || ""}
-                                                            />
-                                                        ) : (
-                                                            <AvatarFallback>
-                                                                <UserIcon className="size-4 text-muted-foreground" />
-                                                            </AvatarFallback>
-                                                        )}
-                                                    </Avatar>
-                                                </Link>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="bottom" align="center">
-                                                {user.displayName || user.username || ""}
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    ))}
-                                </AvatarGroup>
-                            )}
-                        </div>
-                    </header>
+                            <div className="flex flex-col items-end gap-2">
+                                <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                                    {t("pastRelations")}
+                                </span>
+                                {interactionUsers.length === 0 ? (
+                                    <span className="text-xs text-muted-foreground">{t("noRecordedInteractions")}</span>
+                                ) : (
+                                    <AvatarGroup>
+                                        {interactionUsers.map((user) => (
+                                            <Tooltip key={user.id}>
+                                                <TooltipTrigger asChild>
+                                                    <Link href={`/users/${user.id}`}>
+                                                        <Avatar className="h-12 w-12 bg-muted-foreground/40">
+                                                            {user.profilePictureUrl ? (
+                                                                <AvatarImage
+                                                                    src={user.profilePictureUrl}
+                                                                    alt={user.displayName || user.username || ""}
+                                                                />
+                                                            ) : (
+                                                                <AvatarFallback>
+                                                                    <UserIcon className="size-4 text-muted-foreground" />
+                                                                </AvatarFallback>
+                                                            )}
+                                                        </Avatar>
+                                                    </Link>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="bottom" align="center">
+                                                    {user.displayName || user.username || ""}
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        ))}
+                                    </AvatarGroup>
+                                )}
+                            </div>
+                        </header>
+                    </RecordDetailSection>
 
-                    <div className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex justify-end">
                         <CompanyActionsMenu company={company} />
-                    </div>
-                    <RelationshipEvidencePanel evidence={evidence} />
+                    </RecordDetailSection>
                 </Rise>
 
-                <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                    <Rise delay={0.06}>
-                        <aside>
-                            <SectionHeader title={t("profile")} />
-                            <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                <InfoRow label={t("website")} value={company.website ?? ''} href={websiteUrl} />
-                                <InfoRow label={t("phone")} value={company.phone ?? ''} />
-                                <InfoRow label={t("address")} value={company.address ?? ''} />
-                                <InfoRow label={t("industry")} value={company.industry ?? ''} />
-                                <InfoRow
-                                    label={t("owner")}
-                                    value={company.ownerId != null
-                                        ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
-                                        : t("ownerUnassigned")}
-                                />
-                                <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
-                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
-                                <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
-                            </dl>
+                <Rise delay={0.06}>
+                    <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                        <RecordDetailSection recordKind="company" section="profile">
+                            <aside>
+                                <SectionHeader title={t("profile")} />
+                                <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                    <InfoRow label={t("website")} value={company.website ?? ''} href={websiteUrl} />
+                                    <InfoRow label={t("phone")} value={company.phone ?? ''} />
+                                    <InfoRow label={t("address")} value={company.address ?? ''} />
+                                    <InfoRow label={t("industry")} value={company.industry ?? ''} />
+                                    <InfoRow
+                                        label={t("owner")}
+                                        value={company.ownerId != null
+                                            ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
+                                            : t("ownerUnassigned")}
+                                    />
+                                    <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
+                                    <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
+                                    <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
+                                </dl>
+                            </aside>
+                        </RecordDetailSection>
 
-                            <Attachments
-                                entityType="company"
-                                entityId={company.id}
-                                initialAttachments={attachments}
-                                className="mt-6"
-                            />
-                        </aside>
-                    </Rise>
-
-                    <Rise delay={0.12}>
-                        <section>
+                        <RecordDetailSection recordKind="company" section="metrics" aria-label={t("theirActivity")}>
                             <SectionHeader title={t("theirActivity")} />
                             <div className="grid grid-cols-3 gap-3">
                                 <ContactStatCard
@@ -247,32 +246,58 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                 <EngagementSparkline data={engagement.weeklyEngagement} />
                                 <RevenueTiles pastRevenue={engagement.pastRevenue} projectedRevenue={engagement.projectedRevenue} currency={engagement.currency} />
                             </div>
+                        </RecordDetailSection>
+                    </div>
+                </Rise>
 
-                            <PipelineCard deals={deals} render="active" />
+                <Rise delay={0.08}>
+                    <RecordDetailSection recordKind="company" section="activity">
+                        <PipelineCard deals={deals} render="active" />
+                    </RecordDetailSection>
+                </Rise>
 
-                            <Suspense fallback={<Skeleton className="mt-6 h-40 w-full rounded-2xl" />}>
-                                <ContactsGrid contacts={people} company={company} allTags={allTags} />
-                            </Suspense>
+                <Rise delay={0.1}>
+                    <RecordDetailSection recordKind="company" section="relationship">
+                        <RelationshipEvidencePanel evidence={evidence} className="mt-0" />
+                    </RecordDetailSection>
+                </Rise>
 
-                            <div className="mt-6">
-                                <SectionHeader title={t("timeline")} />
-                                <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                    <Timeline
-                                        tasks={tasks}
-                                        activities={activities}
-                                        notes={notes}
-                                        users={relatedUsers}
-                                        persons={people}
-                                        deals={deals}
-                                        currentUserId={currentUser.id}
-                                        companyId={company.id}
-                                        limit={100}
-                                    />
-                                </div>
-                            </div>
-                        </section>
-                    </Rise>
-                </div>
+                <Rise delay={0.12}>
+                    <RecordDetailSection recordKind="company" section="related">
+                        <Suspense fallback={<Skeleton className="h-40 w-full rounded-2xl" />}>
+                            <ContactsGrid contacts={people} company={company} allTags={allTags} />
+                        </Suspense>
+                    </RecordDetailSection>
+                </Rise>
+
+                <Rise delay={0.14}>
+                    <RecordDetailSection recordKind="company" section="files">
+                        <Attachments
+                            entityType="company"
+                            entityId={company.id}
+                            initialAttachments={attachments}
+                        />
+                    </RecordDetailSection>
+                </Rise>
+
+                <Rise delay={0.16}>
+                    <RecordDetailSection recordKind="company" section="history">
+                        <SectionHeader title={t("timeline")} />
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            <Timeline
+                                tasks={tasks}
+                                activities={activities}
+                                notes={notes}
+                                users={relatedUsers}
+                                persons={people}
+                                deals={deals}
+                                currentUserId={currentUser.id}
+                                companyId={company.id}
+                                limit={100}
+                            />
+                        </div>
+                    </RecordDetailSection>
+                </Rise>
         </PageShell>
     );
 }
