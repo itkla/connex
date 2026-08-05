@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.util.ContactMask;
 
 /**
  * The single choke point for outbound email. Resolves the effective SMTP config
@@ -67,13 +68,15 @@ public class MailService {
 
     private void deliverQuietly(ResolvedMailConfig config, MailMessage message, String source) {
         if (config == null || !config.usable()) {
-            log.warn("Email to {} not sent: no usable SMTP configuration ({})", message.to(), source);
+            log.warn("Email to {} not sent: no usable SMTP configuration ({})",
+                    ContactMask.maskEmail(message.to()), source);
             return;
         }
         try {
             deliver(config, message);
         } catch (Exception e) {
-            log.error("Failed to send email to {} ({}): {}", message.to(), source, e.getMessage());
+            log.error("Failed to send email to {} ({}): exception={}",
+                    ContactMask.maskEmail(message.to()), source, e.getClass().getName());
         }
     }
 
@@ -96,7 +99,7 @@ public class MailService {
             }
             sender.send(mime);
         } catch (Exception e) {
-            throw new IllegalStateException("SMTP delivery failed: " + e.getMessage(), e);
+            throw new IllegalStateException("SMTP delivery failed", e);
         }
     }
 }

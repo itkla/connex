@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.util.ContactMask;
 
 /**
  * Handles the public unsubscribe endpoints. The signed token alone identifies a single
@@ -66,7 +67,7 @@ public class DeliveryUnsubscribeService {
             boolean unsubscribed = campaignDeliveryMapper.hasEvent(
                     delivery.getWorkspaceId(), delivery.getId(), EVENT_UNSUBSCRIBED);
             return new DeliveryUnsubscribeDto(
-                    send.getChannel(), maskAddress(delivery.getAddress()), unsubscribed);
+                    send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), unsubscribed);
         });
     }
 
@@ -82,7 +83,8 @@ public class DeliveryUnsubscribeService {
         CampaignSend send = requireSend(delivery);
         int workspaceId = delivery.getWorkspaceId();
         if (campaignDeliveryMapper.hasEvent(workspaceId, delivery.getId(), EVENT_UNSUBSCRIBED)) {
-            return new DeliveryUnsubscribeDto(send.getChannel(), maskAddress(delivery.getAddress()), true);
+            return new DeliveryUnsubscribeDto(
+                    send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), true);
         }
         suppressionService.add(new SuppressionEntryRequest(
                 "workspace", send.getChannel(), delivery.getAddress(), delivery.getPersonId(),
@@ -98,7 +100,8 @@ public class DeliveryUnsubscribeService {
         event.setEventType(EVENT_UNSUBSCRIBED);
         event.setDetail("Recipient unsubscribed");
         campaignDeliveryMapper.insertEvent(event);
-        return new DeliveryUnsubscribeDto(send.getChannel(), maskAddress(delivery.getAddress()), true);
+        return new DeliveryUnsubscribeDto(
+                send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), true);
     }
 
     private <T> T inDeliveryWorkspace(CampaignDelivery delivery, Supplier<T> work) {
@@ -120,17 +123,5 @@ public class DeliveryUnsubscribeService {
             throw new ResourceNotFoundException("Unsubscribe link is not valid");
         }
         return send;
-    }
-
-    private static String maskAddress(String address) {
-        if (address == null || address.isBlank()) {
-            return "";
-        }
-        int at = address.indexOf('@');
-        if (at <= 0) {
-            return "***";
-        }
-        char first = address.charAt(0);
-        return first + "***" + address.substring(at);
     }
 }

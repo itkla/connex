@@ -47,10 +47,10 @@ public class LoggingPasswordResetEmailService implements PasswordResetEmailServi
                     .queryParam("token", rawToken)
                     .build()
                     .toUriString();
-            log.info("Password reset link for user {} (dev link logging enabled): {}", user.getUsername(), link);
+            log.info("Password reset link for userId {} (dev link logging enabled): {}", user.getId(), link);
             return;
         }
-        log.warn("Password reset requested for user {} but no email delivery is configured; "
-                + "set connex.password-reset.log-link=true in local dev to log the link.", user.getUsername());
+        log.warn("Password reset requested for userId {} but no email delivery is configured; "
+                + "set connex.password-reset.log-link=true in local dev to log the link.", user.getId());
     }
 }

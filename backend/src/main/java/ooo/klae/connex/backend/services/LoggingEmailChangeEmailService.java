@@ -47,11 +47,11 @@ public class LoggingEmailChangeEmailService implements EmailChangeEmailService {
                     .queryParam("token", rawToken)
                     .build()
                     .toUriString();
-            log.info("Email-change verification link for user {} (dev link logging enabled): {}",
-                    user.getUsername(), link);
+            log.info("Email-change verification link for userId {} (dev link logging enabled): {}",
+                    user.getId(), link);
             return;
         }
-        log.warn("Email change requested for user {} but no email delivery is configured; "
-                + "set connex.email-change.log-link=true in local dev to log the link.", user.getUsername());
+        log.warn("Email change requested for userId {} but no email delivery is configured; "
+                + "set connex.email-change.log-link=true in local dev to log the link.", user.getId());
     }
 }

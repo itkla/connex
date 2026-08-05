@@ -328,20 +328,20 @@ class EncryptionGuardrailArchTest {
     private static final Map<String, ApprovedSecretSink> APPROVED_SECRET_SINKS = Map.of(
         "ooo/klae/connex/backend/services/LoggingEmailChangeEmailService.java#link",
         new ApprovedSecretSink(
-            "log.info(\"Email-change verification link for user {} (dev link logging enabled): {}\", "
-                + "user.getUsername(), link);",
+            "log.info(\"Email-change verification link for userId {} (dev link logging enabled): {}\", "
+                + "user.getId(), link);",
             Pattern.compile("\\.path\\(\"/auth/verify-email\"\\).*"
                 + "\\.queryParam\\(\"token\",\\s*rawToken\\)", Pattern.DOTALL)),
         "ooo/klae/connex/backend/services/LoggingPasswordResetEmailService.java#link",
         new ApprovedSecretSink(
-            "log.info(\"Password reset link for user {} (dev link logging enabled): {}\", "
-                + "user.getUsername(), link);",
+            "log.info(\"Password reset link for userId {} (dev link logging enabled): {}\", "
+                + "user.getId(), link);",
             Pattern.compile("\\.path\\(\"/auth/reset-password\"\\).*"
                 + "\\.queryParam\\(\"token\",\\s*rawToken\\)", Pattern.DOTALL)),
         "ooo/klae/connex/backend/services/LoggingRegistrationVerificationEmailService.java#link",
         new ApprovedSecretSink(
-            "log.info(\"Registration verification link for user {} (dev link logging enabled): {}\", "
-                + "user.getUsername(), link);",
+            "log.info(\"Registration verification link for userId {} (dev link logging enabled): {}\", "
+                + "user.getId(), link);",
             Pattern.compile("\\.path\\(\"/auth/confirm-email\"\\).*"
                 + "\\.queryParam\\(\"token\",\\s*rawToken\\)", Pattern.DOTALL)));
 
@@ -684,8 +684,8 @@ class EncryptionGuardrailArchTest {
                     void sendResetEmail(String rawToken) {
                         String link = builder.path("/auth/reset-password")
                             .queryParam("token", rawToken).toString();
-                        log.info("Password reset link for user {} (dev link logging enabled): {}",
-                            user.getUsername(), link);
+                        log.info("Password reset link for userId {} (dev link logging enabled): {}",
+                            user.getId(), link);
                     }
                 }
                 """);
@@ -694,7 +694,7 @@ class EncryptionGuardrailArchTest {
                 class LoggingEmailChangeEmailService {
                     void send(String password) {
                         String link = password;
-                        log.info("Email-change verification link for user {} (dev link logging enabled): {}",
+                        log.info("Email-change verification link for userId {} (dev link logging enabled): {}",
                             user.getUsername(), link);
                     }
                 }
@@ -705,8 +705,8 @@ class EncryptionGuardrailArchTest {
                     void send(String rawToken) {
                         String link = builder.path("/auth/confirm-email")
                             .queryParam("token", rawToken).toString();
-                        log.info("Registration verification link for user {} (dev link logging enabled): {} extra",
-                            user.getUsername(), link);
+                        log.info("Registration verification link for userId {} (dev link logging enabled): {} extra",
+                            user.getId(), link);
                     }
                 }
                 """);
