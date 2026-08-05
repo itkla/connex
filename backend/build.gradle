@@ -58,7 +58,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.apache.httpcomponents.client5:httpclient5'
-	implementation 'com.googlecode.libphonenumber:libphonenumber:9.0.35'
+	implementation 'com.googlecode.libphonenumber:libphonenumber:9.0.36'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 	implementation 'org.springframework.boot:spring-boot-starter-mail'
 	implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.1.0'
