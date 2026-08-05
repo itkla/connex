@@ -273,7 +273,7 @@ jobs:
             > "release-${COMPONENT}.json"
 
       - name: Upload verified candidate artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.component }}
           retention-days: 7
@@ -597,7 +597,7 @@ jobs:
           cosign sign-blob --yes --bundle release-manifest.bundle.json release-manifest.json
 
       - name: Upload committed release transaction
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release-transaction-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 90
