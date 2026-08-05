@@ -297,6 +297,7 @@ connex:
             deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}
             deal-risk-rationale: ${CONNEX_AI_FEATURES_DEAL_RISK_RATIONALE:true}
             intro-rationale: ${CONNEX_AI_FEATURES_INTRO_RATIONALE:true}
+            report-composer: ${CONNEX_AI_FEATURES_REPORT_COMPOSER:true}
             report-narrative: ${CONNEX_AI_FEATURES_REPORT_NARRATIVE:true}
             business-card-extraction: ${CONNEX_AI_FEATURES_BUSINESS_CARD_EXTRACTION:true}
         # Instance gate for org-configured private/internal OpenAI-compatible endpoints. Defaults

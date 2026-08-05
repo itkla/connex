@@ -4272,6 +4272,25 @@ export function getReport(id: number, init: RequestInit = {}) {
     return getJson<Types.ReportDefinition>(`/api/reports/${id}`, { cache: "no-store", ...init });
 }
 
+export function getReportComposerAvailability(init: RequestInit = {}) {
+    return getJson<Types.ReportComposerAvailability>(`/api/reports/composer/availability`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function getReportComposerAvailabilityResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.ReportComposerAvailability>(
+        (init) => getReportComposerAvailability(init),
+        cookie,
+    );
+}
+
+export function previewReportComposer(prompt: string) {
+    return withReportRequestIdentity((signal) =>
+        postJson<Types.ReportComposerPreview>(`/api/reports/composer/preview`, { prompt }, { signal }));
+}
+
 export function createReport(payload: Types.ReportDefinitionInput) {
     return postJson<Types.ReportDefinition>(`/api/reports`, payload);
 }

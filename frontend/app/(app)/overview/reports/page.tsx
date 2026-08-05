@@ -7,6 +7,7 @@ import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailableP
 import {
     getCurrentUserFromCookie,
     getEffectivePermissionsResultFromCookie,
+    getReportComposerAvailabilityResultFromCookie,
     getReportsFromCookie,
     getReportTemplatesFromCookie,
 } from '@/app/lib/api';
@@ -21,10 +22,11 @@ export default async function ReportsPage() {
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
 
-    const [templates, reports, permissionsResult] = await Promise.all([
+    const [templates, reports, permissionsResult, composerAvailabilityResult] = await Promise.all([
         getReportTemplatesFromCookie(cookie),
         getReportsFromCookie(cookie),
         getEffectivePermissionsResultFromCookie(cookie),
+        getReportComposerAvailabilityResultFromCookie(cookie),
     ]);
     if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
     const effectivePermissions = permissionsResult.data;
@@ -35,6 +37,7 @@ export default async function ReportsPage() {
             initialReports={reports}
             effectivePermissions={effectivePermissions}
             currentUserId={user.id}
+            composerAvailable={composerAvailabilityResult.ok && composerAvailabilityResult.data.available}
         />
     );
 }

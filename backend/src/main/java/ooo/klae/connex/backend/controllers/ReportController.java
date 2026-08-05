@@ -22,11 +22,15 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.ReportDefinitionDto;
 import ooo.klae.connex.backend.dto.ReportDefinitionRequest;
+import ooo.klae.connex.backend.dto.ReportComposerAvailabilityDto;
+import ooo.klae.connex.backend.dto.ReportComposerPreviewDto;
+import ooo.klae.connex.backend.dto.ReportComposerRequest;
 import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportGenerateRequest;
 import ooo.klae.connex.backend.dto.ReportSnapshotDto;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
 import ooo.klae.connex.backend.dto.ReportTemplateDto;
+import ooo.klae.connex.backend.services.ReportComposerService;
 import ooo.klae.connex.backend.services.ReportService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -41,6 +45,20 @@ public class ReportController {
     private static final byte[] UTF8_BOM = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
 
     private final ReportService reportService;
+    private final ReportComposerService reportComposerService;
+
+    @GetMapping("/composer/availability")
+    @RequirePermission(Permission.REPORT_CREATE)
+    public ReportComposerAvailabilityDto composerAvailability() {
+        return reportComposerService.availability();
+    }
+
+    @PostMapping("/composer/preview")
+    @RequirePermission(Permission.REPORT_CREATE)
+    public ReportComposerPreviewDto previewComposer(
+            @Valid @RequestBody ReportComposerRequest request) {
+        return reportComposerService.preview(request);
+    }
 
     @GetMapping("/templates")
     @RequirePermission(Permission.REPORT_READ)

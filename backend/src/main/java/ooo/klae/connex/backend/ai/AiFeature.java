@@ -7,6 +7,7 @@ public enum AiFeature {
     DEAL_BRIEF("deal.brief", false),
     DEAL_RISK_RATIONALE("deal.risk_rationale", false),
     INTRO_RATIONALE("intro.rationale", false),
+    REPORT_COMPOSER("report.composer", false),
     REPORT_NARRATIVE("report.narrative", false),
     BUSINESS_CARD_EXTRACTION("business_card.scan", true);
 

@@ -14,16 +14,17 @@ import {
     EllipsisHorizontalIcon,
     FlagIcon,
     HeartIcon,
+    PencilSquareIcon,
     PresentationChartLineIcon,
     ShareIcon,
     ShieldExclamationIcon,
-    SparklesIcon,
     TrashIcon,
     UserGroupIcon,
 } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
 import { PageShell } from '@/app/components/PageShell';
+import AskConnexComposer from '@/app/components/reports/AskConnexComposer';
 import {
     cloneReportConfig,
     groupReportTemplates,
@@ -72,17 +73,20 @@ export default function ReportsBoard({
     initialReports,
     effectivePermissions,
     currentUserId,
+    composerAvailable,
 }: {
     templates: ReportTemplate[];
     initialReports: ReportDefinition[];
     effectivePermissions: string[];
     currentUserId: number;
+    composerAvailable: boolean;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
     const router = useRouter();
     const { activeWorkspace } = useWorkspace();
     const canDeleteReports = effectivePermissions.includes('REPORT_DELETE');
+    const canCreateReports = effectivePermissions.includes('REPORT_CREATE');
     const [reports, setReports] = useState(initialReports);
     const [deleting, setDeleting] = useState<ReportDefinition | null>(null);
     const [busy, setBusy] = useState(false);
@@ -160,13 +164,23 @@ export default function ReportsBoard({
 
     const startSection = (
         <section aria-labelledby="start-title">
-            <div className="mb-6 max-w-2xl">
-                <h2 id="start-title" className="text-xl font-bold tracking-tight text-foreground">
-                    {hasReports ? t('landing.startTitle') : t('landing.firstTitle')}
-                </h2>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                    {hasReports ? t('landing.startSubtitle') : t('landing.firstSubtitle')}
-                </p>
+            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+                <div className="max-w-2xl">
+                    <h2 id="start-title" className="text-xl font-bold tracking-tight text-foreground">
+                        {hasReports ? t('landing.startTitle') : t('landing.firstTitle')}
+                    </h2>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        {hasReports ? t('landing.startSubtitle') : t('landing.firstSubtitle')}
+                    </p>
+                </div>
+                {canCreateReports ? (
+                    <Button asChild variant="outline">
+                        <Link href="/overview/reports/new">
+                            <PencilSquareIcon />
+                            {t('landing.blankBuilder')}
+                        </Link>
+                    </Button>
+                ) : null}
             </div>
             <div className="space-y-8">
                 {templateGroups.map((group) => (
@@ -232,6 +246,17 @@ export default function ReportsBoard({
             </div>
         </section>
     );
+    const progressiveStartSection = composerAvailable ? (
+        <details className="group rounded-2xl border border-border bg-card p-5 sm:p-6">
+            <summary className="cursor-pointer list-none font-semibold text-foreground marker:hidden">
+                <span className="flex items-center justify-between gap-4">
+                    {t('landing.otherWays')}
+                    <ArrowRightIcon className="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+                </span>
+            </summary>
+            <div className="mt-8 border-t border-border pt-8">{startSection}</div>
+        </details>
+    ) : startSection;
 
     return (
         <>
@@ -256,19 +281,27 @@ export default function ReportsBoard({
                                     </Link>
                                 </Button>
                             ) : null}
-                            <Button asChild variant="brand">
-                                <Link href="/overview/reports/new">
-                                    <SparklesIcon />
-                                    {t('landing.newReport')}
-                                </Link>
-                            </Button>
+                            {!composerAvailable && canCreateReports ? (
+                                <Button asChild variant="brand">
+                                    <Link href="/overview/reports/new">
+                                        <PencilSquareIcon />
+                                        {t('landing.newReport')}
+                                    </Link>
+                                </Button>
+                            ) : null}
                         </div>
                     </header>
                 </Rise>
 
+                {composerAvailable && canCreateReports ? (
+                    <Rise delay={0.06}>
+                        <AskConnexComposer />
+                    </Rise>
+                ) : null}
+
                 {hasReports ? (
                     <>
-                        <Rise delay={0.06}>
+                        <Rise delay={composerAvailable ? 0.12 : 0.06}>
                             <section aria-labelledby="your-reports-title">
                                 <div className="mb-4">
                                     <h2 id="your-reports-title" className="text-xl font-bold tracking-tight text-foreground">
@@ -346,10 +379,14 @@ export default function ReportsBoard({
                                 </div>
                             </section>
                         </Rise>
-                        <Rise delay={0.12}>{startSection}</Rise>
+                        <Rise delay={composerAvailable ? 0.18 : 0.12}>
+                            {progressiveStartSection}
+                        </Rise>
                     </>
                 ) : (
-                    <Rise delay={0.06}>{startSection}</Rise>
+                    <Rise delay={composerAvailable ? 0.12 : 0.06}>
+                        {progressiveStartSection}
+                    </Rise>
                 )}
             </PageShell>
 

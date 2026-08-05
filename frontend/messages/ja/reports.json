@@ -28,6 +28,8 @@
       "title": "レポート",
       "subtitle": "確定的なCRM数値を、グラフ、推奨事項、データ付録、追跡可能な出典を備えたレビュー用の文章に変換します。",
       "newReport": "新規レポート",
+      "blankBuilder": "空のビルダー",
+      "otherWays": "別の方法で作成",
       "manageGoals": "目標を管理",
       "yourReportsTitle": "あなたのレポート",
       "yourReportsSubtitle": "このワークスペースで共有されているレポート定義です。",
@@ -54,6 +56,48 @@
       "deleteTitle": "レポートを削除しますか？",
       "deleteBody": "{name} とすべての確定スナップショットが完全に削除されます。",
       "deleted": "{name} を削除しました"
+    },
+    "composer": {
+      "eyebrow": "Ask Connex",
+      "title": "必要なレポートを説明してください",
+      "subtitle": "自然な言葉で依頼すると、保存前に確認できるレポート定義を Connex が提案します。",
+      "grounding": "このステップで定義するのは項目、フィルター、範囲のみです。数値は保存後にレポートエンジンが実行時に算出します。",
+      "requestLabel": "このレポートで何を把握したいですか？",
+      "placeholder": "月次のパイプライン健全性、リスク売上、単一接点案件をステージ別に表示。",
+      "requestHint": "連絡先情報などの機微な個人情報は入力しないでください。",
+      "generate": "定義をプレビュー",
+      "regenerate": "プレビューを更新",
+      "generating": "作成中…",
+      "previewEyebrow": "定義プレビュー",
+      "generatedDescription": "依頼内容から作成し、サーバーで検証済みのレポート定義です。",
+      "fields": "項目",
+      "fieldCount": "根拠ブロック {count} 件",
+      "filters": "フィルター",
+      "allCompatible": "対応するすべてのレコード",
+      "dateRange": "対象期間",
+      "evidence": "定義の根拠",
+      "scope": "範囲",
+      "scopeValue": "現在のワークスペース内で、現在の利用者がアクセスできるレコード。",
+      "assumptions": "前提",
+      "assumption": {
+        "current_workspace": "現在のワークスペースを使用します。",
+        "accessible_records": "現在の利用者がアクセスできるレコードのみを含めます。",
+        "current_owners": "現在のレコード所有者を使用します。",
+        "server_computed_figures": "すべての数値は保存後の実行時にのみ算出します。",
+        "date_range_inferred": "選択した周期から対象期間を決定します。"
+      },
+      "freshness": "定義の生成・検証日時: {date}。数値はまだ算出されていません。",
+      "save": "保存して実行",
+      "saving": "保存中…",
+      "created": "レポートを作成しました",
+      "unavailableTitle": "Ask Connex を利用できません",
+      "unavailable": {
+        "not_configured": "AI が無効または未設定の間は、テンプレートまたは空のビルダーを使用してください。",
+        "input_restricted": "設定されたプロバイダーへ送信できない内容が含まれています。機微な情報を削除して再試行してください。",
+        "rate_limited": "AI 生成の上限に達しました。後でもう一度試すか、確定的なビルダーを使用してください。",
+        "invalid_definition": "この依頼を有効なレポート定義に変換できませんでした。言い換えるか、ビルダーを使用してください。",
+        "provider_error": "プロバイダーが定義を生成できませんでした。再試行するか、確定的な開始方法を使用してください。"
+      }
     },
     "templates": {
       "sales-performance": {

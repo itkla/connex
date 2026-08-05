@@ -2178,6 +2178,29 @@ export type ReportDefinition = ReportDefinitionInput & {
     updatedAt: string;
 };
 
+export type ReportComposerAvailability = {
+    available: boolean;
+    reason: string | null;
+};
+
+export type ReportComposerEvidence = {
+    widgetId: string;
+    dataSource: ReportDataSource;
+    measure: ReportMeasure;
+    groupBy: ReportGroupBy;
+    chartType: ReportChartType;
+};
+
+export type ReportComposerPreview = {
+    available: boolean;
+    reason: string | null;
+    definition: ReportDefinitionInput | null;
+    assumptionCodes: string[];
+    evidence: ReportComposerEvidence[];
+    effectiveRange: ReportRange | null;
+    generatedAt: string | null;
+};
+
 export type ReportTemplate = {
     key: string;
     name: string;

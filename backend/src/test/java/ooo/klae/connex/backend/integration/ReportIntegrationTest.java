@@ -968,6 +968,37 @@ class ReportIntegrationTest {
     }
 
     @Test
+    void reportComposerFailsClosedWithoutDisablingDeterministicReports() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        mockMvc.perform(get("/api/reports/composer/availability")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.available").value(false))
+            .andExpect(jsonPath("$.reason").value("not_configured"));
+
+        mockMvc.perform(post("/api/reports/composer/preview")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"prompt\":\"Show pipeline health\"}")
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.available").value(false))
+            .andExpect(jsonPath("$.reason").value("not_configured"));
+
+        mockMvc.perform(get("/api/reports/templates")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
     void networkWarmIntroTemplateIsAvailableWithCanonicalMeasures() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
