@@ -377,6 +377,8 @@
     "selectionToolbar": "テキスト書式",
     "undo": "元に戻す",
     "redo": "やり直す",
+    "moveBlockUp": "ブロックを上へ移動",
+    "moveBlockDown": "ブロックを下へ移動",
     "heading1": "見出し1",
     "heading2": "見出し2",
     "heading3": "見出し3",
