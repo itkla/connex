@@ -112,11 +112,22 @@ public class ReportComposerService {
      */
     @RequirePermission(Permission.REPORT_CREATE)
     public ReportComposerPreviewDto preview(ReportComposerRequest request) {
-        Optional<AiGenerationProfile> profile = featureGate.generationProfileIfUsable(
-                AiFeature.REPORT_COMPOSER, MAX_TOKENS, TEMPERATURE);
-        if (profile.isEmpty()) {
+        try {
+            Optional<AiGenerationProfile> profile = featureGate.generationProfileIfUsable(
+                    AiFeature.REPORT_COMPOSER, MAX_TOKENS, TEMPERATURE);
+            if (profile.isEmpty()) {
+                return ReportComposerPreviewDto.unavailable("not_configured");
+            }
+            return previewWithProfile(request, profile.get());
+        } catch (ForbiddenException exception) {
             return ReportComposerPreviewDto.unavailable("not_configured");
+        } catch (RuntimeException exception) {
+            return ReportComposerPreviewDto.unavailable("provider_error");
         }
+    }
+
+    private ReportComposerPreviewDto previewWithProfile(
+            ReportComposerRequest request, AiGenerationProfile profile) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         ZoneId workspaceZone = ZoneId.of(workspaceService.getCurrentAnalyticsTimezone());
@@ -127,7 +138,7 @@ public class ReportComposerService {
         }
 
         AiReportComposerAssembly assembly = assembled.get();
-        String contentHash = cacheStore.contentHash(profile.get(), assembly.prompt(), assembly.context());
+        String contentHash = cacheStore.contentHash(profile, assembly.prompt(), assembly.context());
         String cacheFeature = cacheFeature();
         ReportComposerPreviewDto cached = cached(workspaceId, actorId, cacheFeature, contentHash, today);
         if (cached != null) {
@@ -137,7 +148,13 @@ public class ReportComposerService {
         CacheIdentity identity = CacheIdentity.forSubject(
                 workspaceId, AiFeature.REPORT_COMPOSER, actorId, LocaleContextHolder.getLocale());
         while (true) {
-            try (Admission admission = admissionService.acquire(identity, contentHash, false)) {
+            Admission admission;
+            try {
+                admission = admissionService.acquire(identity, contentHash, false);
+            } catch (RuntimeException exception) {
+                return ReportComposerPreviewDto.unavailable("provider_error");
+            }
+            try (admission) {
                 if (admission.decision() == Decision.RATE_LIMITED) {
                     return ReportComposerPreviewDto.unavailable("rate_limited");
                 }

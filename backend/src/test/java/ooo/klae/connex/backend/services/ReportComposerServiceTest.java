@@ -143,6 +143,22 @@ class ReportComposerServiceTest {
     }
 
     @Test
+    void preview_returnsUnavailableWhenAdmissionAcquireFails() {
+        readyAdmission();
+        when(admissionService.acquire(any(), eq("hash"), eq(false)))
+                .thenThrow(new IllegalStateException("AI invocation organization is unavailable"));
+
+        ReportComposerPreviewDto result = service.preview(new ReportComposerRequest("Pipeline health"));
+
+        assertFalse(result.available());
+        assertEquals("provider_error", result.reason());
+        verifyNoInteractions(invocationService);
+        verify(cacheStore, never()).save(
+                anyInt(), anyString(), anyInt(), anyInt(), anyString(), any(),
+                anyInt(), anyString(), anyLong());
+    }
+
+    @Test
     void preview_rejectsAttainmentWithoutGoalReadPermission() {
         Admission admission = readyAdmission();
         ReportWidgetConfig widget = new ReportWidgetConfig(

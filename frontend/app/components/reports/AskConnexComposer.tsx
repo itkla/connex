@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormatter, useTranslations } from 'next-intl';
 import {
-    ArrowPathIcon,
     CalendarDaysIcon,
     CheckCircleIcon,
     CircleStackIcon,
@@ -12,12 +11,16 @@ import {
     SparklesIcon,
 } from '@heroicons/react/24/outline';
 
-import { createReport, previewReportComposer } from '@/app/lib/api';
+import { ApiError, createReport, previewReportComposer } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { ReportComposerPreview } from '@/app/lib/types';
+import PixelCard from '@/components/PixelCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
+
+const COMPOSER_PIXEL_COLORS = '#e5f9d8,#a3e635,#73d200';
 
 export default function AskConnexComposer() {
     const t = useTranslations('Reports.composer');
@@ -62,6 +65,11 @@ export default function AskConnexComposer() {
             }
             setPreview(result);
         } catch (error) {
+            if (error instanceof ApiError && error.status >= 500) {
+                setPreview(null);
+                setUnavailableReason('provider_error');
+                return;
+            }
             toastError(error instanceof Error ? error.message : reportsT('common.requestFailed'));
         } finally {
             setGenerating(false);
@@ -126,18 +134,13 @@ export default function AskConnexComposer() {
                     />
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                         <p className="text-xs text-muted-foreground">{t('requestHint')}</p>
-                        <Button
-                            variant="brand"
-                            onClick={generatePreview}
+                        <ComposerActionButton
+                            busy={generating}
                             disabled={!prompt.trim() || generating || saving}
-                        >
-                            {generating ? (
-                                <ArrowPathIcon className="animate-spin motion-reduce:animate-none" />
-                            ) : (
-                                <SparklesIcon />
-                            )}
-                            {generating ? t('generating') : preview ? t('regenerate') : t('generate')}
-                        </Button>
+                            onClick={generatePreview}
+                            label={generating ? t('generating') : preview ? t('regenerate') : t('generate')}
+                            showSparkle
+                        />
                     </div>
 
                     {unavailableReason ? (
@@ -233,16 +236,62 @@ export default function AskConnexComposer() {
                                             : '',
                                     })}
                                 </p>
-                                <Button variant="brand" onClick={savePreview} disabled={saving}>
-                                    {saving ? <ArrowPathIcon className="animate-spin motion-reduce:animate-none" /> : null}
-                                    {saving ? t('saving') : t('save')}
-                                </Button>
+                                <ComposerActionButton
+                                    busy={saving}
+                                    disabled={saving}
+                                    onClick={savePreview}
+                                    label={saving ? t('saving') : t('save')}
+                                    showSparkle={saving}
+                                />
                             </div>
                         </div>
                     ) : null}
                 </div>
             </div>
         </section>
+    );
+}
+
+function ComposerActionButton({
+    busy,
+    disabled,
+    onClick,
+    label,
+    showSparkle,
+}: {
+    busy: boolean;
+    disabled: boolean;
+    onClick: () => void;
+    label: string;
+    showSparkle: boolean;
+}) {
+    return (
+        <Button
+            type="button"
+            variant="brand"
+            onClick={onClick}
+            disabled={disabled}
+            className="relative isolate overflow-hidden"
+        >
+            {busy ? (
+                <PixelCard
+                    active
+                    colors={COMPOSER_PIXEL_COLORS}
+                    gap={3}
+                    speed={55}
+                    noFocus
+                    className="pointer-events-none absolute inset-0 z-0 aspect-auto! h-full! w-full! rounded-full! border-0! opacity-70"
+                />
+            ) : null}
+            <span className="relative z-10 inline-flex items-center gap-1.5">
+                {showSparkle ? (
+                    <SparklesIcon
+                        className={cn('size-4', busy && 'animate-pulse motion-reduce:animate-none')}
+                    />
+                ) : null}
+                {label}
+            </span>
+        </Button>
     );
 }
 
