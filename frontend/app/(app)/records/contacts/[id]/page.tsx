@@ -100,7 +100,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         : null;
 
     return (
-        <PageShell tier="reading">
+        <PageShell tier="wide">
                 <RecordStickyContext
                     anchorId="contact-record-identity"
                     name={contact.name}
@@ -111,12 +111,15 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
                     <RecentRecordBridge type="person" id={contact.id} label={contact.name} />
                     <RecordDetailSection recordKind="contact" section="identity">
-                        <header id="contact-record-identity" className="flex flex-wrap items-center justify-between gap-6">
-                            <div className="flex items-center gap-6 py-8">
+                        <header
+                            id="contact-record-identity"
+                            className="flex flex-col gap-6 py-4 sm:flex-row sm:items-end sm:justify-between"
+                        >
+                            <div className="flex min-w-0 items-center gap-6">
                                 <ContactAvatar contact={contact} type="xlarge" />
-                                <div className="flex flex-col gap-2">
+                                <div className="flex min-w-0 flex-col gap-3">
                                     <div className="flex flex-row flex-wrap items-center gap-3">
-                                        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
+                                        <h1 className="text-balance text-4xl font-extrabold tracking-tight text-foreground">
                                             {contact.name}
                                         </h1>
                                         {evidence?.temperature ? (
@@ -198,14 +201,14 @@ export default async function ContactPage({ params }: ContactPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex justify-start">
                         <ContactActionsMenu
                             contact={contact}
                             currentUserId={currentUser.id}
                             dealSeeds={deals}
                         />
                     </RecordDetailSection>
-                    <RecordDetailSection recordKind="contact" section="notifications">
+                    <RecordDetailSection recordKind="contact" section="notifications" className="mt-6">
                         <EntityNotificationBanner
                             key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(",")}`}
                             initialNotifications={notificationPage.items}
@@ -216,10 +219,10 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     </RecordDetailSection>
                 </Rise>
 
-                <Rise delay={0.06}>
-                    <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                        <RecordDetailSection recordKind="contact" section="profile">
-                            <aside>
+                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
+                    <aside className="flex flex-col gap-6">
+                        <RecordDetailSection recordKind="contact" section="profile" className="flex flex-col gap-6">
+                            <div>
                                 <SectionHeader title={t("profile")} />
                                 <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                                     <InfoRow label={t("email")} value={contact.email ?? ''} />
@@ -234,12 +237,61 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                                     <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                                 </dl>
-                            </aside>
+                            </div>
+
+                            {employment.length > 0 ? (
+                                <div>
+                                    <SectionHeader title={t("employmentHistory")} />
+                                    <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                        {employment.map((stint) => (
+                                            <li key={stint.id} className="px-6 py-4 xl:px-4">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    {stint.companyId ? (
+                                                        <Link
+                                                            href={`/records/companies/${stint.companyId}`}
+                                                            className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                                        >
+                                                            {stint.companyName ?? t("unknownCompany")}
+                                                        </Link>
+                                                    ) : (
+                                                        <span className="truncate text-sm font-medium text-foreground">
+                                                            {stint.companyName ?? t("unknownCompany")}
+                                                        </span>
+                                                    )}
+                                                    {stint.current ? (
+                                                        <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                            {t("current")}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                                {stint.title ? (
+                                                    <p className="mt-0.5 text-xs text-muted-foreground">{stint.title}</p>
+                                                ) : null}
+                                                <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                                                    {formatShortDate(stint.startedAt ?? undefined, locale)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale) : t("present")}
+                                                </p>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                </div>
+                            ) : null}
                         </RecordDetailSection>
 
+                        {ownsContact ? (
+                            <EngineEvaluationPanel
+                                kind="contact"
+                                id={contact.id}
+                                riskExcluded={contact.riskExcluded ?? false}
+                                introExcluded={contact.introExcluded ?? false}
+                                className="mt-0"
+                            />
+                        ) : null}
+                    </aside>
+
+                    <Rise delay={0.06} className="flex min-w-0 flex-col gap-8">
                         <RecordDetailSection recordKind="contact" section="metrics" aria-label={t("theirActivity")}>
                             <SectionHeader title={t("theirActivity")} />
-                            <div className="grid grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                                 <ContactStatCard
                                     label={t("activities")}
                                     value={activities.length}
@@ -276,57 +328,39 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 />
                             </div>
                         </RecordDetailSection>
-                    </div>
-                </Rise>
 
-                <Rise delay={0.08}>
-                    <RecordDetailSection recordKind="contact" section="activity">
-                        <SectionHeader title={t("activePipeline")} />
-                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                            {deals.length === 0 ? (
-                                <p className="px-6 py-6 text-sm text-muted-foreground">{t("noActiveDeals")}</p>
-                            ) : (
-                                <ul className="divide-y divide-border">
-                                    {deals.map((deal) => (
-                                        <li key={deal.id}>
-                                            <Link
-                                                href={`/records/deals/${deal.id}`}
-                                                className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-muted/60"
-                                            >
-                                                <span className="text-sm font-medium text-foreground">
-                                                    {deal.name}
-                                                </span>
-                                                <span className="text-sm text-muted-foreground">
-                                                    {formatCompactCurrency(deal.value, deal.currency, locale)}
-                                                </span>
-                                            </Link>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-                    </RecordDetailSection>
-                </Rise>
+                        <RecordDetailSection recordKind="contact" section="relationship">
+                            <RelationshipEvidencePanel evidence={evidence} className="mt-0" />
+                        </RecordDetailSection>
 
-                <Rise delay={0.1}>
-                    <RecordDetailSection recordKind="contact" section="relationship">
-                        <RelationshipEvidencePanel evidence={evidence} className="mt-0" />
-                        {ownsContact ? (
-                            <div className="mt-6">
-                                <EngineEvaluationPanel
-                                    kind="contact"
-                                    id={contact.id}
-                                    riskExcluded={contact.riskExcluded ?? false}
-                                    introExcluded={contact.introExcluded ?? false}
-                                />
+                        <RecordDetailSection recordKind="contact" section="activity">
+                            <SectionHeader title={t("activePipeline")} />
+                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                {deals.length === 0 ? (
+                                    <p className="px-6 py-6 text-sm text-muted-foreground">{t("noActiveDeals")}</p>
+                                ) : (
+                                    <ul className="divide-y divide-border">
+                                        {deals.map((deal) => (
+                                            <li key={deal.id}>
+                                                <Link
+                                                    href={`/records/deals/${deal.id}`}
+                                                    className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-muted/60"
+                                                >
+                                                    <span className="text-sm font-medium text-foreground">
+                                                        {deal.name}
+                                                    </span>
+                                                    <span className="text-sm text-muted-foreground">
+                                                        {formatCompactCurrency(deal.value, deal.currency, locale)}
+                                                    </span>
+                                                </Link>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
                             </div>
-                        ) : null}
-                    </RecordDetailSection>
-                </Rise>
+                        </RecordDetailSection>
 
-                <Rise delay={0.12}>
-                    <RecordDetailSection recordKind="contact" section="related" className="grid grid-cols-1 gap-8 md:grid-cols-2">
-                        <div>
+                        <RecordDetailSection recordKind="contact" section="related">
                             <SectionHeader title={t("connections")} />
                             <ContactConnections
                                 contactId={contact.id}
@@ -334,47 +368,11 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 initialConnections={connections}
                                 initialIntroPath={introPath}
                             />
-                        </div>
-                        {employment.length > 0 ? (
-                            <div>
-                                <SectionHeader title={t("employmentHistory")} />
-                                <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                    {employment.map((stint) => (
-                                        <li key={stint.id} className="px-6 py-4">
-                                            <div className="flex items-center justify-between gap-2">
-                                                {stint.companyId ? (
-                                                    <Link
-                                                        href={`/records/companies/${stint.companyId}`}
-                                                        className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
-                                                    >
-                                                        {stint.companyName ?? t("unknownCompany")}
-                                                    </Link>
-                                                ) : (
-                                                    <span className="truncate text-sm font-medium text-foreground">
-                                                        {stint.companyName ?? t("unknownCompany")}
-                                                    </span>
-                                                )}
-                                                {stint.current ? (
-                                                    <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
-                                                        {t("current")}
-                                                    </span>
-                                                ) : null}
-                                            </div>
-                                            {stint.title ? (
-                                                <p className="mt-0.5 text-xs text-muted-foreground">{stint.title}</p>
-                                            ) : null}
-                                            <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                                                {formatShortDate(stint.startedAt ?? undefined, locale)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale) : t("present")}
-                                            </p>
-                                        </li>
-                                    ))}
-                                </ol>
-                            </div>
-                        ) : null}
-                    </RecordDetailSection>
-                </Rise>
+                        </RecordDetailSection>
+                    </Rise>
+                </div>
 
-                <Rise delay={0.14}>
+                <Rise delay={0.12}>
                     <RecordDetailSection recordKind="contact" section="files">
                         <Attachments
                             entityType="person"
