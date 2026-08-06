@@ -303,8 +303,7 @@ export default async function DealPage({ params }: DealPageProps) {
                 </Rise>
 
                 <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
-                        <aside className="xl:sticky xl:top-16 xl:self-start">
-                            <div className="flex flex-col gap-6 xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto">
+                        <aside className="flex flex-col gap-6">
                             <RecordDetailSection recordKind="deal" section="profile" className="flex flex-col gap-6">
                                 <div>
                                     <SectionHeader title={t('details')} />
@@ -381,7 +380,6 @@ export default async function DealPage({ params }: DealPageProps) {
                                 riskExcluded={deal.riskExcluded ?? false}
                                 className="mt-0"
                             />
-                            </div>
                         </aside>
 
                         <Rise delay={0.06} className="flex min-w-0 flex-col gap-8">
