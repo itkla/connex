@@ -34,8 +34,7 @@ export default function DealDetailLoading() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
-                    <aside className="xl:sticky xl:top-16 xl:self-start">
-                        <div className="flex flex-col gap-6 xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto">
+                    <aside className="flex flex-col gap-6">
                         <div className="flex flex-col gap-6">
                             <div>
                                 <div className="mb-3 flex h-8 items-center px-6">
@@ -89,7 +88,6 @@ export default function DealDetailLoading() {
                                     <Skeleton className="h-5 w-9 rounded-full" />
                                 </div>
                             </div>
-                        </div>
                         </div>
                     </aside>
 
