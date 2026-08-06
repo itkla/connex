@@ -302,10 +302,9 @@ export default async function DealPage({ params }: DealPageProps) {
                     </RecordDetailSection>
                 </Rise>
 
-                <Rise delay={0.06}>
-                    <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
-                        <RecordDetailSection recordKind="deal" section="profile">
-                            <aside className="flex flex-col gap-6">
+                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
+                        <aside className="flex flex-col gap-6 xl:sticky xl:top-16 xl:max-h-[calc(100dvh-5rem)] xl:self-start xl:overflow-y-auto">
+                            <RecordDetailSection recordKind="deal" section="profile" className="flex flex-col gap-6">
                                 <div>
                                     <SectionHeader title={t('details')} />
                                     <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
@@ -321,10 +320,69 @@ export default async function DealPage({ params }: DealPageProps) {
                                     </dl>
                                 </div>
                                 <DealRiskPanel risk={risk} className="mt-0" />
-                            </aside>
-                        </RecordDetailSection>
+                            </RecordDetailSection>
 
-                        <div className="flex min-w-0 flex-col gap-8">
+                            <RecordDetailSection recordKind="deal" section="related">
+                                <SectionLabelWithTooltip
+                                    title={t('peopleOnThisDeal')}
+                                    tooltip={
+                                        <div className="flex flex-col gap-2">
+                                            <h2 className="text-sm font-medium">{t('peopleOnThisDeal')}</h2>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('peopleOnThisDealTooltipShort')}
+                                            </p>
+                                            <p>
+                                                {t('peopleOnThisDealTooltipLong')}
+                                            </p>
+                                        </div>
+                                    }
+                                />
+                                <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                    {dealPeople.length === 0 ? (
+                                        <p className="px-6 py-6 text-sm text-muted-foreground">
+                                            {t('noPeopleAssociated')}
+                                        </p>
+                                    ) : (
+                                        <ul className="divide-y divide-border">
+                                            {dealPeople.map(({ person, role }) => (
+                                                <li key={person.id}>
+                                                    <Link
+                                                        href={`/records/contacts/${person.id}`}
+                                                        className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-muted/60 xl:px-4"
+                                                    >
+                                                        <ContactAvatar contact={person} type="medium" />
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="truncate text-sm font-medium text-foreground">
+                                                                {person.name}
+                                                            </p>
+                                                            {person.title ? (
+                                                                <p className="truncate text-xs text-muted-foreground">
+                                                                    {person.title}
+                                                                </p>
+                                                            ) : null}
+                                                        </div>
+                                                        {role ? (
+                                                            <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                                {role}
+                                                            </span>
+                                                        ) : null}
+                                                    </Link>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                            </RecordDetailSection>
+
+                            <EngineEvaluationPanel
+                                kind="deal"
+                                id={deal.id}
+                                riskExcluded={deal.riskExcluded ?? false}
+                                className="mt-0"
+                            />
+                        </aside>
+
+                        <Rise delay={0.06} className="flex min-w-0 flex-col gap-8">
                             <RecordDetailSection
                                 recordKind="deal"
                                 section="metrics"
@@ -408,11 +466,6 @@ export default async function DealPage({ params }: DealPageProps) {
                                         className="min-w-0"
                                     />
                                 </div>
-                                <EngineEvaluationPanel
-                                    kind="deal"
-                                    id={deal.id}
-                                    riskExcluded={deal.riskExcluded ?? false}
-                                />
                             </RecordDetailSection>
 
                             <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-8">
@@ -438,65 +491,10 @@ export default async function DealPage({ params }: DealPageProps) {
 
                                 <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
                             </RecordDetailSection>
-                        </div>
+                        </Rise>
                     </div>
-                </Rise>
 
                 <Rise delay={0.12}>
-                    <RecordDetailSection recordKind="deal" section="related">
-                        <SectionLabelWithTooltip
-                            title={t('peopleOnThisDeal')}
-                            tooltip={
-                                <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">{t('peopleOnThisDeal')}</h2>
-                                    <p className="text-xs text-muted-foreground">
-                                        {t('peopleOnThisDealTooltipShort')}
-                                    </p>
-                                    <p>
-                                        {t('peopleOnThisDealTooltipLong')}
-                                    </p>
-                                </div>
-                            }
-                        />
-                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                            {dealPeople.length === 0 ? (
-                                <p className="px-6 py-6 text-sm text-muted-foreground">
-                                    {t('noPeopleAssociated')}
-                                </p>
-                            ) : (
-                                <ul className="divide-y divide-border">
-                                    {dealPeople.map(({ person, role }) => (
-                                        <li key={person.id}>
-                                            <Link
-                                                href={`/records/contacts/${person.id}`}
-                                                className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-muted/60"
-                                            >
-                                                <ContactAvatar contact={person} type="medium" />
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="truncate text-sm font-medium text-foreground">
-                                                        {person.name}
-                                                    </p>
-                                                    {person.title ? (
-                                                        <p className="truncate text-xs text-muted-foreground">
-                                                            {person.title}
-                                                        </p>
-                                                    ) : null}
-                                                </div>
-                                                {role ? (
-                                                    <span className="rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
-                                                        {role}
-                                                    </span>
-                                                ) : null}
-                                            </Link>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-                    </RecordDetailSection>
-                </Rise>
-
-                <Rise delay={0.14}>
                     <RecordDetailSection
                         recordKind="deal"
                         section="files"

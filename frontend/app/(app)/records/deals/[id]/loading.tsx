@@ -34,24 +34,60 @@ export default function DealDetailLoading() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
-                    <aside className="flex flex-col gap-6">
+                    <aside className="flex flex-col gap-6 xl:sticky xl:top-16 xl:max-h-[calc(100dvh-5rem)] xl:self-start xl:overflow-y-auto">
+                        <div className="flex flex-col gap-6">
+                            <div>
+                                <div className="mb-3 flex h-8 items-center px-6">
+                                    <Skeleton className="h-3 w-20" />
+                                </div>
+                                <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                    {Array.from({ length: 8 }).map((_, i) => (
+                                        <div key={i} className="flex items-center justify-between px-6 py-3">
+                                            <Skeleton className="h-3 w-24" />
+                                            <Skeleton className="h-3 w-20" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="grid gap-2">
+                                <Skeleton className="h-3 w-28" />
+                                <Skeleton className="h-12 w-full rounded-lg" />
+                                <Skeleton className="h-12 w-full rounded-lg" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="mb-3 flex h-8 items-center px-6">
+                                <Skeleton className="h-3 w-32" />
+                            </div>
+                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                <ul className="divide-y divide-border">
+                                    {Array.from({ length: 3 }).map((_, i) => (
+                                        <li key={i} className="flex items-center gap-3 px-6 py-3 xl:px-4">
+                                            <Skeleton className="size-12 shrink-0 rounded-full" />
+                                            <div className="min-w-0 flex-1 space-y-2">
+                                                <Skeleton className="h-3 w-28" />
+                                                <Skeleton className="h-3 w-20" />
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+
                         <div>
                             <div className="mb-3 flex h-8 items-center px-6">
                                 <Skeleton className="h-3 w-20" />
                             </div>
-                            <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                {Array.from({ length: 8 }).map((_, i) => (
-                                    <div key={i} className="flex items-center justify-between px-6 py-3">
-                                        <Skeleton className="h-3 w-24" />
-                                        <Skeleton className="h-3 w-20" />
+                            <div className="overflow-hidden rounded-2xl border border-border bg-card px-6 py-4">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="min-w-0 flex-1 space-y-2">
+                                        <Skeleton className="h-3 w-28" />
+                                        <Skeleton className="h-3 w-full" />
                                     </div>
-                                ))}
+                                    <Skeleton className="h-5 w-9 rounded-full" />
+                                </div>
                             </div>
-                        </div>
-                        <div className="grid gap-2">
-                            <Skeleton className="h-3 w-28" />
-                            <Skeleton className="h-12 w-full rounded-lg" />
-                            <Skeleton className="h-12 w-full rounded-lg" />
                         </div>
                     </aside>
 
@@ -116,26 +152,6 @@ export default function DealDetailLoading() {
                         </div>
                     </section>
                 </div>
-
-                <section>
-                    <div className="mb-3 flex h-8 items-center px-6">
-                        <Skeleton className="h-3 w-32" />
-                    </div>
-                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                        <ul className="divide-y divide-border">
-                            {Array.from({ length: 4 }).map((_, i) => (
-                                <li key={i} className="flex items-center gap-3 px-6 py-3">
-                                    <Skeleton className="size-10 shrink-0 rounded-full" />
-                                    <div className="min-w-0 flex-1 space-y-2">
-                                        <Skeleton className="h-3 w-40" />
-                                        <Skeleton className="h-3 w-24" />
-                                    </div>
-                                    <Skeleton className="h-4 w-16 rounded-full" />
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                </section>
 
                 <section className="grid grid-cols-1 gap-8 xl:grid-cols-2">
                     <div className="rounded-2xl border border-border bg-card p-4">
