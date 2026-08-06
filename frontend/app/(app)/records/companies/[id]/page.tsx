@@ -113,7 +113,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     const interactionUsers = relatedUsers.filter((user) => interactionUserIds.has(user.id));
 
     return (
-        <PageShell tier="reading">
+        <PageShell tier="wide">
                 <RecordStickyContext
                     anchorId="company-record-identity"
                     name={company.name}
@@ -124,12 +124,15 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                     <RecentRecordBridge type="company" id={company.id} label={company.name} />
                     <ActionRecordBridge type="company" id={company.id} label={company.name} />
                     <RecordDetailSection recordKind="company" section="identity">
-                        <header id="company-record-identity" className="flex flex-wrap items-center justify-between gap-6">
-                            <div className="flex items-center gap-6 py-8">
+                        <header
+                            id="company-record-identity"
+                            className="flex flex-col gap-6 py-4 sm:flex-row sm:items-end sm:justify-between"
+                        >
+                            <div className="flex min-w-0 items-center gap-6">
                                 <CompanyAvatar company={company} type="2xlarge" />
-                                <div className="flex flex-col gap-2">
+                                <div className="flex min-w-0 flex-col gap-3">
                                     <div className="flex flex-row flex-wrap items-center gap-3">
-                                        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
+                                        <h1 className="text-balance text-4xl font-extrabold tracking-tight text-foreground">
                                             {company.name}
                                         </h1>
                                         {evidence?.temperature ? (
@@ -191,86 +194,79 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex justify-start">
                         <CompanyActionsMenu company={company} />
                     </RecordDetailSection>
                 </Rise>
 
-                <Rise delay={0.06}>
-                    <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
+                    <aside className="flex flex-col gap-6">
                         <RecordDetailSection recordKind="company" section="profile">
-                            <aside>
-                                <SectionHeader title={t("profile")} />
-                                <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                    <InfoRow label={t("website")} value={company.website ?? ''} href={websiteUrl} />
-                                    <InfoRow label={t("phone")} value={company.phone ?? ''} />
-                                    <InfoRow label={t("address")} value={company.address ?? ''} />
-                                    <InfoRow label={t("industry")} value={company.industry ?? ''} />
-                                    <InfoRow
-                                        label={t("owner")}
-                                        value={company.ownerId != null
-                                            ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
-                                            : t("ownerUnassigned")}
+                            <SectionHeader title={t("profile")} />
+                            <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                <InfoRow label={t("website")} value={company.website ?? ''} href={websiteUrl} />
+                                <InfoRow label={t("phone")} value={company.phone ?? ''} />
+                                <InfoRow label={t("address")} value={company.address ?? ''} />
+                                <InfoRow label={t("industry")} value={company.industry ?? ''} />
+                                <InfoRow
+                                    label={t("owner")}
+                                    value={company.ownerId != null
+                                        ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
+                                        : t("ownerUnassigned")}
+                                />
+                                <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
+                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
+                                <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
+                            </dl>
+                        </RecordDetailSection>
+                    </aside>
+
+                    <Rise delay={0.06} className="flex min-w-0 flex-col gap-8">
+                        <RecordDetailSection recordKind="company" section="metrics" aria-label={t("theirActivity")} className="flex flex-col gap-6">
+                            <div>
+                                <SectionHeader title={t("theirActivity")} />
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                    <ContactStatCard
+                                        label={t("activities")}
+                                        value={engagement.numActivities}
+                                        subtitle={engagement.numNotes > 0 ? t("notesSubtitle", { count: engagement.numNotes }) : undefined}
+                                        viewHref={`/activity/all?companyId=${company.id}`}
                                     />
-                                    <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
-                                    <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
-                                    <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
-                                </dl>
-                            </aside>
-                        </RecordDetailSection>
-
-                        <RecordDetailSection recordKind="company" section="metrics" aria-label={t("theirActivity")}>
-                            <SectionHeader title={t("theirActivity")} />
-                            <div className="grid grid-cols-3 gap-3">
-                                <ContactStatCard
-                                    label={t("activities")}
-                                    value={engagement.numActivities}
-                                    subtitle={engagement.numNotes > 0 ? t("notesSubtitle", { count: engagement.numNotes }) : undefined}
-                                    viewHref={`/activity/all?companyId=${company.id}`}
-                                />
-                                <ContactStatCard
-                                    label={t("tasks")}
-                                    value={engagement.numTasks}
-                                    subtitle={engagement.numTasks > 0 ? t("openTasksSubtitle", { count: engagement.openTasks }) : undefined}
-                                    viewHref={`/activity/tasks?companyId=${company.id}`}
-                                />
-                                <ContactStatCard
-                                    label={t("deals")}
-                                    value={engagement.numDeals}
-                                    subtitle={engagement.numDeals > 0 ? t("dealsSubtitle", { count: engagement.numDeals }) : undefined}
-                                    viewHref={`/activity/deals?companyId=${company.id}`}
-                                />
+                                    <ContactStatCard
+                                        label={t("tasks")}
+                                        value={engagement.numTasks}
+                                        subtitle={engagement.numTasks > 0 ? t("openTasksSubtitle", { count: engagement.openTasks }) : undefined}
+                                        viewHref={`/activity/tasks?companyId=${company.id}`}
+                                    />
+                                    <ContactStatCard
+                                        label={t("deals")}
+                                        value={engagement.numDeals}
+                                        subtitle={engagement.numDeals > 0 ? t("dealsSubtitle", { count: engagement.numDeals }) : undefined}
+                                        viewHref={`/activity/deals?companyId=${company.id}`}
+                                    />
+                                </div>
                             </div>
 
-                            <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
-                                <EngagementSparkline data={engagement.weeklyEngagement} />
-                                <RevenueTiles pastRevenue={engagement.pastRevenue} projectedRevenue={engagement.projectedRevenue} currency={engagement.currency} />
-                            </div>
+                            <RevenueTiles pastRevenue={engagement.pastRevenue} projectedRevenue={engagement.projectedRevenue} currency={engagement.currency} />
                         </RecordDetailSection>
-                    </div>
-                </Rise>
 
-                <Rise delay={0.08}>
-                    <RecordDetailSection recordKind="company" section="activity">
-                        <PipelineCard deals={deals} render="active" />
-                    </RecordDetailSection>
-                </Rise>
+                        <RecordDetailSection recordKind="company" section="relationship">
+                            <RelationshipEvidencePanel evidence={evidence} className="mt-0" />
+                        </RecordDetailSection>
 
-                <Rise delay={0.1}>
-                    <RecordDetailSection recordKind="company" section="relationship">
-                        <RelationshipEvidencePanel evidence={evidence} className="mt-0" />
-                    </RecordDetailSection>
-                </Rise>
+                        <RecordDetailSection recordKind="company" section="activity">
+                            <PipelineCard deals={deals} render="active" />
+                        </RecordDetailSection>
+
+                        <RecordDetailSection recordKind="company" section="related">
+                            <Suspense fallback={<Skeleton className="h-40 w-full rounded-2xl" />}>
+                                <ContactsGrid contacts={people} company={company} allTags={allTags} />
+                            </Suspense>
+                        </RecordDetailSection>
+                    </Rise>
+                </div>
 
                 <Rise delay={0.12}>
-                    <RecordDetailSection recordKind="company" section="related">
-                        <Suspense fallback={<Skeleton className="h-40 w-full rounded-2xl" />}>
-                            <ContactsGrid contacts={people} company={company} allTags={allTags} />
-                        </Suspense>
-                    </RecordDetailSection>
-                </Rise>
-
-                <Rise delay={0.14}>
                     <RecordDetailSection recordKind="company" section="files">
                         <Attachments
                             entityType="company"
@@ -281,20 +277,23 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                 </Rise>
 
                 <Rise delay={0.16}>
-                    <RecordDetailSection recordKind="company" section="history">
-                        <SectionHeader title={t("timeline")} />
-                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                            <Timeline
-                                tasks={tasks}
-                                activities={activities}
-                                notes={notes}
-                                users={relatedUsers}
-                                persons={people}
-                                deals={deals}
-                                currentUserId={currentUser.id}
-                                companyId={company.id}
-                                limit={100}
-                            />
+                    <RecordDetailSection recordKind="company" section="history" className="flex flex-col gap-8">
+                        <EngagementSparkline data={engagement.weeklyEngagement} />
+                        <div>
+                            <SectionHeader title={t("timeline")} />
+                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                <Timeline
+                                    tasks={tasks}
+                                    activities={activities}
+                                    notes={notes}
+                                    users={relatedUsers}
+                                    persons={people}
+                                    deals={deals}
+                                    currentUserId={currentUser.id}
+                                    companyId={company.id}
+                                    limit={100}
+                                />
+                            </div>
                         </div>
                     </RecordDetailSection>
                 </Rise>

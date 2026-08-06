@@ -1,7 +1,10 @@
 /**
  * Canonical long-form record-detail section order from #843.
- * Domain adapters choose which slots to fill; Contact/Company keep activity before relationship,
- * while Deal keeps stakeholders and insights in the left rail beside metrics and AI bands.
+ * Domain adapters choose which slots to fill. Relationship intelligence sits before activity/work.
+ * Deal keeps compact stakeholder rows in the left rail beside profile before metrics. Contact and
+ * Company keep interactive people surfaces (`related`) in the main column after pipeline work
+ * because warm-path controls and the contacts card grid need width.
+ * Aggregate engagement charts belong in `history`, not above decision bands.
  */
 export const RECORD_DETAIL_SECTION_ORDER = [
     'identity',
@@ -9,8 +12,8 @@ export const RECORD_DETAIL_SECTION_ORDER = [
     'notifications',
     'profile',
     'metrics',
-    'activity',
     'relationship',
+    'activity',
     'related',
     'files',
     'history',
