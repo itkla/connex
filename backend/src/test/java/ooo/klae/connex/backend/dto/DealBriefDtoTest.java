@@ -20,11 +20,11 @@ class DealBriefDtoTest {
                 new DealBriefDto.Section(
                         "Who they are",
                         "Acme Corp. renewal.",
-                        List.of(new DealBriefDto.Citation("deal", DEAL_ID))),
+                        List.of(new DealBriefDto.Citation("deal.0", "deal", DEAL_ID))),
                 new DealBriefDto.Section(
                         "Next step",
                         "Call the champion.",
-                        List.of(new DealBriefDto.Citation("person", 73))));
+                        List.of(new DealBriefDto.Citation("person.0", "person", 73))));
 
         DealBriefDto result = DealBriefDto.of(DEAL_ID, sections, GENERATED_AT, 3, true);
 
@@ -61,5 +61,11 @@ class DealBriefDtoTest {
     void unavailable_rejectsUnsupportedReason() {
         assertThrows(IllegalArgumentException.class, () -> DealBriefDto.unavailable(DEAL_ID, "not_at_risk"));
         assertThrows(IllegalArgumentException.class, () -> DealBriefDto.unavailable(DEAL_ID, "unknown"));
+    }
+
+    @Test
+    void citation_rejectsBlankSourceId() {
+        assertThrows(IllegalArgumentException.class, () -> new DealBriefDto.Citation(" ", "deal", DEAL_ID));
+        assertThrows(NullPointerException.class, () -> new DealBriefDto.Citation(null, "deal", DEAL_ID));
     }
 }

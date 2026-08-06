@@ -200,8 +200,11 @@ public class DealBriefService {
                         section.title(),
                         section.body(),
                         section.sourceIds().stream()
-                                .map(sourceRegistry::get)
-                                .map(source -> new DealBriefDto.Citation(source.kind(), source.id()))
+                                .map(positionalKey -> {
+                                    DealBriefSource source = sourceRegistry.get(positionalKey);
+                                    return new DealBriefDto.Citation(
+                                            positionalKey, source.kind(), source.id());
+                                })
                                 .toList()))
                 .toList();
     }

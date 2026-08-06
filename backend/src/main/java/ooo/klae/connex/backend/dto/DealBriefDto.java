@@ -101,12 +101,17 @@ public class DealBriefDto {
 
     /**
      * One translated deal-brief citation.
+     * @param sourceId positional prompt id (e.g. {@code note.0}) that may appear in section prose
      * @param kind stable record kind
      * @param id real workspace-scoped record id
      */
-    public record Citation(String kind, int id) {
+    public record Citation(String sourceId, String kind, int id) {
 
         public Citation {
+            Objects.requireNonNull(sourceId, "sourceId");
+            if (sourceId.isBlank()) {
+                throw new IllegalArgumentException("Citation sourceId must be non-blank");
+            }
             Objects.requireNonNull(kind, "kind");
             if (id <= 0) {
                 throw new IllegalArgumentException("Citation id must be positive");

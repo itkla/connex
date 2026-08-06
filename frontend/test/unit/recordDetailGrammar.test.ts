@@ -111,6 +111,8 @@ describe('record detail grammar', () => {
         const people = source.indexOf("t('peopleOnThisDeal')");
         const brief = source.indexOf('<DealBriefPanel');
         const evaluation = source.indexOf('<EngineEvaluationPanel');
+        const sparkline = source.indexOf('<EngagementSparkline');
+        const timeline = source.indexOf('<Timeline');
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
 
         expect(profile).toBeGreaterThan(-1);
@@ -130,10 +132,13 @@ describe('record detail grammar', () => {
         expect(evaluation).toBeLessThan(metrics);
         expect(brief).toBeGreaterThan(metrics);
         expect(brief).toBeLessThan(activity);
+        expect(sparkline).toBeGreaterThan(files);
+        expect(sparkline).toBeLessThan(timeline);
         expect(source).not.toContain('xl:sticky');
         expect(source.indexOf('<DealRiskPanel', risk + 1)).toBe(-1);
         expect(source.indexOf('<DealBriefPanel', brief + 1)).toBe(-1);
         expect(source.indexOf('<EngineEvaluationPanel', evaluation + 1)).toBe(-1);
+        expect(source.indexOf('<EngagementSparkline', sparkline + 1)).toBe(-1);
         expect(source).toContain('tier="wide"');
     });
 
@@ -147,8 +152,12 @@ describe('record detail grammar', () => {
         expect(source).not.toContain('xl:sticky');
         const peopleSkeleton = source.indexOf('size-12 shrink-0 rounded-full');
         const filesSkeleton = source.indexOf('xl:grid-cols-2');
+        const engagementSkeleton = source.indexOf('md:grid-cols-3');
+        const timelineSkeleton = source.lastIndexOf('size-8 shrink-0 rounded-full');
         expect(peopleSkeleton).toBeGreaterThan(-1);
         expect(filesSkeleton).toBeGreaterThan(peopleSkeleton);
+        expect(engagementSkeleton).toBeGreaterThan(filesSkeleton);
+        expect(timelineSkeleton).toBeGreaterThan(engagementSkeleton);
     });
 
     it('contact and company loading skeletons match the wide left-rail canvas', () => {

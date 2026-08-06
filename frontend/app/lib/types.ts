@@ -395,8 +395,10 @@ export type DealBriefCitationKind = 'deal' | 'person' | 'act' | 'note' | 'task';
 /**
  * A source record that informed a brief section — a real, in-context CRM record. Structurally
  * grounded (never fabricated), but not a semantic claim that the section is proven by this record.
+ * {@code sourceId} is the positional prompt token (e.g. {@code note.0}) that may appear in prose.
  */
 export type DealBriefCitation = {
+    sourceId: string;
     kind: DealBriefCitationKind;
     id: number;
 };
