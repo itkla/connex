@@ -22,17 +22,44 @@ public class WorkspaceRequestResolver {
         if (fromHeader != null) {
             return fromHeader;
         }
-        if (request.getCookies() != null) {
-            for (Cookie cookie : request.getCookies()) {
-                if (WorkspaceCookie.NAME.equals(cookie.getName())) {
-                    Integer fromCookie = parseId(cookie.getValue());
-                    if (fromCookie != null) {
-                        return fromCookie;
-                    }
+        Integer fromCookie = cookieId(request);
+        if (fromCookie != null) {
+            return fromCookie;
+        }
+        return workspaceService.defaultWorkspaceIdFor(userId);
+    }
+
+    /**
+     * Whether a failed membership on {@code candidate} is the stale browser/SSR pin
+     * that should heal to the caller's next workspace (#1108), rather than an explicit
+     * foreign {@code X-Workspace-Id} that must stay 403.
+     *
+     * <p>The SPA mirrors {@code connex_workspace} into the header, so a matching stale
+     * pair (or cookie-only SSR) is the revocation case. A header that is absent from
+     * the cookie, or that disagrees with it, is treated as an intentional pin.
+     */
+    public boolean isStaleWorkspacePin(HttpServletRequest request, int candidate) {
+        Integer fromCookie = cookieId(request);
+        if (fromCookie == null || fromCookie != candidate) {
+            return false;
+        }
+        Integer fromHeader = parseId(request.getHeader(HEADER));
+        return fromHeader == null || fromHeader.equals(fromCookie);
+    }
+
+    private static Integer cookieId(HttpServletRequest request) {
+        if (request.getCookies() == null) {
+            return null;
+        }
+        for (Cookie cookie : request.getCookies()) {
+            if (WorkspaceCookie.NAME.equals(cookie.getName())) {
+                Integer fromCookie = parseId(cookie.getValue());
+                if (fromCookie != null) {
+                    return fromCookie;
                 }
             }
         }
-        return workspaceService.defaultWorkspaceIdFor(userId);
+        return null;
     }
 
     private static Integer parseId(String value) {

@@ -19,8 +19,16 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * Resolves the active workspace once per authenticated request and stores it in
  * {@link TenantContext}. Precedence: {@code X-Workspace-Id} header, then the
  * {@code connex_workspace} cookie, then the user's remembered/first membership.
- * The candidate is always re-validated against membership (403 if not a member),
- * so a forged header or cookie cannot grant access.
+ * The candidate is always re-validated against membership, so a forged header or
+ * cookie cannot grant access to a workspace the caller does not belong to.
+ *
+ * <p>A stale matching cookie/header pair — or a cookie-only pin — that fails
+ * membership after the caller was removed from that workspace falls back to
+ * {@link WorkspaceService#defaultWorkspaceIdFor(int)} and rewrites or clears the
+ * workspace cookie so the next request stops targeting the revoked id (#1108).
+ * An explicit foreign {@code X-Workspace-Id} (header without that cookie, or
+ * disagreeing with it) still returns 403 when the caller is not a member.
+ * Only a membership the caller still holds is ever installed in {@link TenantContext}.
  *
  * <p>{@link TenantContext} is a {@code ThreadLocal} on a pooled container thread,
  * so the scope's teardown is load-bearing for tenant isolation (#988). Two rules
@@ -51,6 +59,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     private final TenantContext tenantContext;
     private final TenantCatalogResolver tenantCatalogResolver;
     private final WorkspaceRequestResolver workspaceRequestResolver;
+    private final WorkspaceCookie workspaceCookie;
 
     /**
      * Discards any scope left on this pooled thread, then resolves the request's own.
@@ -65,18 +74,34 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         }
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !(auth.getPrincipal() instanceof User user)) {
-            return true; // unauthenticated; permitAll endpoints, scoped ones fail closed downstream
+            return true;
         }
 
         Integer candidate = workspaceRequestResolver.resolve(request, user.getId());
         if (candidate == null) {
-            return true; // user belongs to no workspace yet (onboarding); leave unresolved
+            return true;
         }
 
         String role = workspaceService.getRole(candidate, user.getId());
         if (role == null) {
-            throw new ForbiddenException("Not a member of workspace " + candidate);
+            if (!workspaceRequestResolver.isStaleWorkspacePin(request, candidate)) {
+                throw new ForbiddenException("Not a member of workspace " + candidate);
+            }
+            Integer fallback = workspaceService.defaultWorkspaceIdFor(user.getId());
+            if (fallback == null) {
+                workspaceCookie.clear(response);
+                return true;
+            }
+            workspaceService.rememberActive(user.getId(), fallback);
+            workspaceCookie.set(response, fallback);
+            candidate = fallback;
+            role = workspaceService.getRole(candidate, user.getId());
+            if (role == null) {
+                workspaceCookie.clear(response);
+                return true;
+            }
         }
+
         int orgId = workspaceService.getOrgId(candidate);
         String catalog = tenantCatalogResolver.resolveCatalog(orgId);
         tenantContext.set(candidate, orgId, user.getId(), role, catalog);

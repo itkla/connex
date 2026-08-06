@@ -4,7 +4,6 @@ import type { NextRequest } from 'next/server';
 import { isProtectedPath } from '@/app/lib/protectedRoutes';
 
 const SESSION_COOKIE = 'JSESSIONID';
-const WORKSPACE_COOKIE = 'connex_workspace';
 
 const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
     '/auth/register',
@@ -16,17 +15,16 @@ const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
 export function proxy(request: NextRequest) {
     const { pathname, search, searchParams } = request.nextUrl;
     const hasSession = request.cookies.has(SESSION_COOKIE);
-    const hasWorkspace = request.cookies.has(WORKSPACE_COOKIE);
 
-    // Onboarding (create a workspace): session required; skip it once a workspace exists.
+    // Onboarding needs a session but must stay reachable even with a leftover
+    // connex_workspace cookie: after involuntary membership removal that cookie
+    // can still name a workspace the caller no longer belongs to (#1108). Bouncing
+    // to /dashboard here would loop with the app shell's empty-membership redirect.
     if (pathname === '/onboarding') {
         if (!hasSession) {
             const loginUrl = new URL('/auth/login', request.url);
             loginUrl.searchParams.set('redirect', pathname);
             return NextResponse.redirect(loginUrl);
-        }
-        if (hasWorkspace) {
-            return NextResponse.redirect(new URL('/dashboard', request.url));
         }
         return NextResponse.next();
     }

@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -31,6 +33,7 @@ class TenantResolutionInterceptorTest {
     private final TenantContext tenantContext = mock(TenantContext.class);
     private final TenantCatalogResolver catalogResolver = mock(TenantCatalogResolver.class);
     private final WorkspaceRequestResolver requestResolver = mock(WorkspaceRequestResolver.class);
+    private final WorkspaceCookie workspaceCookie = mock(WorkspaceCookie.class);
     private final HttpServletResponse response = mock(HttpServletResponse.class);
     private final Object handler = new Object();
     private final TenantContext liveContext = new TenantContext();
@@ -44,12 +47,14 @@ class TenantResolutionInterceptorTest {
             workspaceService,
             tenantContext,
             catalogResolver,
-            requestResolver);
+            requestResolver,
+            workspaceCookie);
         liveInterceptor = new TenantResolutionInterceptor(
             workspaceService,
             liveContext,
             catalogResolver,
-            requestResolver);
+            requestResolver,
+            workspaceCookie);
         User member = new User();
         member.setId(7);
         authenticateAs(member);
@@ -67,7 +72,7 @@ class TenantResolutionInterceptorTest {
         assertTrue(preHandle("DELETE", "/api/orgs/3/workspaces/5"));
         assertTrue(preHandle("DELETE", "/api/orgs/3"));
 
-        verifyNoInteractions(requestResolver, workspaceService, catalogResolver);
+        verifyNoInteractions(requestResolver, workspaceService, catalogResolver, workspaceCookie);
         verify(tenantContext, times(3)).clear();
         verifyNoMoreInteractions(tenantContext);
     }
@@ -160,6 +165,77 @@ class TenantResolutionInterceptorTest {
         assertTrue(preHandle(liveInterceptor, "GET", "/api/companies"));
 
         assertFalse(liveContext.isResolved());
+    }
+
+    @Test
+    void revokedMembershipFallsBackToNextWorkspaceAndHealsTheCookie() {
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(requestResolver.isStaleWorkspacePin(any(), eq(11))).thenReturn(true);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+        when(workspaceService.getRole(19, 7)).thenReturn("member");
+        when(workspaceService.getOrgId(19)).thenReturn(3);
+        when(catalogResolver.resolveCatalog(3)).thenReturn(null);
+
+        assertTrue(preHandle(liveInterceptor, "GET", "/api/workspaces"));
+
+        assertTrue(liveContext.isResolved());
+        assertEquals(19, liveContext.getWorkspaceId());
+        assertEquals("member", liveContext.getRole());
+        verify(workspaceService).rememberActive(7, 19);
+        verify(workspaceCookie).set(response, 19);
+        verify(workspaceCookie, never()).clear(response);
+    }
+
+    @Test
+    void revokedMembershipWithNoRemainingWorkspaceClearsTheCookieAndStaysUnresolved() {
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(requestResolver.isStaleWorkspacePin(any(), eq(11))).thenReturn(true);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(null);
+
+        assertTrue(preHandle(liveInterceptor, "GET", "/api/workspaces"));
+
+        assertFalse(liveContext.isResolved());
+        verify(workspaceCookie).clear(response);
+        verify(workspaceCookie, never()).set(any(), anyInt());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+    }
+
+    @Test
+    void explicitForeignWorkspacePinStillReturnsForbidden() {
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(99);
+        when(requestResolver.isStaleWorkspacePin(any(), eq(99))).thenReturn(false);
+        when(workspaceService.getRole(99, 7)).thenReturn(null);
+
+        try {
+            preHandle(liveInterceptor, "GET", "/api/companies");
+            throw new AssertionError("expected ForbiddenException");
+        } catch (ooo.klae.connex.backend.exceptions.ForbiddenException exception) {
+            assertEquals("Not a member of workspace 99", exception.getMessage());
+        }
+
+        assertFalse(liveContext.isResolved());
+        verify(workspaceCookie, never()).set(any(), anyInt());
+        verify(workspaceCookie, never()).clear(response);
+        verify(workspaceService, never()).defaultWorkspaceIdFor(anyInt());
+    }
+
+    @Test
+    void forgedNonMemberCandidateNeverInstallsThatWorkspace() {
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(99);
+        when(requestResolver.isStaleWorkspacePin(any(), eq(99))).thenReturn(true);
+        when(workspaceService.getRole(99, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+        when(workspaceService.getRole(19, 7)).thenReturn("owner");
+        when(workspaceService.getOrgId(19)).thenReturn(3);
+        when(catalogResolver.resolveCatalog(3)).thenReturn(null);
+
+        assertTrue(preHandle(liveInterceptor, "GET", "/api/companies"));
+
+        assertEquals(19, liveContext.getWorkspaceId());
+        verify(workspaceService, never()).getOrgId(99);
+        verify(workspaceCookie).set(response, 19);
     }
 
     private void stubResolutionFor(int userId, int workspaceId) {
