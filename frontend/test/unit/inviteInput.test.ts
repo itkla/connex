@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseInviteInput } from "@/app/lib/inviteInput";
 
-const ONBOARDING_PAGE = "app/onboarding/page.tsx";
+const ONBOARDING_FORM = "app/onboarding/OnboardingForm.tsx";
 const INVITE_PAGE = "app/invite/[token]/page.tsx";
 
 const EMAILED_TOKEN = "emailed-invite-token_for_parser_tests_000001";
@@ -133,7 +133,7 @@ describe("parseInviteInput", () => {
 
 describe("the onboarding join box", () => {
     it("parses the pasted value instead of hardcoding the emailed marker", () => {
-        const page = source(ONBOARDING_PAGE);
+        const page = source(ONBOARDING_FORM);
 
         expect(page).toContain("parseInviteInput(");
         expect(page).not.toContain('const marker = "/invite/"');
