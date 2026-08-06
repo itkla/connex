@@ -127,6 +127,8 @@ for (const locale of ["en", "ja"] as const) {
             message(locale, "records", "RelationshipEvidence.noHistory"),
         );
         await expect(page.getByText(importSubject).first()).toBeVisible();
+        await page.getByRole("button", { name: "Close" }).click();
+        await expect(evidence).toBeHidden();
 
         await page.getByRole("button", {
             name: message(locale, "contacts", "ContactsNewActivityDialog.triggerSr"),
