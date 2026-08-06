@@ -109,6 +109,13 @@ for (const locale of ["en", "ja"] as const) {
         )).toBeVisible();
 
         await page.goto(`/records/contacts/${target.id}`);
+        await page.getByRole("button", {
+            name: new RegExp(
+                message(locale, "records", "RelationshipEvidence.openEvidenceNamed")
+                    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+                    .replace("\\{band\\}", ".+"),
+            ),
+        }).click();
         const evidence = page.getByRole("region", {
             name: message(locale, "records", "RelationshipEvidence.title"),
         });
@@ -120,6 +127,8 @@ for (const locale of ["en", "ja"] as const) {
             message(locale, "records", "RelationshipEvidence.noHistory"),
         );
         await expect(page.getByText(importSubject).first()).toBeVisible();
+        await page.getByRole("button", { name: "Close" }).click();
+        await expect(evidence).toBeHidden();
 
         await page.getByRole("button", {
             name: message(locale, "contacts", "ContactsNewActivityDialog.triggerSr"),

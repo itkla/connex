@@ -13,10 +13,11 @@ export default function ContactPageLoading() {
                                 <Skeleton className="h-6 w-16 rounded-full" />
                                 <Skeleton className="h-6 w-16 rounded-full" />
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <Skeleton className="h-7 w-28 rounded-md" />
-                                <Skeleton className="h-7 w-32 rounded-md" />
-                            </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <Skeleton className="h-7 w-28 rounded-md" />
+                                    <Skeleton className="h-7 w-32 rounded-md" />
+                                    <Skeleton className="h-6 w-16 rounded-full" />
+                                </div>
                         </div>
                     </div>
 
@@ -109,14 +110,6 @@ export default function ContactPageLoading() {
                                     </div>
                                 ))}
                             </div>
-                        </div>
-
-                        <div className="overflow-hidden rounded-2xl border border-border bg-card px-5 py-5">
-                            <div className="flex items-center justify-between gap-4">
-                                <Skeleton className="h-3 w-36" />
-                                <Skeleton className="h-6 w-16 rounded-full" />
-                            </div>
-                            <Skeleton className="mt-4 h-4 w-2/3" />
                         </div>
 
                         <div>
