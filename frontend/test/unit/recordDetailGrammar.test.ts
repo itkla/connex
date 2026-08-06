@@ -87,6 +87,7 @@ describe('record detail grammar', () => {
         const brief = source.indexOf('<DealBriefPanel');
         const evaluation = source.indexOf('<EngineEvaluationPanel');
         const stickyRail = source.indexOf('xl:sticky xl:top-16');
+        const stickyOverflowInner = source.indexOf('xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto');
         const stickyGrid = source.lastIndexOf('grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]', stickyRail);
         const riseAroundSticky = source.lastIndexOf('<Rise', stickyRail);
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
@@ -110,6 +111,7 @@ describe('record detail grammar', () => {
         expect(brief).toBeLessThan(activity);
         expect(stickyRail).toBeGreaterThan(-1);
         expect(stickyRail).toBeLessThan(files);
+        expect(stickyOverflowInner).toBeGreaterThan(stickyRail);
         expect(stickyGrid).toBeGreaterThan(-1);
         expect(riseAroundSticky).toBeLessThan(stickyGrid);
         expect(source.indexOf('<DealRiskPanel', risk + 1)).toBe(-1);
