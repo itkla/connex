@@ -18,7 +18,7 @@ import ContactActionsMenu from "@/app/components/records/contacts/ContactActions
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
 import ContactConnections from "@/app/components/records/contacts/ContactConnections";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
-import ContactTemperatureChip from "@/app/components/records/contacts/ContactTemperatureChip";
+import TemperatureEvidenceChip from "@/app/components/records/TemperatureEvidenceChip";
 import NewActivityDialog from "@/app/components/records/contacts/NewActivityDialog";
 import NewTaskDialog from "@/app/components/records/contacts/NewTaskDialog";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
@@ -149,7 +149,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                             </>
                                         ) : null}
                                         {evidence ? (
-                                            <ContactTemperatureChip evidence={evidence} />
+                                            <TemperatureEvidenceChip evidence={evidence} />
                                         ) : null}
                                     </h3>
                                 </div>

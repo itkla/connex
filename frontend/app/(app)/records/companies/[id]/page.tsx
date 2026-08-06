@@ -45,9 +45,7 @@ import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
-import RelationshipEvidencePanel from "@/app/components/records/RelationshipEvidencePanel";
-import RecordStickyContext from "@/app/components/records/RecordStickyContext";
-import TemperaturePill from "@/app/components/records/TemperaturePill";
+import TemperatureEvidenceChip from "@/app/components/records/TemperatureEvidenceChip";
 
 type CompanyPageProps = {
     params: Promise<{ id: number }>;
@@ -114,11 +112,6 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
 
     return (
         <PageShell tier="wide">
-                <RecordStickyContext
-                    anchorId="company-record-identity"
-                    name={company.name}
-                    temperature={evidence?.temperature}
-                />
                 <Rise>
                     <CrumbLabel value={company.name} />
                     <RecentRecordBridge type="company" id={company.id} label={company.name} />
@@ -135,9 +128,6 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         <h1 className="text-balance text-4xl font-extrabold tracking-tight text-foreground">
                                             {company.name}
                                         </h1>
-                                        {evidence?.temperature ? (
-                                            <TemperaturePill temp={evidence.temperature} />
-                                        ) : null}
                                         <TagEditor
                                             companyId={company.id}
                                             currentTags={companyTags}
@@ -152,6 +142,9 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                             >
                                                 {company.industry}
                                             </Link>
+                                        ) : null}
+                                        {evidence ? (
+                                            <TemperatureEvidenceChip evidence={evidence} />
                                         ) : null}
                                     </h3>
                                 </div>
@@ -248,10 +241,6 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                             </div>
 
                             <RevenueTiles pastRevenue={engagement.pastRevenue} projectedRevenue={engagement.projectedRevenue} currency={engagement.currency} />
-                        </RecordDetailSection>
-
-                        <RecordDetailSection recordKind="company" section="relationship">
-                            <RelationshipEvidencePanel evidence={evidence} className="mt-0" />
                         </RecordDetailSection>
 
                         <RecordDetailSection recordKind="company" section="activity">
