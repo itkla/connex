@@ -88,8 +88,9 @@ public class CustomFieldDefinitionService {
      * This is the only ungated read on the catalog, and it is ungated rather than carrying its own
      * permission on purpose: a grantable read permission would be absent from custom roles and
      * would silently strip columns from the very members this serves. Access is still bounded —
-     * {@code TenantResolutionInterceptor} refuses a caller who is not a member of the resolved
-     * workspace, and the query is workspace-scoped like every other.
+     * {@code TenantResolutionInterceptor} only installs a workspace the caller belongs to
+     * (falling back from a stale candidate rather than granting foreign access), and the query
+     * is workspace-scoped like every other.
      *
      * The projection, not the caller, is what keeps this safe: the mapper selects only the five
      * columns below, so a field's data classification never leaves the database on this path, and

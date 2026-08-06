@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.tenant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,6 +61,26 @@ class WorkspaceRequestResolverTest {
         when(workspaceService.defaultWorkspaceIdFor(9)).thenReturn(31);
 
         assertEquals(31, resolver.resolve(request, 9));
+    }
+
+    @Test
+    void matchingStaleHeaderAndCookieAreRecognizedAsHealable() {
+        WorkspaceRequestResolver resolver = new WorkspaceRequestResolver(workspaceService);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Workspace-Id", "11");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, "11"));
+
+        assertTrue(resolver.isStaleWorkspacePin(request, 11));
+        assertFalse(resolver.isStaleWorkspacePin(request, 19));
+    }
+
+    @Test
+    void headerOnlyForeignPinIsNotHealable() {
+        WorkspaceRequestResolver resolver = new WorkspaceRequestResolver(workspaceService);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Workspace-Id", "99");
+
+        assertFalse(resolver.isStaleWorkspacePin(request, 99));
     }
 
     @Test

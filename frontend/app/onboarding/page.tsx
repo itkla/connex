@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
 
-import { ApiError, createWorkspace, logout } from "@/app/lib/api";
+import { ApiError, createWorkspace, getMyWorkspaces, logout } from "@/app/lib/api";
 import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -17,9 +17,29 @@ export default function OnboardingPage() {
     const t = useTranslations("Onboarding");
     const router = useRouter();
     const reduce = useReducedMotion();
+    const [ready, setReady] = useState(false);
     const [name, setName] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [joinValue, setJoinValue] = useState("");
+
+    useEffect(() => {
+        let cancelled = false;
+        void getMyWorkspaces()
+            .then((selection) => {
+                if (cancelled) return;
+                if (selection.workspaces.length > 0) {
+                    router.replace("/dashboard");
+                    return;
+                }
+                setReady(true);
+            })
+            .catch(() => {
+                if (!cancelled) setReady(true);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [router]);
 
     const enter = reduce
         ? { initial: false as const }
@@ -67,6 +87,10 @@ export default function OnboardingPage() {
         }
         router.replace("/auth/login");
         router.refresh();
+    }
+
+    if (!ready) {
+        return <div className="min-h-dvh w-full bg-white" aria-busy="true" />;
     }
 
     return (
