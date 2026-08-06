@@ -72,6 +72,13 @@ test.describe("records browse and peek", () => {
         await expect(contactEvidence.getByText(/^Calculated /)).toBeVisible();
 
         await page.goto(`/records/companies/${fixture.companies.primary.id}`);
+        await page.getByRole("button", {
+            name: new RegExp(
+                message("en", "records", "RelationshipEvidence.openEvidenceNamed")
+                    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+                    .replace("\\{band\\}", ".+"),
+            ),
+        }).click();
         const companyEvidence = page.getByRole("region", {
             name: message("en", "records", "RelationshipEvidence.title"),
         });

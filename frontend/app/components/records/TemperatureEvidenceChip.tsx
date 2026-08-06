@@ -19,10 +19,10 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { cn } from '@/lib/utils';
 
 /**
- * Contact-detail entry point that reuses {@link TemperaturePill}: hover shows a short warmth
+ * Record-detail entry point that reuses {@link TemperaturePill}: hover shows a short warmth
  * summary, click opens Relationship Evidence in a dialog that mirrors the page panel chrome.
  */
-export default function ContactTemperatureChip({
+export default function TemperatureEvidenceChip({
     evidence,
 }: {
     evidence: RelationshipEvidence;
