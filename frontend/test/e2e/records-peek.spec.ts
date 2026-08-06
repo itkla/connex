@@ -100,10 +100,6 @@ test.describe("records browse and peek", () => {
         await page.goto(`/records/contacts/${contact.id}?${new URLSearchParams({ returnTo: listUrl })}`);
 
         await expect(page.getByRole("heading", { name: contact.name }).first()).toBeVisible();
-        await page.locator("[data-app-main]").evaluate((main) => main.scrollTo({ top: 900 }));
-        const sticky = page.locator("[data-record-sticky-context]");
-        await expect(sticky).toHaveAttribute("data-visible", "true");
-        await expect(sticky.getByRole("link")).toHaveCount(0);
 
         const breadcrumb = page.getByRole("navigation", {
             name: message("ja", "common", "CommonBreadcrumb.ariaLabel"),

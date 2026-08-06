@@ -32,7 +32,6 @@ import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
-import RecordStickyContext from "@/app/components/records/RecordStickyContext";
 
 type ContactPageProps = {
     params: Promise<{ id: number }>;
@@ -100,11 +99,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
 
     return (
         <PageShell tier="wide">
-                <RecordStickyContext
-                    anchorId="contact-record-identity"
-                    name={contact.name}
-                    temperature={evidence?.temperature}
-                />
                 <Rise>
                     <CrumbLabel value={contact.name} />
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
