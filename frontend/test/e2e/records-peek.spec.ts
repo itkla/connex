@@ -51,6 +51,13 @@ test.describe("records browse and peek", () => {
         const fixture = runFixture(testInfo.project.name);
 
         await page.goto(`/records/contacts/${fixture.contacts.peek.id}`);
+        await page.getByRole("button", {
+            name: new RegExp(
+                message("en", "records", "RelationshipEvidence.openEvidenceNamed")
+                    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+                    .replace("\\{band\\}", ".+"),
+            ),
+        }).click();
         const contactEvidence = page.getByRole("region", {
             name: message("en", "records", "RelationshipEvidence.title"),
         });
