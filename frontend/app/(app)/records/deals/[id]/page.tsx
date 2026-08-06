@@ -51,8 +51,10 @@ import {
     formatCurrency,
     formatDate,
     formatDateTime,
+    formatRelativeTime,
     parseMysqlDateTime,
 } from '@/app/lib/utils';
+import { citationTitleKey } from '@/app/lib/dealBriefCitations';
 
 import Rise from '@/app/components/motion/Rise';
 import { PageShell } from '@/app/components/PageShell';
@@ -209,6 +211,16 @@ export default async function DealPage({ params }: DealPageProps) {
     for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
     for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
+    const lastTouchAtByPerson = lastTouchAtByPersonId(activities, tasks, notes);
+    const citationTitles = buildCitationTitles(
+        deal.id,
+        deal.name,
+        dealPeople,
+        activities,
+        tasks,
+        notes,
+    );
+
     return (
         <PageShell tier="wide">
                 <RecordStickyContext
@@ -319,7 +331,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
                                     </dl>
                                 </div>
-                                <DealRiskPanel risk={risk} className="mt-0" />
+                                <DealRiskPanel risk={risk} />
                             </RecordDetailSection>
 
                             <RecordDetailSection recordKind="deal" section="related">
@@ -344,7 +356,18 @@ export default async function DealPage({ params }: DealPageProps) {
                                         </p>
                                     ) : (
                                         <ul className="divide-y divide-border">
-                                            {dealPeople.map(({ person, role }) => (
+                                            {dealPeople.map(({ person, role }) => {
+                                                const lastTouchAt = lastTouchAtByPerson.get(person.id);
+                                                const lastTouchLabel = lastTouchAt
+                                                        ? t('lastTouch', {
+                                                              when: formatRelativeTime(
+                                                                  lastTouchAt,
+                                                                  locale,
+                                                                  now,
+                                                              ),
+                                                          })
+                                                        : t('noLastTouch');
+                                                return (
                                                 <li key={person.id}>
                                                     <Link
                                                         href={`/records/contacts/${person.id}`}
@@ -360,6 +383,9 @@ export default async function DealPage({ params }: DealPageProps) {
                                                                     {person.title}
                                                                 </p>
                                                             ) : null}
+                                                            <p className="truncate text-xs text-muted-foreground">
+                                                                {lastTouchLabel}
+                                                            </p>
                                                         </div>
                                                         {role ? (
                                                             <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
@@ -368,7 +394,8 @@ export default async function DealPage({ params }: DealPageProps) {
                                                         ) : null}
                                                     </Link>
                                                 </li>
-                                            ))}
+                                                );
+                                            })}
                                         </ul>
                                     )}
                                 </div>
@@ -459,6 +486,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         key={`deal-brief-${deal.id}`}
                                         dealId={deal.id}
                                         className="min-w-0"
+                                        citationTitles={citationTitles}
                                     />
                                     <DealRationalePanel
                                         key={`deal-rationale-${deal.id}`}
@@ -469,24 +497,6 @@ export default async function DealPage({ params }: DealPageProps) {
                             </RecordDetailSection>
 
                             <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-8">
-                                <div>
-                                    <SectionLabelWithTooltip
-                                        title={t('engagement')}
-                                        tooltip={
-                                            <div className="flex flex-col gap-2">
-                                                <h2 className="text-sm font-medium">{t('engagement')}</h2>
-                                                <p className="text-xs text-muted-foreground">
-                                                    {t('engagementTooltip')}
-                                                </p>
-                                            </div>
-                                        }
-                                    />
-                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                        <EngagementSparkline data={weeklyEngagement} />
-                                        <DealActivityBreakdown activities={activities} />
-                                    </div>
-                                </div>
-
                                 <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
 
                                 <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
@@ -516,29 +526,49 @@ export default async function DealPage({ params }: DealPageProps) {
                 </Rise>
 
                 <Rise delay={0.16}>
-                    <RecordDetailSection recordKind="deal" section="history">
-                        <SectionLabelWithTooltip
-                            title={t('timeline')}
-                            tooltip={
-                                <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">{t('timeline')}</h2>
-                                    <p className="text-xs text-muted-foreground">
-                                        {t('timelineTooltip')}
-                                    </p>
-                                </div>
-                            }
-                        />
-                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                            <Timeline
-                                tasks={tasks}
-                                activities={activities}
-                                notes={notes}
-                                users={relatedUsers}
-                                persons={personSeeds}
-                                deals={dealSeeds}
-                                currentUserId={currentUser.id}
-                                companyId={deal.company ?? null}
+                    <RecordDetailSection recordKind="deal" section="history" className="flex flex-col gap-8">
+                        <div>
+                            <SectionLabelWithTooltip
+                                title={t('engagement')}
+                                tooltip={
+                                    <div className="flex flex-col gap-2">
+                                        <h2 className="text-sm font-medium">{t('engagement')}</h2>
+                                        <p className="text-xs text-muted-foreground">
+                                            {t('engagementTooltip')}
+                                        </p>
+                                    </div>
+                                }
                             />
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                <EngagementSparkline data={weeklyEngagement} />
+                                <DealActivityBreakdown activities={activities} />
+                            </div>
+                        </div>
+
+                        <div>
+                            <SectionLabelWithTooltip
+                                title={t('timeline')}
+                                tooltip={
+                                    <div className="flex flex-col gap-2">
+                                        <h2 className="text-sm font-medium">{t('timeline')}</h2>
+                                        <p className="text-xs text-muted-foreground">
+                                            {t('timelineTooltip')}
+                                        </p>
+                                    </div>
+                                }
+                            />
+                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                <Timeline
+                                    tasks={tasks}
+                                    activities={activities}
+                                    notes={notes}
+                                    users={relatedUsers}
+                                    persons={personSeeds}
+                                    deals={dealSeeds}
+                                    currentUserId={currentUser.id}
+                                    companyId={deal.company ?? null}
+                                />
+                            </div>
                         </div>
                     </RecordDetailSection>
                 </Rise>
@@ -582,4 +612,60 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
             {t('statusOpen')}
         </span>
     );
+}
+
+function lastTouchAtByPersonId(
+    activities: Activity[],
+    tasks: Task[],
+    notes: Note[],
+): Map<number, string> {
+    const bestMs = new Map<number, number>();
+    const bestAt = new Map<number, string>();
+    const consider = (personId: number | null | undefined, raw: string | null | undefined) => {
+        if (personId == null || !raw) return;
+        const ms = parseMysqlDateTime(raw);
+        if (!Number.isFinite(ms)) return;
+        const prev = bestMs.get(personId);
+        if (prev != null && ms <= prev) return;
+        bestMs.set(personId, ms);
+        bestAt.set(personId, raw);
+    };
+    for (const activity of activities) consider(activity.personId, activity.timestamp);
+    for (const task of tasks) consider(task.personId, task.updatedAt || task.createdAt);
+    for (const note of notes) consider(note.person, note.updatedAt || note.createdAt);
+    return bestAt;
+}
+
+function buildCitationTitles(
+    dealId: number,
+    dealName: string,
+    people: ResolvedDealPerson[],
+    activities: Activity[],
+    tasks: Task[],
+    notes: Note[],
+): Map<string, string> {
+    const titles = new Map<string, string>();
+    titles.set(citationTitleKey('deal', dealId), clipCitationTitle(dealName));
+    for (const { person } of people) {
+        titles.set(citationTitleKey('person', person.id), clipCitationTitle(person.name));
+    }
+    for (const activity of activities) {
+        const subject = activity.subject?.trim();
+        if (subject) titles.set(citationTitleKey('act', activity.id), clipCitationTitle(subject));
+    }
+    for (const task of tasks) {
+        const description = task.description?.trim();
+        if (description) titles.set(citationTitleKey('task', task.id), clipCitationTitle(description));
+    }
+    for (const note of notes) {
+        const label = note.title?.trim() || note.content?.trim();
+        if (label) titles.set(citationTitleKey('note', note.id), clipCitationTitle(label));
+    }
+    return titles;
+}
+
+function clipCitationTitle(value: string): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= 48) return normalized;
+    return `${normalized.slice(0, 47)}…`;
 }

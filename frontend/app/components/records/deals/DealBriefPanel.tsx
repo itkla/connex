@@ -1,11 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import { generateDealBrief } from '@/app/lib/api';
 import { recoverAiResult } from '@/app/lib/aiRecovery';
+import {
+    citationHref,
+    citationTitle,
+    rewriteBriefBody,
+} from '@/app/lib/dealBriefCitations';
 import type { DealBrief, DealBriefCitation } from '@/app/lib/types';
 import { formatDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -29,8 +35,17 @@ type DealBriefState = BriefState & { dealId: number };
  * fast unavailability response and the panel renders nothing, so the page stays clean while AI is
  * off by default. Generation is slow (a masked LLM call, server-cached), so arrival is a calm
  * fade; a provider failure offers a quiet retry and never blocks the deterministic signals.
+ * Citation chips and inline tokens resolve to record detail routes via {@code sourceId}.
  */
-export default function DealBriefPanel({ dealId, className }: { dealId: number; className?: string }) {
+export default function DealBriefPanel({
+    dealId,
+    className,
+    citationTitles,
+}: {
+    dealId: number;
+    className?: string;
+    citationTitles?: ReadonlyMap<string, string>;
+}) {
     const t = useTranslations('DealBrief');
     const locale = useLocale();
     const [storedState, setStoredState] = useState<DealBriefState>({ dealId, status: 'loading' });
@@ -89,8 +104,10 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
 
     if (state.status === 'hidden') return null;
 
-    const citationLabel = (citation: DealBriefCitation) =>
-        t(`source_${citation.kind}`, { id: citation.id });
+    const citationLabel = (citation: DealBriefCitation) => {
+        const titled = citationTitles ? citationTitle(citation, citationTitles) : null;
+        return titled ?? t(`source_${citation.kind}`, { id: citation.id });
+    };
 
     return (
         <section aria-label={t('panelTitle')} className={cn('flex flex-col gap-3', className)}>
@@ -129,27 +146,49 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                 <div className="flex flex-1 flex-col gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
                     {state.brief.sections && state.brief.sections.length > 0 ? (
                         <div className="grid max-w-[70ch] flex-1 gap-4">
-                            {state.brief.sections.map((section) => (
-                                <div key={section.title} className="grid gap-1.5">
-                                    <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
-                                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                                        {section.body}
-                                    </p>
-                                    {section.citations && section.citations.length > 0 ? (
-                                        <div className="flex flex-wrap gap-1">
-                                            {section.citations.map((citation) => (
-                                                <Badge
-                                                    key={`${citation.kind}-${citation.id}`}
-                                                    variant="outline"
-                                                    className="font-normal text-muted-foreground"
-                                                >
-                                                    {citationLabel(citation)}
-                                                </Badge>
-                                            ))}
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ))}
+                            {state.brief.sections.map((section) => {
+                                const citations = section.citations ?? [];
+                                const segments = rewriteBriefBody(section.body, citations);
+                                return (
+                                    <div key={section.title} className="grid gap-1.5">
+                                        <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
+                                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                                            {segments.map((segment, i) =>
+                                                segment.type === 'text' ? (
+                                                    <span key={`t-${i}`}>{segment.value}</span>
+                                                ) : (
+                                                    <Link
+                                                        key={`${segment.sourceId}-${i}`}
+                                                        href={segment.href}
+                                                        className="align-super text-[0.7em] font-semibold text-brand-dark transition-colors hover:underline"
+                                                    >
+                                                        [{segment.index}]
+                                                    </Link>
+                                                ),
+                                            )}
+                                        </p>
+                                        {citations.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                                {citations.map((citation) => (
+                                                    <Badge
+                                                        key={citation.sourceId || `${citation.kind}-${citation.id}`}
+                                                        variant="outline"
+                                                        asChild
+                                                        className="font-normal text-muted-foreground"
+                                                    >
+                                                        <Link
+                                                            href={citationHref(citation.kind, citation.id)}
+                                                            title={citationLabel(citation)}
+                                                        >
+                                                            {citationLabel(citation)}
+                                                        </Link>
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                );
+                            })}
                         </div>
                     ) : (
                         <div className="max-w-[70ch] flex-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">

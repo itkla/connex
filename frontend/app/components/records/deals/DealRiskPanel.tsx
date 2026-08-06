@@ -29,7 +29,7 @@ export default function DealRiskPanel({
         return (
             <section
                 aria-label={t('panelTitle')}
-                className={cn('mt-8 rounded-2xl border border-border bg-card px-5 py-4', className)}
+                className={cn('rounded-2xl border border-border bg-card px-5 py-4', className)}
             >
                 <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('panelTitle')}
@@ -40,7 +40,7 @@ export default function DealRiskPanel({
     }
 
     return (
-        <section aria-label={t('panelTitle')} className={cn('mt-8 grid gap-3', className)}>
+        <section aria-label={t('panelTitle')} className={cn('grid gap-3', className)}>
             <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 {t('panelTitle')}
             </h2>

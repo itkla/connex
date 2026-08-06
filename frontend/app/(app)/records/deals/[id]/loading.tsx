@@ -121,29 +121,6 @@ export default function DealDetailLoading() {
                             </div>
                         </div>
 
-                        <div>
-                            <div className="mb-3 flex h-8 items-center px-6">
-                                <Skeleton className="h-3 w-28" />
-                            </div>
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                <div className="rounded-2xl border border-border bg-card p-3 md:col-span-2">
-                                    <Skeleton className="h-3 w-32" />
-                                    <Skeleton className="mt-3 h-28 w-full" />
-                                </div>
-                                <div className="rounded-2xl border border-border bg-card p-3">
-                                    <Skeleton className="h-3 w-24" />
-                                    <div className="mt-3 flex items-center gap-4">
-                                        <Skeleton className="size-28 shrink-0 rounded-full" />
-                                        <div className="flex-1 space-y-2">
-                                            <Skeleton className="h-3 w-full" />
-                                            <Skeleton className="h-3 w-4/5" />
-                                            <Skeleton className="h-3 w-3/5" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                         <div className="rounded-2xl border border-border bg-card p-4">
                             <Skeleton className="h-16 w-full rounded-xl" />
                         </div>
@@ -162,21 +139,46 @@ export default function DealDetailLoading() {
                     </div>
                 </section>
 
-                <section>
-                    <div className="mb-3 flex h-8 items-center px-6">
-                        <Skeleton className="h-3 w-20" />
-                    </div>
-                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                        <div className="space-y-6 p-6">
-                            {Array.from({ length: 5 }).map((_, i) => (
-                                <div key={i} className="flex gap-3">
-                                    <Skeleton className="size-8 shrink-0 rounded-full" />
+                <section className="flex flex-col gap-8">
+                    <div>
+                        <div className="mb-3 flex h-8 items-center px-6">
+                            <Skeleton className="h-3 w-28" />
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <div className="rounded-2xl border border-border bg-card p-3 md:col-span-2">
+                                <Skeleton className="h-3 w-32" />
+                                <Skeleton className="mt-3 h-28 w-full" />
+                            </div>
+                            <div className="rounded-2xl border border-border bg-card p-3">
+                                <Skeleton className="h-3 w-24" />
+                                <div className="mt-3 flex items-center gap-4">
+                                    <Skeleton className="size-28 shrink-0 rounded-full" />
                                     <div className="flex-1 space-y-2">
-                                        <Skeleton className="h-3 w-32" />
+                                        <Skeleton className="h-3 w-full" />
                                         <Skeleton className="h-3 w-4/5" />
+                                        <Skeleton className="h-3 w-3/5" />
                                     </div>
                                 </div>
-                            ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div className="mb-3 flex h-8 items-center px-6">
+                            <Skeleton className="h-3 w-20" />
+                        </div>
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            <div className="space-y-6 p-6">
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                    <div key={i} className="flex gap-3">
+                                        <Skeleton className="size-8 shrink-0 rounded-full" />
+                                        <div className="flex-1 space-y-2">
+                                            <Skeleton className="h-3 w-32" />
+                                            <Skeleton className="h-3 w-4/5" />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </section>

@@ -332,7 +332,7 @@ class DealBriefServiceTest {
         assertTrue(result.isAvailable());
         assertEquals("Fresh brief.", result.getSections().getFirst().body());
         assertEquals(
-                new DealBriefDto.Citation("act", 202),
+                new DealBriefDto.Citation("act.0", "act", 202),
                 result.getSections().getFirst().citations().getFirst());
         verify(aiOutputCacheStore, never()).read("payload", DealBriefContent.class);
         verify(aiInvocationService).completeStructured(
