@@ -13,7 +13,6 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
@@ -21,7 +20,7 @@ import { cn } from '@/lib/utils';
 
 /**
  * Contact-detail entry point that reuses {@link TemperaturePill}: hover shows a short warmth
- * summary, click opens Relationship Evidence in a dialog instead of embedding it on the page.
+ * summary, click opens Relationship Evidence in a dialog that mirrors the page panel chrome.
  */
 export default function ContactTemperatureChip({
     evidence,
@@ -46,6 +45,8 @@ export default function ContactTemperatureChip({
         <>
             <HoverCard>
                 <HoverCardTrigger
+                    delay={100}
+                    closeDelay={100}
                     render={
                         <button
                             type="button"
@@ -92,18 +93,14 @@ export default function ContactTemperatureChip({
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                 <DialogContent
                     size="xl"
-                    className="max-h-[min(90vh,44rem)] gap-4 overflow-hidden p-0 sm:max-w-2xl"
+                    className="max-h-[min(90vh,44rem)] gap-0 overflow-hidden bg-card p-0 sm:max-w-2xl"
                 >
-                    <DialogHeader className="px-6 pt-6 pr-14">
-                        <DialogTitle>{tEvidence('title')}</DialogTitle>
-                        <DialogDescription>{tEvidence('subtitle')}</DialogDescription>
-                    </DialogHeader>
-                    <div className="max-h-[min(70vh,34rem)] overflow-y-auto px-6 pb-6">
-                        <RelationshipEvidencePanel
-                            evidence={evidence}
-                            className="mt-0"
-                            hideChromeHeader
-                        />
+                    <DialogTitle className="sr-only">{tEvidence('title')}</DialogTitle>
+                    <DialogDescription className="sr-only">
+                        {tEvidence('subtitle')}
+                    </DialogDescription>
+                    <div className="max-h-[min(90vh,44rem)] overflow-y-auto">
+                        <RelationshipEvidencePanel evidence={evidence} variant="dialog" />
                     </div>
                 </DialogContent>
             </Dialog>

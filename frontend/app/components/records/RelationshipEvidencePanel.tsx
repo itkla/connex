@@ -60,15 +60,17 @@ function contributorLabel(
 
 /**
  * Explains a canonical contact or company warmth score with bounded source metadata and coverage.
+ * Use {@code variant="dialog"} to flush the same chrome into a modal shell (close-button gutter,
+ * no outer card border).
  */
 export default function RelationshipEvidencePanel({
     evidence,
     className,
-    hideChromeHeader = false,
+    variant = 'page',
 }: {
     evidence?: RelationshipEvidence | null;
     className?: string;
-    hideChromeHeader?: boolean;
+    variant?: 'page' | 'dialog';
 }) {
     const t = useTranslations('RelationshipEvidence');
     const locale = useLocale();
@@ -76,24 +78,23 @@ export default function RelationshipEvidencePanel({
         () => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }),
         [locale],
     );
-    const shellClass = hideChromeHeader
-        ? cn('overflow-hidden', className)
-        : cn('mt-6 overflow-hidden rounded-2xl border border-border bg-card', className);
+    const isDialog = variant === 'dialog';
 
     if (!evidence) {
         return (
             <section
                 aria-label={t('title')}
-                className={hideChromeHeader ? cn(className) : cn('mt-6 rounded-2xl border border-border bg-card p-5', className)}
+                className={cn(
+                    isDialog
+                        ? 'bg-card p-5'
+                        : 'mt-6 rounded-2xl border border-border bg-card p-5',
+                    className,
+                )}
             >
-                {!hideChromeHeader ? (
-                    <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                        {t('title')}
-                    </h2>
-                ) : null}
-                <p className={cn('text-sm text-muted-foreground', !hideChromeHeader && 'mt-3')}>
-                    {t('unavailable')}
-                </p>
+                <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    {t('title')}
+                </h2>
+                <p className="mt-3 text-sm text-muted-foreground">{t('unavailable')}</p>
             </section>
         );
     }
@@ -102,26 +103,37 @@ export default function RelationshipEvidencePanel({
     const hasHistory = totals.contributorCount > 0 && Boolean(temperature.lastTouchAt);
 
     return (
-        <section aria-label={t('title')} className={shellClass}>
-            {!hideChromeHeader ? (
-                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
-                    <div>
-                        <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                            {t('title')}
-                        </h2>
-                        <p className="mt-1 text-sm text-foreground">{t('subtitle')}</p>
-                    </div>
-                    <TemperaturePill temp={temperature} />
+        <section
+            aria-label={t('title')}
+            className={cn(
+                isDialog
+                    ? 'overflow-hidden bg-card'
+                    : 'mt-6 overflow-hidden rounded-2xl border border-border bg-card',
+                className,
+            )}
+        >
+            <div
+                className={cn(
+                    'flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4',
+                    isDialog && 'pr-14',
+                )}
+            >
+                <div>
+                    <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                        {t('title')}
+                    </h2>
+                    <p className="mt-1 text-sm text-foreground">{t('subtitle')}</p>
                 </div>
-            ) : null}
+                <TemperaturePill temp={temperature} />
+            </div>
 
             {!hasHistory ? (
-                <div className={hideChromeHeader ? 'py-2' : 'px-5 py-6'}>
+                <div className="px-5 py-6">
                     <p className="text-sm text-muted-foreground">{t('noHistory')}</p>
                 </div>
             ) : (
                 <>
-                    <dl className={cn('grid gap-px bg-border sm:grid-cols-3', hideChromeHeader && 'rounded-xl overflow-hidden ring-1 ring-border')}>
+                    <dl className="grid gap-px bg-border sm:grid-cols-3">
                         <div className="bg-card px-5 py-4">
                             <dt className="text-xs text-muted-foreground">{t('lastTouch')}</dt>
                             <dd className="mt-1 text-sm font-medium text-foreground">
@@ -146,7 +158,7 @@ export default function RelationshipEvidencePanel({
                         </div>
                     </dl>
 
-                    <div className={hideChromeHeader ? 'pt-4' : 'px-5 py-4'}>
+                    <div className="px-5 py-4">
                         <h3 className="text-xs font-medium text-muted-foreground">{t('sources')}</h3>
                         <ul className="mt-2 grid gap-2">
                             {evidence.contributors.map((contributor) => {
@@ -189,10 +201,7 @@ export default function RelationshipEvidencePanel({
                 </>
             )}
 
-            <div className={cn(
-                'border-t border-border bg-muted/30 px-5 py-3',
-                hideChromeHeader && 'mt-4 rounded-xl border px-4',
-            )}>
+            <div className="border-t border-border bg-muted/30 px-5 py-3">
                 <p className="flex items-start gap-2 text-xs text-muted-foreground">
                     <DocumentTextIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                     {t(ATTRIBUTION_KEYS[evidence.attributionRule])}
