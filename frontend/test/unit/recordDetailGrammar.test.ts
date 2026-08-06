@@ -26,7 +26,7 @@ describe('record detail grammar', () => {
         expect(recordDetailSectionId('deal', 'relationship')).toBe('deal-detail-relationship');
     });
 
-    it('contact detail uses the wide left-rail canvas with connections after pipeline work', () => {
+    it('contact detail uses the wide left-rail canvas with evidence in the identity chip dialog', () => {
         const source = readFileSync(
             path.resolve(process.cwd(), 'app/(app)/records/contacts/[id]/page.tsx'),
             'utf8',
@@ -39,25 +39,24 @@ describe('record detail grammar', () => {
         const related = source.indexOf('section="related"');
         const files = source.indexOf('section="files"');
         const history = source.indexOf('section="history"');
-        const evidence = source.indexOf('<RelationshipEvidencePanel');
+        const chip = source.indexOf('<ContactTemperatureChip');
         const evaluation = source.indexOf('<EngineEvaluationPanel');
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
 
         expect(profile).toBeGreaterThan(-1);
         expect(metrics).toBeGreaterThan(profile);
-        expect(relationship).toBeGreaterThan(metrics);
-        expect(activity).toBeGreaterThan(relationship);
+        expect(relationship).toBe(-1);
+        expect(activity).toBeGreaterThan(metrics);
         expect(related).toBeGreaterThan(activity);
         expect(files).toBeGreaterThan(related);
         expect(history).toBeGreaterThan(files);
-        expect(evidence).toBeGreaterThan(metrics);
-        expect(evidence).toBeGreaterThan(identityClose);
-        expect(evidence).toBeLessThan(activity);
+        expect(chip).toBeGreaterThan(-1);
+        expect(chip).toBeLessThan(identityClose);
+        expect(source).not.toContain('<RelationshipEvidencePanel');
         expect(evaluation).toBeGreaterThan(profile);
         expect(evaluation).toBeLessThan(metrics);
         expect(source).toContain('tier="wide"');
         expect(source).not.toContain('xl:sticky');
-        expect(source.indexOf('<RelationshipEvidencePanel', evidence + 1)).toBe(-1);
         expect(source.indexOf('<EngineEvaluationPanel', evaluation + 1)).toBe(-1);
     });
 

@@ -18,6 +18,7 @@ import ContactActionsMenu from "@/app/components/records/contacts/ContactActions
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
 import ContactConnections from "@/app/components/records/contacts/ContactConnections";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
+import ContactTemperatureChip from "@/app/components/records/contacts/ContactTemperatureChip";
 import NewActivityDialog from "@/app/components/records/contacts/NewActivityDialog";
 import NewTaskDialog from "@/app/components/records/contacts/NewTaskDialog";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
@@ -31,9 +32,7 @@ import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
-import RelationshipEvidencePanel from "@/app/components/records/RelationshipEvidencePanel";
 import RecordStickyContext from "@/app/components/records/RecordStickyContext";
-import TemperaturePill from "@/app/components/records/TemperaturePill";
 
 type ContactPageProps = {
     params: Promise<{ id: number }>;
@@ -122,9 +121,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                         <h1 className="text-balance text-4xl font-extrabold tracking-tight text-foreground">
                                             {contact.name}
                                         </h1>
-                                        {evidence?.temperature ? (
-                                            <TemperaturePill temp={evidence.temperature} />
-                                        ) : null}
                                         {contact.suspendedAt ? (
                                             <span className="shrink-0 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
                                                 {t("processingSuspended")}
@@ -157,6 +153,9 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                     {contact.company.name}
                                                 </Link>
                                             </>
+                                        ) : null}
+                                        {evidence ? (
+                                            <ContactTemperatureChip evidence={evidence} />
                                         ) : null}
                                     </h3>
                                 </div>
@@ -327,10 +326,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     viewHref={`/activity/deals?contactId=${contact.id}`}
                                 />
                             </div>
-                        </RecordDetailSection>
-
-                        <RecordDetailSection recordKind="contact" section="relationship">
-                            <RelationshipEvidencePanel evidence={evidence} className="mt-0" />
                         </RecordDetailSection>
 
                         <RecordDetailSection recordKind="contact" section="activity">
