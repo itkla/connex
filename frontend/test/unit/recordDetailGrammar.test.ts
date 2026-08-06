@@ -69,7 +69,7 @@ describe('record detail grammar', () => {
         expect(source.indexOf('<RelationshipEvidencePanel', evidence + 1)).toBe(-1);
     });
 
-    it('deal detail places commercial KPIs, then AI intelligence, then engagement', () => {
+    it('deal detail keeps stakeholders and insights in the sticky left rail before files', () => {
         const source = readFileSync(
             path.resolve(process.cwd(), 'app/(app)/records/deals/[id]/page.tsx'),
             'utf8',
@@ -83,32 +83,54 @@ describe('record detail grammar', () => {
         const files = source.indexOf('section="files"');
         const history = source.indexOf('section="history"');
         const risk = source.indexOf('<DealRiskPanel');
+        const people = source.indexOf("t('peopleOnThisDeal')");
         const brief = source.indexOf('<DealBriefPanel');
+        const evaluation = source.indexOf('<EngineEvaluationPanel');
+        const stickyRail = source.indexOf('xl:sticky xl:top-16');
+        const stickyOverflowInner = source.indexOf('xl:max-h-[calc(100dvh-5rem)] xl:overflow-y-auto');
+        const stickyGrid = source.lastIndexOf('grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]', stickyRail);
+        const riseAroundSticky = source.lastIndexOf('<Rise', stickyRail);
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
 
         expect(profile).toBeGreaterThan(-1);
+        expect(related).toBeGreaterThan(profile);
+        expect(related).toBeLessThan(metrics);
         expect(metrics).toBeGreaterThan(profile);
         expect(relationship).toBeGreaterThan(metrics);
         expect(activity).toBeGreaterThan(relationship);
-        expect(related).toBeGreaterThan(activity);
-        expect(files).toBeGreaterThan(related);
+        expect(files).toBeGreaterThan(activity);
         expect(history).toBeGreaterThan(files);
         expect(risk).toBeGreaterThan(profile);
         expect(risk).toBeGreaterThan(identityClose);
-        expect(risk).toBeLessThan(metrics);
+        expect(risk).toBeLessThan(related);
+        expect(people).toBeGreaterThan(risk);
+        expect(people).toBeLessThan(evaluation);
+        expect(evaluation).toBeGreaterThan(related);
+        expect(evaluation).toBeLessThan(metrics);
         expect(brief).toBeGreaterThan(metrics);
         expect(brief).toBeLessThan(activity);
+        expect(stickyRail).toBeGreaterThan(-1);
+        expect(stickyRail).toBeLessThan(files);
+        expect(stickyOverflowInner).toBeGreaterThan(stickyRail);
+        expect(stickyGrid).toBeGreaterThan(-1);
+        expect(riseAroundSticky).toBeLessThan(stickyGrid);
         expect(source.indexOf('<DealRiskPanel', risk + 1)).toBe(-1);
         expect(source.indexOf('<DealBriefPanel', brief + 1)).toBe(-1);
+        expect(source.indexOf('<EngineEvaluationPanel', evaluation + 1)).toBe(-1);
         expect(source).toContain('tier="wide"');
     });
 
-    it('deal detail loading skeleton matches the wide PageShell tier', () => {
+    it('deal detail loading skeleton matches the wide PageShell tier and left-rail order', () => {
         const source = readFileSync(
             path.resolve(process.cwd(), 'app/(app)/records/deals/[id]/loading.tsx'),
             'utf8',
         );
         expect(source).toContain('tier="wide"');
         expect(source).not.toContain('tier="reading"');
+        expect(source).toContain('xl:sticky xl:top-16');
+        const peopleSkeleton = source.indexOf('size-12 shrink-0 rounded-full');
+        const filesSkeleton = source.indexOf('xl:grid-cols-2');
+        expect(peopleSkeleton).toBeGreaterThan(-1);
+        expect(filesSkeleton).toBeGreaterThan(peopleSkeleton);
     });
 });

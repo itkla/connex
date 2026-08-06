@@ -8,10 +8,11 @@ import { Switch } from '@/components/ui/switch';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { updateContactEvaluation, updateDealEvaluation } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
+import { cn } from '@/lib/utils';
 
 type PanelProps =
-    | { kind: 'contact'; id: number; riskExcluded: boolean; introExcluded: boolean }
-    | { kind: 'deal'; id: number; riskExcluded: boolean };
+    | { kind: 'contact'; id: number; riskExcluded: boolean; introExcluded: boolean; className?: string }
+    | { kind: 'deal'; id: number; riskExcluded: boolean; className?: string };
 
 /**
  * Per-record engine-evaluation opt-outs (issue #358): switches that include or exclude the record
@@ -75,7 +76,7 @@ export default function EngineEvaluationPanel(props: PanelProps) {
               ];
 
     return (
-        <div className="mt-6">
+        <div className={cn('mt-6', props.className)}>
             <SectionHeader title={t('title')} />
             <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                 {rows.map((row) => (

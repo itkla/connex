@@ -1,7 +1,7 @@
 /**
  * Canonical long-form record-detail section order from #843.
  * Domain adapters choose which slots to fill; Contact/Company keep activity before relationship,
- * while Deal places commercial AI intelligence between metrics and engagement activity.
+ * while Deal keeps stakeholders and insights in the sticky left rail beside metrics and AI bands.
  */
 export const RECORD_DETAIL_SECTION_ORDER = [
     'identity',
