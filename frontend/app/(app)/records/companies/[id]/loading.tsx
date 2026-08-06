@@ -26,7 +26,7 @@ export default function CompanyDetailLoading() {
                     </div>
                 </header>
 
-                <div className="flex justify-start">
+                <div className="flex justify-end">
                     <Skeleton className="size-9 rounded-md" />
                 </div>
 

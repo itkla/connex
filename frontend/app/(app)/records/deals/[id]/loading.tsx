@@ -22,7 +22,7 @@ export default function DealDetailLoading() {
                     </div>
                 </header>
 
-                <div className="flex justify-start gap-2">
+                <div className="flex justify-end gap-2">
                     <Skeleton className="h-9 w-24 rounded-md" />
                     <Skeleton className="h-9 w-28 rounded-md" />
                     <Skeleton className="h-9 w-20 rounded-md" />

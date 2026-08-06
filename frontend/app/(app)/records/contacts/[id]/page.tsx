@@ -200,7 +200,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex justify-start">
+                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex justify-end">
                         <ContactActionsMenu
                             contact={contact}
                             currentUserId={currentUser.id}

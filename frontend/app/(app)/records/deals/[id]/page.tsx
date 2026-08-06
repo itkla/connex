@@ -291,7 +291,7 @@ export default async function DealPage({ params }: DealPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex justify-start">
+                    <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex justify-end">
                         <DealActionsMenu
                             deal={deal}
                             pipelines={pipelines}

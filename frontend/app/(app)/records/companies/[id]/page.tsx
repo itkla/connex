@@ -194,7 +194,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex justify-start">
+                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex justify-end">
                         <CompanyActionsMenu company={company} />
                     </RecordDetailSection>
                 </Rise>
