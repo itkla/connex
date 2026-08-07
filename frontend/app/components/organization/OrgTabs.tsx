@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
 
+import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -18,10 +19,24 @@ const TABS = [
     { key: "tabDiagnostics", href: "/organization/diagnostics" },
 ] as const;
 
+/**
+ * The organization admin tab strip.
+ *
+ * Every organization route is org-admin-only on the backend (`requireOrgAdmin`). The strip reads
+ * the active workspace's `orgRole` — the same membership signal Sidebar and Overview already use —
+ * so a non-admin is not offered tabs that can only answer with a refusal. SSO remains gated on the
+ * instance capability. Panel-level denial stays as defense in depth when the role is lost mid-session.
+ *
+ * @param ssoEnabled - whether the instance exposes SSO administration
+ */
 export default function OrgTabs({ ssoEnabled = false }: { ssoEnabled?: boolean }) {
     const pathname = usePathname() ?? "";
     const t = useTranslations("Organization");
     const reduce = useReducedMotion() ?? false;
+    const { activeWorkspace } = useWorkspace();
+    const isOrgAdmin = activeWorkspace?.orgRole != null;
+    if (!isOrgAdmin) return null;
+
     const tabs = TABS.filter((tab) => tab.key !== "tabSso" || ssoEnabled);
 
     return (
