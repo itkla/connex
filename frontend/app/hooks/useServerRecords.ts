@@ -71,8 +71,14 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         return () => clearTimeout(id);
     }, [query]);
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    useEffect(() => { setPage(1); }, [extraKey]);
+    const extraMountedRef = useRef(false);
+    useEffect(() => {
+        if (!extraMountedRef.current) {
+            extraMountedRef.current = true;
+            return;
+        }
+        setPage(1);
+    }, [extraKey]);
 
     useEffect(() => {
         if (!urlSync) return;
