@@ -71,12 +71,10 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         return () => clearTimeout(id);
     }, [query]);
 
-    const extraMountedRef = useRef(false);
+    const prevExtraKeyRef = useRef(extraKey);
     useEffect(() => {
-        if (!extraMountedRef.current) {
-            extraMountedRef.current = true;
-            return;
-        }
+        if (prevExtraKeyRef.current === extraKey) return;
+        prevExtraKeyRef.current = extraKey;
         setPage(1);
     }, [extraKey]);
 
