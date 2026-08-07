@@ -112,6 +112,7 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'settings-rules', path: '/settings/rules', area: 'workflows', tier: 3, role: 'admin', deniesMember: true, landsOn: ['/workflows'] },
     { id: 'settings-sso', path: '/settings/sso', area: 'settings', tier: 3, role: 'admin', landsOn: ['/organization/sso', '/organization/members', '/dashboard'] },
     { id: 'org-members', path: '/organization/members', area: 'settings', tier: 3, role: 'owner', deniesMember: true, landsOn: ['/organization/members', '/dashboard'] },
+    { id: 'org-overview', path: '/organization/overview', area: 'settings', tier: 3, role: 'owner', deniesMember: true, landsOn: ['/organization/overview', '/dashboard'] },
     { id: 'org-audit', path: '/organization/audit', area: 'settings', tier: 3, role: 'owner', deniesMember: true, landsOn: ['/organization/audit', '/dashboard'] },
     { id: 'org-ai', path: '/organization/ai', area: 'ai', tier: 3, role: 'owner', deniesMember: true, landsOn: ['/organization/ai', '/dashboard'] },
     { id: 'org-sso', path: '/organization/sso', area: 'settings', tier: 3, role: 'owner', deniesMember: true, landsOn: ['/organization/sso', '/organization/members', '/dashboard'] },
