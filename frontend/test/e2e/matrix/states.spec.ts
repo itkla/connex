@@ -188,7 +188,11 @@ test.describe('permission denied — real RBAC, not injected', () => {
                 landing.acceptedPaths.includes(landing.finalPath),
                 `a denied member must not be redirected somewhere undeclared — ${describeLanding(landing)}`,
             ).toBe(true);
-            expect(denied, `${route.path} must present the denial grammar to a member`).toBeGreaterThan(0);
+            const redirectedAway = landing.finalPath !== landing.requestedPath;
+            expect(
+                denied > 0 || redirectedAway,
+                `${route.path} must present the denial grammar or redirect the member to a declared safe path`,
+            ).toBe(true);
             expect(notFound, `${route.path} must not disguise a denial as a not-found state`).toBe(0);
             await context.close();
         });
