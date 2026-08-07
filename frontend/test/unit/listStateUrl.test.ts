@@ -205,7 +205,7 @@ describe("shared-link survival across a browser session", () => {
         expect(new URLSearchParams(url.search()).has("task")).toBe(false);
     });
 
-    it("lets the files writer own seven keys without disturbing a co-writer's page state", () => {
+    it("lets a files filter write leave pagination and foreign keys intact", () => {
         const url = mountUrl("?page=3&size=50&sv=2%3A9");
 
         writeOwnedParamsToUrl("/library/files", {
@@ -229,6 +229,65 @@ describe("shared-link survival across a browser session", () => {
         expect(params.get("orphaned")).toBe("1");
         expect(params.has("source")).toBe(false);
         expect(params.has("file")).toBe(false);
+    });
+
+    it("lets the files writer sync page and size without disturbing its own sort value space", () => {
+        const url = mountUrl("?sort=largest&kind=pdf&sv=2%3A9");
+
+        writeOwnedParamsToUrl("/library/files", {
+            q: undefined,
+            kind: "pdf",
+            source: undefined,
+            sort: "largest",
+            tags: undefined,
+            orphaned: undefined,
+            page: "3",
+            size: "50",
+            file: undefined,
+        });
+
+        const afterPage = new URLSearchParams(url.search());
+        expect(afterPage.get("page")).toBe("3");
+        expect(afterPage.get("size")).toBe("50");
+        expect(afterPage.get("sort")).toBe("largest");
+        expect(afterPage.get("kind")).toBe("pdf");
+        expect(afterPage.get("sv")).toBe("2:9");
+        expect(afterPage.has("dir")).toBe(false);
+
+        writeOwnedParamsToUrl("/library/files", {
+            q: undefined,
+            kind: "pdf",
+            source: undefined,
+            sort: "largest",
+            tags: undefined,
+            orphaned: undefined,
+            page: undefined,
+            size: undefined,
+            file: undefined,
+        });
+
+        const afterDefaults = new URLSearchParams(url.search());
+        expect(afterDefaults.has("page")).toBe(false);
+        expect(afterDefaults.has("size")).toBe(false);
+        expect(afterDefaults.get("sort")).toBe("largest");
+        expect(afterDefaults.get("kind")).toBe("pdf");
+        expect(afterDefaults.get("sv")).toBe("2:9");
+    });
+
+    it("keeps files pagination when a deep-linked file opens and closes", () => {
+        const url = mountUrl("?page=2&size=50&sort=name");
+
+        writeOwnedParamsToUrl("/library/files", { file: "42" });
+        expect(new URLSearchParams(url.search()).get("page")).toBe("2");
+        expect(new URLSearchParams(url.search()).get("size")).toBe("50");
+        expect(new URLSearchParams(url.search()).get("sort")).toBe("name");
+        expect(new URLSearchParams(url.search()).get("file")).toBe("42");
+
+        writeOwnedParamsToUrl("/library/files", { file: undefined });
+        expect(new URLSearchParams(url.search()).get("page")).toBe("2");
+        expect(new URLSearchParams(url.search()).get("size")).toBe("50");
+        expect(new URLSearchParams(url.search()).get("sort")).toBe("name");
+        expect(new URLSearchParams(url.search()).has("file")).toBe(false);
     });
 
     it("clears only the analytics writer's own keys when they return to defaults", () => {

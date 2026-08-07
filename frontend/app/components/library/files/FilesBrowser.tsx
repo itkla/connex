@@ -160,6 +160,8 @@ export default function FilesBrowser() {
     >(getAttachmentsPage, extraParams, {
         defaultSize: PAGE_SIZE,
         seedQuery: searchParams.get('q') ?? undefined,
+        seedPage: searchParams.get('page') ?? undefined,
+        seedSize: searchParams.get('size') ?? undefined,
     });
 
     const [deepLinkSettled, setDeepLinkSettled] = useState(
@@ -194,6 +196,8 @@ export default function FilesBrowser() {
         sort: sort !== 'newest' ? sort : undefined,
         tags: tagIds.length ? tagIds.join(',') : undefined,
         orphaned: orphaned ? '1' : undefined,
+        page: page > 1 ? String(page) : undefined,
+        size: size !== PAGE_SIZE ? String(size) : undefined,
     });
     useOwnedUrlParams({ file: detailFile ? String(detailFile.id) : undefined }, deepLinkSettled);
 

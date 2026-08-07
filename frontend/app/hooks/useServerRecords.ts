@@ -16,31 +16,42 @@ export { SERVER_RECORDS_URL_KEYS } from '@/app/hooks/listStateUrl';
  * owned by other writers, and it resets to defaults on a workspace switch so state never leaks across
  * workspaces. Leave `urlSync` off for consumers that own the URL themselves (e.g. FilesBrowser).
  *
- * A consumer that owns the URL itself can still restore the search box on first render by passing
- * `seedQuery`, which avoids seeding it from an effect and refetching once the value lands.
+ * A consumer that owns the URL itself can still restore list state on first render by passing
+ * `seedQuery` / `seedPage` / `seedSize`, which avoids seeding from an effect and refetching once the
+ * values land. That path is for browsers whose `sort` value space conflicts with the records-browser
+ * `sort`/`dir` pair — they write pagination through their own owned-params writer instead of
+ * enabling full `urlSync`.
  *
  * @param fetcher - loads a page of results for the given params
  * @param extraParams - non-paging params merged into every fetch
- * @param options - `defaultSize`, an optional initial query, and whether to sync list state to the URL
+ * @param options - `defaultSize`, optional initial query/page/size seeds, and whether to sync list state to the URL
  */
 export function useServerRecords<T, P extends PageParams = PageParams>(
     fetcher: (params: P) => Promise<Page<T>>,
     extraParams: Omit<P, keyof PageParams> = {} as Omit<P, keyof PageParams>,
-    options: { defaultSize?: number; urlSync?: boolean; seedQuery?: string } = {},
+    options: {
+        defaultSize?: number;
+        urlSync?: boolean;
+        seedQuery?: string;
+        seedPage?: string;
+        seedSize?: string;
+    } = {},
 ) {
-    const { defaultSize = 25, urlSync = false, seedQuery } = options;
+    const { defaultSize = 25, urlSync = false, seedQuery, seedPage, seedSize } = options;
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
 
     const seed = urlSync ? searchParams : null;
     const seededQuery = (urlSync ? seed?.get('q') : seedQuery)?.trim() ?? '';
+    const seededPageParam = (urlSync ? seed?.get('page') : seedPage) ?? null;
+    const seededSizeParam = (urlSync ? seed?.get('size') : seedSize) ?? null;
 
     const [items, setItems] = useState<T[]>([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
-    const [page, setPage] = useState(() => parseListInt(seed?.get('page') ?? null, 1));
-    const [size, setSize] = useState(() => parseListInt(seed?.get('size') ?? null, defaultSize, Math.max(defaultSize, MAX_URL_PAGE_SIZE)));
+    const [page, setPage] = useState(() => parseListInt(seededPageParam, 1));
+    const [size, setSize] = useState(() => parseListInt(seededSizeParam, defaultSize, Math.max(defaultSize, MAX_URL_PAGE_SIZE)));
     const [query, setQuery] = useState(seededQuery);
     const [debouncedQuery, setDebouncedQuery] = useState(seededQuery);
     const [sortKey, setSortKey] = useState<string | null>(() => seed?.get('sort') || null);
