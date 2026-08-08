@@ -7,9 +7,10 @@ import { ArchiveBoxXMarkIcon, LockClosedIcon } from '@heroicons/react/24/outline
 import ReportDocumentBoard from '@/app/components/reports/ReportDocumentBoard';
 import AccessDeniedPage from '@/app/components/AccessDeniedPage';
 import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import {
     ApiError,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getReport,
     getReportSnapshot,
@@ -72,7 +73,9 @@ export default async function ReportSnapshotPage({
     if (!Number.isInteger(id) || id < 1) notFound();
     if (!Number.isInteger(snapshotId) || snapshotId < 1) notFound();
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) return <WorkspaceUnavailablePage />;
+    const user = userResult.data;
     if (!user) redirect('/auth/login');
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const t = await getTranslations('Reports');

@@ -4,15 +4,15 @@ import { getTranslations } from 'next-intl/server';
 
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
 import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import {
     getActiveWorkspaceMembersResultFromCookie,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
-    getPipelinesFromCookie,
-    getReportTemplatesFromCookie,
-    getTagsFromCookie,
+    getPipelines,
+    getReportTemplates,
+    getTags,
 } from '@/app/lib/api';
-import type { Tag } from '@/app/lib/types';
 
 export async function generateMetadata() {
     const t = await getTranslations('Reports');
@@ -25,14 +25,17 @@ export default async function NewReportPage({
     searchParams: Promise<{ template?: string }>;
 }) {
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) return <WorkspaceUnavailablePage />;
+    const user = userResult.data;
     if (!user) redirect('/auth/login');
     const { template: templateKey } = await searchParams;
+    const init = { headers: { cookie: cookie ?? '' } } as const;
     const [templates, pipelines, ownersResult, tags, permissionsResult] = await Promise.all([
-        getReportTemplatesFromCookie(cookie),
-        getPipelinesFromCookie(cookie),
+        getReportTemplates(init),
+        getPipelines(init),
         getActiveWorkspaceMembersResultFromCookie(cookie),
-        getTagsFromCookie(cookie).catch((): Tag[] => []),
+        getTags(init),
         getEffectivePermissionsResultFromCookie(cookie),
     ]);
     if (!permissionsResult.ok) return <PermissionsUnavailablePage />;

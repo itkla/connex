@@ -1,10 +1,11 @@
 import CalendarShell from '@/app/components/calendar/CalendarShell';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import type { CalendarSourceKey, CalendarTruncation } from '@/app/components/calendar/SourceNotice';
 import {
     getActivitiesCappedResultFromCookie,
     getContactsCappedResultFromCookie,
     getContactTemperaturesResultFromCookie,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getDealsCappedResultFromCookie,
     getNotesCappedResultFromCookie,
     getTasksCappedResultFromCookie,
@@ -37,7 +38,11 @@ function collect<T>(
 
 export default async function CalendarPage() {
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         redirect('/auth/login');
     }

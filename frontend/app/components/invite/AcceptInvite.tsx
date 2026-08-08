@@ -1,26 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
-import { acceptInvite } from "@/app/lib/api";
+import { acceptInvite, WorkspaceSelectionUnavailableError } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 
 export default function AcceptInvite({ token }: { token: string }) {
     const t = useTranslations("InviteAccept");
-    const router = useRouter();
     const [busy, setBusy] = useState(false);
 
     const accept = async () => {
         setBusy(true);
         try {
             await acceptInvite(token);
-            router.replace("/dashboard");
-            router.refresh();
+            window.location.replace("/dashboard");
         } catch (err) {
+            if (err instanceof WorkspaceSelectionUnavailableError) {
+                window.location.replace("/dashboard");
+                return;
+            }
             toastError(err instanceof Error ? err.message : t("acceptFailed"));
             setBusy(false);
         }

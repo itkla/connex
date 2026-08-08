@@ -3,7 +3,11 @@
 ARG BUILD_TIME
 ARG SOURCE_DATE_EPOCH
 
-FROM python:3.14-slim-bookworm@sha256:86f975aca15cf04a40b399eebede9aea7c82eae084d1f1a0a6ef6bcaae871a30
+# paddlepaddle publishes no cp314 wheels, and requirements.lock is generated with Python 3.12
+# (see AGENTS.md). Bumping this base past 3.12 makes the hash-pinned install unresolvable and
+# the sidecar image unbuildable. Move it only together with a paddlepaddle release that ships
+# wheels for the new interpreter, and regenerate requirements.lock on the same version.
+FROM python:3.12-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2
 
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-ocr" \

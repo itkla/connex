@@ -1,29 +1,33 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
-    getCurrentUserFromCookie,
-    getNotesFromCookie,
-    getContactsFromCookie,
-    getDealsFromCookie,
+    getContacts,
+    getCurrentUserResultFromCookie,
+    getDeals,
+    getNotes,
     getUsers,
 } from "@/app/lib/api";
-import type { User } from "@/app/lib/types";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import NotesBrowser from "@/app/components/activity/notes/NotesBrowser";
 
 export default async function NotesPage() {
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         redirect('/auth/login');
     }
 
-    const init = cookie ? { headers: { cookie }, cache: 'no-store' as const } : undefined;
+    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
 
     const [allNotes, persons, deals, users] = await Promise.all([
-        getNotesFromCookie(cookie),
-        getContactsFromCookie(cookie),
-        getDealsFromCookie(cookie),
-        (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
+        getNotes(init),
+        getContacts({}, init),
+        getDeals(init),
+        getUsers(init),
     ]);
 
     return (
