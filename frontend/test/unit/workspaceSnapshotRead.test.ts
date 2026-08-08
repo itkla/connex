@@ -4,6 +4,7 @@ import { createElement, isValidElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AppLayout from "@/app/(app)/layout";
+import TasksPage from "@/app/(app)/activity/tasks/page";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import OnboardingForm from "@/app/onboarding/OnboardingForm";
 import OnboardingPage from "@/app/onboarding/page";
@@ -56,6 +57,7 @@ function stubAppShellReads(
 ) {
     const fetch = vi.fn((input: string | URL | Request) => {
         const url = String(input);
+        const pathname = new URL(url, "http://localhost:8080").pathname;
         if (url.endsWith("/api/auth/me")) {
             if (authenticationResponse === "network") {
                 return Promise.reject(new TypeError("fetch failed"));
@@ -131,6 +133,12 @@ function stubAppShellReads(
         if (url.endsWith("/api/permissions/effective")) {
             return Promise.resolve(json([]));
         }
+        if (["/api/tasks/page", "/api/persons/page", "/api/deals/page"].includes(pathname)) {
+            return Promise.resolve(json({ items: [], total: 0 }));
+        }
+        if (pathname === "/api/users") {
+            return Promise.resolve(json([]));
+        }
         return Promise.resolve(new Response("", { status: 404 }));
     });
     vi.stubGlobal("fetch", fetch);
@@ -187,6 +195,18 @@ describe("workspace snapshot reads", () => {
         expect(result.ok).toBe(true);
         if (!result.ok) throw new Error("Expected a normalized workspace snapshot");
         expect(result.data.activeWorkspaceId).toBe(7);
+    });
+
+    it("passes the forwarded cookie selection to a nested server page", async () => {
+        stubAppShellReads("cross-device");
+
+        const rendered = await TasksPage();
+
+        expect(isValidElement<{ originWorkspaceId: number | null }>(rendered)).toBe(true);
+        if (!isValidElement<{ originWorkspaceId: number | null }>(rendered)) {
+            throw new Error("Expected the tasks browser");
+        }
+        expect(rendered.props.originWorkspaceId).toBe(7);
     });
 
     it("returns an empty snapshot only when there is no authenticated cookie to forward", async () => {

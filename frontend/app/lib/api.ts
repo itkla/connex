@@ -3722,7 +3722,10 @@ function activeWorkspaceFromSelection(snapshot: Types.MyWorkspaces): Types.Works
 
 export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<Types.MyWorkspaces> {
     if (!cookie) return EMPTY_WORKSPACES;
-    return getMyWorkspaces({ headers: { cookie }, cache: "no-store" });
+    return workspaceSnapshotForForwardedCookie(
+        await getMyWorkspaces({ headers: { cookie }, cache: "no-store" }),
+        cookie,
+    );
 }
 
 function workspaceSnapshotForForwardedCookie(

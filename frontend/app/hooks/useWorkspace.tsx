@@ -318,12 +318,12 @@ export function WorkspaceProvider({
 
     const retrySelectionRecovery = useCallback(async () => {
         try {
-            await executeSelectionChange(async () => {
-                publishAuthoritativeWorkspaceSelection(
-                    await readAuthoritativeWorkspaceSelection(),
-                );
-                router.refresh();
-            }, true);
+            const snapshot = await executeSelectionChange(
+                () => readAuthoritativeWorkspaceSelection(),
+                true,
+            );
+            publishAuthoritativeWorkspaceSelection(snapshot);
+            router.refresh();
         } catch {
             selectionUnavailableRef.current = true;
             setSelectionUnavailable(true);
