@@ -1,20 +1,26 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.ByteArrayOutputStream;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -26,6 +32,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.request.async.AsyncWebRequest;
@@ -37,16 +44,22 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.TenantExportGrantService;
+import ooo.klae.connex.backend.services.TenantExportGrantService.TenantExportGrant;
 import ooo.klae.connex.backend.services.TenantExportService;
 import ooo.klae.connex.backend.services.TenantExportService.TenantExportDownload;
 import ooo.klae.connex.backend.services.TenantTeardownService;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantExportGrantCookie;
 
 @ExtendWith(MockitoExtension.class)
 class TenantLifecycleControllerTest {
     @Mock private TenantExportService tenantExportService;
+    @Mock private TenantExportGrantService tenantExportGrantService;
+    @Mock private TenantExportGrantCookie tenantExportGrantCookie;
     @Mock private TenantTeardownService tenantTeardownService;
     @Mock private AuthService authService;
     @Mock private TenantExportDownload download;
@@ -61,6 +74,8 @@ class TenantLifecycleControllerTest {
     void setUp() {
         exportController = new TenantLifecycleController(
             tenantExportService,
+            tenantExportGrantService,
+            tenantExportGrantCookie,
             authService);
         teardownController = new TenantTeardownController(
             tenantTeardownService,
@@ -82,7 +97,12 @@ class TenantLifecycleControllerTest {
         WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
         clearInvocations(asyncWebRequest);
 
-        var response = exportController.export(3, 5, request);
+        var response = exportController.export(
+            3,
+            5,
+            null,
+            request,
+            new MockHttpServletResponse());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         response.getBody().writeTo(output);
 
@@ -111,7 +131,12 @@ class TenantLifecycleControllerTest {
             return null;
         }).when(asyncWebRequest).addErrorHandler(any());
 
-        exportController.export(3, 5, request);
+        exportController.export(
+            3,
+            5,
+            null,
+            request,
+            new MockHttpServletResponse());
 
         verify(asyncWebRequest).addTimeoutHandler(timeoutHandler.capture());
         verify(asyncWebRequest).addCompletionHandler(completionHandler.capture());
@@ -132,7 +157,12 @@ class TenantLifecycleControllerTest {
 
         IllegalStateException thrown = assertThrows(
             IllegalStateException.class,
-            () -> exportController.export(3, 5, request));
+            () -> exportController.export(
+                3,
+                5,
+                null,
+                request,
+                new MockHttpServletResponse()));
 
         assertSame(primary, thrown);
         assertEquals(0, thrown.getSuppressed().length);
@@ -151,6 +181,95 @@ class TenantLifecycleControllerTest {
 
         mockMvc.perform(get("/api/orgs/3/workspaces/5/export"))
             .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void issueExportGrantUsesTheAuthenticatedSessionAndReturnsDownloadPath() throws Exception {
+        TenantExportGrant grant = new TenantExportGrant(
+            "a".repeat(64),
+            Instant.parse("2026-08-08T12:02:00Z"));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        when(tenantExportGrantService.issue(3, 5, 7, request.getSession().getId()))
+            .thenReturn(grant);
+
+        var response = exportController.issueExportGrant(
+            3,
+            5,
+            request,
+            new MockHttpServletResponse());
+
+        assertEquals(200, response.getStatusCode().value());
+        var body = response.getBody();
+        assertNotNull(body);
+        assertEquals(
+            "/api/orgs/3/workspaces/5/export",
+            body.downloadPath());
+        verify(tenantExportGrantCookie).set(
+            any(),
+            eq(3),
+            eq(5),
+            eq("a".repeat(64)),
+            eq(TenantExportGrantService.GRANT_LIFETIME));
+    }
+
+    @Test
+    void presentedGrantNeverFallsBackToTheLegacyGetAuthorization() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        when(tenantExportGrantService.redeem(
+                3,
+                5,
+                7,
+                request.getSession().getId(),
+                "b".repeat(64)))
+            .thenReturn(download);
+        when(download.filename()).thenReturn("tenant.zip");
+        when(download.remainingTimeoutMillis()).thenReturn(1_000L);
+        WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
+
+        exportController.export(
+            3,
+            5,
+            "b".repeat(64),
+            request,
+            new MockHttpServletResponse());
+
+        verify(tenantExportService, never()).prepare(anyInt(), anyInt(), anyInt());
+        verify(tenantExportGrantCookie).clear(any(), eq(3), eq(5));
+    }
+
+    @Test
+    void failedGrantRedemptionDoesNotClearTheRetryableCookie() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        doThrow(new TooManyRequestsException("Export capacity unavailable"))
+            .when(tenantExportGrantService)
+            .redeem(3, 5, 7, request.getSession().getId(), "a".repeat(64));
+
+        assertThrows(
+            TooManyRequestsException.class,
+            () -> exportController.export(
+                3,
+                5,
+                "a".repeat(64),
+                request,
+                new MockHttpServletResponse()));
+
+        verify(tenantExportGrantCookie, never()).clear(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void exportGrantPostMapsRecentAuthenticationRequirement() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        doThrow(new ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException())
+            .when(tenantExportGrantService)
+            .issue(3, 5, 7, request.getSession().getId());
+
+        mockMvc.perform(post("/api/orgs/3/workspaces/5/export").session(
+                (org.springframework.mock.web.MockHttpSession) request.getSession()))
+            .andExpect(status().isForbidden());
     }
 
     @Test

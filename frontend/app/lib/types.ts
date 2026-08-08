@@ -2894,6 +2894,11 @@ export type OrganizationLayout = {
     nextWorkspaceId: number | null;
 };
 
+export type TenantExportGrant = {
+    expiresAt: string;
+    downloadPath: string;
+};
+
 export type OrgMember = {
     id: number;
     username: string;

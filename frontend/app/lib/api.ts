@@ -3513,6 +3513,49 @@ export function getOrganizationLayout(
     });
 }
 
+export async function requestWorkspaceTenantExport(
+    orgId: number,
+    workspaceId: number,
+): Promise<Types.TenantExportGrant> {
+    const expectedPath = `/api/orgs/${orgId}/workspaces/${workspaceId}/export`;
+    const response = await postJson<unknown>(expectedPath);
+    if (typeof response !== "object"
+        || response === null
+        || !("downloadPath" in response)
+        || response.downloadPath !== expectedPath
+        || !("expiresAt" in response)
+        || typeof response.expiresAt !== "string"
+        || Number.isNaN(Date.parse(response.expiresAt))) {
+        throw new Error("Tenant export returned an invalid download path");
+    }
+    return {
+        downloadPath: response.downloadPath,
+        expiresAt: response.expiresAt,
+    };
+}
+
+export function teardownOrganizationWorkspace(
+    orgId: number,
+    workspaceId: number,
+    confirmation: string,
+) {
+    return withClientRequestIdentityReset(
+        () => deleteJson<void>(`/api/orgs/${orgId}/workspaces/${workspaceId}`, {
+            body: JSON.stringify({ confirmation }),
+        }),
+        "workspace",
+    );
+}
+
+export function teardownOrganization(orgId: number, confirmation: string) {
+    return withClientRequestIdentityReset(
+        () => deleteJson<void>(`/api/orgs/${orgId}`, {
+            body: JSON.stringify({ confirmation }),
+        }),
+        "workspace",
+    );
+}
+
 export function addOrgMemberByEmail(orgId: number, email: string, orgRole: Types.OrgRole) {
     return postJson<void>(`/api/orgs/${orgId}/members`, { email, orgRole });
 }

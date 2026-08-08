@@ -65,6 +65,7 @@ public final class TablePlaneRegistry {
         "sso_link_challenge",
         "tenant_cleanup_tombstone",
         "tenant_export_admission_control",
+        "tenant_export_download_grant",
         "tenant_operation_lease",
         "user_object_deletion_queue",
         "webauthn_credential",

@@ -97,24 +97,29 @@ public class TenantExportService {
             int actorId) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
+        AcquiredWorkspace acquired = controlOperations.acquireExport(
+            orgId,
+            workspaceId,
+            actorId);
+        return prepareAcquired(orgId, actorId, acquired);
+    }
 
-        OperationLease operationLease = null;
+    TenantExportDownload prepareAcquired(
+            int orgId,
+            int actorId,
+            AcquiredWorkspace acquired) {
+        OperationLease operationLease = acquired.lease();
         Path objectSpool = null;
         try {
-            AcquiredWorkspace acquired = controlOperations.acquireExport(
-                orgId,
-                workspaceId,
-                actorId);
-            operationLease = acquired.lease();
             Route route = lifecycleAccess.capture(acquired.workspace(), orgId);
             objectSpool = createObjectSpool();
             auditService.recordStrictIndependentScoped(
                 AUDIT_ACTION,
                 "workspace",
-                workspaceId,
+                acquired.workspace().id(),
                 null,
                 orgId,
-                "workspace:" + workspaceId,
+                "workspace:" + acquired.workspace().id(),
                 "Tenant export authorized and streaming started",
                 Map.of("declaredTableCount", TenantLifecycleRegistry.declarations().size()));
             TenantExportDownload download = new TenantExportDownload(

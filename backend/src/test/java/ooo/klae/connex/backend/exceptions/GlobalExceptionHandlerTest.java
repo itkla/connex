@@ -178,6 +178,21 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void openDataSubjectRequestReturnsStableTeardownRefusalCode() {
+        ResponseEntity<Map<String, String>> response = handler.openDataSubjectRequest(
+            new OpenDataSubjectRequestException(
+                "An open data-subject request still references this workspace"));
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        Map<String, String> body = response.getBody();
+        assertNotNull(body);
+        assertEquals(OpenDataSubjectRequestException.CODE, body.get("code"));
+        assertEquals(
+            "An open data-subject request still references this workspace",
+            body.get("message"));
+    }
+
+    @Test
     void ssoEnforced_returnsStableCode() {
         ResponseEntity<Map<String, String>> response = handler.ssoEnforced(new SsoEnforcedException());
 

@@ -292,15 +292,13 @@ a string like `SOCIAL_LOGIN_GOOGLE`, so grepping for the table's row names finds
       and enrol immediately — that refusal carries no machine-readable code and the UI does not
       explain it. Mechanics in
       [INTERNAL_OPERATIONS_RUNBOOK.md](INTERNAL_OPERATIONS_RUNBOOK.md).
-- [ ] **Passkey tested, not just registered:** the owner has completed one real step-up-guarded
-      **mutation** (for example creating and revoking a throwaway invite link) and seen the passkey
-      prompt appear. **The frontend only auto-prompts on mutating requests**, so a successful
-      mutation is the only in-app proof available; the tenant export is a `GET` and can never be
-      tested this way. Do this at onboarding, not at offboarding.
-- [ ] **Offboarding rehearsed once, end to end, on non-production data** — including the indirect
-      step-up procedure the export needs (stamp the session with an unrelated mutation, then reuse
-      that session for the `GET` within the recent-authentication window). There is no export or
-      teardown UI, so this is hand-assembled HTTP; step 0 of the **Offboarding** section of
+- [ ] **Passkey tested, not just registered:** at **Organization → Overview → Export and teardown**,
+      the owner has selected **Export workspace**, completed the passkey prompt raised by the export
+      grant request, and received the ZIP. No unrelated mutation is part of this test. Do it at
+      onboarding, not for the first time at offboarding.
+- [ ] **Offboarding rehearsed once, end to end, on non-production data** through the product UI —
+      export, ZIP verification, exact-slug confirmation, the natural teardown passkey prompt, and a
+      deliberate open-data-request refusal. The **Offboarding** section of
       [INTERNAL_OPERATIONS_RUNBOOK.md](INTERNAL_OPERATIONS_RUNBOOK.md) is the procedure. Record who
       rehearsed it and when.
 - [ ] Starting data decided: **seeded demo fixtures** or **real import**.
@@ -335,11 +333,10 @@ Agree the exit path **at admission**, not at termination. The mechanics — expo
 the two owner-only teardown calls — are in the **Offboarding** section of
 [INTERNAL_OPERATIONS_RUNBOOK.md](INTERNAL_OPERATIONS_RUNBOOK.md). Confirm at admission that:
 
-- [ ] The partner knows the export is a streamed ZIP obtained over HTTP by an **organization
-      administrator** with recent authentication, and that there is **no CLI and no UI** — the
-      export and teardown endpoints are called by hand, and the export's step-up stamp has to be
-      obtained indirectly (see the **Offboarding** section of
-      [INTERNAL_OPERATIONS_RUNBOOK.md](INTERNAL_OPERATIONS_RUNBOOK.md)).
+- [ ] The partner knows the export is a streamed ZIP started from **Organization → Overview → Export
+      and teardown** by an **organization administrator** with a passkey. The mutating grant request
+      raises step-up naturally and the browser consumes its short-lived, single-use download grant;
+      no unrelated mutation or copied session cookie is required.
 - [ ] The partner knows exports are **plaintext at generation** and that protecting the downloaded
       archive is theirs to do.
 - [ ] The export-then-delete window from the signed DPA (template §8 proposes **[30] days**) is
