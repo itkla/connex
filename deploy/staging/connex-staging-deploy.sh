@@ -198,12 +198,24 @@ build_backend() {
 }
 
 build_frontend() {
+    local build_status=0 restore_status=0
     cd "$STAGING_DIR/frontend"
     log "Building frontend (into .next-new)..."
     set -a; source "$FRONTEND_ENV"; set +a
     "$PNPM" install --frozen-lockfile --silent
-    rm -rf .next-new
-    NEXT_DIST_DIR=.next-new "$PNPM" build
+    # Only generated route types are safe to remove from the live .next tree before the
+    # swap. The running frontend still reads .next/server and .next/static, so never clean
+    # .next wholesale here. .next-new is disposable until it becomes the live build.
+    rm -rf .next-new .next/types .next/dev/types
+    NEXT_DIST_DIR=.next-new "$PNPM" build || build_status=$?
+    git checkout -- tsconfig.json || restore_status=$?
+    if [ "$restore_status" -ne 0 ]; then
+        log "Frontend tsconfig restore FAILED"
+    fi
+    if [ "$build_status" -ne 0 ]; then
+        return "$build_status"
+    fi
+    return "$restore_status"
 }
 
 swap_frontend_build() {
