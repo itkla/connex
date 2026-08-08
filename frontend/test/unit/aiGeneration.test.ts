@@ -16,6 +16,7 @@ function running(
         result: null,
         reason: null,
         retryAfterMs: 2_000,
+        pollWindowMs: 120_000,
         expiresAt,
     };
 }
@@ -75,7 +76,7 @@ describe('bounded AI generation polling', () => {
         });
 
         await expect(resolveAiGeneration(
-            running('accepted'),
+            { ...running('accepted'), pollWindowMs: 1_000 },
             vi.fn().mockRejectedValue(new TypeError('network')),
             {
                 now: () => now,
@@ -86,5 +87,47 @@ describe('bounded AI generation polling', () => {
             status: 'timed_out',
             reason: 'poll_window_expired',
         });
+    });
+
+    it('polls normally when the workstation clock is far ahead of the server', async () => {
+        let now = Date.parse('2126-08-08T10:00:00.000Z');
+        const sleep = vi.fn().mockImplementation(async (milliseconds: number) => {
+            now += milliseconds;
+        });
+        const poll = vi.fn().mockResolvedValue({
+            ...running('running'),
+            status: 'resolved',
+            result: 'ready',
+        } satisfies AiGenerationStatus<string>);
+
+        await expect(resolveAiGeneration(running('accepted'), poll, {
+            now: () => now,
+            sleep,
+        })).resolves.toBe('ready');
+
+        expect(poll).toHaveBeenCalledOnce();
+    });
+
+    it('stops before polling when a behind workstation clock consumes the relative window', async () => {
+        let now = Date.parse('1926-08-08T10:00:00.000Z');
+        const sleep = vi.fn().mockImplementation(async (milliseconds: number) => {
+            now += milliseconds;
+        });
+        const poll = vi.fn().mockRejectedValue(new TypeError('network'));
+
+        await expect(resolveAiGeneration(
+            { ...running('accepted'), pollWindowMs: 500 },
+            poll,
+            {
+                now: () => now,
+                sleep,
+                shouldRetryError: () => true,
+            },
+        )).rejects.toMatchObject({
+            status: 'timed_out',
+            reason: 'poll_window_expired',
+        });
+
+        expect(poll).not.toHaveBeenCalled();
     });
 });

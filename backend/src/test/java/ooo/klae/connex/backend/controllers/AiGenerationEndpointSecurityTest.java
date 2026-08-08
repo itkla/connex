@@ -117,7 +117,8 @@ class AiGenerationEndpointSecurityTest {
     void generationStatusIsAuthenticatedReadOnlyAndNoStore() throws Exception {
         String handle = "f40f5943-9943-4c79-94d2-2e2a014cff46";
         when(aiGenerationService.status(handle)).thenReturn(new AiGenerationStatusDto(
-                handle, "deal.brief", "running", null, null, 2_000, "2026-08-08T10:02:00Z"));
+                handle, "deal.brief", "running", null, null, 2_000, 120_000,
+                "2026-08-08T10:02:00Z"));
 
         mockMvc.perform(get("/api/ai/generations/{handle}", handle))
                 .andExpect(status().isOk())

@@ -45,9 +45,10 @@ export async function resolveAiGeneration<T>(
     poll: (handle: string) => Promise<AiGenerationStatus<T>>,
     options: ResolveOptions = {},
 ): Promise<T> {
-    const now = options.now ?? Date.now;
+    const now = options.now ?? (() => performance.now());
     const sleep = options.sleep ?? abortableSleep;
-    const deadline = Date.parse(initial.expiresAt);
+    const startedAt = now();
+    const deadline = startedAt + initial.pollWindowMs;
     let current = initial;
 
     while (true) {
@@ -56,13 +57,17 @@ export async function resolveAiGeneration<T>(
         if (current.status === 'failed' || current.status === 'timed_out') {
             throw new AiGenerationError(current.status, current.reason);
         }
-        if (!Number.isFinite(deadline) || now() >= deadline) {
+        const remaining = deadline - now();
+        if (!Number.isFinite(deadline) || remaining <= 0) {
             throw new AiGenerationError('timed_out', 'poll_window_expired');
         }
 
-        const delay = Math.min(Math.max(current.retryAfterMs, 250), deadline - now());
+        const delay = Math.min(Math.max(current.retryAfterMs, 250), remaining);
         await sleep(delay, options.signal);
         options.signal?.throwIfAborted();
+        if (now() >= deadline) {
+            throw new AiGenerationError('timed_out', 'poll_window_expired');
+        }
         try {
             current = await poll(current.handle);
         } catch (error) {

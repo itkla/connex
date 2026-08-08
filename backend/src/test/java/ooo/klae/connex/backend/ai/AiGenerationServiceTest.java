@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,11 +13,16 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Field;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -103,6 +109,7 @@ class AiGenerationServiceTest {
                 });
 
         assertEquals("accepted", accepted.status());
+        assertTrue(accepted.pollWindowMs() > 0);
         assertTrue(running.await(2, TimeUnit.SECONDS));
         assertEquals("running", service.status(accepted.handle()).status());
         release.countDown();
@@ -392,6 +399,55 @@ class AiGenerationServiceTest {
     }
 
     @Test
+    void rejectedWorkerSubmissionIsNeverPublishedToAConcurrentDuplicate() throws Exception {
+        ThreadPoolExecutor workers = workerExecutor();
+        CountDownLatch rejectionEntered = new CountDownLatch(1);
+        CountDownLatch releaseRejection = new CountDownLatch(1);
+        CountDownLatch duplicateStarted = new CountDownLatch(1);
+        AtomicInteger billableAttempts = new AtomicInteger();
+        workers.setRejectedExecutionHandler((task, executor) -> {
+            rejectionEntered.countDown();
+            await(releaseRejection);
+            throw new RejectedExecutionException("worker unavailable");
+        });
+        workers.shutdownNow();
+        var generationTask = (java.util.function.Supplier<AiGenerationTaskResult<String>>) () -> {
+            billableAttempts.incrementAndGet();
+            return AiGenerationTaskResult.resolved("must-not-run");
+        };
+
+        CompletableFuture<AiGenerationStatusDto> initiating = CompletableFuture.supplyAsync(() ->
+                service.start(
+                        AiFeature.DEAL_BRIEF,
+                        "deal-17",
+                        Set.of(Permission.AI_USE),
+                        "unavailable",
+                        generationTask));
+        assertTrue(rejectionEntered.await(2, TimeUnit.SECONDS));
+        CompletableFuture<AiGenerationStatusDto> duplicate = CompletableFuture.supplyAsync(() -> {
+            duplicateStarted.countDown();
+            return service.start(
+                    AiFeature.DEAL_BRIEF,
+                    "deal-17",
+                    Set.of(Permission.AI_USE),
+                    "unavailable",
+                    generationTask);
+        });
+        assertTrue(duplicateStarted.await(2, TimeUnit.SECONDS));
+        releaseRejection.countDown();
+
+        ExecutionException initiatingFailure = assertThrows(
+                ExecutionException.class,
+                () -> initiating.get(2, TimeUnit.SECONDS));
+        ExecutionException duplicateFailure = assertThrows(
+                ExecutionException.class,
+                () -> duplicate.get(2, TimeUnit.SECONDS));
+        assertInstanceOf(TooManyRequestsException.class, initiatingFailure.getCause());
+        assertInstanceOf(TooManyRequestsException.class, duplicateFailure.getCause());
+        assertEquals(0, billableAttempts.get());
+    }
+
+    @Test
     void crossWorkspaceAndCrossUserPollsAreRefused() throws Exception {
         CountDownLatch running = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -508,6 +564,12 @@ class AiGenerationServiceTest {
         }
         assertEquals(expected, current.status());
         return current;
+    }
+
+    private ThreadPoolExecutor workerExecutor() throws ReflectiveOperationException {
+        Field field = AiGenerationService.class.getDeclaredField("workers");
+        field.setAccessible(true);
+        return ThreadPoolExecutor.class.cast(field.get(service));
     }
 
     private static void await(CountDownLatch latch) {

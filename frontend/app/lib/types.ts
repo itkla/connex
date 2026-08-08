@@ -2222,6 +2222,7 @@ type AiGenerationBase = {
     handle: string;
     kind: string;
     retryAfterMs: number;
+    pollWindowMs: number;
     expiresAt: string;
 };
 

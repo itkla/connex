@@ -72,6 +72,7 @@ import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
@@ -553,6 +554,7 @@ class ReportIntegrationTest {
                         null,
                         null,
                         2_000,
+                        120_000,
                         "2026-07-12T12:02:00Z"));
     }
 
@@ -660,6 +662,34 @@ class ReportIntegrationTest {
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void saturatedNarrativeAdmissionPreservesDeterministicFigures() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace);
+        insertActivity(workspace.getId(), member.getId(), "2026-01-05 09:00:00");
+        insertActivity(workspace.getId(), member.getId(), "2026-01-20 09:00:00");
+        when(aiGenerationService.startAtRestrictionEpoch(
+                any(), any(), anySet(), any(), any(), anyLong()))
+                .thenThrow(new TooManyRequestsException("AI generation is busy"));
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .param("narrative", "full")
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").value(2))
+            .andExpect(jsonPath("$.appendix[0].sourceId").value("metric.0.0"))
+            .andExpect(jsonPath("$.narrative.available").value(false))
+            .andExpect(jsonPath("$.narrative.reason").value("rate_limited"))
+            .andExpect(jsonPath("$.generation").doesNotExist());
     }
 
     @Test

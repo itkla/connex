@@ -225,6 +225,7 @@
       "narrativeErrorBody": "The AI summary is temporarily unavailable. The figures and appendix below are complete.",
       "narrativeTimedOutTitle": "Narrative generation timed out",
       "narrativeTimedOutBody": "The generation reached its time limit. The figures and appendix below are complete.",
+      "narrativeRateLimitedTitle": "Narrative is temporarily unavailable",
       "narrativeRateLimitedBody": "You have reached the AI generation limit for now. The figures below are complete; try the narrative again in a few minutes.",
       "figures": "Evidence & figures",
       "appendix": "Data appendix",

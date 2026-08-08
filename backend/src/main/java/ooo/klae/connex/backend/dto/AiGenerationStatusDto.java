@@ -10,6 +10,7 @@ import tools.jackson.databind.JsonNode;
  * @param result typed feature result when resolved
  * @param reason stable terminal reason when failed or timed out
  * @param retryAfterMs recommended delay before the next status read
+ * @param pollWindowMs remaining relative lifetime for local monotonic polling
  * @param expiresAt fixed ISO instant after which the handle is unavailable
  */
 public record AiGenerationStatusDto(
@@ -19,5 +20,6 @@ public record AiGenerationStatusDto(
         JsonNode result,
         String reason,
         long retryAfterMs,
+        long pollWindowMs,
         String expiresAt) {
 }

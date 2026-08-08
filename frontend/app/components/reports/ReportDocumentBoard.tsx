@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
@@ -32,6 +32,7 @@ import {
     generateReport,
     getReportSnapshot,
     resolveAcceptedAiGeneration,
+    subscribeClientRequestIdentityInvalidation,
 } from '@/app/lib/api';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
@@ -68,14 +69,67 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
-type DocumentState =
+type LiveReportState =
     | { status: 'loading' }
-    | { status: 'error' }
-    | { status: 'ready'; document: ReportDocument };
+    | { status: 'report_failed' }
+    | {
+        status: 'accepted' | 'running' | 'resolved' | 'failed' | 'rate_limited' | 'timed_out';
+        document: ReportDocument;
+    };
 
-type NarrativeState = 'idle' | 'generating' | 'error' | 'rateLimited' | 'timedOut';
+type LiveReportAction =
+    | { type: 'load' }
+    | { type: 'report_failed' }
+    | { type: 'received'; document: ReportDocument }
+    | { type: 'running' }
+    | { type: 'resolved'; document: ReportDocument }
+    | { type: 'terminal'; status: 'failed' | 'rate_limited' | 'timed_out' };
 
 const FIGURES_TIMEOUT_MS = 30_000;
+
+function receivedReportState(document: ReportDocument): LiveReportState {
+    const generation = document.generation;
+    if (generation?.status === 'accepted' || generation?.status === 'running') {
+        return { status: generation.status, document };
+    }
+    if (generation?.status === 'resolved') {
+        return { status: 'resolved', document: generation.result };
+    }
+    if (generation?.status === 'failed') {
+        return {
+            status: generation.reason === 'rate_limited' ? 'rate_limited' : 'failed',
+            document,
+        };
+    }
+    if (generation?.status === 'timed_out') {
+        return { status: 'timed_out', document };
+    }
+    if (document.narrative.reason === 'rate_limited') {
+        return { status: 'rate_limited', document };
+    }
+    return { status: 'resolved', document };
+}
+
+function liveReportReducer(state: LiveReportState, action: LiveReportAction): LiveReportState {
+    switch (action.type) {
+        case 'load':
+            return { status: 'loading' };
+        case 'report_failed':
+            return { status: 'report_failed' };
+        case 'received':
+            return receivedReportState(action.document);
+        case 'resolved':
+            return { status: 'resolved', document: action.document };
+        case 'running':
+            return state.status === 'loading' || state.status === 'report_failed'
+                ? state
+                : { status: 'running', document: state.document };
+        case 'terminal':
+            return state.status === 'loading' || state.status === 'report_failed'
+                ? state
+                : { status: action.status, document: state.document };
+    }
+}
 
 /**
  * Rejects if the wrapped promise has not settled within {@link ms}. The underlying request keeps
@@ -123,8 +177,7 @@ export default function ReportDocumentBoard({
     const t = useTranslations('Reports');
     const locale = useLocale();
     const { activeWorkspace } = useWorkspace();
-    const [state, setState] = useState<DocumentState>({ status: 'loading' });
-    const [narrativeState, setNarrativeState] = useState<NarrativeState>('idle');
+    const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
     const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(initialSnapshot?.id ?? null);
     const [activeSnapshot, setActiveSnapshot] = useState<ReportSnapshot | null>(initialSnapshot);
@@ -146,17 +199,29 @@ export default function ReportDocumentBoard({
 
     const document = activeSnapshotId != null
         ? activeSnapshot?.computedResult ?? null
-        : state.status === 'ready' ? state.document : null;
+        : reportState.status === 'loading' || reportState.status === 'report_failed'
+            ? null
+            : reportState.document;
+
+    useEffect(() => subscribeClientRequestIdentityInvalidation(() => {
+        snapshotRequestRef.current += 1;
+        generationAbortRef.current?.abort();
+        generationRef.current += 1;
+    }), []);
 
     /** Resolves an accepted narrative handle, or starts a fresh handle for an explicit retry. */
     const runNarrative = useCallback(async (
         generationId: number,
         accepted?: AiGenerationStatus<ReportDocument>,
+        generationGuard?: () => boolean,
     ) => {
         generationAbortRef.current?.abort();
         const controller = new AbortController();
         generationAbortRef.current = controller;
-        setNarrativeState('generating');
+        const isCurrent = () => (generationGuard?.() ?? true)
+            && generationRef.current === generationId
+            && !controller.signal.aborted;
+        dispatchReport({ type: 'running' });
         try {
             let generation = accepted;
             if (!generation) {
@@ -164,29 +229,29 @@ export default function ReportDocumentBoard({
                     generateReport(definition.id, generationInputRef.current, 'full'),
                     FIGURES_TIMEOUT_MS,
                 );
-                if (generationRef.current !== generationId) return;
-                setState({ status: 'ready', document: started });
+                if (!isCurrent()) return;
+                dispatchReport({ type: 'received', document: started });
                 generation = started.generation ?? undefined;
-                if (!generation) {
-                    setNarrativeState(started.narrative.available ? 'idle' : 'error');
+                if (!generation || generation.status === 'resolved'
+                    || generation.status === 'failed' || generation.status === 'timed_out') {
                     return;
                 }
             }
+            dispatchReport({ type: 'running' });
             const resolved = await resolveAcceptedAiGeneration<ReportDocument>(
                 generation,
                 { signal: controller.signal },
             );
-            if (generationRef.current !== generationId) return;
-            setState({ status: 'ready', document: resolved });
-            setNarrativeState('idle');
+            if (!isCurrent()) return;
+            dispatchReport({ type: 'resolved', document: resolved });
         } catch (error) {
-            if (generationRef.current !== generationId || controller.signal.aborted) return;
+            if (!isCurrent()) return;
             if (error instanceof AiGenerationError && error.status === 'timed_out') {
-                setNarrativeState('timedOut');
+                dispatchReport({ type: 'terminal', status: 'timed_out' });
             } else if (error instanceof AiGenerationError && error.reason === 'rate_limited') {
-                setNarrativeState('rateLimited');
+                dispatchReport({ type: 'terminal', status: 'rate_limited' });
             } else {
-                setNarrativeState('error');
+                dispatchReport({ type: 'terminal', status: 'failed' });
             }
         } finally {
             if (generationAbortRef.current === controller) {
@@ -195,35 +260,41 @@ export default function ReportDocumentBoard({
         }
     }, [definition.id]);
 
+    const loadLiveReport = useCallback(async (
+        generationId: number,
+        isCurrent: () => boolean,
+    ) => {
+        let figures: ReportDocument;
+        try {
+            figures = await withTimeout(
+                generateReport(definition.id, generationInputRef.current, 'full'),
+                FIGURES_TIMEOUT_MS,
+            );
+        } catch {
+            if (isCurrent()) dispatchReport({ type: 'report_failed' });
+            return;
+        }
+        if (!isCurrent()) return;
+        dispatchReport({ type: 'received', document: figures });
+        setStart(figures.periodStart);
+        setEnd(figures.periodEnd);
+        if (figures.generation?.status === 'accepted' || figures.generation?.status === 'running') {
+            void runNarrative(generationId, figures.generation, isCurrent);
+        }
+    }, [definition.id, runNarrative]);
+
     useEffect(() => {
         if (!liveRequested) return;
+        let active = true;
         const generationId = (generationRef.current += 1);
-        (async () => {
-            let figures: ReportDocument;
-            try {
-                figures = await withTimeout(
-                    generateReport(definition.id, generationInputRef.current, 'full'),
-                    FIGURES_TIMEOUT_MS,
-                );
-            } catch {
-                if (generationRef.current === generationId) setState({ status: 'error' });
-                return;
-            }
-            if (generationRef.current !== generationId) return;
-            setState({ status: 'ready', document: figures });
-            setStart(figures.periodStart);
-            setEnd(figures.periodEnd);
-            if (figures.generation) {
-                void runNarrative(generationId, figures.generation);
-            } else {
-                setNarrativeState('idle');
-            }
-        })();
+        const isCurrent = () => active && generationRef.current === generationId;
+        void loadLiveReport(generationId, isCurrent);
         return () => {
+            active = false;
             generationAbortRef.current?.abort();
             generationRef.current += 1;
         };
-    }, [definition.id, refreshKey, runNarrative, liveRequested]);
+    }, [definition.id, loadLiveReport, refreshKey, liveRequested]);
 
     const retryNarrative = () => {
         const generationId = (generationRef.current += 1);
@@ -249,8 +320,7 @@ export default function ReportDocumentBoard({
         snapshotRequestRef.current += 1;
         setActiveSnapshotId(null);
         setActiveSnapshot(null);
-        setState({ status: 'loading' });
-        setNarrativeState('idle');
+        dispatchReport({ type: 'load' });
         setLiveRequested(true);
         setRefreshKey((key) => key + 1);
         syncSnapshotUrl(null);
@@ -503,9 +573,9 @@ export default function ReportDocumentBoard({
 
                 {activeSnapshotId != null && activeSnapshot == null ? (
                     <ReportDocumentSkeleton />
-                ) : activeSnapshot == null && state.status === 'loading' ? (
+                ) : activeSnapshot == null && reportState.status === 'loading' ? (
                     <ReportDocumentSkeleton />
-                ) : activeSnapshot == null && state.status === 'error' ? (
+                ) : activeSnapshot == null && reportState.status === 'report_failed' ? (
                     <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
                         <DocumentTextIcon className="mx-auto size-8 text-muted-foreground" />
                         <h2 className="mt-4 text-lg font-semibold text-foreground">{t('document.errorTitle')}</h2>
@@ -522,13 +592,13 @@ export default function ReportDocumentBoard({
                         paperRef={paperRef}
                         narrativePhase={activeSnapshot != null
                             ? null
-                            : narrativeState === 'generating'
+                            : reportState.status === 'accepted' || reportState.status === 'running'
                                 ? 'generating'
-                                : narrativeState === 'timedOut'
+                                : reportState.status === 'timed_out'
                                     ? 'timedOut'
-                                    : narrativeState === 'rateLimited'
+                                    : reportState.status === 'rate_limited'
                                         ? 'rateLimited'
-                                        : narrativeState === 'error'
+                                        : reportState.status === 'failed'
                                             ? 'error'
                                             : null}
                         onRetryNarrative={activeSnapshot != null ? undefined : retryNarrative}
@@ -693,14 +763,16 @@ function ReportPaper({
                                 <p className="text-sm font-medium text-foreground">
                                     {narrativePhase === 'timedOut'
                                         ? t('document.narrativeTimedOutTitle')
-                                        : t('document.narrativeErrorTitle')}
+                                        : narrativePhase === 'rateLimited'
+                                            ? t('document.narrativeRateLimitedTitle')
+                                            : t('document.narrativeErrorTitle')}
                                 </p>
                                 <p className="mt-1 text-sm text-muted-foreground">
                                     {narrativePhase === 'rateLimited'
                                         ? t('document.narrativeRateLimitedBody')
                                         : narrativePhase === 'timedOut'
                                             ? t('document.narrativeTimedOutBody')
-                                        : t('document.narrativeErrorBody')}
+                                            : t('document.narrativeErrorBody')}
                                 </p>
                             </div>
                         </div>

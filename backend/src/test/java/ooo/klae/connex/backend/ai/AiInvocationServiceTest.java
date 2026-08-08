@@ -165,6 +165,11 @@ class AiInvocationServiceTest {
                 () -> service.completeStructured(
                         invocation, IntroRationaleContent.class, invocationAdmission)));
 
+        List<Map<?, ?>> audits = auditMetadata();
+        assertEquals("attempt", audits.get(0).get("outcome"));
+        assertEquals("blocked", audits.get(1).get("outcome"));
+        assertEquals("restriction_epoch", audits.get(1).get("reason"));
+        assertNoContent(audits.get(1));
         verify(invocationAdmission, never()).commitLeaderInvocation();
         verify(aiProvider, never()).complete(any());
     }

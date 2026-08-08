@@ -67,6 +67,7 @@ import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
@@ -99,6 +100,7 @@ public class ReportService {
     private static final String SNAPSHOT_ORIGIN_SCHEDULED = "scheduled";
     private static final String NARRATIVE_NOT_CACHED = "not_cached";
     private static final String NARRATIVE_NOT_CONFIGURED = "not_configured";
+    private static final String NARRATIVE_RATE_LIMITED = "rate_limited";
     private static final Set<String> NARRATIVE_FAILURE_REASONS = Set.of(
             "provider_error", "invalid_grounding", "rate_limited");
     private static final int RISK_ID_BATCH_SIZE = 1_000;
@@ -385,19 +387,24 @@ public class ReportService {
         ReportDocumentDto unavailable = document(
                 prepared,
                 ReportNarrativeDto.unavailable(NARRATIVE_NOT_CONFIGURED));
-        AiGenerationStatusDto generation = aiGenerationService.startAtRestrictionEpoch(
-                AiFeature.REPORT_NARRATIVE,
-                new ReportGenerationIdentity(
-                        id,
-                        prepared.definition(),
-                        prepared.period().start(),
-                        prepared.period().end(),
-                        prepared.figures(),
-                        prepared.restrictionEpoch()),
-                requiredPermissions,
-                unavailable,
-                () -> generateNarrative(prepared),
-                prepared.restrictionEpoch());
+        AiGenerationStatusDto generation;
+        try {
+            generation = aiGenerationService.startAtRestrictionEpoch(
+                    AiFeature.REPORT_NARRATIVE,
+                    new ReportGenerationIdentity(
+                            id,
+                            prepared.definition(),
+                            prepared.period().start(),
+                            prepared.period().end(),
+                            prepared.figures(),
+                            prepared.restrictionEpoch()),
+                    requiredPermissions,
+                    unavailable,
+                    () -> generateNarrative(prepared),
+                    prepared.restrictionEpoch());
+        } catch (TooManyRequestsException exception) {
+            return document(prepared, ReportNarrativeDto.unavailable(NARRATIVE_RATE_LIMITED));
+        }
         return new ReportDocumentDto(
                 initial.definition(),
                 initial.periodStart(),

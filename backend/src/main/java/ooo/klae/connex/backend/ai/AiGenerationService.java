@@ -213,8 +213,6 @@ public class AiGenerationService {
             return toDto(resolved);
         }
 
-        GenerationState state;
-        AiGenerationStatusDto acceptedStatus;
         synchronized (stateLock) {
             purgeExpiredLocked(now);
             String activeHandle = activeHandles.get(key);
@@ -226,7 +224,7 @@ public class AiGenerationService {
             requireUserHandleCapacity(userId);
             requireUserCapacity(workspaceId, userId);
             requireResultCapacity(workspaceId, userId);
-            state = GenerationState.accepted(
+            GenerationState state = GenerationState.accepted(
                     requestedFeature,
                     workspaceId,
                     userId,
@@ -235,29 +233,27 @@ public class AiGenerationService {
                     now.plus(pollWindow),
                     key,
                     maxResultBytes);
+            ScheduledFuture<?> timeout;
+            try {
+                timeout = scheduler.schedule(
+                        () -> timeOut(state), maxLifetime.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (RejectedExecutionException exception) {
+                throw new TooManyRequestsException(CAPACITY_MESSAGE);
+            }
+            Future<?> future;
+            try {
+                future = workers.submit(() -> execute(state, locale, task));
+            } catch (RejectedExecutionException exception) {
+                cancelTimer(timeout);
+                throw new TooManyRequestsException(CAPACITY_MESSAGE);
+            }
+            state.future = future;
+            state.timeout = timeout;
             generations.put(state.handle, state);
             activeHandles.put(key, state.handle);
             retainedResultBytes += state.retainedResultBytes;
-            acceptedStatus = toDto(state);
+            return toDto(state);
         }
-
-        ScheduledFuture<?> timeout;
-        try {
-            timeout = scheduler.schedule(
-                    () -> timeOut(state), maxLifetime.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (RejectedExecutionException exception) {
-            rollbackRejected(state, null, null);
-            throw new TooManyRequestsException(CAPACITY_MESSAGE);
-        }
-        Future<?> future;
-        try {
-            future = workers.submit(() -> execute(state, locale, task));
-        } catch (RejectedExecutionException exception) {
-            rollbackRejected(state, null, timeout);
-            throw new TooManyRequestsException(CAPACITY_MESSAGE);
-        }
-        attachExecution(state, future, timeout);
-        return acceptedStatus;
     }
 
     /** Returns one status after exact scope, permission, feature-gate, and restriction revalidation. */
@@ -392,24 +388,6 @@ public class AiGenerationService {
         }
     }
 
-    private void attachExecution(
-            GenerationState state,
-            Future<?> future,
-            ScheduledFuture<?> timeout) {
-        boolean terminal;
-        synchronized (stateLock) {
-            terminal = generations.get(state.handle) != state || !state.isActive();
-            if (!terminal) {
-                state.future = future;
-                state.timeout = timeout;
-            }
-        }
-        if (terminal) {
-            future.cancel(true);
-            timeout.cancel(false);
-        }
-    }
-
     private ScheduledFuture<?> finishLocked(GenerationState state) {
         if (state.key != null && state.handle.equals(activeHandles.get(state.key))) {
             activeHandles.remove(state.key);
@@ -417,22 +395,6 @@ public class AiGenerationService {
         ScheduledFuture<?> timeout = state.timeout;
         state.timeout = null;
         return timeout;
-    }
-
-    private void rollbackRejected(
-            GenerationState state, Future<?> submittedFuture, ScheduledFuture<?> scheduledTimeout) {
-        synchronized (stateLock) {
-            if (generations.remove(state.handle, state)) {
-                releaseResultCapacityLocked(state);
-                if (state.key != null && state.handle.equals(activeHandles.get(state.key))) {
-                    activeHandles.remove(state.key);
-                }
-            }
-        }
-        if (submittedFuture != null) {
-            submittedFuture.cancel(true);
-        }
-        cancelTimer(scheduledTimeout);
     }
 
     private void invalidate(GenerationState state) {
@@ -570,6 +532,7 @@ public class AiGenerationService {
                 state.result,
                 state.reason,
                 pollInterval.toMillis(),
+                Math.max(0, Duration.between(clock.instant(), state.expiresAt).toMillis()),
                 state.expiresAt.toString());
     }
 

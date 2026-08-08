@@ -293,8 +293,18 @@ public class AiInvocationService {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
                     null, null, null, null, "provider_exception", structured, null);
             throw exception;
+        } catch (TooManyRequestsException exception) {
+            mediaLease.close();
+            throw exception;
+        } catch (AiRestrictionEpoch.EgressRejectedException exception) {
+            mediaLease.close();
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "restriction_epoch", structured, null);
+            throw exception;
         } catch (RuntimeException | Error exception) {
             mediaLease.close();
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
+                    null, null, null, null, "invocation_exception", structured, null);
             throw exception;
         }
     }

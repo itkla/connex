@@ -14,10 +14,10 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AutomationExecutor;
 import ooo.klae.connex.backend.services.AutomationScope;
+import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -33,7 +33,7 @@ class AiGenerationContextRunnerTest {
 
     @Test
     void reloadsAndPropagatesSecurityTenantAndLocaleContexts() {
-        UserMapper userMapper = mock(UserMapper.class);
+        UserService userService = mock(UserService.class);
         WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         TenantCatalogResolver tenantCatalogResolver = mock(TenantCatalogResolver.class);
@@ -44,12 +44,12 @@ class AiGenerationContextRunnerTest {
                 tenantContext, mock(AutomationScope.class), tenantWorkScope);
         User principal = new User();
         principal.setId(42);
-        when(userMapper.getUserById(42)).thenReturn(principal);
+        when(userService.getActiveWorkspaceUser(7, 42)).thenReturn(principal);
         when(workspaceService.getRole(7, 42)).thenReturn("member");
         when(workspaceMapper.getOrgId(7)).thenReturn(11);
         when(tenantCatalogResolver.resolveCatalog(11)).thenReturn("cnx_org_11");
         AiGenerationContextRunner runner = new AiGenerationContextRunner(
-                userMapper, workspaceService, automationExecutor);
+                userService, workspaceService, automationExecutor);
 
         runner.run(7, 42, Locale.JAPAN, () -> {
             assertSame(principal, SecurityContextHolder.getContext().getAuthentication().getPrincipal());

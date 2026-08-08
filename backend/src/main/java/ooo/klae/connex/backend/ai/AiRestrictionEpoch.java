@@ -156,7 +156,7 @@ public class AiRestrictionEpoch {
         boolean invoked = runIfCurrent(
                 workspaceId, expected.epoch(), () -> result.set(invocation.get()));
         if (!invoked) {
-            throw new IllegalStateException("AI restrictions changed before provider egress");
+            throw new EgressRejectedException("AI restrictions changed before provider egress");
         }
         return result.get();
     }
@@ -217,5 +217,11 @@ public class AiRestrictionEpoch {
     }
 
     private record RestrictionExpectation(int workspaceId, long epoch) {
+    }
+
+    static final class EgressRejectedException extends IllegalStateException {
+        private EgressRejectedException(String message) {
+            super(message);
+        }
     }
 }
