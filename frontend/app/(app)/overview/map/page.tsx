@@ -23,8 +23,6 @@ type MapSearchParams = { companyId?: string; contactId?: string };
 export default async function MapPage({ searchParams }: { searchParams: Promise<MapSearchParams> }) {
     const cookie = (await headers()).get('cookie');
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const t = await getTranslations("MapPage");
-    const { companyId, contactId } = await searchParams;
     const userResult = await getCurrentUserResultFromCookie(cookie);
     if (!userResult.ok) {
         return <WorkspaceUnavailablePage />;
@@ -34,8 +32,10 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
         redirect('/auth/login');
     }
 
-    const [workspaces, mapData, users, pipelines] =
+    const [t, { companyId, contactId }, workspaces, mapData, users, pipelines] =
         await Promise.all([
+            getTranslations("MapPage"),
+            searchParams,
             getMyWorkspacesFromCookie(cookie),
             getRelationshipMapData(init).catch(() => null),
             getUsers(init).catch(() => [] as User[]),
