@@ -7,22 +7,45 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceProvider, useWorkspace } from "@/app/hooks/useWorkspace";
 import type { Workspace } from "@/app/lib/types";
 import {
+    acceptInvite,
+    acceptInviteLink,
+    acceptWorkspace,
+    createWorkspace,
     getActiveWorkspaceMembers,
     getWorkspaceMembers,
     leaveWorkspace,
+    WorkspaceSelectionUnavailableError,
 } from "@/app/lib/api";
 
 const router = vi.hoisted(() => ({
     refresh: vi.fn(),
     replace: vi.fn(),
 }));
+const workspaceUnavailable = vi.hoisted<{
+    onRetry: (() => Promise<void>) | undefined;
+    renderCount: number;
+}>(() => ({
+    onRetry: undefined,
+    renderCount: 0,
+}));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => router,
 }));
+vi.mock("@/app/components/WorkspaceSelectionUnavailable", () => ({
+    default: ({ onRetry }: { onRetry: () => Promise<void> }) => {
+        workspaceUnavailable.onRetry = onRetry;
+        workspaceUnavailable.renderCount += 1;
+        return null;
+    },
+}));
 
 const PROVIDER = "app/hooks/useWorkspace.tsx";
 const MEMBERSHIP_PANEL = "app/components/account/MembershipPanel.tsx";
+const API = "app/lib/api.ts";
+const ONBOARDING_FORM = "app/onboarding/OnboardingForm.tsx";
+const INVITE_ACCEPT = "app/components/invite/AcceptInvite.tsx";
+const INVITE_LINK_ACCEPT = "app/components/invite/AcceptInviteLink.tsx";
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
@@ -59,11 +82,12 @@ function renderWorkspaceProvider() {
     return workspace;
 }
 
-function installMinimalDocument(): HTMLElement {
+function installMinimalDocument(cookie = ""): HTMLElement {
     class HtmlIFrameElement {}
 
     const documentTarget = {
         nodeType: 9,
+        cookie,
         activeElement: null,
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
@@ -124,8 +148,9 @@ function workspaceFixture(id: number, name: string): Workspace {
 async function renderInteractiveWorkspaceProvider(
     initialWorkspaces: Workspace[],
     initialActiveId: number | null,
+    cookie = "",
 ) {
-    const container = installMinimalDocument();
+    const container = installMinimalDocument(cookie);
     const { createRoot } = await import("react-dom/client");
     const root = createRoot(container);
     let workspace: ReturnType<typeof useWorkspace> | undefined;
@@ -159,9 +184,29 @@ async function renderInteractiveWorkspaceProvider(
     };
 }
 
+function unreadableResponse(message: string): Response {
+    return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+            controller.error(new Error(message));
+        },
+    }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+    });
+}
+
+function jsonResponse(body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+    });
+}
+
 afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    workspaceUnavailable.onRetry = undefined;
+    workspaceUnavailable.renderCount = 0;
 });
 
 describe("authoritative workspace selection adoption", () => {
@@ -196,6 +241,316 @@ describe("authoritative workspace selection adoption", () => {
         await expect(inFlightSelection).resolves.toBeUndefined();
         await expect(workspace.runSelectionChange(blockedOperation)).resolves.toBeUndefined();
         expect(blockedOperation).toHaveBeenCalledOnce();
+    });
+
+    it("does not recover a selection request that failed before response headers", async () => {
+        vi.stubGlobal("document", { cookie: "NEXT_LOCALE=en; connex_workspace=7" });
+        const fetchMock = vi.fn().mockRejectedValue(new TypeError("Connection failed"));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(createWorkspace("Uncreated")).rejects.toThrow("Connection failed");
+
+        expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it("recovers invalid create JSON from the cookie despite a different remembered active id", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const created = workspaceFixture(22, "Created workspace");
+        const rendered = await renderInteractiveWorkspaceProvider(
+            [existing],
+            existing.id,
+            "NEXT_LOCALE=en; connex_workspace=7",
+        );
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/auth/csrf") return new Response("", { status: 503 });
+            if (url.pathname === "/api/workspaces" && init?.method === "POST") {
+                document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
+                return new Response('{"id":22', { status: 200 });
+            }
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                return jsonResponse({ workspaces: [existing, created], activeWorkspaceId: existing.id });
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        let result: Workspace | undefined;
+        await act(async () => {
+            result = await rendered.readWorkspace().create(created.name);
+        });
+
+        expect(result).toEqual(created);
+        expect(rendered.readWorkspace().activeWorkspaceId).toBe(created.id);
+        expect(rendered.readWorkspace().activeWorkspace).toEqual(created);
+        expect(router.replace).toHaveBeenCalledWith("/dashboard");
+        expect(router.refresh).toHaveBeenCalledOnce();
+
+        await rendered.unmount();
+    });
+
+    it("recovers an unreadable pending-accept body before publishing membership and selection", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const accepted = workspaceFixture(22, "Accepted workspace");
+        const rendered = await renderInteractiveWorkspaceProvider(
+            [existing],
+            existing.id,
+            "NEXT_LOCALE=en; connex_workspace=7",
+        );
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/auth/csrf") return new Response("", { status: 503 });
+            if (url.pathname === "/api/workspaces/22/accept") {
+                document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
+                return unreadableResponse("Accepted body stream failed");
+            }
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                return jsonResponse({ workspaces: [existing, accepted], activeWorkspaceId: accepted.id });
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        await act(async () => {
+            await rendered.readWorkspace().runSelectionChange(async (
+                publishActiveWorkspace,
+                publishWorkspace,
+            ) => {
+                const recovered = await acceptWorkspace(accepted.id);
+                publishWorkspace(recovered);
+                publishActiveWorkspace(recovered.id);
+            });
+        });
+
+        expect(rendered.readWorkspace().activeWorkspaceId).toBe(accepted.id);
+        expect(rendered.readWorkspace().activeWorkspace).toEqual(accepted);
+
+        await rendered.unmount();
+    });
+
+    it("recovers an unreadable empty switch body before publishing the requested selection", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const selected = workspaceFixture(22, "Selected workspace");
+        const rendered = await renderInteractiveWorkspaceProvider(
+            [existing, selected],
+            existing.id,
+            "NEXT_LOCALE=en; connex_workspace=7",
+        );
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/auth/csrf") return new Response("", { status: 503 });
+            if (url.pathname === "/api/workspaces/22/switch") {
+                document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
+                return unreadableResponse("Empty body stream failed");
+            }
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                return jsonResponse({ workspaces: [existing, selected], activeWorkspaceId: selected.id });
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        await act(async () => {
+            await expect(rendered.readWorkspace().runInWorkspace(selected.id, async () => {}))
+                .resolves.toBe(true);
+        });
+
+        expect(rendered.readWorkspace().activeWorkspaceId).toBe(selected.id);
+
+        await rendered.unmount();
+    });
+
+    it("recovers a bodyless last-workspace leave by publishing the cleared cookie selection", async () => {
+        vi.stubGlobal("document", { cookie: "NEXT_LOCALE=en; connex_workspace=7" });
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/workspaces/7/leave") {
+                document.cookie = "NEXT_LOCALE=en";
+                return new Response("", { status: 200 });
+            }
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                expect(new Headers(init.headers).get("X-Workspace-Id")).toBeNull();
+                return jsonResponse({ workspaces: [], activeWorkspaceId: null });
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        await expect(leaveWorkspace(7)).resolves.toEqual({ activeWorkspaceId: null });
+        expect(document.cookie).not.toContain("connex_workspace");
+    });
+
+    it.each([
+        {
+            label: "emailed invite",
+            path: "/api/invites/invite-token/accept",
+            request: () => acceptInvite("invite-token"),
+        },
+        {
+            label: "shareable invite link",
+            path: "/api/invite-links/link-token/accept",
+            request: () => acceptInviteLink("link-token"),
+        },
+    ])("recovers an unreadable $label acceptance body", async ({ path: acceptancePath, request }) => {
+        const accepted = workspaceFixture(22, "Accepted workspace");
+        vi.stubGlobal("document", { cookie: "NEXT_LOCALE=en; connex_workspace=7" });
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === acceptancePath) {
+                document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
+                return unreadableResponse("Invite body stream failed");
+            }
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                return jsonResponse({ workspaces: [accepted], activeWorkspaceId: accepted.id });
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        await expect(request()).resolves.toEqual(accepted);
+    });
+
+    it("keeps the selection mutex held while the authoritative recovery read is pending", async () => {
+        const accepted = workspaceFixture(22, "Accepted workspace");
+        const workspace = renderWorkspaceProvider();
+        const recoveryStarted = deferred();
+        let resolveRecovery: (response: Response) => void = () => {};
+        const recoveryResponse = new Promise<Response>((resolve) => {
+            resolveRecovery = resolve;
+        });
+        vi.stubGlobal("document", { cookie: "NEXT_LOCALE=en; connex_workspace=7" });
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/workspaces/22/accept") {
+                document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
+                return unreadableResponse("Accepted body stream failed");
+            }
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                recoveryStarted.resolve();
+                return recoveryResponse;
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        const firstSelection = workspace.runSelectionChange(async () => {
+            await acceptWorkspace(accepted.id);
+        });
+        await recoveryStarted.promise;
+
+        await expect(workspace.runSelectionChange(async () => {})).rejects.toThrow(
+            "A workspace operation is already in progress",
+        );
+
+        resolveRecovery(jsonResponse({ workspaces: [accepted], activeWorkspaceId: accepted.id }));
+        await expect(firstSelection).resolves.toBeUndefined();
+    });
+
+    it("fails closed and retries under the mutex when authoritative recovery is unavailable", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const created = workspaceFixture(22, "Created workspace");
+        const rendered = await renderInteractiveWorkspaceProvider(
+            [existing],
+            existing.id,
+            "NEXT_LOCALE=en; connex_workspace=7",
+        );
+        const retryStarted = deferred();
+        let resolveRetry: (response: Response) => void = () => {};
+        const retryResponse = new Promise<Response>((resolve) => {
+            resolveRetry = resolve;
+        });
+        let snapshotReads = 0;
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/auth/csrf") return new Response("", { status: 503 });
+            if (url.pathname === "/api/workspaces" && init?.method === "POST") {
+                document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
+                return new Response('{"id":22', { status: 200 });
+            }
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                snapshotReads += 1;
+                if (snapshotReads === 1) return new Response("", { status: 503 });
+                retryStarted.resolve();
+                return retryResponse;
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        await act(async () => {
+            await expect(rendered.readWorkspace().create(created.name))
+                .rejects.toBeInstanceOf(WorkspaceSelectionUnavailableError);
+        });
+
+        expect(workspaceUnavailable.renderCount).toBeGreaterThan(0);
+        expect(workspaceUnavailable.onRetry).toBeDefined();
+        const staleWorkspace = rendered.readWorkspace();
+        const blockedWhileUnavailable = vi.fn(async () => {});
+        await expect(staleWorkspace.runSelectionChange(blockedWhileUnavailable)).rejects.toThrow(
+            "Workspace selection is unavailable",
+        );
+        expect(blockedWhileUnavailable).not.toHaveBeenCalled();
+
+        const retry = workspaceUnavailable.onRetry;
+        if (!retry) throw new Error("Unavailable state did not expose recovery");
+        let retryPromise = Promise.resolve();
+        await act(() => {
+            retryPromise = retry();
+        });
+        await retryStarted.promise;
+
+        await expect(staleWorkspace.runSelectionChange(async () => {})).rejects.toThrow(
+            "A workspace operation is already in progress",
+        );
+        resolveRetry(jsonResponse({ workspaces: [created], activeWorkspaceId: created.id }));
+        await act(async () => {
+            await retryPromise;
+        });
+
+        expect(document.cookie).toContain("connex_workspace=22");
+        expect(rendered.readWorkspace().activeWorkspaceId).toBe(created.id);
+        expect(rendered.readWorkspace().activeWorkspace).toEqual(created);
+        expect(router.refresh).toHaveBeenCalledOnce();
+        const provider = source(PROVIDER);
+        expect(provider).toContain("publishActiveWorkspace(null);");
+
+        await rendered.unmount();
+    });
+
+    it("forces no-provider completions through a fresh server mount without replay", () => {
+        for (const relativePath of [ONBOARDING_FORM, INVITE_ACCEPT, INVITE_LINK_ACCEPT]) {
+            const caller = source(relativePath);
+            const successBranch = section(caller, "try {", "} catch");
+            const unavailableBranch = section(
+                caller,
+                "if (err instanceof WorkspaceSelectionUnavailableError)",
+                "toastError",
+            );
+
+            expect(successBranch).toContain('window.location.replace("/dashboard");');
+            expect(successBranch).not.toContain('router.replace("/dashboard")');
+            expect(successBranch).not.toContain("router.refresh");
+            expect(unavailableBranch).toContain('window.location.replace("/dashboard");');
+            expect(unavailableBranch).toContain("return;");
+            expect(unavailableBranch).not.toContain("router.replace");
+            expect(unavailableBranch).not.toContain("router.refresh");
+            expect(unavailableBranch).not.toContain("setSubmitting(false)");
+            expect(unavailableBranch).not.toContain("setBusy(false)");
+        }
     });
 
     it("keeps the returned membership active immediately after acceptance without a refresh", async () => {
@@ -508,38 +863,58 @@ describe("authoritative workspace selection adoption", () => {
         expect(panel).toContain("disabled={leaving || switching}");
     });
 
-    it("documents serialization without promising recovery from response-body failure", () => {
+    it("documents ordered recovery without adopting active state from refreshed props", () => {
         const provider = source(PROVIDER);
         const contract = section(provider, "/**", "export function WorkspaceProvider");
         const normalizedContract = contract.replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ");
+        const api = source(API);
+        const protocolStart = api.indexOf("Completes a selection-changing request");
+        const protocol = api.slice(
+            api.lastIndexOf("/**", protocolStart),
+            api.indexOf("export async function recoverWorkspaceSelectionResponse", protocolStart),
+        ).replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ");
 
         expect(normalizedContract).toContain("one selection-changing operation at a time");
         expect(normalizedContract).toContain("cookie is applied before that result is published");
-        expect(normalizedContract).toContain("body fails to read or parse");
-        expect(normalizedContract).toContain("#1023");
+        expect(normalizedContract).toContain("shared request pipeline re-reads");
+        expect(normalizedContract).toContain("withheld until an explicit ordered retry succeeds");
+        expect(normalizedContract).toContain("never repair active selection");
         expect(normalizedContract).not.toContain("matching the order in which the browser");
         expect(provider).not.toContain("setActiveWorkspaceId(initialActiveId)");
+        expect(protocol).toContain("Fetch failures before a {@code Response} exists");
+        expect(protocol).toContain("authoritative workspace snapshot");
+        expect(protocol).toContain("surrounding selection mutex stays held");
+        expect(protocol).toContain("WorkspaceSelectionUnavailableError");
     });
 
-    it("uses the returned selection for matching default and explicit workspace headers", async () => {
-        expect(
-            source(MEMBERSHIP_PANEL).includes("publishActiveWorkspace(selection.activeWorkspaceId);"),
-        ).toBe(true);
-        const browserDocument = { cookie: "NEXT_LOCALE=en; connex_workspace=7" };
+    it("recovers a truncated leave response before matching default and provider-derived headers", async () => {
+        const active = workspaceFixture(7, "Leaving workspace");
+        const remaining = workspaceFixture(22, "Remaining workspace");
+        const rendered = await renderInteractiveWorkspaceProvider(
+            [active, remaining],
+            active.id,
+            "NEXT_LOCALE=en; connex_workspace=7",
+        );
         const memberRequests: Array<{ path: string; workspaceId: string | null }> = [];
-        vi.stubGlobal("document", browserDocument);
         vi.stubGlobal("fetch", vi.fn(async (
             input: string | URL | Request,
             init?: RequestInit,
         ): Promise<Response> => {
             const requestUrl = input instanceof Request ? input.url : input.toString();
             const url = new URL(requestUrl, "http://localhost:8080");
+            if (url.pathname === "/api/auth/csrf") {
+                return new Response("", { status: 503 });
+            }
             if (url.pathname === "/api/workspaces/7/leave") {
-                browserDocument.cookie = "NEXT_LOCALE=en; connex_workspace=22";
-                return new Response('{"activeWorkspaceId":22}', {
+                document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
+                return new Response('{"activeWorkspaceId":22', {
                     status: 200,
                     headers: { "Content-Type": "application/json" },
                 });
+            }
+            if (url.pathname === "/api/workspaces") {
+                expect(new Headers(init?.headers).get("X-Workspace-Id")).toBe("22");
+                return jsonResponse({ workspaces: [remaining], activeWorkspaceId: remaining.id });
             }
             if (url.pathname === "/api/workspaces/22/members") {
                 memberRequests.push({
@@ -554,18 +929,26 @@ describe("authoritative workspace selection adoption", () => {
             throw new Error(`Unexpected request to ${url.pathname}`);
         }));
 
-        const selection = await leaveWorkspace(7);
-        if (selection.activeWorkspaceId === null) {
-            throw new Error("Expected the leave response to select a remaining workspace");
-        }
+        await act(async () => {
+            await rendered.readWorkspace().runSelectionChange(async (publishActiveWorkspace) => {
+                const selection = await leaveWorkspace(active.id);
+                publishActiveWorkspace(selection.activeWorkspaceId);
+            });
+        });
+        const providerWorkspaceId = rendered.readWorkspace().activeWorkspaceId;
+        if (providerWorkspaceId === null) throw new Error("Recovery did not publish a workspace");
         await getActiveWorkspaceMembers();
-        await getWorkspaceMembers(selection.activeWorkspaceId, {
-            headers: { "X-Workspace-Id": String(selection.activeWorkspaceId) },
+        await getWorkspaceMembers(providerWorkspaceId, {
+            headers: { "X-Workspace-Id": String(providerWorkspaceId) },
         });
 
+        expect(document.cookie).toContain("connex_workspace=22");
+        expect(providerWorkspaceId).toBe(22);
         expect(memberRequests).toEqual([
             { path: "/api/workspaces/22/members", workspaceId: "22" },
             { path: "/api/workspaces/22/members", workspaceId: "22" },
         ]);
+
+        await rendered.unmount();
     });
 });

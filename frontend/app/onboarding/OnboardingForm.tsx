@@ -6,7 +6,12 @@ import { useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
 
-import { ApiError, createWorkspace, logout } from "@/app/lib/api";
+import {
+    ApiError,
+    createWorkspace,
+    logout,
+    WorkspaceSelectionUnavailableError,
+} from "@/app/lib/api";
 import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -40,9 +45,12 @@ export default function OnboardingForm() {
         try {
             await createWorkspace(trimmed);
             toastSuccess(t("created"));
-            router.replace("/dashboard");
-            router.refresh();
+            window.location.replace("/dashboard");
         } catch (err) {
+            if (err instanceof WorkspaceSelectionUnavailableError) {
+                window.location.replace("/dashboard");
+                return;
+            }
             toastError(err instanceof ApiError ? err.message : t("createFailed"));
             setSubmitting(false);
         }

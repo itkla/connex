@@ -32,7 +32,7 @@ vi.mock("next/navigation", async (importOriginal) => {
     return { ...actual, redirect: redirectMock };
 });
 
-type WorkspaceResponse = "unavailable" | "empty" | "ready";
+type WorkspaceResponse = "cross-device" | "unavailable" | "empty" | "ready";
 type AuthenticationResponse = "authenticated" | "network" | 401 | 403 | 503;
 
 function source(relativePath: string): string {
@@ -71,6 +71,34 @@ function stubAppShellReads(
             }
             if (workspaceResponse === "empty") {
                 return Promise.resolve(json({ workspaces: [], activeWorkspaceId: null }));
+            }
+            if (workspaceResponse === "cross-device") {
+                return Promise.resolve(json({
+                    workspaces: [{
+                        id: 7,
+                        name: "Cookie workspace",
+                        slug: "cookie-workspace",
+                        timezone: "Pacific/Honolulu",
+                        identityVersion: 1,
+                        role: "owner",
+                        orgId: 3,
+                        orgName: "Connex",
+                        orgIdentityVersion: 1,
+                        orgRole: "owner",
+                    }, {
+                        id: 22,
+                        name: "Snapshot workspace",
+                        slug: "snapshot-workspace",
+                        timezone: "Pacific/Honolulu",
+                        identityVersion: 1,
+                        role: "owner",
+                        orgId: 3,
+                        orgName: "Connex",
+                        orgIdentityVersion: 1,
+                        orgRole: "owner",
+                    }],
+                    activeWorkspaceId: 22,
+                }));
             }
             return Promise.resolve(json({
                 workspaces: [{
@@ -147,6 +175,18 @@ describe("workspace snapshot reads", () => {
                 ok: true,
                 data: { workspaces: [], activeWorkspaceId: null },
             });
+    });
+
+    it("normalizes a user-wide remembered selection to this browser's accessible cookie", async () => {
+        stubAppShellReads("cross-device");
+
+        const result = await getMyWorkspacesResultFromCookie(
+            "JSESSIONID=session; connex_workspace=7",
+        );
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) throw new Error("Expected a normalized workspace snapshot");
+        expect(result.data.activeWorkspaceId).toBe(7);
     });
 
     it("returns an empty snapshot only when there is no authenticated cookie to forward", async () => {
@@ -259,6 +299,19 @@ describe("the app shell distinguishes workspace membership from lookup availabil
             .toBe(false);
     });
 
+    it("mounts the provider with this browser's accessible cookie after another device switches", async () => {
+        const fetch = stubAppShellReads("cross-device");
+        const workspaceScopedContent = createElement("div", { "data-workspace-scoped": true });
+
+        const rendered = await AppLayout({ children: workspaceScopedContent });
+
+        expect(isValidElement(rendered) ? rendered.type : null).not.toBe(WorkspaceUnavailablePage);
+        expect(redirectMock).not.toHaveBeenCalled();
+        expect(JSON.stringify(rendered)).toContain('"initialActiveId":7');
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/permissions/effective")))
+            .toBe(true);
+    });
+
     it("redirects to onboarding only after a resolved, genuinely empty response", async () => {
         stubAppShellReads("empty");
 
@@ -293,7 +346,9 @@ describe("the app shell distinguishes workspace membership from lookup availabil
 
         expect(page).toContain("<PermissionsUnavailable");
         expect(page).toContain("<WorkspaceUnavailableRetry");
-        expect(retry).toContain("startTransition(() => router.refresh())");
+        expect(retry).toContain("startTransition(async () =>");
+        expect(retry).toContain("await onRetry()");
+        expect(retry).toContain("router.refresh()");
         expect(retry).toContain("disabled={isRetrying}");
     });
 });

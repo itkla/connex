@@ -3,8 +3,14 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import type { Workspace } from "@/app/lib/types";
-import { createWorkspace, switchWorkspace } from "@/app/lib/api";
+import WorkspaceSelectionUnavailable from "@/app/components/WorkspaceSelectionUnavailable";
+import type { MyWorkspaces, Workspace } from "@/app/lib/types";
+import {
+    createWorkspace,
+    readAuthoritativeWorkspaceSelection,
+    switchWorkspace,
+    WorkspaceSelectionUnavailableError,
+} from "@/app/lib/api";
 import {
     adoptWorkspaces,
     applyOrganizationIdentity,
@@ -119,11 +125,14 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
  * applied before that result is published to provider state, so serialization prevents another
  * selection response from inverting those two decisions.
  *
- * This is not a complete convergence guarantee. If a 200 response's body fails to read or parse,
- * the browser has already applied its cookie but the operation cannot publish its result. Because
- * `initialActiveId` is mount-only, nothing re-synchronizes the provider after that failure.
- * Recovery for that residual is tracked by
- * {@link https://github.com/itkla/connex/issues/1023 issue #1023}.
+ * If a successful selection response's body fails, the shared request pipeline re-reads a
+ * cookie-matching authoritative snapshot before this operation releases the serialization lock.
+ * The endpoint's normal success path then publishes that recovered decision. If the re-read is
+ * unavailable or inconsistent, the stale active ID is cleared and workspace-scoped children are
+ * withheld until an explicit ordered retry succeeds. Refreshed props remain list-only input; they
+ * never repair active selection because their RSC payloads still carry no ordering generation.
+ * An explicit recovery snapshot replaces the held membership list without marking itself as the
+ * last consumed RSC payload, so the props already mounted cannot immediately overwrite it.
  *
  * @param initialWorkspaces - the viewer's workspaces as of the current server render
  * @param initialActiveId - the workspace the session cookie selects, or null when none is
@@ -147,8 +156,10 @@ export function WorkspaceProvider({
     });
     const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId);
     const [switching, setSwitching] = useState(false);
+    const [selectionUnavailable, setSelectionUnavailable] = useState(false);
     const activeWorkspaceIdRef = useRef(initialActiveId);
     const switchingRef = useRef(false);
+    const selectionUnavailableRef = useRef(false);
 
     if (workspaceSnapshot.consumedWorkspaces !== initialWorkspaces) {
         const adopted = adoptWorkspaces(
@@ -186,6 +197,28 @@ export function WorkspaceProvider({
                 : [...previous.workspaces, workspace],
         }));
     }, []);
+
+    const publishAuthoritativeWorkspaceSelection = useCallback((snapshot: MyWorkspaces) => {
+        setWorkspaceSnapshot((previous) => {
+            const workspaceIdentityResult = preservePublishedWorkspaceIdentities(
+                snapshot.workspaces,
+                previous.workspaceIdentities,
+            );
+            const organizationIdentityResult = preservePublishedOrganizationIdentities(
+                workspaceIdentityResult.workspaces,
+                previous.organizationIdentities,
+            );
+            return {
+                workspaces: organizationIdentityResult.workspaces,
+                consumedWorkspaces: previous.consumedWorkspaces,
+                workspaceIdentities: workspaceIdentityResult.pending,
+                organizationIdentities: organizationIdentityResult.pending,
+            };
+        });
+        publishActiveWorkspace(snapshot.activeWorkspaceId);
+        selectionUnavailableRef.current = false;
+        setSelectionUnavailable(false);
+    }, [publishActiveWorkspace]);
 
     const publishWorkspaceIdentity = useCallback((identity: PublishedWorkspaceIdentity) => {
         setWorkspaceSnapshot((previous) => ({
@@ -248,22 +281,54 @@ export function WorkspaceProvider({
         });
     }, []);
 
-    const runSelectionChange = useCallback(async <T,>(
+    const executeSelectionChange = useCallback(async <T,>(
         operation: (
             publishActiveWorkspace: PublishActiveWorkspace,
             publishWorkspace: PublishWorkspace,
         ) => Promise<T>,
+        allowUnavailable: boolean,
     ) => {
         if (switchingRef.current) throw new Error("A workspace operation is already in progress");
+        if (selectionUnavailableRef.current && !allowUnavailable) {
+            throw new Error("Workspace selection is unavailable");
+        }
         switchingRef.current = true;
         setSwitching(true);
         try {
             return await operation(publishActiveWorkspace, publishWorkspace);
+        } catch (error) {
+            if (error instanceof WorkspaceSelectionUnavailableError) {
+                selectionUnavailableRef.current = true;
+                publishActiveWorkspace(null);
+                setSelectionUnavailable(true);
+            }
+            throw error;
         } finally {
             switchingRef.current = false;
             setSwitching(false);
         }
     }, [publishActiveWorkspace, publishWorkspace]);
+
+    const runSelectionChange = useCallback(<T,>(
+        operation: (
+            publishActiveWorkspace: PublishActiveWorkspace,
+            publishWorkspace: PublishWorkspace,
+        ) => Promise<T>,
+    ) => executeSelectionChange(operation, false), [executeSelectionChange]);
+
+    const retrySelectionRecovery = useCallback(async () => {
+        try {
+            await executeSelectionChange(async () => {
+                publishAuthoritativeWorkspaceSelection(
+                    await readAuthoritativeWorkspaceSelection(),
+                );
+                router.refresh();
+            }, true);
+        } catch {
+            selectionUnavailableRef.current = true;
+            setSelectionUnavailable(true);
+        }
+    }, [executeSelectionChange, publishAuthoritativeWorkspaceSelection, router]);
 
     const runInWorkspace = useCallback(async (
         id: number,
@@ -338,6 +403,10 @@ export function WorkspaceProvider({
             restoreOrganizationIdentity,
         ],
     );
+
+    if (selectionUnavailable) {
+        return <WorkspaceSelectionUnavailable onRetry={retrySelectionRecovery} />;
+    }
 
     return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
