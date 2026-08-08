@@ -36,16 +36,17 @@ reviewed, in-repo script
    so the live frontend never serves a half-written build directory; on a failed frontend
    restart the previous build is swapped back. Before building, the deploy removes the
    disposable `.next-new` tree and stale generated route types under `.next`, while preserving
-   the live `.next/server` and `.next/static` trees. After either a successful or failed build,
-   it restores the tracked `frontend/tsconfig.json` so Next.js cannot accumulate generated
-   `distDir` include globs across deploys. A backend already serving the target sha is not
-   rebuilt or restarted. Because `next.config.ts` sets `output: standalone`, the build bakes
-   `.next-new` into `standalone/server.js` as its `distDir` — a path the swap renames away — so
-   the swap deletes that standalone output. Staging serves with `next start` and never reads
-   it; **serving staging from the standalone runtime would require building into the directory
-   it is served from**, not swapping one in.
+   the live `.next/server` and `.next/static` trees. After a successful, failed, or interrupted
+   build, a cleanup trap restores the tracked `frontend/tsconfig.json`; the deploy refuses to
+   continue unless checkout plus a clean diff proves that Next.js left no generated `distDir`
+   include globs behind. A backend already serving the target sha is not rebuilt or restarted.
+   Because `next.config.ts` sets `output: standalone`, the build bakes `.next-new` into
+   `standalone/server.js` as its `distDir` — a path the swap renames away — so the swap deletes
+   that standalone output. Staging serves with `next start` and never reads it; **serving
+   staging from the standalone runtime would require building into the directory it is served
+   from**, not swapping one in.
 4. **Health-gates the backend restart.** After `systemctl restart connex-staging-backend` it
-   polls unit state + `http://127.0.0.1:8081/api/version` (bounded, 300s) until the served
+   polls unit state + `http://127.0.0.1:8081/api/version` (bounded, 900s) until the served
    `gitSha` equals the target commit **and** `GET /api/health/ready` answers 200 (DB
    reachable, Flyway migrations applied, no failed migrations), then rechecks the same
    MainPID, unit health, and readiness after a 15s stability interval. A JAR that predates
