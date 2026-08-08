@@ -199,8 +199,7 @@ class DeploymentProfileValidatorTest {
     }
 
     private static DeploymentProfileValidator validator(String profile, MockEnvironment environment) {
-        DeploymentProperties properties = new DeploymentProperties();
-        properties.setProfile(profile);
-        return new DeploymentProfileValidator(properties, environment);
+        environment.setProperty("connex.deployment.profile", profile);
+        return new DeploymentProfileValidator(environment);
     }
 }
