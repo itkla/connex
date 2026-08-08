@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
@@ -21,7 +22,7 @@ import {
     getCompanyTags,
     getCompanyTimeline,
     getCompanyEvidence,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEntityCustomFieldsFromCookie,
     getTags,
     getUserReferences,
@@ -55,12 +56,19 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
+    const currentUserResult = await getCurrentUserResultFromCookie(cookie);
+    if (!currentUserResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const currentUser = currentUserResult.data;
+    if (!currentUser) {
+        redirect('/auth/login');
+    }
 
     const [
         t,
         locale,
         companyAccess,
-        currentUser,
         allTags,
         people,
         deals,
@@ -74,7 +82,6 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getTranslations("CompaniesDetail"),
         getLocale(),
         loadRecord<Company>(() => getCompanyById(id, init)),
-        getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),
         getCompanyPeople(id, init).catch(() => [] as Contact[]),
         getCompanyDeals(id, init).catch(() => [] as Deal[]),
@@ -94,9 +101,6 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     }
     const company = companyAccess.record;
     const websiteUrl = company.website ? (/^https?:\/\//i.test(company.website) ? company.website : `https://${company.website}`) : undefined;
-    if (!currentUser) {
-        redirect('/auth/login');
-    }
 
     const { activities, tasks, notes } = timeline;
     const relatedUserIds = new Set<number>([

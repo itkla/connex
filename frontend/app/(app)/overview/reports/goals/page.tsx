@@ -5,9 +5,10 @@ import { getTranslations } from 'next-intl/server';
 import GoalsBoard from '@/app/components/reports/GoalsBoard';
 import AccessDeniedPage from '@/app/components/AccessDeniedPage';
 import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import {
     getActiveWorkspaceMembersResultFromCookie,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getGoalsResultFromCookie,
 } from '@/app/lib/api';
@@ -19,7 +20,9 @@ export async function generateMetadata() {
 
 export default async function GoalsPage() {
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) return <WorkspaceUnavailablePage />;
+    const user = userResult.data;
     if (!user) redirect('/auth/login');
 
     const permissionsResult = await getEffectivePermissionsResultFromCookie(cookie);

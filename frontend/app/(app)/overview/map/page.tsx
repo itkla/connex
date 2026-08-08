@@ -5,7 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { ShareIcon } from "@heroicons/react/24/outline";
 import {
     getContactTemperatures,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getMapCompanyTemperatures,
     getMyWorkspacesFromCookie,
     getPipelines,
@@ -14,6 +14,7 @@ import {
     getUsers,
 } from "@/app/lib/api";
 import type { Pipeline, RelationshipTemperature, Stage, TemperatureBand, User } from "@/app/lib/types";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import MapView from "@/app/components/map/MapView";
 import { buildGraph, companyNodeId, contactNodeId } from "@/app/components/map/graph/buildGraph";
 
@@ -24,19 +25,22 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const t = await getTranslations("MapPage");
     const { companyId, contactId } = await searchParams;
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
+    if (!user) {
+        redirect('/auth/login');
+    }
 
-    const [user, workspaces, mapData, users, pipelines] =
+    const [workspaces, mapData, users, pipelines] =
         await Promise.all([
-            getCurrentUserFromCookie(cookie),
             getMyWorkspacesFromCookie(cookie),
             getRelationshipMapData(init).catch(() => null),
             getUsers(init).catch(() => [] as User[]),
             getPipelines(init).catch(() => [] as Pipeline[]),
         ]);
-
-    if (!user) {
-        redirect('/auth/login');
-    }
 
     if (!mapData) {
         return (

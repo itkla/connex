@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { getCurrentUserFromCookie, getAuditLogs } from "@/app/lib/api";
+import { getCurrentUserResultFromCookie, getAuditLogs } from "@/app/lib/api";
 import { loadCollection } from "@/app/lib/recordAccess";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import AuditLogBrowser from "@/app/components/admin/AuditLogBrowser";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -19,8 +20,12 @@ const PAGE_SIZE = 200;
 
 export default async function AuditLogPage() {
     const cookie = (await headers()).get("cookie");
-    const currentUser = await getCurrentUserFromCookie(cookie);
+    const currentUserResult = await getCurrentUserResultFromCookie(cookie);
 
+    if (!currentUserResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const currentUser = currentUserResult.data;
     if (!currentUser) {
         redirect("/auth/login");
     }

@@ -4,9 +4,10 @@ import { getTranslations } from 'next-intl/server';
 
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
 import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import {
     getActiveWorkspaceMembersResultFromCookie,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getPipelines,
     getReportTemplates,
@@ -24,7 +25,9 @@ export default async function NewReportPage({
     searchParams: Promise<{ template?: string }>;
 }) {
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) return <WorkspaceUnavailablePage />;
+    const user = userResult.data;
     if (!user) redirect('/auth/login');
     const { template: templateKey } = await searchParams;
     const init = { headers: { cookie: cookie ?? '' } } as const;

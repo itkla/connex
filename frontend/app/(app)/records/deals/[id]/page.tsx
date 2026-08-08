@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import AccessDeniedPage from '@/app/components/AccessDeniedPage';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import { loadRecord } from '@/app/lib/recordAccess';
 import { CrumbLabel } from '@/app/hooks/useNavTrail';
 import RecentRecordBridge from '@/app/components/actions/RecentRecordBridge';
@@ -16,7 +17,7 @@ import {
     getAttachmentsFromCookie,
     getCompanyById,
     getContacts,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEntityCustomFieldsFromCookie,
     getContextNotifications,
     getDealById,
@@ -96,12 +97,15 @@ export default async function DealPage({ params }: DealPageProps) {
     if (!Number.isInteger(id) || id < 1) notFound();
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
+    const currentUserResult = await getCurrentUserResultFromCookie(cookie);
+    if (!currentUserResult.ok) return <WorkspaceUnavailablePage />;
+    const currentUser = currentUserResult.data;
+    if (!currentUser) redirect('/auth/login');
 
     const [
         t,
         locale,
         dealAccess,
-        currentUser,
         activities,
         notes,
         tasks,
@@ -118,7 +122,6 @@ export default async function DealPage({ params }: DealPageProps) {
             getTranslations('DealsPage'),
             getLocale(),
             loadRecord(() => getDealById(id, init)),
-            getCurrentUserFromCookie(cookie),
             getActivitiesForDeal(id, init).catch(() => [] as Activity[]),
             getNotesForDeal(id, init).catch(() => [] as Note[]),
             getTasksForDeal(id, init).catch(() => [] as Task[]),
@@ -140,7 +143,6 @@ export default async function DealPage({ params }: DealPageProps) {
     if (dealAccess.kind === 'forbidden') return <AccessDeniedPage />;
     if (dealAccess.kind === 'missing') notFound();
     const deal = dealAccess.record;
-    if (!currentUser) redirect('/auth/login');
 
     const [lineItems, documents, effectivePermissions, company, dealContacts, pipeline, stages] = await Promise.all([
         getDealLineItemsFromCookie(deal.id, cookie)

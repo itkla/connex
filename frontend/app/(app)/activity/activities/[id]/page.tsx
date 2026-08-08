@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -9,7 +10,7 @@ import { BriefcaseIcon, UserIcon } from "@heroicons/react/24/outline";
 import {
     getActivityById,
     getContactsFromCookie,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getDealsFromCookie,
     getUsers,
 } from "@/app/lib/api";
@@ -41,7 +42,11 @@ export default async function ActivityDetailPage({
 }) {
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         redirect("/auth/login");
     }

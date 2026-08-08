@@ -144,9 +144,10 @@ describe('authenticated surfaces keep the backend-unreachable guard', () => {
         }
     });
 
-    it('leaves the invite pages on the guarded resolver, since they decide on the visitor', () => {
+    it('leaves the invite pages on the result resolver, since they decide on the visitor', () => {
         for (const page of ['app/invite/[token]/page.tsx', 'app/invite-link/[token]/page.tsx']) {
-            expect(source(page)).toContain('getCurrentUserFromCookie');
+            expect(source(page)).toContain('getCurrentUserResultFromCookie');
+            expect(source(page)).toContain('WorkspaceUnavailablePage');
             expect(source(page)).not.toContain('getPublicPageUserFromCookie');
         }
     });
