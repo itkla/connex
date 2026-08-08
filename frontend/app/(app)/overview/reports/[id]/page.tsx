@@ -5,9 +5,10 @@ import { getTranslations } from 'next-intl/server';
 import ReportDocumentBoard from '@/app/components/reports/ReportDocumentBoard';
 import AccessDeniedPage from '@/app/components/AccessDeniedPage';
 import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import { loadRecord } from '@/app/lib/recordAccess';
 import {
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getReport,
     getReportSnapshots,
@@ -25,7 +26,9 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     const id = Number(rawId);
     if (!Number.isInteger(id) || id < 1) notFound();
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) return <WorkspaceUnavailablePage />;
+    const user = userResult.data;
     if (!user) redirect('/auth/login');
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const [reportAccess, snapshots, permissionsResult] = await Promise.all([

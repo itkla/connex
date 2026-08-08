@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -151,6 +151,31 @@ describe('the error-swallowing cookie wrapper stays off write paths', () => {
         for (const [relativePath, swallowingRead] of HONEST_ROUTE_READS) {
             const route = readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
             expect(route, relativePath).not.toContain(swallowingRead);
+        }
+    });
+
+    it('keeps authenticated route login redirects off the legacy auth resolver', () => {
+        const authenticatedRoutes = globSync('app/(app)/**/page.tsx', { cwd: process.cwd() });
+
+        expect(authenticatedRoutes.length).toBeGreaterThan(40);
+        for (const relativePath of authenticatedRoutes) {
+            const route = readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
+            if (route.includes('/auth/login')) {
+                expect(route, relativePath).not.toContain('getCurrentUserFromCookie');
+            }
+        }
+    });
+
+    it('resolves route authentication before starting protected page reads', () => {
+        const authenticatedRoutes = globSync('app/(app)/**/page.tsx', { cwd: process.cwd() });
+
+        for (const relativePath of authenticatedRoutes) {
+            const route = readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
+            if (route.includes('getCurrentUserResultFromCookie')) {
+                expect(route, relativePath).toMatch(
+                    /const (?:currentUser|user)Result = await getCurrentUserResultFromCookie\(cookie\);/,
+                );
+            }
         }
     });
 });

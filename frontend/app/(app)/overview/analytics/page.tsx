@@ -5,7 +5,7 @@ import { getTranslations } from 'next-intl/server';
 
 import {
     getAllStagesFromCookie,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getDealMetricsFromCookie,
     getDealRiskAnalyticsFromCookie,
     getIntroSuggestionsFromCookie,
@@ -29,6 +29,7 @@ import type {
     WarmthSummary,
 } from '@/app/lib/types';
 import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
+import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
@@ -51,13 +52,15 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AnalyticsPage() {
     const cookie = (await headers()).get('cookie');
-    const [user, workspaceSnapshot] = await Promise.all([
-        getCurrentUserFromCookie(cookie),
-        getMyWorkspacesFromCookie(cookie),
-    ]);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         redirect('/auth/login');
     }
+    const workspaceSnapshot = await getMyWorkspacesFromCookie(cookie);
     const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
     const init = { headers: { cookie: cookie ?? '' } } as const;

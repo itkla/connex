@@ -6,7 +6,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import {
     getAttachmentsFromCookie,
     getContacts,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getDeals,
     getUserActivitiesFromCookie,
     getUserById,
@@ -18,6 +18,7 @@ import { type Contact, type Deal, type User } from "@/app/lib/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 
 import UserAvatar from "@/app/components/records/users/UserAvatar";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import InfoRow from "@/app/components/me/InfoRow";
 import StatCard from "@/app/components/me/StatCard";
 import Timeline from "@/app/components/me/Timeline";
@@ -32,12 +33,19 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const init = { headers: { cookie: cookie ?? "" } } as const;
+    const currentUserResult = await getCurrentUserResultFromCookie(cookie);
+    if (!currentUserResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const currentUser = currentUserResult.data;
+    if (!currentUser) {
+        redirect("/auth/login");
+    }
 
-    const [t, locale, user, currentUser, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
+    const [t, locale, user, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
         getTranslations("UsersPage"),
         getLocale(),
         getUserById(id, init).catch(() => null),
-        getCurrentUserFromCookie(cookie),
         getUserTasksFromCookie(id, cookie),
         getUserActivitiesFromCookie(id, cookie),
         getUserNotesFromCookie(id, cookie),
@@ -47,9 +55,6 @@ export default async function UserPage({ params }: { params: { id: number } }) {
         getAttachmentsFromCookie("user", id, cookie),
     ]);
 
-    if (!currentUser) {
-        redirect("/auth/login");
-    }
     if (!user) {
         notFound();
     }

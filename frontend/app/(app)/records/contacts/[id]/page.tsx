@@ -1,6 +1,7 @@
-import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
@@ -44,12 +45,19 @@ export default async function ContactPage({ params }: ContactPageProps) {
     const activeWorkspaceCookie = cookieStore.get("connex_workspace")?.value;
     const activeWorkspaceId = activeWorkspaceCookie ? Number(activeWorkspaceCookie) : null;
     const init = { headers: { cookie } } as const;
+    const currentUserResult = await getCurrentUserResultFromCookie(cookie);
+    if (!currentUserResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const currentUser = currentUserResult.data;
+    if (!currentUser) {
+        redirect('/auth/login');
+    }
 
-    const [t, locale, contactAccess, currentUser, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
-        getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),
         getAttachmentsFromCookie("person", id, cookie),
         getContextNotifications("person", id, init).catch(() => ({
@@ -71,9 +79,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
         notFound();
     }
     const contact = contactAccess.record;
-    if (!currentUser) {
-        redirect('/auth/login');
-    }
 
     const tasks = contact.tasks ?? [];
     const activities = contact.activities ?? [];

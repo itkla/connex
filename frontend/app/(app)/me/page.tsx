@@ -7,7 +7,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import {
     getContactTemperaturesFromCookie,
     getContactsFromCookie,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getDealRisksFromCookie,
     getDealsFromCookie,
     getUserActivitiesFromCookie,
@@ -15,6 +15,7 @@ import {
     getUserTasksFromCookie,
     getUsers,
 } from "@/app/lib/api";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { Activity, Contact, Deal, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
 import { formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/utils";
 import { computeKpis } from "@/app/components/overview/analytics/metrics";
@@ -48,8 +49,12 @@ export default async function MePage() {
     const t = await getTranslations("MePage");
     const locale = await getLocale();
     const cookie = (await headers()).get("cookie");
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
 
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         redirect("/auth/login");
     }

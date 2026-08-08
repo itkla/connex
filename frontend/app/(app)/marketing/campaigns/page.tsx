@@ -3,17 +3,22 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import {
     getCampaigns,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
 } from "@/app/lib/api";
 import { loadCollection } from "@/app/lib/recordAccess";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailablePage";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import CampaignsBrowser from "@/app/components/marketing/campaigns/CampaignsBrowser";
 
 export default async function CampaignsPage() {
     const cookie = (await headers()).get("cookie");
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         redirect("/auth/login");
     }

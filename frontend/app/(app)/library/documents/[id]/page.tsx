@@ -1,8 +1,9 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
-import { getCurrentUserFromCookie, getDocumentTemplateById } from "@/app/lib/api";
+import { getCurrentUserResultFromCookie, getDocumentTemplateById } from "@/app/lib/api";
 import type { DocumentTemplate } from "@/app/lib/types";
 import TemplateBuilder from "@/app/components/library/documents/TemplateBuilder";
 
@@ -11,7 +12,12 @@ export default async function EditDocumentTemplatePage({ params }: { params: Pro
     const id = Number(rawId);
     if (!Number.isInteger(id) || id < 1) notFound();
     const cookie = (await headers()).get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
 
     if (!user) {
         redirect('/auth/login');

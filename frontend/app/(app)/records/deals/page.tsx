@@ -1,8 +1,9 @@
 import { headers } from "next/headers";
-import { type CookieResult, getDealsPage, getDealMetricsFromCookie, getDealFacetsFromCookie, getCurrentUserFromCookie, getDefaultSavedViewFromCookie, getMyWorkspacesFromCookie, getSavedViewsResultFromCookie } from "@/app/lib/api";
+import { type CookieResult, getDealsPage, getDealMetricsFromCookie, getDealFacetsFromCookie, getCurrentUserResultFromCookie, getDefaultSavedViewFromCookie, getMyWorkspacesFromCookie, getSavedViewsResultFromCookie } from "@/app/lib/api";
 import { type Deal, type DealFacets, type DealMetrics, type Page, type SavedView } from "@/app/lib/types";
 import { resolveWorkspaceTimezone } from "@/app/lib/workspaceSnapshot";
 import { redirect } from "next/navigation";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
 
 /**
@@ -36,14 +37,15 @@ function dominantCurrency(metrics: DealMetrics): string | undefined {
 
 export default async function DealsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
     const cookie = (await headers()).get('cookie');
-    const [user, workspaceSnapshot] = await Promise.all([
-        getCurrentUserFromCookie(cookie),
-        getMyWorkspacesFromCookie(cookie),
-    ]);
-
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         redirect('/auth/login');
     }
+    const workspaceSnapshot = await getMyWorkspacesFromCookie(cookie);
     const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
     const status = statusParam((await searchParams).status);
