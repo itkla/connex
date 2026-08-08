@@ -40,6 +40,8 @@ MARKER="$STATE_DIR/deployed-sha"
 LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
 ROLLBACK_JAR="$ART_DIR/rollback.jar"
 FRONTEND_ENV=/etc/connex-staging/frontend.env
+FRONTEND_SWAP_STATE=unchanged
+FRONTEND_TSCONFIG_CLEANUP_ARMED=0
 
 BACKEND_URL=http://127.0.0.1:8081
 FRONTEND_URL=http://127.0.0.1:3001
@@ -151,13 +153,20 @@ rollback_backend() {
         return 0
     fi
     log "Rolling back backend to previous JAR..."
-    cp -f "$ROLLBACK_JAR" "$LIVE_JAR"
-    sudo systemctl restart connex-staging-backend \
-        || log "Rollback restart command failed (unit state: $(backend_unit_state))"
+    if ! cp -f "$ROLLBACK_JAR" "$LIVE_JAR"; then
+        log "Backend rollback FAILED while restoring $LIVE_JAR; manual intervention required"
+        return 1
+    fi
+    if ! sudo systemctl restart connex-staging-backend; then
+        log "Rollback restart command failed (unit state: $(backend_unit_state)); manual intervention required"
+        return 1
+    fi
     if wait_for_backend_http "$ROLLBACK_HEALTH_TIMEOUT"; then
         log "Rollback complete: previous backend restored and answering"
+        return 0
     else
         log "Rollback restart did not become healthy within ${ROLLBACK_HEALTH_TIMEOUT}s (unit state: $(backend_unit_state)); manual intervention required"
+        return 1
     fi
 }
 
@@ -180,58 +189,211 @@ prune_artifacts() {
 
 build_backend() {
     local target="$1"
-    cd "$STAGING_DIR/backend"
+    if ! cd "$STAGING_DIR/backend"; then
+        log "Backend build FAILED: cannot enter $STAGING_DIR/backend"
+        return 1
+    fi
     if [ -f "$LIVE_JAR" ]; then
-        cp -f "$LIVE_JAR" "$ROLLBACK_JAR"
+        if ! cp -f "$LIVE_JAR" "$ROLLBACK_JAR"; then
+            log "Backend build FAILED: could not snapshot the previous JAR"
+            return 1
+        fi
     fi
     log "Building backend (clean bootJar, sha ${target:0:8})..."
     if ! bash ./gradlew clean bootJar -q -PgitSha="$target"; then
         if [ -f "$ROLLBACK_JAR" ] && [ ! -f "$LIVE_JAR" ]; then
-            cp -f "$ROLLBACK_JAR" "$LIVE_JAR"
-            log "Backend build FAILED; restored previous JAR on disk (running service untouched)"
+            if cp -f "$ROLLBACK_JAR" "$LIVE_JAR"; then
+                log "Backend build FAILED; restored previous JAR on disk (running service untouched)"
+            else
+                log "Backend build FAILED and the previous JAR could not be restored on disk; running service untouched"
+            fi
         else
             log "Backend build FAILED"
         fi
         return 1
     fi
-    cp -f "$LIVE_JAR" "$ART_DIR/backend-$target.jar"
+    if ! cp -f "$LIVE_JAR" "$ART_DIR/backend-$target.jar"; then
+        log "Backend build FAILED: could not archive the target-stamped JAR"
+        return 1
+    fi
+}
+
+restore_frontend_tsconfig() {
+    if [ "$FRONTEND_TSCONFIG_CLEANUP_ARMED" != "1" ]; then
+        return 0
+    fi
+    if ! git checkout -- tsconfig.json; then
+        log "Frontend tsconfig restore FAILED: git checkout did not succeed"
+        return 1
+    fi
+    if ! git diff --quiet -- tsconfig.json; then
+        log "Frontend tsconfig restore FAILED: tsconfig.json still differs from HEAD"
+        return 1
+    fi
+    FRONTEND_TSCONFIG_CLEANUP_ARMED=0
+}
+
+frontend_tsconfig_exit_cleanup() {
+    local exit_status="$1" cleanup_status=0
+    restore_frontend_tsconfig || cleanup_status=$?
+    if [ "$exit_status" -ne 0 ]; then
+        exit "$exit_status"
+    fi
+    exit "$cleanup_status"
+}
+
+frontend_tsconfig_signal_cleanup() {
+    local signal_name="$1" signal_status="$2" cleanup_status=0
+    trap - INT TERM
+    log "Frontend build interrupted by $signal_name; restoring tsconfig.json"
+    restore_frontend_tsconfig || cleanup_status=$?
+    if [ "$cleanup_status" -eq 0 ]; then
+        trap - EXIT
+    fi
+    exit "$signal_status"
 }
 
 build_frontend() {
+    local build_status=0 restore_status=0
     cd "$STAGING_DIR/frontend"
     log "Building frontend (into .next-new)..."
     set -a; source "$FRONTEND_ENV"; set +a
     "$PNPM" install --frozen-lockfile --silent
-    rm -rf .next-new
-    NEXT_DIST_DIR=.next-new "$PNPM" build
+    # Only generated route types are safe to remove from the live .next tree before the
+    # swap. The running frontend still reads .next/server and .next/static, so never clean
+    # .next wholesale here. .next-new is disposable until it becomes the live build.
+    if ! rm -rf .next-new .next/types .next/dev/types; then
+        log "Frontend build FAILED while removing disposable generated output"
+        return 1
+    fi
+    # Next rewrites tsconfig.json during a build. The EXIT trap covers shell termination and
+    # the signal traps preserve conventional signal exit statuses; all remain armed until a
+    # checkout plus a clean diff proves that the tracked file is back at HEAD.
+    FRONTEND_TSCONFIG_CLEANUP_ARMED=1
+    trap 'frontend_tsconfig_exit_cleanup "$?"' EXIT
+    trap 'frontend_tsconfig_signal_cleanup INT 130' INT
+    trap 'frontend_tsconfig_signal_cleanup TERM 143' TERM
+    NEXT_DIST_DIR=.next-new "$PNPM" build || build_status=$?
+    restore_frontend_tsconfig || restore_status=$?
+    if [ "$restore_status" -eq 0 ]; then
+        trap - EXIT INT TERM
+    fi
+    if [ "$build_status" -ne 0 ]; then
+        return "$build_status"
+    fi
+    return "$restore_status"
 }
 
 swap_frontend_build() {
-    cd "$STAGING_DIR/frontend"
-    rm -rf .next-old
-    if [ -d .next ]; then
-        mv .next .next-old
+    if ! cd "$STAGING_DIR/frontend"; then
+        log "Frontend swap FAILED: cannot enter $STAGING_DIR/frontend"
+        return 1
     fi
-    mv .next-new .next
+    FRONTEND_SWAP_STATE=unchanged
+    if ! rm -rf .next-old; then
+        log "Frontend swap FAILED while removing the previous rollback tree"
+        return 1
+    fi
+    if [ ! -d .next-new ]; then
+        log "Frontend swap FAILED: .next-new is missing"
+        return 1
+    fi
+    if [ -d .next ]; then
+        if ! mv .next .next-old; then
+            log "Frontend swap FAILED while saving the live .next tree; new build left in .next-new"
+            return 1
+        fi
+        FRONTEND_SWAP_STATE=previous_saved
+    else
+        FRONTEND_SWAP_STATE=no_previous
+    fi
+    if ! mv .next-new .next; then
+        log "Frontend swap FAILED while moving .next-new into place"
+        return 1
+    fi
+    if [ "$FRONTEND_SWAP_STATE" = "previous_saved" ]; then
+        FRONTEND_SWAP_STATE=new_live_with_previous
+    else
+        FRONTEND_SWAP_STATE=new_live_without_previous
+    fi
     # next.config.ts sets output: standalone, so the build bakes its distDir into
     # standalone/server.js as .next-new — a directory this swap has just renamed away. Staging
     # serves with `next start` and never reads it, but leaving an unusable server.js behind is a
     # trap for anyone who later switches to the standalone runtime, so drop it.
     if [ -d .next/standalone ]; then
-        rm -rf .next/standalone
+        if ! rm -rf .next/standalone; then
+            log "Frontend swap FAILED while removing unusable standalone output"
+            return 1
+        fi
         log "Removed standalone output (its baked distDir does not survive the .next-new swap)"
     fi
 }
 
 restore_frontend_build() {
-    cd "$STAGING_DIR/frontend"
-    if [ -d .next-old ]; then
-        rm -rf .next
-        mv .next-old .next
-        sudo systemctl restart connex-staging-frontend \
-            || log "Frontend restore restart command failed"
-        log "Frontend restored to previous build"
+    if ! cd "$STAGING_DIR/frontend"; then
+        log "Frontend restore FAILED: cannot enter $STAGING_DIR/frontend"
+        return 1
     fi
+    case "$FRONTEND_SWAP_STATE" in
+        previous_saved)
+            if [ -e .next ] || [ -L .next ]; then
+                log "Frontend restore FAILED: refusing to move .next-old into an occupied .next path"
+                return 1
+            fi
+            if ! mv .next-old .next; then
+                log "Frontend restore FAILED while moving .next-old back into place"
+                return 1
+            fi
+            FRONTEND_SWAP_STATE=previous_restored
+            ;;
+        new_live_with_previous)
+            if [ -e .next-new ] || [ -L .next-new ]; then
+                log "Frontend restore FAILED: .next-new is occupied, so the active tree cannot be parked safely"
+                return 1
+            fi
+            if ! mv .next .next-new; then
+                log "Frontend restore FAILED while parking the active build; previous build remains in .next-old"
+                return 1
+            fi
+            FRONTEND_SWAP_STATE=new_build_parked
+            if ! mv .next-old .next; then
+                log "Frontend restore FAILED while moving .next-old back into place"
+                if mv .next-new .next; then
+                    FRONTEND_SWAP_STATE=new_live_with_previous
+                    log "Returned the failed new build to .next after the restore failure"
+                else
+                    FRONTEND_SWAP_STATE=restore_incomplete
+                    log "Could not return the failed new build to .next; manual intervention required"
+                fi
+                return 1
+            fi
+            FRONTEND_SWAP_STATE=previous_restored
+            ;;
+        previous_restored)
+            ;;
+        new_live_without_previous)
+            log "Frontend restore FAILED: there is no previous .next tree to restore"
+            return 1
+            ;;
+        *)
+            log "Frontend restore FAILED: swap state '$FRONTEND_SWAP_STATE' is not restorable"
+            return 1
+            ;;
+    esac
+    if ! sudo systemctl restart connex-staging-frontend; then
+        log "Frontend restore restart command failed; restored tree retained for manual recovery"
+        return 1
+    fi
+    # The failed tree is renamed, rather than deleted, while the old process may still be
+    # serving it. Only a successful restart makes it safe to remove that parked tree.
+    if [ -e .next-new ] || [ -L .next-new ]; then
+        if ! rm -rf .next-new; then
+            log "Frontend restore FAILED while removing the parked failed build"
+            return 1
+        fi
+    fi
+    FRONTEND_SWAP_STATE=restored
+    log "Frontend restored to previous build"
 }
 
 deploy_backend() {
@@ -240,25 +402,49 @@ deploy_backend() {
         log "Backend already serving sha ${target:0:8}; skipping backend build/restart"
         return 0
     fi
-    build_backend "$target"
+    if ! build_backend "$target"; then
+        log "Backend build step FAILED; backend not restarted"
+        return 1
+    fi
     log "Restarting backend..."
     if ! sudo systemctl restart connex-staging-backend \
         || ! wait_for_backend_sha "$target" \
         || ! verify_backend_stability "$target"; then
-        rollback_backend
+        if ! rollback_backend; then
+            log "Backend rollback did not complete; manual intervention required"
+        fi
         return 1
     fi
     log "Backend healthy and serving sha ${target:0:8}"
 }
 
 deploy_frontend() {
-    swap_frontend_build
-    log "Restarting frontend..."
-    if ! sudo systemctl restart connex-staging-frontend || ! wait_for_frontend; then
-        log "Frontend did not answer on $FRONTEND_URL within ${FRONTEND_HEALTH_TIMEOUT}s after restart; restoring previous build"
-        restore_frontend_build
+    if ! swap_frontend_build; then
+        case "$FRONTEND_SWAP_STATE" in
+            previous_saved|new_live_with_previous|new_live_without_previous)
+                if ! restore_frontend_build; then
+                    log "Frontend restore after the failed swap did not complete; manual intervention may be required"
+                fi
+                ;;
+        esac
         return 1
     fi
+    log "Restarting frontend..."
+    if ! sudo systemctl restart connex-staging-frontend; then
+        log "Frontend restart command FAILED; restoring previous build"
+        if ! restore_frontend_build; then
+            log "Frontend restore after the failed restart did not complete; manual intervention required"
+        fi
+        return 1
+    fi
+    if ! wait_for_frontend; then
+        log "Frontend did not answer on $FRONTEND_URL within ${FRONTEND_HEALTH_TIMEOUT}s after restart; restoring previous build"
+        if ! restore_frontend_build; then
+            log "Frontend restore after the failed health gate did not complete; manual intervention required"
+        fi
+        return 1
+    fi
+    return 0
 }
 
 main() {
@@ -287,7 +473,7 @@ main() {
 
     build_frontend
     if ! deploy_backend "$target"; then
-        log "Deploy of ${target:0:8} FAILED at the backend health gate; frontend untouched, will retry next cycle"
+        log "Deploy of ${target:0:8} FAILED at the backend build or health gate; frontend untouched, will retry next cycle"
         exit 1
     fi
     if ! deploy_frontend; then
