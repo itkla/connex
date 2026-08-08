@@ -87,6 +87,9 @@
     },
     "IntroRationale": {
         "label": "AIインサイト",
+        "generating": "AIインサイトを生成しています…",
+        "error": "AIインサイトを生成できませんでした。",
+        "timedOut": "AIインサイトの生成がタイムアウトしました。",
         "integrityWarning": "一部の参照を確認できませんでした",
         "attribution": "AI生成 · {time}",
         "rateLimited": "リクエストが集中しているため、AIインサイトは一時的に利用できません。"

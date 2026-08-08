@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.controllers;
 
 import java.math.BigDecimal;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,10 +14,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import ooo.klae.connex.backend.ai.brief.DealBriefService;
-import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
+import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
@@ -28,7 +30,6 @@ import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealAgingDto;
-import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealEvaluationDto;
@@ -41,7 +42,6 @@ import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealRevenuePeriodSeriesDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
-import ooo.klae.connex.backend.dto.DealRationaleDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
 import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
@@ -94,8 +94,7 @@ public class DealController {
     private final DealService dealService;
     private final BulkOperationService bulkOperationService;
     private final DealRiskService dealRiskService;
-    private final DealBriefService dealBriefService;
-    private final DealRiskRationaleService dealRiskRationaleService;
+    private final AiGenerationAdapterService aiGenerationAdapterService;
     private final WorkspaceService workspaceService;
     private final MemberScopeResolver memberScopeResolver;
 
@@ -562,14 +561,20 @@ public class DealController {
 
     /** Returns an AI-generated before-you-call brief, or a graceful unavailability response. */
     @PostMapping("/{id}/brief")
-    public DealBriefDto brief(@PathVariable int id, @RequestParam(defaultValue = "false") boolean refresh) {
-        return dealBriefService.generate(id, refresh);
+    public ResponseEntity<AiGenerationStatusDto> brief(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "false") boolean refresh) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(aiGenerationAdapterService.startDealBrief(id, refresh));
     }
 
     /** Returns an AI-generated deal-risk rationale, or a graceful unavailability response. */
     @PostMapping("/{id}/rationale")
-    public DealRationaleDto rationale(@PathVariable int id, @RequestParam(defaultValue = "false") boolean refresh) {
-        return dealRiskRationaleService.generate(id, refresh);
+    public ResponseEntity<AiGenerationStatusDto> rationale(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "false") boolean refresh) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(aiGenerationAdapterService.startDealRationale(id, refresh));
     }
 
     /**

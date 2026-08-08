@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { generateDealRationale } from '@/app/lib/api';
-import { recoverAiResult } from '@/app/lib/aiRecovery';
+import { AiGenerationError } from '@/app/lib/aiGeneration';
 import type { DealRationale, DealRiskFactorCode } from '@/app/lib/types';
 import { formatDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,7 @@ type RationaleState =
     | { status: 'loading' }
     | { status: 'hidden' }
     | { status: 'error' }
+    | { status: 'timedOut' }
     | { status: 'rateLimited' }
     | { status: 'ready'; rationale: DealRationale };
 
@@ -64,17 +65,15 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
                 } else {
                     setStoredState({ dealId, status: 'hidden' });
                 }
-            } catch {
+            } catch (error) {
                 if (cancelled) return;
-                const recovered = await recoverAiResult(
-                    () => generateDealRationale(dealId, false),
-                    (rationale) => rationale.available && Boolean(rationale.narrative || rationale.rationale),
-                    () => cancelled,
-                );
-                if (cancelled) return;
-                setStoredState(recovered
-                    ? { dealId, status: 'ready', rationale: recovered }
-                    : { dealId, status: 'error' });
+                if (error instanceof AiGenerationError && error.status === 'timed_out') {
+                    setStoredState({ dealId, status: 'timedOut' });
+                } else if (error instanceof AiGenerationError && error.reason === 'rate_limited') {
+                    setStoredState({ dealId, status: 'rateLimited' });
+                } else {
+                    setStoredState({ dealId, status: 'error' });
+                }
             }
         })();
         return () => {
@@ -103,14 +102,17 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
             </h2>
             {state.status === 'loading' ? (
                 <div className="grid flex-1 gap-2 rounded-lg border px-4 py-3" aria-busy>
+                    <p className="text-sm text-muted-foreground">{t('generating')}</p>
                     <Skeleton className="h-3.5 w-full" />
                     <Skeleton className="h-3.5 w-11/12" />
                     <Skeleton className="h-3.5 w-4/5" />
                     <Skeleton className="h-3.5 w-2/3" />
                 </div>
-            ) : state.status === 'error' ? (
+            ) : state.status === 'error' || state.status === 'timedOut' ? (
                 <div className="flex flex-1 items-center justify-between gap-3 rounded-lg border px-4 py-3">
-                    <p className="text-sm text-muted-foreground">{t('error')}</p>
+                    <p className="text-sm text-muted-foreground">
+                        {state.status === 'timedOut' ? t('timedOut') : t('error')}
+                    </p>
                     <Button variant="ghost" size="sm" onClick={retry} className="shrink-0">
                         <ArrowPathIcon className="size-4" aria-hidden />
                         {t('retry')}

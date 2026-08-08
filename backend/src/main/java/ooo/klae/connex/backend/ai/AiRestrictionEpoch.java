@@ -4,18 +4,22 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
- * Fences cache writes whose complete demasked inputs were assembled before a workspace processing
- * restriction. Workspaces use bounded lock stripes, so a transaction-held purge fence blocks only
- * affected workspace stripes rather than every tenant in the JVM. This closes the in-flight write
- * window only within one application JVM; multi-instance deployments still need persisted
- * report-to-person provenance or a persisted epoch, tracked in issue #941.
+ * Fences provider egress and cache writes whose complete demasked inputs were assembled before a
+ * workspace processing restriction. Workspaces use bounded lock stripes, so a transaction-held
+ * purge fence blocks only affected workspace stripes rather than every tenant in the JVM. Provider
+ * egress releases its read fence before person-row-backed cache persistence to preserve the
+ * restriction path's row-before-fence lock order. These guarantees apply within one application
+ * JVM; multi-instance deployments still need persisted report-to-person provenance or a persisted
+ * epoch, tracked in issue #941.
  *
  * <p>The JVM-lock and InnoDB-row-lock order is load-bearing: a restriction transaction locks and
  * updates the person, acquires every affected workspace fence in ascending workspace-stripe order,
@@ -31,6 +35,7 @@ public class AiRestrictionEpoch {
     private final ReentrantReadWriteLock[] workspaceLocks;
     private final AtomicLong[] workspaceEpochs;
     private final AtomicLong epochSequence = new AtomicLong();
+    private final ThreadLocal<RestrictionExpectation> expectedEgressEpoch = new ThreadLocal<>();
 
     /** Creates the production restriction-epoch fence with bounded workspace stripes. */
     public AiRestrictionEpoch() {
@@ -117,6 +122,45 @@ public class AiRestrictionEpoch {
         }
     }
 
+    void runWithExpectedEgressEpoch(
+            int workspaceId, long expectedEpoch, Runnable action) {
+        Objects.requireNonNull(action, "action");
+        requireWorkspace(workspaceId);
+        RestrictionExpectation previous = expectedEgressEpoch.get();
+        RestrictionExpectation expected = new RestrictionExpectation(workspaceId, expectedEpoch);
+        if (previous != null && !previous.equals(expected)) {
+            throw new IllegalStateException("Nested AI egress restriction contexts do not match");
+        }
+        expectedEgressEpoch.set(expected);
+        try {
+            action.run();
+        } finally {
+            if (previous == null) {
+                expectedEgressEpoch.remove();
+            } else {
+                expectedEgressEpoch.set(previous);
+            }
+        }
+    }
+
+    <T> T invokeAtEgress(int workspaceId, Supplier<T> invocation) {
+        Objects.requireNonNull(invocation, "invocation");
+        RestrictionExpectation expected = expectedEgressEpoch.get();
+        if (expected == null) {
+            return invocation.get();
+        }
+        if (expected.workspaceId() != workspaceId) {
+            throw new IllegalStateException("AI egress workspace does not match its restriction context");
+        }
+        AtomicReference<T> result = new AtomicReference<>();
+        boolean invoked = runIfCurrent(
+                workspaceId, expected.epoch(), () -> result.set(invocation.get()));
+        if (!invoked) {
+            throw new EgressRejectedException("AI restrictions changed before provider egress");
+        }
+        return result.get();
+    }
+
     int usedWorkspaceStripeCount() {
         int tracked = 0;
         for (AtomicLong epoch : workspaceEpochs) {
@@ -169,6 +213,15 @@ public class AiRestrictionEpoch {
         @Override
         public void afterCompletion(int status) {
             lock.writeLock().unlock();
+        }
+    }
+
+    private record RestrictionExpectation(int workspaceId, long epoch) {
+    }
+
+    static final class EgressRejectedException extends IllegalStateException {
+        private EgressRejectedException(String message) {
+            super(message);
         }
     }
 }

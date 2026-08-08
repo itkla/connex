@@ -98,7 +98,12 @@ public class UserService implements UserDetailsService {
     }
 
     public User getUserById(int id) {
-        if (!workspaceService.isMember(workspaceService.getCurrentWorkspaceId(), id)) {
+        return getActiveWorkspaceUser(workspaceService.getCurrentWorkspaceId(), id);
+    }
+
+    /** Resolves one user only when they remain an active member of the explicit workspace. */
+    public User getActiveWorkspaceUser(int workspaceId, int id) {
+        if (!workspaceService.isMember(workspaceId, id)) {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
         User user = userMapper.getUserById(id);

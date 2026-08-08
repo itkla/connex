@@ -87,6 +87,9 @@
     },
     "IntroRationale": {
         "label": "AI insight",
+        "generating": "Generating AI insight…",
+        "error": "AI insight generation failed.",
+        "timedOut": "AI insight generation timed out.",
         "integrityWarning": "Some references could not be verified",
         "attribution": "AI-generated · {time}",
         "rateLimited": "AI insight is temporarily unavailable — too many requests right now."

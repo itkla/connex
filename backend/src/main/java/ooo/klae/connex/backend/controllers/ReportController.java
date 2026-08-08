@@ -102,11 +102,14 @@ public class ReportController {
 
     @PostMapping("/{id}/generate")
     @RequirePermission(Permission.REPORT_READ)
-    public ReportDocumentDto generate(
+    public ResponseEntity<ReportDocumentDto> generate(
             @PathVariable int id,
             @RequestParam(name = "narrative", defaultValue = "cached") String narrative,
             @Valid @RequestBody(required = false) ReportGenerateRequest request) {
-        return reportService.generate(id, request, narrativeMode(narrative));
+        ReportDocumentDto document = reportService.generateInteractive(
+                id, request, narrativeMode(narrative));
+        HttpStatus status = document.generation() == null ? HttpStatus.OK : HttpStatus.ACCEPTED;
+        return ResponseEntity.status(status).body(document);
     }
 
     private static ReportService.NarrativeMode narrativeMode(String narrative) {

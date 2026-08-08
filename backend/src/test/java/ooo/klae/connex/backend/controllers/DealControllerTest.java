@@ -34,8 +34,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import ooo.klae.connex.backend.ai.brief.DealBriefService;
-import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
@@ -79,8 +78,7 @@ class DealControllerTest {
     @MockitoBean private DealService dealService;
     @MockitoBean private BulkOperationService bulkOperationService;
     @MockitoBean private DealRiskService dealRiskService;
-    @MockitoBean private DealBriefService dealBriefService;
-    @MockitoBean private DealRiskRationaleService dealRiskRationaleService;
+    @MockitoBean private AiGenerationAdapterService aiGenerationAdapterService;
     @MockitoBean private WorkspaceService workspaceService;
     @MockitoBean private MemberScopeResolver memberScopeResolver;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;

@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import { generateDealBrief } from '@/app/lib/api';
-import { recoverAiResult } from '@/app/lib/aiRecovery';
+import { AiGenerationError } from '@/app/lib/aiGeneration';
 import {
     citationHref,
     citationTitle,
@@ -23,6 +23,7 @@ type BriefState =
     | { status: 'loading' }
     | { status: 'hidden' }
     | { status: 'error' }
+    | { status: 'timedOut' }
     | { status: 'rateLimited' }
     | { status: 'insufficient' }
     | { status: 'ready'; brief: DealBrief };
@@ -73,17 +74,15 @@ export default function DealBriefPanel({
                 } else {
                     setStoredState({ dealId, status: 'hidden' });
                 }
-            } catch {
+            } catch (error) {
                 if (cancelled) return;
-                const recovered = await recoverAiResult(
-                    () => generateDealBrief(dealId, false),
-                    (brief) => brief.available && ((brief.sections?.length ?? 0) > 0 || Boolean(brief.brief)),
-                    () => cancelled,
-                );
-                if (cancelled) return;
-                setStoredState(recovered
-                    ? { dealId, status: 'ready', brief: recovered }
-                    : { dealId, status: 'error' });
+                if (error instanceof AiGenerationError && error.status === 'timed_out') {
+                    setStoredState({ dealId, status: 'timedOut' });
+                } else if (error instanceof AiGenerationError && error.reason === 'rate_limited') {
+                    setStoredState({ dealId, status: 'rateLimited' });
+                } else {
+                    setStoredState({ dealId, status: 'error' });
+                }
             }
         })();
         return () => {
@@ -117,14 +116,17 @@ export default function DealBriefPanel({
             </h2>
             {state.status === 'loading' ? (
                 <div className="grid flex-1 gap-2 rounded-lg border px-4 py-3" aria-busy>
+                    <p className="text-sm text-muted-foreground">{t('generating')}</p>
                     <Skeleton className="h-3.5 w-full" />
                     <Skeleton className="h-3.5 w-11/12" />
                     <Skeleton className="h-3.5 w-4/5" />
                     <Skeleton className="h-3.5 w-2/3" />
                 </div>
-            ) : state.status === 'error' ? (
+            ) : state.status === 'error' || state.status === 'timedOut' ? (
                 <div className="flex flex-1 items-center justify-between gap-3 rounded-lg border px-4 py-3">
-                    <p className="text-sm text-muted-foreground">{t('error')}</p>
+                    <p className="text-sm text-muted-foreground">
+                        {state.status === 'timedOut' ? t('timedOut') : t('error')}
+                    </p>
                     <Button variant="ghost" size="sm" onClick={retry} className="shrink-0">
                         <ArrowPathIcon className="size-4" aria-hidden />
                         {t('retry')}

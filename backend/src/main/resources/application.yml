@@ -322,6 +322,18 @@ connex:
         invocation-quota-max-organizations: ${CONNEX_AI_INVOCATION_QUOTA_MAX_ORGANIZATIONS:10000}
         invocation-refresh-max-identities: ${CONNEX_AI_INVOCATION_REFRESH_MAX_IDENTITIES:10000}
         invocation-max-active-flights: ${CONNEX_AI_INVOCATION_MAX_ACTIVE_FLIGHTS:10000}
+        generation-worker-threads: ${CONNEX_AI_GENERATION_WORKER_THREADS:4}
+        generation-queue-capacity: ${CONNEX_AI_GENERATION_QUEUE_CAPACITY:60}
+        generation-max-handles: ${CONNEX_AI_GENERATION_MAX_HANDLES:2048}
+        generation-max-active-per-user: ${CONNEX_AI_GENERATION_MAX_ACTIVE_PER_USER:4}
+        generation-max-handles-per-user: ${CONNEX_AI_GENERATION_MAX_HANDLES_PER_USER:32}
+        generation-max-result-bytes: ${CONNEX_AI_GENERATION_MAX_RESULT_BYTES:4194304}
+        generation-max-retained-result-bytes: ${CONNEX_AI_GENERATION_MAX_RETAINED_RESULT_BYTES:67108864}
+        generation-max-retained-result-bytes-per-workspace: ${CONNEX_AI_GENERATION_MAX_RETAINED_RESULT_BYTES_PER_WORKSPACE:33554432}
+        generation-max-retained-result-bytes-per-user: ${CONNEX_AI_GENERATION_MAX_RETAINED_RESULT_BYTES_PER_USER:16777216}
+        generation-max-lifetime: ${CONNEX_AI_GENERATION_MAX_LIFETIME:75s}
+        generation-poll-window: ${CONNEX_AI_GENERATION_POLL_WINDOW:2m}
+        generation-poll-interval: ${CONNEX_AI_GENERATION_POLL_INTERVAL:2s}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
@@ -31,9 +31,11 @@ import {
     exportReportSnapshotCsv,
     generateReport,
     getReportSnapshot,
+    resolveAcceptedAiGeneration,
+    subscribeClientRequestIdentityInvalidation,
 } from '@/app/lib/api';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import { recoverAiResult } from '@/app/lib/aiRecovery';
+import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
@@ -41,6 +43,7 @@ import type {
     ReportDefinition,
     ReportDocument,
     ReportGenerateInput,
+    AiGenerationStatus,
     ReportNarrativeClaim,
     ReportSnapshot,
     ReportSnapshotSummary,
@@ -66,15 +69,67 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
-type DocumentState =
+type LiveReportState =
     | { status: 'loading' }
-    | { status: 'error' }
-    | { status: 'ready'; document: ReportDocument };
+    | { status: 'report_failed' }
+    | {
+        status: 'accepted' | 'running' | 'resolved' | 'failed' | 'rate_limited' | 'timed_out';
+        document: ReportDocument;
+    };
 
-type NarrativeState = 'idle' | 'generating' | 'error';
+type LiveReportAction =
+    | { type: 'load' }
+    | { type: 'report_failed' }
+    | { type: 'received'; document: ReportDocument }
+    | { type: 'running' }
+    | { type: 'resolved'; document: ReportDocument }
+    | { type: 'terminal'; status: 'failed' | 'rate_limited' | 'timed_out' };
 
 const FIGURES_TIMEOUT_MS = 30_000;
-const NARRATIVE_TIMEOUT_MS = 90_000;
+
+function receivedReportState(document: ReportDocument): LiveReportState {
+    const generation = document.generation;
+    if (generation?.status === 'accepted' || generation?.status === 'running') {
+        return { status: generation.status, document };
+    }
+    if (generation?.status === 'resolved') {
+        return { status: 'resolved', document: generation.result };
+    }
+    if (generation?.status === 'failed') {
+        return {
+            status: generation.reason === 'rate_limited' ? 'rate_limited' : 'failed',
+            document,
+        };
+    }
+    if (generation?.status === 'timed_out') {
+        return { status: 'timed_out', document };
+    }
+    if (document.narrative.reason === 'rate_limited') {
+        return { status: 'rate_limited', document };
+    }
+    return { status: 'resolved', document };
+}
+
+function liveReportReducer(state: LiveReportState, action: LiveReportAction): LiveReportState {
+    switch (action.type) {
+        case 'load':
+            return { status: 'loading' };
+        case 'report_failed':
+            return { status: 'report_failed' };
+        case 'received':
+            return receivedReportState(action.document);
+        case 'resolved':
+            return { status: 'resolved', document: action.document };
+        case 'running':
+            return state.status === 'loading' || state.status === 'report_failed'
+                ? state
+                : { status: 'running', document: state.document };
+        case 'terminal':
+            return state.status === 'loading' || state.status === 'report_failed'
+                ? state
+                : { status: action.status, document: state.document };
+    }
+}
 
 /**
  * Rejects if the wrapped promise has not settled within {@link ms}. The underlying request keeps
@@ -122,8 +177,7 @@ export default function ReportDocumentBoard({
     const t = useTranslations('Reports');
     const locale = useLocale();
     const { activeWorkspace } = useWorkspace();
-    const [state, setState] = useState<DocumentState>({ status: 'loading' });
-    const [narrativeState, setNarrativeState] = useState<NarrativeState>('idle');
+    const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
     const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(initialSnapshot?.id ?? null);
     const [activeSnapshot, setActiveSnapshot] = useState<ReportSnapshot | null>(initialSnapshot);
@@ -139,78 +193,112 @@ export default function ReportDocumentBoard({
     const generationInputRef = useRef<ReportGenerateInput>({});
     const snapshotRequestRef = useRef(0);
     const generationRef = useRef(0);
+    const generationAbortRef = useRef<AbortController | null>(null);
     const paperRef = useRef<HTMLElement>(null);
     const hasAttainment = definition.config.widgets.some((widget) => widget.measure === 'attainment');
 
     const document = activeSnapshotId != null
         ? activeSnapshot?.computedResult ?? null
-        : state.status === 'ready' ? state.document : null;
+        : reportState.status === 'loading' || reportState.status === 'report_failed'
+            ? null
+            : reportState.document;
 
-    /**
-     * Generates the narrative, then recovers from a request that was cut in transit. The server
-     * completes and caches the narrative regardless of whether the client still holds the
-     * connection, so a lost response is resolved by polling the provider-free cached mode rather
-     * than by surfacing an error the reader has to retry by hand.
-     */
-    const runNarrative = useCallback(async (generationId: number) => {
-        setNarrativeState('generating');
-        const apply = (document: ReportDocument) => {
-            setState({ status: 'ready', document });
-            setNarrativeState('idle');
-        };
+    useEffect(() => subscribeClientRequestIdentityInvalidation(() => {
+        snapshotRequestRef.current += 1;
+        generationAbortRef.current?.abort();
+        generationRef.current += 1;
+    }), []);
+
+    /** Resolves an accepted narrative handle, or starts a fresh handle for an explicit retry. */
+    const runNarrative = useCallback(async (
+        generationId: number,
+        accepted?: AiGenerationStatus<ReportDocument>,
+        generationGuard?: () => boolean,
+    ) => {
+        generationAbortRef.current?.abort();
+        const controller = new AbortController();
+        generationAbortRef.current = controller;
+        const isCurrent = () => (generationGuard?.() ?? true)
+            && generationRef.current === generationId
+            && !controller.signal.aborted;
+        dispatchReport({ type: 'running' });
         try {
-            const full = await withTimeout(
-                generateReport(definition.id, generationInputRef.current, 'full'),
-                NARRATIVE_TIMEOUT_MS,
+            let generation = accepted;
+            if (!generation) {
+                const started = await withTimeout(
+                    generateReport(definition.id, generationInputRef.current, 'full'),
+                    FIGURES_TIMEOUT_MS,
+                );
+                if (!isCurrent()) return;
+                dispatchReport({ type: 'received', document: started });
+                generation = started.generation ?? undefined;
+                if (!generation || generation.status === 'resolved'
+                    || generation.status === 'failed' || generation.status === 'timed_out') {
+                    return;
+                }
+            }
+            dispatchReport({ type: 'running' });
+            const resolved = await resolveAcceptedAiGeneration<ReportDocument>(
+                generation,
+                { signal: controller.signal },
             );
-            if (generationRef.current !== generationId) return;
-            apply(full);
-            return;
-        } catch {
-            if (generationRef.current !== generationId) return;
-        }
-        const recovered = await recoverAiResult(
-            () => generateReport(definition.id, generationInputRef.current, 'cached'),
-            (document) => document.narrative.available,
-            () => generationRef.current !== generationId,
-        );
-        if (generationRef.current !== generationId) return;
-        if (recovered) {
-            apply(recovered);
-        } else {
-            setNarrativeState('error');
+            if (!isCurrent()) return;
+            dispatchReport({ type: 'resolved', document: resolved });
+        } catch (error) {
+            if (!isCurrent()) return;
+            if (error instanceof AiGenerationError && error.status === 'timed_out') {
+                dispatchReport({ type: 'terminal', status: 'timed_out' });
+            } else if (error instanceof AiGenerationError && error.reason === 'rate_limited') {
+                dispatchReport({ type: 'terminal', status: 'rate_limited' });
+            } else {
+                dispatchReport({ type: 'terminal', status: 'failed' });
+            }
+        } finally {
+            if (generationAbortRef.current === controller) {
+                generationAbortRef.current = null;
+            }
         }
     }, [definition.id]);
 
+    const loadLiveReport = useCallback(async (
+        generationId: number,
+        isCurrent: () => boolean,
+    ) => {
+        let figures: ReportDocument;
+        try {
+            figures = await withTimeout(
+                generateReport(definition.id, generationInputRef.current, 'full'),
+                FIGURES_TIMEOUT_MS,
+            );
+        } catch {
+            if (isCurrent()) dispatchReport({ type: 'report_failed' });
+            return;
+        }
+        if (!isCurrent()) return;
+        dispatchReport({ type: 'received', document: figures });
+        setStart(figures.periodStart);
+        setEnd(figures.periodEnd);
+        if (figures.generation?.status === 'accepted' || figures.generation?.status === 'running') {
+            void runNarrative(generationId, figures.generation, isCurrent);
+        }
+    }, [definition.id, runNarrative]);
+
     useEffect(() => {
         if (!liveRequested) return;
+        let active = true;
         const generationId = (generationRef.current += 1);
-        (async () => {
-            let figures: ReportDocument;
-            try {
-                figures = await withTimeout(
-                    generateReport(definition.id, generationInputRef.current, 'cached'),
-                    FIGURES_TIMEOUT_MS,
-                );
-            } catch {
-                if (generationRef.current === generationId) setState({ status: 'error' });
-                return;
-            }
-            if (generationRef.current !== generationId) return;
-            setState({ status: 'ready', document: figures });
-            setStart(figures.periodStart);
-            setEnd(figures.periodEnd);
-            if (figures.narrative.reason === 'not_cached') {
-                void runNarrative(generationId);
-            }
-        })();
+        const isCurrent = () => active && generationRef.current === generationId;
+        void loadLiveReport(generationId, isCurrent);
         return () => {
+            active = false;
+            generationAbortRef.current?.abort();
             generationRef.current += 1;
         };
-    }, [definition.id, refreshKey, runNarrative, liveRequested]);
+    }, [definition.id, loadLiveReport, refreshKey, liveRequested]);
 
     const retryNarrative = () => {
-        void runNarrative(generationRef.current);
+        const generationId = (generationRef.current += 1);
+        void runNarrative(generationId);
     };
 
     const generationInput = (): ReportGenerateInput | null => {
@@ -232,8 +320,7 @@ export default function ReportDocumentBoard({
         snapshotRequestRef.current += 1;
         setActiveSnapshotId(null);
         setActiveSnapshot(null);
-        setState({ status: 'loading' });
-        setNarrativeState('idle');
+        dispatchReport({ type: 'load' });
         setLiveRequested(true);
         setRefreshKey((key) => key + 1);
         syncSnapshotUrl(null);
@@ -486,9 +573,9 @@ export default function ReportDocumentBoard({
 
                 {activeSnapshotId != null && activeSnapshot == null ? (
                     <ReportDocumentSkeleton />
-                ) : activeSnapshot == null && state.status === 'loading' ? (
+                ) : activeSnapshot == null && reportState.status === 'loading' ? (
                     <ReportDocumentSkeleton />
-                ) : activeSnapshot == null && state.status === 'error' ? (
+                ) : activeSnapshot == null && reportState.status === 'report_failed' ? (
                     <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
                         <DocumentTextIcon className="mx-auto size-8 text-muted-foreground" />
                         <h2 className="mt-4 text-lg font-semibold text-foreground">{t('document.errorTitle')}</h2>
@@ -505,13 +592,15 @@ export default function ReportDocumentBoard({
                         paperRef={paperRef}
                         narrativePhase={activeSnapshot != null
                             ? null
-                            : narrativeState === 'generating'
+                            : reportState.status === 'accepted' || reportState.status === 'running'
                                 ? 'generating'
-                                : narrativeState === 'error'
-                                    || document.narrative.reason === 'rate_limited'
-                                    || document.narrative.reason === 'provider_error'
-                                    ? 'error'
-                                    : null}
+                                : reportState.status === 'timed_out'
+                                    ? 'timedOut'
+                                    : reportState.status === 'rate_limited'
+                                        ? 'rateLimited'
+                                        : reportState.status === 'failed'
+                                            ? 'error'
+                                            : null}
                         onRetryNarrative={activeSnapshot != null ? undefined : retryNarrative}
                     />
                 ) : null}
@@ -554,7 +643,7 @@ function ReportPaper({
     document: ReportDocument;
     snapshot: ReportSnapshot | null;
     paperRef: RefObject<HTMLElement | null>;
-    narrativePhase: 'generating' | 'error' | null;
+    narrativePhase: 'generating' | 'error' | 'rateLimited' | 'timedOut' | null;
     onRetryNarrative?: () => void;
 }) {
     const t = useTranslations('Reports');
@@ -664,16 +753,26 @@ function ReportPaper({
                             <p className="mt-1 text-sm text-muted-foreground">{t('document.narrativeGeneratingBody')}</p>
                         </div>
                     </div>
-                ) : narrativePhase === 'error' ? (
+                ) : narrativePhase === 'error'
+                    || narrativePhase === 'rateLimited'
+                    || narrativePhase === 'timedOut' ? (
                     <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-8">
                         <div className="flex items-start gap-3">
                             <ExclamationCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
                             <div>
-                                <p className="text-sm font-medium text-foreground">{t('document.narrativeErrorTitle')}</p>
+                                <p className="text-sm font-medium text-foreground">
+                                    {narrativePhase === 'timedOut'
+                                        ? t('document.narrativeTimedOutTitle')
+                                        : narrativePhase === 'rateLimited'
+                                            ? t('document.narrativeRateLimitedTitle')
+                                            : t('document.narrativeErrorTitle')}
+                                </p>
                                 <p className="mt-1 text-sm text-muted-foreground">
-                                    {document.narrative.reason === 'rate_limited'
+                                    {narrativePhase === 'rateLimited'
                                         ? t('document.narrativeRateLimitedBody')
-                                        : t('document.narrativeErrorBody')}
+                                        : narrativePhase === 'timedOut'
+                                            ? t('document.narrativeTimedOutBody')
+                                            : t('document.narrativeErrorBody')}
                                 </p>
                             </div>
                         </div>

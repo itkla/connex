@@ -17,7 +17,9 @@
     },
     "DealBrief": {
         "panelTitle": "AIブリーフ",
+        "generating": "ブリーフを生成しています…",
         "error": "ブリーフを生成できませんでした。",
+        "timedOut": "ブリーフの生成がタイムアウトしました。",
         "retry": "再試行",
         "regenerate": "再生成",
         "attribution": "AI生成 · {time}",
@@ -33,7 +35,9 @@
     },
     "DealRationale": {
         "panelTitle": "AIリスク分析",
+        "generating": "リスク分析を生成しています…",
         "error": "リスク分析を生成できませんでした。",
+        "timedOut": "リスク分析の生成がタイムアウトしました。",
         "retry": "再試行",
         "regenerate": "再生成",
         "attribution": "AI生成 · {time}",

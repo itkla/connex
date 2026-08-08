@@ -29,12 +29,22 @@ class AiPropertiesTest {
         assertEquals(1, new AiProperties().getMaxConcurrentMediaRequestsPerOrg());
         assertEquals(67108864, new AiProperties().getMaxMediaWorkingBytes());
         assertEquals(300, new AiProperties().getInvocationQuotaAttemptsPerOrg());
+        assertEquals(32, new AiProperties().getGenerationMaxHandlesPerUser());
+        assertEquals(67108864, new AiProperties().getGenerationMaxRetainedResultBytes());
+        assertEquals(33554432, new AiProperties().getGenerationMaxRetainedResultBytesPerWorkspace());
+        assertEquals(16777216, new AiProperties().getGenerationMaxRetainedResultBytesPerUser());
         assertTrue(yaml.contains("enabled: ${CONNEX_AI_ENABLED:false}"));
         assertTrue(yaml.contains("deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}"));
         assertTrue(yaml.contains("nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}"));
         assertTrue(yaml.contains("max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}"));
         assertTrue(yaml.contains(
                 "invocation-quota-attempts-per-org: ${CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG:300}"));
+        assertTrue(yaml.contains(
+                "generation-max-retained-result-bytes: ${CONNEX_AI_GENERATION_MAX_RETAINED_RESULT_BYTES:67108864}"));
+        assertTrue(yaml.contains(
+                "generation-max-retained-result-bytes-per-workspace: ${CONNEX_AI_GENERATION_MAX_RETAINED_RESULT_BYTES_PER_WORKSPACE:33554432}"));
+        assertTrue(yaml.contains(
+                "generation-max-retained-result-bytes-per-user: ${CONNEX_AI_GENERATION_MAX_RETAINED_RESULT_BYTES_PER_USER:16777216}"));
     }
 
     @Test

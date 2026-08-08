@@ -20,8 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import ooo.klae.connex.backend.ai.brief.DealBriefService;
-import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.BandCounts;
@@ -77,8 +76,7 @@ class RecordListControllerTest {
     @Mock private CompanyService companyService;
     @Mock private DealService dealService;
     @Mock private DealRiskService dealRiskService;
-    @Mock private DealBriefService dealBriefService;
-    @Mock private DealRiskRationaleService dealRiskRationaleService;
+    @Mock private AiGenerationAdapterService aiGenerationAdapterService;
     @Mock private WorkspaceService workspaceService;
     @Mock private MemberScopeResolver memberScopeResolver;
     @Mock private NoteService noteService;
@@ -401,8 +399,8 @@ class RecordListControllerTest {
     @Test
     void dealsWithoutFilterRequirePageEndpoint() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDeals(null, null, null, null, null));
 
@@ -412,8 +410,8 @@ class RecordListControllerTest {
     @Test
     void dealsPageClampsSize() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
@@ -435,8 +433,8 @@ class RecordListControllerTest {
     @Test
     void dealsPageRejectsInvalidStatusAndDirection() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
             1, 25, null, null, "sideways", null, null, null, null, false, null, null,
@@ -453,8 +451,8 @@ class RecordListControllerTest {
     @Test
     void dealsPageExpandsClosedAndBoundsFilterLists() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
@@ -478,8 +476,8 @@ class RecordListControllerTest {
     @Test
     void dealSegmentEndpointsPreserveAndNormalizeTheCompleteListScope() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         SegmentDefinition definition = new SegmentDefinition();
         definition.setMatch("all");
         definition.setConditions(List.of());
@@ -533,8 +531,8 @@ class RecordListControllerTest {
     @Test
     void dealBoardRequiresPositivePipelineAndDelegates() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         when(dealService.getDealBoard(4)).thenReturn(List.of());
 
         assertTrue(controller.getDealBoard(4).isEmpty());
@@ -546,8 +544,8 @@ class RecordListControllerTest {
     @Test
     void dealPrimaryContactsNormalizeAndDelegateTheBoundedIdBatch() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         List<DealPrimaryContactDto> contacts = List.of(
             new DealPrimaryContactDto(4, 9, "Primary", null));
         when(dealService.getPrimaryContacts(List.of(4, 2))).thenReturn(contacts);
@@ -565,8 +563,8 @@ class RecordListControllerTest {
     @Test
     void dealChartEndpointsUseServerOwnedTimezoneAndNormalizeCurrency() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("Pacific/Honolulu");
@@ -593,8 +591,8 @@ class RecordListControllerTest {
     @Test
     void dealAnalyticsEndpointsNormalizeAndForwardParameters() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
@@ -629,8 +627,8 @@ class RecordListControllerTest {
     @Test
     void dealAnalyticsEndpointsRejectInvalidRange() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealKpis(
             null, "7d", null, null, null, null, null, null, null));
@@ -644,8 +642,8 @@ class RecordListControllerTest {
     @Test
     void legacyAnalyticsEndpointsPreserveEverySupportedRange() {
         DealController dealController = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         ActivityController activityController = new ActivityController(
             activityService, workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
@@ -676,8 +674,8 @@ class RecordListControllerTest {
     @Test
     void windowedAnalyticsEndpointsDispatchWithServerOwnedTimezone() {
         DealController dealController = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         ActivityController activityController = new ActivityController(
             activityService, workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
@@ -733,8 +731,8 @@ class RecordListControllerTest {
     @Test
     void windowValidationRejectsInvalidCommonParameters() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealKpis(
             null, "90d", null, null,
@@ -762,8 +760,8 @@ class RecordListControllerTest {
     @Test
     void dealClosingSoonCountValidatesAndDelegatesDays() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         CountDto count = new CountDto(4);
         when(dealService.getClosingSoonCount(7)).thenReturn(count);
 
@@ -777,8 +775,8 @@ class RecordListControllerTest {
     @Test
     void dealClosingSoonListValidatesAndDelegatesBounds() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         when(dealService.getClosingSoonDeals(7, 6)).thenReturn(List.of());
 
         assertEquals(List.of(), controller.getClosingSoonDeals(7, 6));
@@ -793,8 +791,8 @@ class RecordListControllerTest {
     @Test
     void interactiveDealRiskRequiresIdsAndAnalyticsUsesBoundedProjection() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
         DealRiskAnalyticsDto analytics = new DealRiskAnalyticsDto(List.of(), false);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);

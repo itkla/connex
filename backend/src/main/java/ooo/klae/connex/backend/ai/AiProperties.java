@@ -99,6 +99,42 @@ public class AiProperties {
     /** Maximum active single-flight identities retained by one replica. */
     private int invocationMaxActiveFlights = 10000;
 
+    /** Fixed worker count for request-detached AI generation. */
+    private int generationWorkerThreads = 4;
+
+    /** Maximum queued generation tasks beyond the fixed worker count. */
+    private int generationQueueCapacity = 60;
+
+    /** Maximum live accepted, running, and terminal polling handles. */
+    private int generationMaxHandles = 2048;
+
+    /** Maximum accepted or running tasks owned by one user in one workspace. */
+    private int generationMaxActivePerUser = 4;
+
+    /** Maximum live active and terminal handles owned by one user across workspaces. */
+    private int generationMaxHandlesPerUser = 32;
+
+    /** Maximum serialized result retained behind one polling handle. */
+    private int generationMaxResultBytes = 4194304;
+
+    /** Maximum serialized result bytes retained across all polling handles. */
+    private long generationMaxRetainedResultBytes = 67108864;
+
+    /** Maximum serialized result bytes reserved or retained by one workspace. */
+    private long generationMaxRetainedResultBytesPerWorkspace = 33554432;
+
+    /** Maximum serialized result bytes reserved or retained by one user across workspaces. */
+    private long generationMaxRetainedResultBytesPerUser = 16777216;
+
+    /** Hard non-sliding lifetime for one generation task. */
+    private Duration generationMaxLifetime = Duration.ofSeconds(75);
+
+    /** Fixed window in which the initiating client may poll a handle. */
+    private Duration generationPollWindow = Duration.ofMinutes(2);
+
+    /** Recommended client poll cadence and abandoned-handle cleanup cadence. */
+    private Duration generationPollInterval = Duration.ofSeconds(2);
+
     /**
      * Returns whether the master switch and the selected feature switch permit the feature.
      * @param feature feature to evaluate

@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.controllers;
 
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -12,9 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
-import ooo.klae.connex.backend.ai.introrationale.IntroRationaleService;
+import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
+import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.dto.IntroOverviewDto;
-import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.IntroductionRequestDto;
@@ -38,7 +40,7 @@ import ooo.klae.connex.backend.services.WarmPathService;
 @RequiredArgsConstructor
 public class IntroductionController {
     private final IntroductionService introductionService;
-    private final IntroRationaleService introRationaleService;
+    private final AiGenerationAdapterService aiGenerationAdapterService;
     private final WarmPathService warmPathService;
 
     /**
@@ -66,8 +68,11 @@ public class IntroductionController {
 
     /** Returns an AI-generated introduction rationale, or a graceful unavailability response. */
     @PostMapping("/suggestions/rationale")
-    public IntroRationaleDto rationale(@RequestParam int personA, @RequestParam int personB) {
-        return introRationaleService.generate(personA, personB);
+    public ResponseEntity<AiGenerationStatusDto> rationale(
+            @RequestParam int personA,
+            @RequestParam int personB) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(aiGenerationAdapterService.startIntroRationale(personA, personB));
     }
 
     /**

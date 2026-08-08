@@ -12,6 +12,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -138,6 +139,89 @@ class AiRestrictionEpochTest {
                 TransactionSynchronizationManager.clearSynchronization();
             }
             TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
+    void currentEpochActionBlocksAConcurrentRestrictionBump() throws Exception {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        long expectedEpoch = epoch.current(7);
+        CountDownLatch actionStarted = new CountDownLatch(1);
+        CountDownLatch releaseAction = new CountDownLatch(1);
+        CountDownLatch bumpStarted = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            CompletableFuture<Boolean> action = CompletableFuture.supplyAsync(
+                    () -> epoch.runIfCurrent(7, expectedEpoch, () -> {
+                        actionStarted.countDown();
+                        await(releaseAction);
+                    }),
+                    executor);
+            assertTrue(actionStarted.await(1, TimeUnit.SECONDS));
+            CompletableFuture<Void> bump = CompletableFuture.runAsync(() -> {
+                bumpStarted.countDown();
+                epoch.bump(7);
+            }, executor);
+            assertTrue(bumpStarted.await(1, TimeUnit.SECONDS));
+            assertFalse(bump.isDone());
+
+            releaseAction.countDown();
+
+            assertTrue(action.get(1, TimeUnit.SECONDS));
+            bump.get(1, TimeUnit.SECONDS);
+            assertFalse(epoch.runIfCurrent(7, expectedEpoch, () -> {
+                throw new AssertionError("Stale epoch action must not execute");
+            }));
+        }
+    }
+
+    @Test
+    void providerFenceReleasesBeforeContributorPersistenceToPreserveLockOrder() throws Exception {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        long expectedEpoch = epoch.current(7);
+        ReentrantLock contributorRow = new ReentrantLock(true);
+        CountDownLatch providerStarted = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        CountDownLatch restrictionLockedContributor = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            CompletableFuture<Void> generation = CompletableFuture.runAsync(
+                    () -> epoch.runWithExpectedEgressEpoch(7, expectedEpoch, () -> {
+                        epoch.invokeAtEgress(7, () -> {
+                            providerStarted.countDown();
+                            await(releaseProvider);
+                            return "generated";
+                        });
+                        contributorRow.lock();
+                        try {
+                            assertTrue(epoch.current(7) > expectedEpoch);
+                        } finally {
+                            contributorRow.unlock();
+                        }
+                    }),
+                    executor);
+            assertTrue(providerStarted.await(1, TimeUnit.SECONDS));
+            CompletableFuture<Void> restriction = CompletableFuture.runAsync(() -> {
+                contributorRow.lock();
+                try {
+                    restrictionLockedContributor.countDown();
+                    epoch.bump(7);
+                } finally {
+                    contributorRow.unlock();
+                }
+            }, executor);
+            assertTrue(restrictionLockedContributor.await(1, TimeUnit.SECONDS));
+
+            releaseProvider.countDown();
+
+            restriction.get(1, TimeUnit.SECONDS);
+            generation.get(1, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
         }
     }
 }
