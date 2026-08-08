@@ -1079,6 +1079,34 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
 }
 
 /**
+ * Resolves the authenticated user while preserving the difference between a rejected session and
+ * an unavailable authentication check. The backend reports expired sessions with HTTP 401; every
+ * other failed response remains unavailable rather than becoming a logged-out decision.
+ * @param cookie the incoming request's cookie header, or null
+ * @returns a resolved user or null authentication decision, or an unavailable result
+ */
+export async function getCurrentUserResultFromCookie(
+    cookie: string | null,
+): Promise<CookieResult<Types.User | null>> {
+    if (!cookie) {
+        return { ok: true, data: null };
+    }
+
+    try {
+        const user = await me({
+            headers: { cookie },
+            cache: "no-store",
+        });
+        return { ok: true, data: user };
+    } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+            return { ok: true, data: null };
+        }
+        return { ok: false };
+    }
+}
+
+/**
  * Resolves the authenticated user for a **public** page — documentation, marketing, legal —
  * where the session only selects which call to action the header shows.
  *
@@ -1089,7 +1117,8 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
  * the pages most likely to be read during an outage. Degrading to the signed-out call to action
  * costs a signed-in visitor one extra click and keeps the page readable.
  *
- * Authenticated surfaces must keep using {@link getCurrentUserFromCookie}.
+ * Authenticated surfaces must use {@link getCurrentUserFromCookie} or, when they make an access
+ * decision, {@link getCurrentUserResultFromCookie}; they must not use this public resolver.
  * @param cookie the incoming request's cookie header, or null
  * @returns the authenticated user, or null when unauthenticated or the backend is unreachable
  */
@@ -3358,11 +3387,7 @@ const EMPTY_SEARCH_RESULTS: Types.SearchResults = {
  */
 export async function searchFromCookie(cookie: string | null, query: string): Promise<Types.SearchResults> {
     if (!cookie || !query.trim()) return EMPTY_SEARCH_RESULTS;
-    try {
-        return await search(query, { headers: { cookie }, cache: "no-store" });
-    } catch {
-        return EMPTY_SEARCH_RESULTS;
-    }
+    return search(query, { headers: { cookie }, cache: "no-store" });
 }
 
 /*
@@ -3568,6 +3593,10 @@ export function getMyWorkspaces(init: RequestInit = {}) {
 export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<Types.MyWorkspaces> {
     if (!cookie) return EMPTY_WORKSPACES;
     return getMyWorkspaces({ headers: { cookie }, cache: "no-store" });
+}
+
+export function getMyWorkspacesResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.MyWorkspaces>((init) => getMyWorkspaces(init), cookie);
 }
 
 export function createWorkspace(name: string) {

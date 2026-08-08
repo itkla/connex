@@ -10,11 +10,10 @@ import {
     getActiveWorkspaceMembersResultFromCookie,
     getCurrentUserFromCookie,
     getEffectivePermissionsResultFromCookie,
-    getPipelinesFromCookie,
+    getPipelines,
     getReport,
-    getTagsFromCookie,
+    getTags,
 } from '@/app/lib/api';
-import type { Tag } from '@/app/lib/types';
 import { CrumbLabel } from '@/app/hooks/useNavTrail';
 
 export async function generateMetadata() {
@@ -32,9 +31,9 @@ export default async function EditReportPage({ params }: { params: Promise<{ id:
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const [reportAccess, pipelines, ownersResult, tags, permissionsResult] = await Promise.all([
         loadRecord(() => getReport(id, init)),
-        getPipelinesFromCookie(cookie),
+        getPipelines(init),
         getActiveWorkspaceMembersResultFromCookie(cookie),
-        getTagsFromCookie(cookie).catch((): Tag[] => []),
+        getTags(init),
         getEffectivePermissionsResultFromCookie(cookie),
     ]);
     if (reportAccess.kind === 'forbidden') return <AccessDeniedPage />;

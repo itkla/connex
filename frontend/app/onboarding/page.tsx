@@ -1,7 +1,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { getMyWorkspacesFromCookie } from "@/app/lib/api";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
+import { getCurrentUserResultFromCookie, getMyWorkspacesResultFromCookie } from "@/app/lib/api";
 import OnboardingForm from "@/app/onboarding/OnboardingForm";
 
 /**
@@ -11,7 +12,18 @@ import OnboardingForm from "@/app/onboarding/OnboardingForm";
  */
 export default async function OnboardingPage() {
     const cookie = (await headers()).get("cookie");
-    const { workspaces } = await getMyWorkspacesFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    if (!userResult.data) {
+        redirect("/auth/login");
+    }
+    const workspacesResult = await getMyWorkspacesResultFromCookie(cookie);
+    if (!workspacesResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const { workspaces } = workspacesResult.data;
     if (workspaces.length > 0) {
         redirect("/dashboard");
     }

@@ -1,4 +1,4 @@
-import { getCurrentUserFromCookie, getTagsFromCookie } from "@/app/lib/api";
+import { getCurrentUserFromCookie, getTags } from "@/app/lib/api";
 import type { Tag } from "@/app/lib/types";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -11,7 +11,10 @@ export default async function TagsLibraryPage() {
         redirect('/auth/login');
     }
 
-    const tags: Tag[] = await getTagsFromCookie(cookie);
+    const tags: Tag[] = await getTags({
+        headers: { cookie: cookie ?? "" },
+        cache: "no-store",
+    });
 
     return <TagsBrowser tags={tags} />;
 }

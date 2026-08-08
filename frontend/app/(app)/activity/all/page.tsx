@@ -1,14 +1,13 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
+    getActivities,
+    getContacts,
     getCurrentUserFromCookie,
-    getActivitiesFromCookie,
-    getContactsFromCookie,
-    getDealsFromCookie,
+    getDeals,
     getMyWorkspacesFromCookie,
     getUsers,
 } from "@/app/lib/api";
-import type { User } from "@/app/lib/types";
 import ActivitiesBrowser from "@/app/components/activity/activities/ActivitiesBrowser";
 
 export default async function ActivityPage() {
@@ -18,13 +17,13 @@ export default async function ActivityPage() {
         redirect('/auth/login');
     }
 
-    const init = cookie ? { headers: { cookie }, cache: 'no-store' as const } : undefined;
+    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
 
     const [activities, persons, deals, users, workspaceState] = await Promise.all([
-        getActivitiesFromCookie(cookie),
-        getContactsFromCookie(cookie),
-        getDealsFromCookie(cookie),
-        (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
+        getActivities(init),
+        getContacts({}, init),
+        getDeals(init),
+        getUsers(init),
         getMyWorkspacesFromCookie(cookie),
     ]);
 

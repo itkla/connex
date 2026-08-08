@@ -1,15 +1,15 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailablePage";
 import {
+    getContacts,
     getCurrentUserFromCookie,
-    getTasksFromCookie,
-    getContactsFromCookie,
-    getDealsFromCookie,
-    getEffectivePermissionsFromCookie,
+    getDeals,
+    getEffectivePermissionsResultFromCookie,
     getMyWorkspacesFromCookie,
+    getTasks,
     getUsers,
 } from "@/app/lib/api";
-import type { User } from "@/app/lib/types";
 import TasksBrowser from "@/app/components/activity/tasks/TasksBrowser";
 
 export default async function TasksPage() {
@@ -19,16 +19,17 @@ export default async function TasksPage() {
         redirect('/auth/login');
     }
 
-    const init = cookie ? { headers: { cookie }, cache: 'no-store' as const } : undefined;
+    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
 
-    const [tasks, persons, deals, users, effectivePermissions, workspaceState] = await Promise.all([
-        getTasksFromCookie(cookie),
-        getContactsFromCookie(cookie),
-        getDealsFromCookie(cookie),
-        (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
-        getEffectivePermissionsFromCookie(cookie),
+    const [tasks, persons, deals, users, permissionsResult, workspaceState] = await Promise.all([
+        getTasks(init),
+        getContacts({}, init),
+        getDeals(init),
+        getUsers(init),
+        getEffectivePermissionsResultFromCookie(cookie),
         getMyWorkspacesFromCookie(cookie),
     ]);
+    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
 
     return (
         <TasksBrowser
@@ -37,7 +38,7 @@ export default async function TasksPage() {
             deals={deals}
             users={users}
             currentUserId={user.id}
-            canDeleteTasks={effectivePermissions.includes('TASK_DELETE')}
+            canDeleteTasks={permissionsResult.data.includes('TASK_DELETE')}
             originWorkspaceId={workspaceState.activeWorkspaceId}
         />
     );

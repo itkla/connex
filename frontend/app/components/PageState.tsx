@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 import Rise from '@/app/components/motion/Rise';
 import { Button } from '@/components/ui/button';
@@ -24,17 +24,21 @@ export type PageStateAction = {
  * @param title localized heading
  * @param body localized explanation
  * @param actions destinations offered; the first is emphasized
+ * @param action interactive recovery control supplied by a client component when navigation alone
+ * cannot retry the failed operation
  */
 export default function PageState({
     icon: Icon,
     title,
     body,
     actions,
+    action,
 }: {
     icon: ComponentType<{ className?: string }>;
     title: string;
     body: string;
     actions: ReadonlyArray<PageStateAction>;
+    action?: ReactNode;
 }) {
     return (
         <div className="flex min-h-[60vh] items-center justify-center px-6 py-16">
@@ -44,8 +48,9 @@ export default function PageState({
                 </div>
                 <h2 className="mt-5 text-lg font-semibold text-foreground">{title}</h2>
                 <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
-                {actions.length > 0 ? (
+                {action || actions.length > 0 ? (
                     <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                        {action}
                         {actions.map((action, index) => (
                             <Button
                                 key={action.href}

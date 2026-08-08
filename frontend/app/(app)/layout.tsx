@@ -3,12 +3,13 @@ import { Suspense } from "react";
 import Sidebar from "@/app/components/Sidebar";
 import SidebarFallback from "@/app/components/SidebarFallback";
 import ContentShell from "@/app/components/ContentShell";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import {
     DEFAULT_CAPABILITIES,
     getCapabilities,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
-    getMyWorkspacesFromCookie,
+    getMyWorkspacesResultFromCookie,
 } from "@/app/lib/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -47,14 +48,22 @@ export default async function AppLayout({
 
     const headerList = await headers();
     const cookie = headerList.get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
 
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         const pathname = headerList.get('x-pathname') ?? '/dashboard';
         redirect(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
     }
 
-    const { workspaces, activeWorkspaceId } = await getMyWorkspacesFromCookie(cookie);
+    const workspacesResult = await getMyWorkspacesResultFromCookie(cookie);
+    if (!workspacesResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const { workspaces, activeWorkspaceId } = workspacesResult.data;
     if (workspaces.length === 0) {
         redirect('/onboarding');
     }
