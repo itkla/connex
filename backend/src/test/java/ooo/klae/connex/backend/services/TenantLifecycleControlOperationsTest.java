@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.sql.SQLException;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.dto.OrganizationLifecycleRef;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -92,6 +94,118 @@ class TenantLifecycleControlOperationsTest {
             () -> operations.acquireExport(ORG_ID, WORKSPACE_ID, ACTOR_ID));
 
         verify(mapper, never()).insertOperationLease(anyInt(), anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    void grantIssueRevalidatesThenReplacesTheExactSessionBinding() {
+        stubExportLocks();
+        byte[] sessionHash = new byte[32];
+        byte[] tokenHash = new byte[32];
+        LocalDateTime now = LocalDateTime.of(2026, 8, 8, 12, 0);
+        LocalDateTime expiresAt = now.plusMinutes(2);
+        when(mapper.insertExportGrant(
+                tokenHash,
+                sessionHash,
+                ORG_ID,
+                WORKSPACE_ID,
+                ACTOR_ID,
+                expiresAt))
+            .thenReturn(1);
+
+        operations.issueExportGrant(
+            ORG_ID,
+            WORKSPACE_ID,
+            ACTOR_ID,
+            sessionHash,
+            tokenHash,
+            expiresAt,
+            now);
+
+        InOrder order = inOrder(userMapper, mapper);
+        order.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        order.verify(mapper).lockWorkspaceForShare(WORKSPACE_ID);
+        order.verify(mapper).lockActiveOrganizationForShare(ORG_ID);
+        order.verify(mapper).lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID);
+        order.verify(mapper).deleteExpiredExportGrants(now, 100);
+        order.verify(mapper).deleteExportGrantForBinding(
+            ORG_ID,
+            WORKSPACE_ID,
+            ACTOR_ID,
+            sessionHash);
+        order.verify(mapper).insertExportGrant(
+            tokenHash,
+            sessionHash,
+            ORG_ID,
+            WORKSPACE_ID,
+            ACTOR_ID,
+            expiresAt);
+    }
+
+    @Test
+    void grantRedemptionConsumesAfterRevalidationAndBeforeLeaseAdmission() {
+        stubExportLocks();
+        byte[] sessionHash = new byte[32];
+        byte[] tokenHash = new byte[32];
+        LocalDateTime now = LocalDateTime.of(2026, 8, 8, 12, 0);
+        when(mapper.consumeExportGrant(
+                tokenHash,
+                sessionHash,
+                ORG_ID,
+                WORKSPACE_ID,
+                ACTOR_ID,
+                now))
+            .thenReturn(1);
+        when(mapper.lockExportAdmissionCapacityNowait()).thenReturn(4);
+
+        operations.redeemExportGrant(
+            ORG_ID,
+            WORKSPACE_ID,
+            ACTOR_ID,
+            sessionHash,
+            tokenHash,
+            now);
+
+        InOrder order = inOrder(userMapper, mapper);
+        order.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        order.verify(mapper).lockWorkspaceForShare(WORKSPACE_ID);
+        order.verify(mapper).lockActiveOrganizationForShare(ORG_ID);
+        order.verify(mapper).lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID);
+        order.verify(mapper).consumeExportGrant(
+            tokenHash,
+            sessionHash,
+            ORG_ID,
+            WORKSPACE_ID,
+            ACTOR_ID,
+            now);
+        order.verify(mapper).lockExportAdmissionCapacityNowait();
+        order.verify(mapper).countGlobalExportLeases();
+        order.verify(mapper).insertOperationLease(
+            eq(ORG_ID),
+            eq(WORKSPACE_ID),
+            eq("export"),
+            anyString());
+    }
+
+    @Test
+    void replayedOrMisbindingGrantCannotReachLeaseAdmission() {
+        stubExportLocks();
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> operations.redeemExportGrant(
+                ORG_ID,
+                WORKSPACE_ID,
+                ACTOR_ID,
+                new byte[32],
+                new byte[32],
+                LocalDateTime.of(2026, 8, 8, 12, 0)));
+
+        verify(mapper, never()).lockExportAdmissionCapacityNowait();
+        verify(mapper, never()).insertOperationLease(
+            anyInt(),
+            anyInt(),
+            anyString(),
+            anyString());
     }
 
     @Test

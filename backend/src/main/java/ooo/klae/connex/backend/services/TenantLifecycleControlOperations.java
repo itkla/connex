@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.sql.SQLException;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -17,6 +18,7 @@ import ooo.klae.connex.backend.dto.OrganizationLifecycleRef;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.OpenDataSubjectRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
@@ -32,6 +34,7 @@ public class TenantLifecycleControlOperations {
         "Too many tenant exports are already streaming; retry shortly";
     private static final int MYSQL_NOWAIT_ERROR = 3572;
     private static final String MYSQL_GENERAL_ERROR_STATE = "HY000";
+    private static final int EXPIRED_GRANT_CLEANUP_LIMIT = 100;
 
     private final TenantLifecycleControlMapper mapper;
     private final UserMapper userMapper;
@@ -44,27 +47,59 @@ public class TenantLifecycleControlOperations {
             int orgId,
             int workspaceId,
             int actorId) {
-        lockActor(actorId);
-        WorkspaceLifecycleRef workspace =
-            mapper.lockWorkspaceForShare(workspaceId);
-        requireWorkspaceInOrg(workspace, orgId, "Workspace not found");
-        if (!"active".equals(workspace.lifecycleState())) {
-            throw new ConflictException("Workspace teardown is in progress");
+        WorkspaceLifecycleRef workspace = lockExportTarget(orgId, workspaceId, actorId);
+        OperationLease lease = acquireExportLease(orgId, workspaceId);
+        return new AcquiredWorkspace(workspace, lease);
+    }
+
+    /** Persists one bounded export grant after locked organization-admin revalidation. */
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED)
+    public void issueExportGrant(
+            int orgId,
+            int workspaceId,
+            int actorId,
+            byte[] sessionHash,
+            byte[] tokenHash,
+            LocalDateTime expiresAt,
+            LocalDateTime now) {
+        lockExportTarget(orgId, workspaceId, actorId);
+        mapper.deleteExpiredExportGrants(now, EXPIRED_GRANT_CLEANUP_LIMIT);
+        mapper.deleteExportGrantForBinding(orgId, workspaceId, actorId, sessionHash);
+        if (mapper.insertExportGrant(
+                tokenHash,
+                sessionHash,
+                orgId,
+                workspaceId,
+                actorId,
+                expiresAt) != 1) {
+            throw new IllegalStateException("Tenant export grant was not persisted");
         }
-        if (mapper.lockActiveOrganizationForShare(orgId) == null) {
-            if (mapper.findOrganization(orgId) == null) {
-                throw new ResourceNotFoundException("Organization not found");
-            }
-            throw new ConflictException("Organization teardown is in progress");
+    }
+
+    /** Atomically consumes an exact bound grant and acquires its export lease. */
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED)
+    public AcquiredWorkspace redeemExportGrant(
+            int orgId,
+            int workspaceId,
+            int actorId,
+            byte[] sessionHash,
+            byte[] tokenHash,
+            LocalDateTime now) {
+        WorkspaceLifecycleRef workspace = lockExportTarget(orgId, workspaceId, actorId);
+        if (mapper.consumeExportGrant(
+                tokenHash,
+                sessionHash,
+                orgId,
+                workspaceId,
+                actorId,
+                now) != 1) {
+            throw new ForbiddenException("Tenant export download grant is invalid or expired");
         }
-        if (mapper.lockOrgAdminMembershipForUpdate(orgId, actorId) == null) {
-            throw new ForbiddenException("Organization administrator access required");
-        }
-        int capacity = lockExportAdmissionCapacity();
-        if (mapper.countGlobalExportLeases() >= capacity) {
-            throw new TooManyRequestsException(EXPORT_BUSY_MESSAGE);
-        }
-        OperationLease lease = insertLease(orgId, workspaceId, EXPORT);
+        OperationLease lease = acquireExportLease(orgId, workspaceId);
         return new AcquiredWorkspace(workspace, lease);
     }
 
@@ -332,6 +367,33 @@ public class TenantLifecycleControlOperations {
         return lease;
     }
 
+    private WorkspaceLifecycleRef lockExportTarget(int orgId, int workspaceId, int actorId) {
+        lockActor(actorId);
+        WorkspaceLifecycleRef workspace = mapper.lockWorkspaceForShare(workspaceId);
+        requireWorkspaceInOrg(workspace, orgId, "Workspace not found");
+        if (!"active".equals(workspace.lifecycleState())) {
+            throw new ConflictException("Workspace teardown is in progress");
+        }
+        if (mapper.lockActiveOrganizationForShare(orgId) == null) {
+            if (mapper.findOrganization(orgId) == null) {
+                throw new ResourceNotFoundException("Organization not found");
+            }
+            throw new ConflictException("Organization teardown is in progress");
+        }
+        if (mapper.lockOrgAdminMembershipForUpdate(orgId, actorId) == null) {
+            throw new ForbiddenException("Organization administrator access required");
+        }
+        return workspace;
+    }
+
+    private OperationLease acquireExportLease(int orgId, int workspaceId) {
+        int capacity = lockExportAdmissionCapacity();
+        if (mapper.countGlobalExportLeases() >= capacity) {
+            throw new TooManyRequestsException(EXPORT_BUSY_MESSAGE);
+        }
+        return insertLease(orgId, workspaceId, EXPORT);
+    }
+
     private int lockExportAdmissionCapacity() {
         try {
             int capacity = mapper.lockExportAdmissionCapacityNowait();
@@ -368,14 +430,14 @@ public class TenantLifecycleControlOperations {
 
     private void requireNoOpenWorkspaceSubjectRequests(int orgId, int workspaceId) {
         if (mapper.countOpenSubjectRequestsForWorkspace(orgId, workspaceId) > 0) {
-            throw new ConflictException(
+            throw new OpenDataSubjectRequestException(
                 "An open data-subject request still references this workspace");
         }
     }
 
     private void requireNoOpenOrganizationSubjectRequests(int orgId) {
         if (mapper.countOpenSubjectRequestsForOrg(orgId) > 0) {
-            throw new ConflictException(
+            throw new OpenDataSubjectRequestException(
                 "An open data-subject request is still recorded for this organization");
         }
     }

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,6 +25,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 
 @SpringBootTest(properties = "connex.tenant-lifecycle.teardown-settle-delay=0s")
@@ -32,6 +34,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private TenantExportService exportService;
+    @Autowired private TenantExportGrantService exportGrantService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -239,6 +242,186 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
             currentUser.getId()).cancel();
     }
 
+    @Test
+    void workspaceOwnerWithoutOrganizationAuthorityCannotExportOrTeardown() {
+        Organization organization = createOrganization(currentUser);
+        Workspace target = createWorkspace(organization, currentUser);
+        User workspaceOwner = newUser();
+        additionalUserIds.add(workspaceOwner.getId());
+        workspaceMapper.addMember(target.getId(), workspaceOwner.getId(), "owner");
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportGrantService.issue(
+                organization.getId(),
+                target.getId(),
+                workspaceOwner.getId(),
+                currentSession().getId()));
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportService.prepare(
+                organization.getId(),
+                target.getId(),
+                workspaceOwner.getId()));
+        assertThrows(
+            ForbiddenException.class,
+            () -> teardownService.teardownWorkspace(
+                organization.getId(),
+                target.getId(),
+                workspaceOwner.getId(),
+                target.getSlug()));
+        assertThrows(
+            ForbiddenException.class,
+            () -> teardownService.teardownOrganization(
+                organization.getId(),
+                workspaceOwner.getId(),
+                organization.getSlug()));
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace WHERE id = ?",
+                Integer.class,
+                target.getId()));
+    }
+
+    @Test
+    void exportGrantIsSessionActorTenantWorkspaceBoundExpiringAndSingleUse() throws Exception {
+        Organization organization = createOrganization(currentUser);
+        Workspace target = createWorkspace(organization, currentUser);
+        Workspace otherWorkspace = createWorkspace(organization, currentUser);
+        Organization otherOrganization = createOrganization(currentUser);
+        Workspace otherOrganizationWorkspace = createWorkspace(otherOrganization, currentUser);
+        String sessionId = currentSession().getId();
+
+        TenantExportGrantService.TenantExportGrant sessionGrant = exportGrantService.issue(
+            organization.getId(),
+            target.getId(),
+            currentUser.getId(),
+            sessionId);
+        expireStepUp();
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportGrantService.redeem(
+                organization.getId(),
+                target.getId(),
+                currentUser.getId(),
+                "another-session",
+                sessionGrant.token()));
+        writeGrantExport(organization, target, sessionId, sessionGrant.token());
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportGrantService.redeem(
+                organization.getId(),
+                target.getId(),
+                currentUser.getId(),
+                sessionId,
+                sessionGrant.token()));
+
+        restoreStepUp();
+        TenantExportGrantService.TenantExportGrant workspaceGrant = exportGrantService.issue(
+            organization.getId(),
+            target.getId(),
+            currentUser.getId(),
+            sessionId);
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportGrantService.redeem(
+                organization.getId(),
+                otherWorkspace.getId(),
+                currentUser.getId(),
+                sessionId,
+                workspaceGrant.token()));
+        writeGrantExport(organization, target, sessionId, workspaceGrant.token());
+
+        TenantExportGrantService.TenantExportGrant tenantGrant = exportGrantService.issue(
+            organization.getId(),
+            target.getId(),
+            currentUser.getId(),
+            sessionId);
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportGrantService.redeem(
+                otherOrganization.getId(),
+                otherOrganizationWorkspace.getId(),
+                currentUser.getId(),
+                sessionId,
+                tenantGrant.token()));
+        writeGrantExport(organization, target, sessionId, tenantGrant.token());
+
+        User otherActor = newUser();
+        additionalUserIds.add(otherActor.getId());
+        orgMemberService.addFoundingOwner(organization.getId(), otherActor.getId());
+        TenantExportGrantService.TenantExportGrant actorGrant = exportGrantService.issue(
+            organization.getId(),
+            target.getId(),
+            currentUser.getId(),
+            sessionId);
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportGrantService.redeem(
+                organization.getId(),
+                target.getId(),
+                otherActor.getId(),
+                sessionId,
+                actorGrant.token()));
+        writeGrantExport(organization, target, sessionId, actorGrant.token());
+
+        TenantExportGrantService.TenantExportGrant expiredGrant = exportGrantService.issue(
+            organization.getId(),
+            target.getId(),
+            currentUser.getId(),
+            sessionId);
+        jdbcTemplate.update(
+            "UPDATE tenant_export_download_grant SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND"
+                + " WHERE org_id = ? AND workspace_id = ? AND actor_id = ?",
+            organization.getId(),
+            target.getId(),
+            currentUser.getId());
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportGrantService.redeem(
+                organization.getId(),
+                target.getId(),
+                currentUser.getId(),
+                sessionId,
+                expiredGrant.token()));
+    }
+
+    @Test
+    void exportAdmissionFailureRollsBackGrantConsumption() throws Exception {
+        Organization organization = createOrganization(currentUser);
+        Workspace target = createWorkspace(organization, currentUser);
+        String sessionId = currentSession().getId();
+        TenantExportGrantService.TenantExportGrant grant = exportGrantService.issue(
+            organization.getId(),
+            target.getId(),
+            currentUser.getId(),
+            sessionId);
+        for (int index = 0; index < TenantExportService.MAX_CONCURRENT_EXPORTS; index++) {
+            jdbcTemplate.update(
+                "INSERT INTO tenant_operation_lease"
+                    + " (org_id, workspace_id, lease_kind, lease_token)"
+                    + " VALUES (?, ?, 'export', ?)",
+                organization.getId(),
+                target.getId(),
+                java.util.UUID.randomUUID().toString());
+        }
+
+        assertThrows(
+            TooManyRequestsException.class,
+            () -> exportGrantService.redeem(
+                organization.getId(),
+                target.getId(),
+                currentUser.getId(),
+                sessionId,
+                grant.token()));
+
+        jdbcTemplate.update(
+            "DELETE FROM tenant_operation_lease WHERE org_id = ? AND lease_kind = 'export'",
+            organization.getId());
+        writeGrantExport(organization, target, sessionId, grant.token());
+    }
+
     private void expireStepUp() {
         currentSession().removeAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR);
     }
@@ -253,6 +436,20 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
         ServletRequestAttributes attributes =
             (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
         return attributes.getRequest().getSession(true);
+    }
+
+    private void writeGrantExport(
+            Organization organization,
+            Workspace target,
+            String sessionId,
+            String token) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        exportGrantService.redeem(
+            organization.getId(),
+            target.getId(),
+            currentUser.getId(),
+            sessionId,
+            token).writeTo(output);
     }
 
     private Organization createOrganization(User owner) {

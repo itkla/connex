@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
@@ -52,6 +53,32 @@ public interface TenantLifecycleControlMapper {
     Integer lockOrgAdminMembershipForUpdate(
         @Param("orgId") int orgId,
         @Param("userId") int userId);
+
+    int deleteExpiredExportGrants(
+        @Param("now") LocalDateTime now,
+        @Param("limit") int limit);
+
+    int deleteExportGrantForBinding(
+        @Param("orgId") int orgId,
+        @Param("workspaceId") int workspaceId,
+        @Param("actorId") int actorId,
+        @Param("sessionHash") byte[] sessionHash);
+
+    int insertExportGrant(
+        @Param("tokenHash") byte[] tokenHash,
+        @Param("sessionHash") byte[] sessionHash,
+        @Param("orgId") int orgId,
+        @Param("workspaceId") int workspaceId,
+        @Param("actorId") int actorId,
+        @Param("expiresAt") LocalDateTime expiresAt);
+
+    int consumeExportGrant(
+        @Param("tokenHash") byte[] tokenHash,
+        @Param("sessionHash") byte[] sessionHash,
+        @Param("orgId") int orgId,
+        @Param("workspaceId") int workspaceId,
+        @Param("actorId") int actorId,
+        @Param("now") LocalDateTime now);
 
     int lockExportAdmissionCapacityNowait();
 

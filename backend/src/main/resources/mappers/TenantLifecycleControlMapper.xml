@@ -184,6 +184,38 @@
     FOR UPDATE
   </select>
 
+  <delete id="deleteExpiredExportGrants">
+    DELETE FROM tenant_export_download_grant
+    WHERE expires_at &lt;= #{now}
+    ORDER BY expires_at
+    LIMIT #{limit}
+  </delete>
+
+  <delete id="deleteExportGrantForBinding">
+    DELETE FROM tenant_export_download_grant
+    WHERE org_id = #{orgId}
+      AND workspace_id = #{workspaceId}
+      AND actor_id = #{actorId}
+      AND session_hash = #{sessionHash}
+  </delete>
+
+  <insert id="insertExportGrant">
+    INSERT INTO tenant_export_download_grant
+      (token_hash, session_hash, org_id, workspace_id, actor_id, expires_at)
+    VALUES
+      (#{tokenHash}, #{sessionHash}, #{orgId}, #{workspaceId}, #{actorId}, #{expiresAt})
+  </insert>
+
+  <delete id="consumeExportGrant">
+    DELETE FROM tenant_export_download_grant
+    WHERE token_hash = #{tokenHash}
+      AND session_hash = #{sessionHash}
+      AND org_id = #{orgId}
+      AND workspace_id = #{workspaceId}
+      AND actor_id = #{actorId}
+      AND expires_at &gt; #{now}
+  </delete>
+
   <select id="lockExportAdmissionCapacityNowait" resultType="int">
     SELECT capacity
     FROM tenant_export_admission_control

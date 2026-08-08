@@ -388,10 +388,10 @@ The step-up failure itself is a `403` with a machine-readable code:
 { "code": "RECENT_AUTHENTICATION_REQUIRED", "message": "Recent WebAuthn authentication required" }
 ```
 
-**The frontend turns that into a passkey prompt only on mutating requests.** The retry helper in
-`app/lib/api.ts` refuses to prompt unless the request was a mutation, so a **`GET`** that needs
-step-up — and the tenant export is a `GET` — returns a bare `403` with no prompt and no in-app way
-to recover. See [Offboarding](#offboarding) for the procedure that works around it.
+**The frontend turns that into a passkey prompt on mutating requests.** Tenant export deliberately
+starts with a mutating grant request, so **Organization → Overview → Export and teardown** raises the
+same passkey ceremony as teardown and then starts the streamed download. No unrelated mutation is
+needed to stamp the session.
 
 Operationally: **make sure the customer's organization owner registers a passkey during onboarding,
 not on the day they need to offboard.** Setting the window to zero or a negative value disables
@@ -804,10 +804,10 @@ paraphrasing this section.
 
 ## Offboarding
 
-The sequence is **export → verify → delete workspaces → delete organization**. There is **no CLI for
-any of it** — and, less obviously, **no UI for any of it either**: nothing in the frontend calls the
-export or teardown endpoints. Offboarding is hand-assembled HTTP against the deployment, performed
-by the customer's own organization owner or administrator.
+The sequence is **export → verify → delete workspaces or delete organization**. There is no CLI for
+these lifecycle operations. The supported product flow is **Organization → Overview → Export and
+teardown**, performed by the customer's own organization administrator or owner. An organization
+administrator can export; only an organization owner can delete a workspace or organization.
 
 **Confirm before you start that the operator has a registered passkey.** Both the export and both
 teardown calls are step-up-guarded, and step-up is WebAuthn-only — a password-only session fails
@@ -815,51 +815,32 @@ every one of them with `RECENT_AUTHENTICATION_REQUIRED`. Discovering this at ter
 account may already be the last one standing, is a bad day. If they have no passkey, enrol one
 first: **Account → Security**, see "Step-up requires a passkey" above.
 
-### 0. Get the session stamped — do this first, it is not obvious
-
-The export is a **`GET`** (`TenantLifecycleController.export`), and the frontend's automatic passkey
-prompt fires **only on mutating requests**. There is also no manual "step up now" control anywhere
-in the UI, and `curl` cannot perform a WebAuthn ceremony. So there is no direct way to satisfy
-step-up on the export call itself. The working procedure is indirect, and every step of it must
-happen inside one recent-authentication window (default **10 minutes**):
-
-1. **Sign in as the organization owner or administrator in a browser, with a passkey.**
-2. **Perform an unrelated step-up-guarded *mutation* purely to stamp the session.** The least
-   invasive is renaming one of your own passkeys at **Account → Security**
-   (`PATCH /api/auth/webauthn/credentials/{credentialId}`) — it is step-up-guarded, touches no
-   tenant data, and you can rename it straight back. Creating and then revoking a throwaway invite
-   link (**Settings → Members**) also works. Complete the passkey prompt the frontend raises.
-3. **Reuse that same authenticated session for the export.** The stamp lives on the servlet session,
-   so it travels with the `JSESSIONID` cookie:
-   - *Simplest:* paste the export URL into the same browser. It is a `GET` with
-     `Content-Disposition: attachment`, so the ZIP just downloads.
-   - *Scripted:* copy `JSESSIONID` from the browser's devtools (Application → Cookies) and replay it
-     with `curl`.
-4. **The stamp is not consumed by use** — every call inside the window succeeds — but it does
-   expire. A long export or a careful ZIP verification will outlive it, so **re-stamp with another
-   mutation before the teardown calls**.
-
-> **This is a current product gap, not a design.** The missing export/teardown UI and the missing
-> manual step-up trigger are **tracked**; until they land, the sequence above is the documented
-> procedure and a tester cannot complete an offboarding without it. Do not "fix" it by setting
-> `CONNEX_RECENT_AUTHENTICATION_WINDOW` to zero — that disables step-up for the whole instance.
-
 ### 1. Export
 
+1. Sign in as an organization administrator or owner.
+2. Open **Organization → Overview → Export and teardown**.
+3. Read the plaintext-export warning, choose **Export workspace**, and complete the passkey prompt.
+4. When **Download ZIP** appears, select it. The browser handles the streamed attachment in a new
+   tab while Connex remains open. Save the archive only to the approved location.
+
+The browser first calls the mutating grant endpoint, then downloads the artifact when the operator
+selects the explicit download control:
+
 ```text
-GET /api/orgs/{orgId}/workspaces/{workspaceId}/export
+POST /api/orgs/{orgId}/workspaces/{workspaceId}/export
+GET  /api/orgs/{orgId}/workspaces/{workspaceId}/export
 ```
 
-With a session stamped per step 0, either open that URL in the same browser or replay the cookie:
-
-```bash
-curl -sS -OJ -b "JSESSIONID=<value-from-devtools>" \
-  https://<partner-host>/api/orgs/<orgId>/workspaces/<workspaceId>/export
-```
+The POST returns the expiry and download path while placing the credential in an exact-path,
+`HttpOnly`, `SameSite=Strict` cookie. The grant lasts two minutes, is single-use, and is bound to the
+issuing user, authenticated session, organization, and workspace. A replay or cross-tenant use is
+refused. The browser consumes it on the GET; operators never copy the grant or a `JSESSIONID` into a
+script. The GET has no grantless compatibility mode: a missing, expired, or already-consumed grant
+is refused even while the authenticated session remains inside its recent-authentication window.
 
 - Requires **organization administrator** access (`Organization administrator access required`) and
-  **recent authentication** (step-up). The strict authorization audit record is durable before any
-  response body begins.
+  **recent authentication** when the grant is issued. The strict authorization audit record is
+  durable before any response body begins.
 - Streams a **ZIP** — tenant table snapshots plus managed object bytes — without materializing
   tables or object bytes in memory. Response headers are hardened: `Cache-Control: no-store`,
   `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin`, and a
@@ -871,7 +852,9 @@ curl -sS -OJ -b "JSESSIONID=<value-from-devtools>" \
   Too many tenant exports are already streaming; retry shortly
   ```
 
-  Retry rather than escalate. Do not run several tenant exports in parallel to "save time".
+  The product remains open and the download grant is not cleared on this refusal. Return to the
+  export controls and retry **Download ZIP** before the two-minute grant expires, or choose **Renew
+  download** to issue a fresh grant. Do not run several tenant exports in parallel to "save time".
 - One workspace per call. An organization with several workspaces needs one export each.
 
 ### 2. Verify before deleting
@@ -888,18 +871,10 @@ DELETE /api/orgs/{orgId}/workspaces/{workspaceId}     body: { "confirmation": "<
 DELETE /api/orgs/{orgId}                              body: { "confirmation": "<organization-slug>" }
 ```
 
-These are mutations with a JSON body and no UI, so they need the session cookie **and** a CSRF token
-from the same session — plus a step-up stamp that is still inside the window (re-stamp per step 0 if
-verifying the ZIP took longer than that):
-
-```bash
-BOOTSTRAP=$(curl -sS -b "JSESSIONID=<value>" https://<partner-host>/api/auth/csrf)
-curl -sS -X DELETE -b "JSESSIONID=<value>" \
-  -H "$(jq -r .headerName <<<"$BOOTSTRAP"): $(jq -r .token <<<"$BOOTSTRAP")" \
-  -H 'Content-Type: application/json' \
-  -d '{"confirmation":"<workspace-slug>"}' \
-  https://<partner-host>/api/orgs/<orgId>/workspaces/<workspaceId>
-```
+Return to **Organization → Overview → Export and teardown**. Choose the workspace or organization
+delete action, read exactly what is deleted and retained, type the displayed slug without changing
+case or whitespace, and complete the passkey prompt. If ZIP verification outlived the recent-auth
+window, this mutation raises a fresh prompt naturally.
 
 Both return `204`. Both are guarded four ways:
 
@@ -911,7 +886,8 @@ Both return `204`. Both are guarded four ways:
 4. **Refused while any APPI data-subject request is still open** against that workspace or
    organization. Deleting the organization root would cascade the request rows themselves away, so
    an unfinished 開示等 obligation must be **closed first**, not erased. Expect this refusal on a
-   real offboarding and plan for it — see
+   real offboarding and plan for it. The dialog stays open and identifies the blocking obligation
+   instead of collapsing it into a generic failure. See
    [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md).
 
 The organization call tears down every workspace and then the organization root, so the per-workspace

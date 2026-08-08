@@ -70,6 +70,26 @@ class TenantLifecycleControlMapperXmlTest {
     }
 
     @Test
+    void downloadGrantConsumptionIsSingleStatementExactAndUnexpired() throws Exception {
+        String resource = "mappers/TenantLifecycleControlMapper.xml";
+        String xml;
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+
+        int consumeStart = xml.indexOf("id=\"consumeExportGrant\"");
+        int consumeEnd = xml.indexOf("</delete>", consumeStart);
+        String consume = xml.substring(consumeStart, consumeEnd);
+        assertTrue(consume.contains("token_hash = #{tokenHash}"));
+        assertTrue(consume.contains("session_hash = #{sessionHash}"));
+        assertTrue(consume.contains("org_id = #{orgId}"));
+        assertTrue(consume.contains("workspace_id = #{workspaceId}"));
+        assertTrue(consume.contains("actor_id = #{actorId}"));
+        assertTrue(consume.contains("expires_at &gt; #{now}"));
+    }
+
+    @Test
     void ssoChallengeRevalidationTakesTheOperationRowLock() throws Exception {
         String resource = "mappers/SsoLinkChallengeMapper.xml";
         String xml;

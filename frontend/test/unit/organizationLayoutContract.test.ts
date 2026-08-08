@@ -10,6 +10,10 @@ const OVERVIEW = readFileSync(
     path.resolve(process.cwd(), "app/components/organization/OrganizationOverviewPanel.tsx"),
     "utf8",
 );
+const LIFECYCLE = readFileSync(
+    path.resolve(process.cwd(), "app/components/organization/OrganizationLifecyclePanel.tsx"),
+    "utf8",
+);
 
 describe("organization layout presentation contract", () => {
     it("uses a task-adaptive mobile list instead of a horizontally scrolling table", () => {
@@ -29,5 +33,21 @@ describe("organization layout presentation contract", () => {
     it("keeps interface icons on the Heroicons set", () => {
         expect(LAYOUT).toContain("ArrowPathIcon");
         expect(LAYOUT).not.toContain("lucide-react");
+    });
+
+    it("gates destructive controls on organization authority rather than workspace ownership", () => {
+        expect(OVERVIEW).toContain("if (orgRole === null || state.accessDenied)");
+        expect(OVERVIEW).toContain("orgRole={orgRole}");
+        expect(LIFECYCLE).toContain("access.canTeardown ?");
+        expect(LIFECYCLE).not.toContain('activeWorkspace.role === "owner"');
+        expect(LIFECYCLE).not.toContain('workspace.role === "owner"');
+        expect(LIFECYCLE).toContain("confirmation === teardownTarget.slug");
+        expect(LIFECYCLE).not.toContain("confirmation.trim()");
+    });
+
+    it("keeps the product open while the browser handles the streamed export", () => {
+        expect(LIFECYCLE).toContain('target="_blank"');
+        expect(LIFECYCLE).toContain('rel="noopener noreferrer"');
+        expect(LIFECYCLE).not.toContain("window.location.assign(downloadPath)");
     });
 });

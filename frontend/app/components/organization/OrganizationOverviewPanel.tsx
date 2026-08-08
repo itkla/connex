@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import OrganizationIdentityForm from "@/app/components/organization/OrganizationIdentityForm";
+import OrganizationLifecyclePanel from "@/app/components/organization/OrganizationLifecyclePanel";
 import OrganizationLayoutPanel from "@/app/components/organization/OrganizationLayoutPanel";
 import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
 import Rise from "@/app/components/motion/Rise";
@@ -45,7 +46,8 @@ export default function OrganizationOverviewPanel() {
         switching,
     } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
-    const hasOrgAccess = activeWorkspace?.orgRole != null;
+    const orgRole = activeWorkspace?.orgRole ?? null;
+    const hasOrgAccess = orgRole !== null;
     const loadMoreRequest = useRef<AbortController | null>(null);
     const [state, dispatch] = useReducer(
         organizationOverviewReducer,
@@ -126,7 +128,7 @@ export default function OrganizationOverviewPanel() {
         }
     }
 
-    if (!hasOrgAccess || state.accessDenied) return <NoAccessCard />;
+    if (orgRole === null || state.accessDenied) return <NoAccessCard />;
     if (loading) return <OverviewLoading />;
     if (state.loadFailed) {
         return (
@@ -178,6 +180,21 @@ export default function OrganizationOverviewPanel() {
                             switching={switching}
                             onLoadMore={() => void loadMore()}
                             onNavigate={(workspaceId, href) => void navigate(workspaceId, href)}
+                        />
+                    </SettingsSection>
+                </Rise>
+                <Rise>
+                    <SettingsSection
+                        title={t("lifecycleTitle")}
+                        description={t("lifecycleDescription")}
+                    >
+                        <OrganizationLifecyclePanel
+                            organization={state.organization}
+                            workspaces={state.workspaces}
+                            orgRole={orgRole}
+                            hasMore={state.hasMoreAuthority || state.hasMoreWorkspaces}
+                            loadingMore={state.loadingMore}
+                            onLoadMore={() => void loadMore()}
                         />
                     </SettingsSection>
                 </Rise>
