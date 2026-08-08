@@ -174,6 +174,12 @@ public class ImportService {
             String reviewProof) {
     }
 
+    private record DealUpdateValues(
+            String currency,
+            BigDecimal value,
+            boolean shouldUpdateValue) {
+    }
+
     // ===================================================================================
     // Contacts
     // ===================================================================================
@@ -1024,6 +1030,7 @@ public class ImportService {
             action,
             id -> dealMapper.getDealByIdForUpdate(workspaceId, id),
             "deal");
+        validateDealUpdates(workspaceId, mutations, action, lockedTargets);
         Map<String, Integer> columnToDef = resolveCustomDefinitions(
             "deal", request.getMapping(), mutations, action);
         Map<Integer, Map<Integer, Object>> customValues =
@@ -1244,11 +1251,7 @@ public class ImportService {
             Map<String, Integer> personByEmail,
             Map<Integer, String> stageOutcome,
             Map<Integer, Deal> lockedTargets) {
-        Deal existing = lockedTargets.get(row.matchedId);
-        if (existing == null) {
-            fail(row, "Matched deal #" + row.matchedId + " not found");
-            return false;
-        }
+        Deal existing = Objects.requireNonNull(lockedTargets.get(row.matchedId));
         Integer beforeStageId = existing.getStageId();
         Boolean beforeOutcome = existing.getWon();
         String beforeName = existing.getName();
@@ -1259,28 +1262,14 @@ public class ImportService {
         String beforeExpectedCloseDate = existing.getExpectedCloseDate();
         String beforeClosedAt = existing.getClosedAt();
         String beforeClosedReason = existing.getClosedReason();
-        String mergedCurrency = merge(action, existing.getCurrency(), row.std.get("currency"));
-        boolean currencyChanged = mergedCurrency != null
-            && !mergedCurrency.equalsIgnoreCase(existing.getCurrency());
-        String value = row.std.get("value");
-        BigDecimal incomingValue = parseValue(value);
-        boolean shouldUpdateValue = value != null
-            && (OVERWRITE.equals(action) || existing.getValue().signum() == 0)
-            && existing.getValue().compareTo(incomingValue) != 0;
-        if ((currencyChanged || shouldUpdateValue)
-                && dealLineItemMapper.countByDealIdForUpdate(
-                    workspaceId, existing.getId()) > 0) {
-            fail(row, currencyChanged
-                ? DEAL_CURRENCY_LINE_ITEM_CONFLICT : DEAL_VALUE_LINE_ITEM_CONFLICT);
-            return false;
-        }
+        DealUpdateValues updateValues = dealUpdateValues(existing, row, action);
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
-        existing.setCurrency(mergedCurrency);
+        existing.setCurrency(updateValues.currency());
         existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
         boolean valueChanged = false;
-        if (shouldUpdateValue) {
+        if (updateValues.shouldUpdateValue()) {
             existing.setValue(dealValueService.setManualValue(
-                workspaceId, existing, incomingValue));
+                workspaceId, existing, updateValues.value()));
             valueChanged = true;
         }
         Integer companyId = companyId(row, companyByName);
@@ -1325,6 +1314,47 @@ public class ImportService {
             action,
             customValues.getOrDefault(existing.getId(), Map.of()));
         return parentChanged || valueChanged || tagsChanged || peopleChanged || customChanged;
+    }
+
+    private void validateDealUpdates(
+            int workspaceId,
+            List<PlanRow> plan,
+            String action,
+            Map<Integer, Deal> lockedTargets) {
+        for (PlanRow row : plan) {
+            if (!MATCH.equals(row.status) || !willWrite(row, action)) {
+                continue;
+            }
+            Deal existing = lockedTargets.get(row.matchedId);
+            if (existing == null) {
+                fail(row, "Matched deal #" + row.matchedId + " not found");
+                continue;
+            }
+            DealUpdateValues updateValues = dealUpdateValues(existing, row, action);
+            boolean currencyChanged = updateValues.currency() != null
+                && !updateValues.currency().equalsIgnoreCase(existing.getCurrency());
+            if ((currencyChanged || updateValues.shouldUpdateValue())
+                    && dealLineItemMapper.countByDealIdForUpdate(
+                        workspaceId, existing.getId()) > 0) {
+                fail(row, currencyChanged
+                    ? DEAL_CURRENCY_LINE_ITEM_CONFLICT
+                    : DEAL_VALUE_LINE_ITEM_CONFLICT);
+            }
+        }
+    }
+
+    private static DealUpdateValues dealUpdateValues(
+            Deal existing,
+            PlanRow row,
+            String action) {
+        String currency = merge(
+            action, existing.getCurrency(), row.std.get("currency"));
+        String value = row.std.get("value");
+        BigDecimal parsedValue = parseValue(value);
+        boolean shouldUpdateValue = value != null
+            && (OVERWRITE.equals(action) || existing.getValue().signum() == 0)
+            && existing.getValue().compareTo(parsedValue) != 0;
+        return new DealUpdateValues(currency, parsedValue, shouldUpdateValue);
     }
 
     private void resolveStages(int workspaceId, List<PlanRow> plan) {
