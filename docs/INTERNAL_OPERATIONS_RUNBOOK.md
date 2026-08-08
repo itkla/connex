@@ -835,8 +835,8 @@ The POST returns the expiry and download path while placing the credential in an
 `HttpOnly`, `SameSite=Strict` cookie. The grant lasts two minutes, is single-use, and is bound to the
 issuing user, authenticated session, organization, and workspace. A replay or cross-tenant use is
 refused. The browser consumes it on the GET; operators never copy the grant or a `JSESSIONID` into a
-script. The legacy GET without a grant remains recent-authentication-guarded for compatibility, but
-it is not the offboarding procedure.
+script. The GET has no grantless compatibility mode: a missing, expired, or already-consumed grant
+is refused even while the authenticated session remains inside its recent-authentication window.
 
 - Requires **organization administrator** access (`Organization administrator access required`) and
   **recent authentication** when the grant is issued. The strict authorization audit record is

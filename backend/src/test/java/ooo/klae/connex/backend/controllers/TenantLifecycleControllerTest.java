@@ -24,6 +24,8 @@ import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import jakarta.servlet.http.Cookie;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.request.async.AsyncWebRequest;
@@ -49,7 +52,6 @@ import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.TenantExportGrantService;
 import ooo.klae.connex.backend.services.TenantExportGrantService.TenantExportGrant;
-import ooo.klae.connex.backend.services.TenantExportService;
 import ooo.klae.connex.backend.services.TenantExportService.TenantExportDownload;
 import ooo.klae.connex.backend.services.TenantTeardownService;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -57,7 +59,6 @@ import ooo.klae.connex.backend.tenant.TenantExportGrantCookie;
 
 @ExtendWith(MockitoExtension.class)
 class TenantLifecycleControllerTest {
-    @Mock private TenantExportService tenantExportService;
     @Mock private TenantExportGrantService tenantExportGrantService;
     @Mock private TenantExportGrantCookie tenantExportGrantCookie;
     @Mock private TenantTeardownService tenantTeardownService;
@@ -73,7 +74,6 @@ class TenantLifecycleControllerTest {
     @BeforeEach
     void setUp() {
         exportController = new TenantLifecycleController(
-            tenantExportService,
             tenantExportGrantService,
             tenantExportGrantCookie,
             authService);
@@ -90,17 +90,24 @@ class TenantLifecycleControllerTest {
 
     @Test
     void exportUsesARequestScopedTimeoutAndStreamsThePreparedDownload() throws Exception {
-        when(tenantExportService.prepare(3, 5, 7)).thenReturn(download);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        when(tenantExportGrantService.redeem(
+                3,
+                5,
+                7,
+                request.getSession().getId(),
+                "a".repeat(64)))
+            .thenReturn(download);
         when(download.filename()).thenReturn("tenant.zip");
         when(download.remainingTimeoutMillis()).thenReturn(1_020_000L);
-        MockHttpServletRequest request = new MockHttpServletRequest();
         WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
         clearInvocations(asyncWebRequest);
 
         var response = exportController.export(
             3,
             5,
-            null,
+            "a".repeat(64),
             request,
             new MockHttpServletResponse());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -117,10 +124,17 @@ class TenantLifecycleControllerTest {
 
     @Test
     void exportLifecycleHandlersIdempotentlySignalCancellation() {
-        when(tenantExportService.prepare(3, 5, 7)).thenReturn(download);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        when(tenantExportGrantService.redeem(
+                3,
+                5,
+                7,
+                request.getSession().getId(),
+                "a".repeat(64)))
+            .thenReturn(download);
         when(download.filename()).thenReturn("tenant.zip");
         when(download.remainingTimeoutMillis()).thenReturn(1_000L);
-        MockHttpServletRequest request = new MockHttpServletRequest();
         WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
         clearInvocations(asyncWebRequest);
         ArgumentCaptor<Runnable> timeoutHandler = ArgumentCaptor.forClass(Runnable.class);
@@ -134,7 +148,7 @@ class TenantLifecycleControllerTest {
         exportController.export(
             3,
             5,
-            null,
+            "a".repeat(64),
             request,
             new MockHttpServletResponse());
 
@@ -149,10 +163,17 @@ class TenantLifecycleControllerTest {
     @Test
     void exportResponseConstructionFailureSignalsNonblockingCancellation() {
         IllegalStateException primary = new IllegalStateException("filename failed");
-        when(tenantExportService.prepare(3, 5, 7)).thenReturn(download);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        when(tenantExportGrantService.redeem(
+                3,
+                5,
+                7,
+                request.getSession().getId(),
+                "a".repeat(64)))
+            .thenReturn(download);
         when(download.filename()).thenThrow(primary);
         when(download.remainingTimeoutMillis()).thenReturn(1_000L);
-        MockHttpServletRequest request = new MockHttpServletRequest();
         WebAsyncUtils.getAsyncManager(request).setAsyncWebRequest(asyncWebRequest);
 
         IllegalStateException thrown = assertThrows(
@@ -160,7 +181,7 @@ class TenantLifecycleControllerTest {
             () -> exportController.export(
                 3,
                 5,
-                null,
+                "a".repeat(64),
                 request,
                 new MockHttpServletResponse()));
 
@@ -171,15 +192,20 @@ class TenantLifecycleControllerTest {
 
     @Test
     void exportMapsAuthorizationAndPathIsolationFailures() throws Exception {
+        MockHttpSession session = new MockHttpSession();
         doThrow(new ForbiddenException("Forbidden"))
             .doThrow(new ResourceNotFoundException("Workspace not found"))
-            .when(tenantExportService)
-            .prepare(3, 5, 7);
+            .when(tenantExportGrantService)
+            .redeem(3, 5, 7, session.getId(), "a".repeat(64));
 
-        mockMvc.perform(get("/api/orgs/3/workspaces/5/export"))
+        mockMvc.perform(get("/api/orgs/3/workspaces/5/export")
+                .session(session)
+                .cookie(new Cookie(TenantExportGrantCookie.NAME, "a".repeat(64))))
             .andExpect(status().isForbidden());
 
-        mockMvc.perform(get("/api/orgs/3/workspaces/5/export"))
+        mockMvc.perform(get("/api/orgs/3/workspaces/5/export")
+                .session(session)
+                .cookie(new Cookie(TenantExportGrantCookie.NAME, "a".repeat(64))))
             .andExpect(status().isNotFound());
     }
 
@@ -214,7 +240,7 @@ class TenantLifecycleControllerTest {
     }
 
     @Test
-    void presentedGrantNeverFallsBackToTheLegacyGetAuthorization() {
+    void exportAlwaysRedeemsTheGrantAndClearsItAfterSuccess() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.getSession(true);
         when(tenantExportGrantService.redeem(
@@ -235,8 +261,27 @@ class TenantLifecycleControllerTest {
             request,
             new MockHttpServletResponse());
 
-        verify(tenantExportService, never()).prepare(anyInt(), anyInt(), anyInt());
         verify(tenantExportGrantCookie).clear(any(), eq(3), eq(5));
+    }
+
+    @Test
+    void exportWithoutAGrantIsRefusedWithoutClearingACookie() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession(true);
+        doThrow(new ForbiddenException("Tenant export download grant is invalid or expired"))
+            .when(tenantExportGrantService)
+            .redeem(3, 5, 7, request.getSession().getId(), null);
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> exportController.export(
+                3,
+                5,
+                null,
+                request,
+                new MockHttpServletResponse()));
+
+        verify(tenantExportGrantCookie, never()).clear(any(), anyInt(), anyInt());
     }
 
     @Test

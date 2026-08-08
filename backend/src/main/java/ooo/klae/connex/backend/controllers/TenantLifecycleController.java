@@ -26,7 +26,6 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.TenantExportGrantService;
 import ooo.klae.connex.backend.services.TenantExportGrantService.TenantExportGrant;
-import ooo.klae.connex.backend.services.TenantExportService;
 import ooo.klae.connex.backend.services.TenantExportService.TenantExportDownload;
 import ooo.klae.connex.backend.tenant.TenantExportGrantCookie;
 
@@ -35,7 +34,6 @@ import ooo.klae.connex.backend.tenant.TenantExportGrantCookie;
 @RequestMapping("/api/orgs/{orgId}")
 @RequiredArgsConstructor
 public class TenantLifecycleController {
-    private final TenantExportService tenantExportService;
     private final TenantExportGrantService tenantExportGrantService;
     private final TenantExportGrantCookie tenantExportGrantCookie;
     private final AuthService authService;
@@ -75,18 +73,13 @@ public class TenantLifecycleController {
             HttpServletRequest request,
             HttpServletResponse response) {
         int actorId = authService.getCurrentUser().getId();
-        TenantExportDownload download;
-        if (exportGrant == null) {
-            download = tenantExportService.prepare(orgId, workspaceId, actorId);
-        } else {
-            download = tenantExportGrantService.redeem(
-                orgId,
-                workspaceId,
-                actorId,
-                requireSessionId(request),
-                exportGrant);
-            tenantExportGrantCookie.clear(response, orgId, workspaceId);
-        }
+        TenantExportDownload download = tenantExportGrantService.redeem(
+            orgId,
+            workspaceId,
+            actorId,
+            requireSessionId(request),
+            exportGrant);
+        tenantExportGrantCookie.clear(response, orgId, workspaceId);
         try {
             configureAsyncLifecycle(request, download);
             StreamingResponseBody body = download::writeTo;

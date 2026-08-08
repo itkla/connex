@@ -61,6 +61,7 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private SessionSecurityService sessionSecurityService;
 
     private MockMvc mockMvc;
     private final List<Integer> organizationIds = new ArrayList<>();
@@ -137,7 +138,7 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
     }
 
     @Test
-    void exportPostAndLegacyGetBothRequireRecentWebAuthnForAnOrgAdmin() throws Exception {
+    void exportGrantPostRequiresRecentWebAuthnForAnOrgAdmin() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
         User admin = newUser();
@@ -156,11 +157,6 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
                 .with(csrf().asHeader()))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("RECENT_AUTHENTICATION_REQUIRED"));
-        mockMvc.perform(get(exportPath(orgId, workspace.getId()))
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("RECENT_AUTHENTICATION_REQUIRED"));
     }
 
     @Test
@@ -172,27 +168,8 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
         int orgId = workspace.getOrgId();
         orgMemberMapper.addMember(orgId, admin.getId(), "admin");
         MockHttpSession session = login(admin.getUsername());
-        session.setAttribute(
-            SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
-            System.currentTimeMillis());
-        session.setAttribute(
-            SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR,
-            admin.getId());
-
-        MvcResult grantResult = mockMvc.perform(post(exportPath(orgId, workspace.getId()))
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session)
-                .with(csrf().asHeader()))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.downloadPath").value(exportPath(orgId, workspace.getId())))
-            .andReturn();
-        String setCookie = grantResult.getResponse().getHeader("Set-Cookie");
-        assertNotNull(setCookie);
-        String grantPrefix = TenantExportGrantCookie.NAME + "=";
-        int grantEnd = setCookie.indexOf(';');
-        assertTrue(setCookie.startsWith(grantPrefix));
-        assertTrue(grantEnd > grantPrefix.length());
-        String rawGrant = setCookie.substring(grantPrefix.length(), grantEnd);
+        markRecentlyAuthenticated(session, admin.getId());
+        String rawGrant = issueExportGrant(orgId, workspace.getId(), session);
 
         MvcResult downloadResult = mockMvc.perform(get(exportPath(orgId, workspace.getId()))
                 .cookie(new Cookie(TenantExportGrantCookie.NAME, rawGrant))
@@ -202,6 +179,80 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
 
         mockMvc.perform(asyncDispatch(downloadResult))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void exportGrantCannotBeReplayedWhileSessionRemainsRecentlyAuthenticated() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User admin = newUser();
+        workspaceMapper.addMember(workspace.getId(), admin.getId(), "owner");
+        int orgId = workspace.getOrgId();
+        orgMemberMapper.addMember(orgId, admin.getId(), "admin");
+        MockHttpSession session = login(admin.getUsername());
+        markRecentlyAuthenticated(session, admin.getId());
+        String rawGrant = issueExportGrant(orgId, workspace.getId(), session);
+
+        MvcResult firstDownload = mockMvc.perform(get(exportPath(orgId, workspace.getId()))
+                .cookie(new Cookie(TenantExportGrantCookie.NAME, rawGrant))
+                .session(session))
+            .andExpect(request().asyncStarted())
+            .andReturn();
+        mockMvc.perform(asyncDispatch(firstDownload))
+            .andExpect(status().isOk());
+
+        assertTrue(sessionSecurityService.hasFreshRecentAuthentication(session, admin.getId()));
+        mockMvc.perform(get(exportPath(orgId, workspace.getId()))
+                .cookie(new Cookie(TenantExportGrantCookie.NAME, rawGrant))
+                .session(session))
+            .andExpect(status().isForbidden())
+            .andExpect(content().string("Tenant export download grant is invalid or expired"));
+    }
+
+    @Test
+    void expiredExportGrantIsRefusedWhileSessionRemainsRecentlyAuthenticated() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User admin = newUser();
+        workspaceMapper.addMember(workspace.getId(), admin.getId(), "owner");
+        int orgId = workspace.getOrgId();
+        orgMemberMapper.addMember(orgId, admin.getId(), "admin");
+        MockHttpSession session = login(admin.getUsername());
+        markRecentlyAuthenticated(session, admin.getId());
+        String rawGrant = issueExportGrant(orgId, workspace.getId(), session);
+        jdbcTemplate.update(
+            "UPDATE tenant_export_download_grant"
+                + " SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND"
+                + " WHERE org_id = ? AND workspace_id = ? AND actor_id = ?",
+            orgId,
+            workspace.getId(),
+            admin.getId());
+
+        assertTrue(sessionSecurityService.hasFreshRecentAuthentication(session, admin.getId()));
+        mockMvc.perform(get(exportPath(orgId, workspace.getId()))
+                .cookie(new Cookie(TenantExportGrantCookie.NAME, rawGrant))
+                .session(session))
+            .andExpect(status().isForbidden())
+            .andExpect(content().string("Tenant export download grant is invalid or expired"));
+    }
+
+    @Test
+    void exportDownloadWithoutAGrantIsRefusedWhileSessionRemainsRecentlyAuthenticated()
+            throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User admin = newUser();
+        workspaceMapper.addMember(workspace.getId(), admin.getId(), "owner");
+        int orgId = workspace.getOrgId();
+        orgMemberMapper.addMember(orgId, admin.getId(), "admin");
+        MockHttpSession session = login(admin.getUsername());
+        markRecentlyAuthenticated(session, admin.getId());
+
+        assertTrue(sessionSecurityService.hasFreshRecentAuthentication(session, admin.getId()));
+        mockMvc.perform(get(exportPath(orgId, workspace.getId()))
+                .session(session))
+            .andExpect(status().isForbidden())
+            .andExpect(content().string("Tenant export download grant is invalid or expired"));
     }
 
     private Workspace newWorkspace() {
@@ -243,6 +294,35 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
         MockHttpSession session = (MockHttpSession) result.getRequest().getSession(false);
         assertNotNull(session, "login did not establish a tenant lifecycle session");
         return session;
+    }
+
+    private void markRecentlyAuthenticated(MockHttpSession session, int userId) {
+        session.setAttribute(
+            SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
+            System.currentTimeMillis());
+        session.setAttribute(
+            SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR,
+            userId);
+    }
+
+    private String issueExportGrant(
+            int orgId,
+            int workspaceId,
+            MockHttpSession session) throws Exception {
+        MvcResult grantResult = mockMvc.perform(post(exportPath(orgId, workspaceId))
+                .header("X-Workspace-Id", workspaceId)
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.downloadPath").value(exportPath(orgId, workspaceId)))
+            .andReturn();
+        String setCookie = grantResult.getResponse().getHeader("Set-Cookie");
+        assertNotNull(setCookie);
+        String grantPrefix = TenantExportGrantCookie.NAME + "=";
+        int grantEnd = setCookie.indexOf(';');
+        assertTrue(setCookie.startsWith(grantPrefix));
+        assertTrue(grantEnd > grantPrefix.length());
+        return setCookie.substring(grantPrefix.length(), grantEnd);
     }
 
     private static String exportPath(int orgId, int workspaceId) {
