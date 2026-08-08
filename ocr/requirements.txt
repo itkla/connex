@@ -1,4 +1,8 @@
+# numpy is capped by paddlex (pulled in by paddleocr), which requires numpy<2.4,>=1.24.
+# Bumping numpy past 2.3.x makes this file unresolvable and breaks both the CI contract
+# tests and the sidecar image build. Raise it only together with a paddleocr/paddlex
+# release whose own ceiling has moved.
 paddlepaddle==3.3.1
 paddleocr==3.7.0
 Pillow==12.3.0
-numpy==2.5.1
+numpy==2.3.5
