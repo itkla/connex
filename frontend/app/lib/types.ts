@@ -2218,6 +2218,30 @@ export type ReportGenerateInput = {
 
 export type ReportNarrativeMode = "cached" | "full";
 
+type AiGenerationBase = {
+    handle: string;
+    kind: string;
+    retryAfterMs: number;
+    expiresAt: string;
+};
+
+export type AiGenerationStatus<T> =
+    | AiGenerationBase & {
+        status: 'accepted' | 'running';
+        result: null;
+        reason: null;
+    }
+    | AiGenerationBase & {
+        status: 'resolved';
+        result: T;
+        reason: null;
+    }
+    | AiGenerationBase & {
+        status: 'failed' | 'timed_out';
+        result: null;
+        reason: string;
+    };
+
 export type ReportDataPoint = {
     key: string;
     label: string;
@@ -2288,6 +2312,7 @@ export type ReportDocument = {
     appendix: ReportAppendixRow[];
     citations: ReportCitation[];
     generatedAt: string;
+    generation?: AiGenerationStatus<ReportDocument> | null;
 };
 
 /** How a frozen snapshot came to exist: created by hand, or frozen by scheduled delivery. */

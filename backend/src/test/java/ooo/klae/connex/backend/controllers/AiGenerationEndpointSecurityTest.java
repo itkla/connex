@@ -22,14 +22,14 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import ooo.klae.connex.backend.ai.brief.DealBriefService;
-import ooo.klae.connex.backend.ai.introrationale.IntroRationaleService;
-import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
+import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
+import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.BusinessCardService;
@@ -50,7 +50,12 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 
 @WebMvcTest(
-    controllers = { BusinessCardController.class, DealController.class, IntroductionController.class },
+    controllers = {
+        AiGenerationController.class,
+        BusinessCardController.class,
+        DealController.class,
+        IntroductionController.class
+    },
     excludeFilters = @ComponentScan.Filter(
         type = FilterType.ASSIGNABLE_TYPE,
         classes = GlobalExceptionHandler.class
@@ -68,13 +73,12 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private DealService dealService;
     @MockitoBean private BulkOperationService bulkOperationService;
     @MockitoBean private DealRiskService dealRiskService;
-    @MockitoBean private DealBriefService dealBriefService;
-    @MockitoBean private DealRiskRationaleService dealRiskRationaleService;
+    @MockitoBean private AiGenerationAdapterService aiGenerationAdapterService;
+    @MockitoBean private AiGenerationService aiGenerationService;
     @MockitoBean private BusinessCardService businessCardService;
     @MockitoBean private WorkspaceService workspaceService;
     @MockitoBean private MemberScopeResolver memberScopeResolver;
     @MockitoBean private IntroductionService introductionService;
-    @MockitoBean private IntroRationaleService introRationaleService;
     @MockitoBean private WarmPathService warmPathService;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;
     @MockitoBean private SocialLoginClientRegistrations socialLoginClientRegistrations;
@@ -95,9 +99,9 @@ class AiGenerationEndpointSecurityTest {
         assertPostWithCsrfOnly("/api/deals/17/rationale");
         assertPostWithCsrfOnly("/api/introductions/suggestions/rationale?personA=11&personB=12");
 
-        verify(dealBriefService).generate(17, false);
-        verify(dealRiskRationaleService).generate(17, false);
-        verify(introRationaleService).generate(11, 12);
+        verify(aiGenerationAdapterService).startDealBrief(17, false);
+        verify(aiGenerationAdapterService).startDealRationale(17, false);
+        verify(aiGenerationAdapterService).startIntroRationale(11, 12);
     }
 
     @Test
@@ -105,8 +109,22 @@ class AiGenerationEndpointSecurityTest {
         assertPostWithCsrfOnly("/api/deals/17/brief?refresh=true");
         assertPostWithCsrfOnly("/api/deals/17/rationale?refresh=true");
 
-        verify(dealBriefService).generate(17, true);
-        verify(dealRiskRationaleService).generate(17, true);
+        verify(aiGenerationAdapterService).startDealBrief(17, true);
+        verify(aiGenerationAdapterService).startDealRationale(17, true);
+    }
+
+    @Test
+    void generationStatusIsAuthenticatedReadOnlyAndNoStore() throws Exception {
+        String handle = "f40f5943-9943-4c79-94d2-2e2a014cff46";
+        when(aiGenerationService.status(handle)).thenReturn(new AiGenerationStatusDto(
+                handle, "deal.brief", "running", null, null, 2_000, "2026-08-08T10:02:00Z"));
+
+        mockMvc.perform(get("/api/ai/generations/{handle}", handle))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Cache-Control", "no-store"));
+
+        verify(aiGenerationService).status(handle);
     }
 
     @Test
@@ -133,7 +151,7 @@ class AiGenerationEndpointSecurityTest {
         mockMvc.perform(post(path))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post(path).with(csrf().asHeader()))
-                .andExpect(status().isOk());
+                .andExpect(status().isAccepted());
     }
 
     @TestConfiguration

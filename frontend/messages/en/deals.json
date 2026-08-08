@@ -17,7 +17,9 @@
     },
     "DealBrief": {
         "panelTitle": "AI brief",
+        "generating": "Generating the brief…",
         "error": "Couldn't generate the brief.",
+        "timedOut": "Brief generation timed out.",
         "retry": "Retry",
         "regenerate": "Regenerate",
         "attribution": "AI-generated · {time}",
@@ -33,7 +35,9 @@
     },
     "DealRationale": {
         "panelTitle": "AI risk analysis",
+        "generating": "Generating the risk analysis…",
         "error": "Couldn't generate the risk analysis.",
+        "timedOut": "Risk analysis generation timed out.",
         "retry": "Retry",
         "regenerate": "Regenerate",
         "attribution": "AI-generated · {time}",

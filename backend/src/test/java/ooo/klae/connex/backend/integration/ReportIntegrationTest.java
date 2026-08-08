@@ -8,7 +8,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -59,12 +61,15 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
+import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
+import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.mail.MailService;
@@ -77,6 +82,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
 import ooo.klae.connex.backend.services.ReportDeliveryScheduler;
+import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -499,6 +505,7 @@ class ReportIntegrationTest {
     @Autowired private ReportDeliveryScheduler reportDeliveryScheduler;
 
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
+    @MockitoBean private AiGenerationService aiGenerationService;
     @MockitoBean private AiRestrictionEpoch aiRestrictionEpoch;
     @MockitoBean private Clock clock;
     @MockitoBean private MailService mailService;
@@ -537,6 +544,16 @@ class ReportIntegrationTest {
         when(aiReportNarrativeService.cachedNarrative(
                 anyInt(), anyString(), any(LocalDate.class), any(LocalDate.class), anyList()))
                 .thenReturn(ReportNarrativeDto.unavailable("not_cached"));
+        when(aiGenerationService.startAtRestrictionEpoch(
+                any(), any(), anySet(), any(), any(), anyLong())).thenReturn(
+                new AiGenerationStatusDto(
+                        "f40f5943-9943-4c79-94d2-2e2a014cff46",
+                        "report.narrative",
+                        "accepted",
+                        null,
+                        null,
+                        2_000,
+                        "2026-07-12T12:02:00Z"));
     }
 
     @Test
@@ -587,18 +604,22 @@ class ReportIntegrationTest {
             .andExpect(jsonPath("$.narrative.available").value(false))
             .andExpect(jsonPath("$.narrative.reason").value("not_cached"));
 
-        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+        MvcResult acceptedGeneration = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
                 .param("narrative", "full")
                 .header("X-Workspace-Id", workspace.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
                 .with(csrf().asHeader()))
-            .andExpect(status().isOk())
+            .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.widgets[0].total").value(2))
             .andExpect(jsonPath("$.appendix[0].sourceId").value("metric.0.0"))
-            .andExpect(jsonPath("$.narrative.available").value(true))
-            .andExpect(jsonPath("$.citations[0].sourceId").value("metric.0.0"));
+            .andExpect(jsonPath("$.narrative.reason").value("not_cached"))
+            .andExpect(jsonPath("$.generation.status").value("accepted"))
+            .andReturn();
+
+        verify(aiGenerationService).startAtRestrictionEpoch(
+                eq(AiFeature.REPORT_NARRATIVE), any(), anySet(), any(), any(), anyLong());
 
         MvcResult snapshotResult = mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
                 .header("X-Workspace-Id", workspace.getId())
@@ -1349,6 +1370,35 @@ class ReportIntegrationTest {
     }
 
     @Test
+    void attainmentAsyncHandleRetainsGoalReadPermission() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User manager = newMember(workspace, "admin");
+        MockHttpSession session = login(manager.getUsername());
+        int reportId = createReport(session, workspace, ATTAINMENT_BODY);
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .param("narrative", "full")
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isAccepted());
+
+        verify(aiGenerationService).startAtRestrictionEpoch(
+                eq(AiFeature.REPORT_NARRATIVE),
+                any(),
+                argThat(required -> required.containsAll(Set.of(
+                        Permission.AI_USE,
+                        Permission.REPORT_READ,
+                        Permission.GOAL_READ))),
+                any(),
+                any(),
+                anyLong());
+    }
+
+    @Test
     void quarterlyAttainmentUsesCalendarQuarterGoalAndActualWindow() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
@@ -1627,14 +1677,14 @@ class ReportIntegrationTest {
         insertPersonEdge(workspace.getId(), reverseB, mutual, 2);
 
         int reportId = createReport(session, workspace, NETWORK_REPORT_BODY);
-        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+        MvcResult acceptedGeneration = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
                 .queryParam("narrative", "full")
                 .header("X-Workspace-Id", workspace.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
                 .with(csrf().asHeader()))
-            .andExpect(status().isOk())
+            .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.widgets[1].total").value(3))
             .andExpect(jsonPath("$.widgets[1].priorTotal").doesNotExist())
             .andExpect(jsonPath("$.widgets[2].points.length()").value(3))
@@ -1648,11 +1698,13 @@ class ReportIntegrationTest {
                     "$.widgets[5].points[?(@.label == 'Reverse Alice ↔ Reverse Bob')]").isNotEmpty())
             .andReturn();
 
-        JsonNode widgets = objectMapper.readTree(result.getResponse().getContentAsString()).get("widgets");
+        JsonNode initialDocument = objectMapper.readTree(
+                acceptedGeneration.getResponse().getContentAsString());
+        JsonNode widgets = initialDocument.get("widgets");
         BigDecimal reachableValue = widgets.get(0).get("total").decimalValue();
         assertTrue(reachableValue.compareTo(BigDecimal.ZERO) > 0);
         assertTrue(reachableValue.compareTo(new BigDecimal("510.00")) < 0);
-        String document = result.getResponse().getContentAsString();
+        String document = acceptedGeneration.getResponse().getContentAsString();
         assertTrue(document.contains("Alpha Reachable"));
         assertTrue(document.contains("Beta Reachable"));
         assertTrue(document.contains("Shared Reachable"));
@@ -1662,12 +1714,12 @@ class ReportIntegrationTest {
         assertTrue(!document.contains("Weak Path"));
         assertTrue(widgets.get(4).get("total").decimalValue().compareTo(BigDecimal.ZERO) > 0);
         InOrder generationOrder = inOrder(
-                aiRestrictionEpoch, personEdgeMapper, aiReportNarrativeService);
+                aiRestrictionEpoch, personEdgeMapper, aiGenerationService);
         generationOrder.verify(aiRestrictionEpoch).current(workspace.getId());
         generationOrder.verify(personEdgeMapper).getEdgesForNetworkReport(
                 anyInt(), anyString(), anyInt());
-        generationOrder.verify(aiReportNarrativeService).generate(
-                eq(reportId), anyString(), any(LocalDate.class), any(LocalDate.class), anyList(), eq(23L));
+        generationOrder.verify(aiGenerationService).startAtRestrictionEpoch(
+                eq(AiFeature.REPORT_NARRATIVE), any(), anySet(), any(), any(), anyLong());
     }
 
     @Test

@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { generateIntroRationale } from '@/app/lib/api';
+import { AiGenerationError } from '@/app/lib/aiGeneration';
 import type { IntroRationale } from '@/app/lib/types';
 import { formatDateTime } from '@/app/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -12,6 +13,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 type RationaleState =
     | { status: 'loading' }
     | { status: 'hidden' }
+    | { status: 'error' }
+    | { status: 'timedOut' }
     | { status: 'rateLimited' }
     | { status: 'ready'; rationale: IntroRationale };
 
@@ -51,8 +54,16 @@ export default function IntroRationaleLine({
                 } else {
                     setStoredState({ pairKey, status: 'hidden' });
                 }
-            } catch {
-                if (!cancelled) setStoredState({ pairKey, status: 'hidden' });
+            } catch (error) {
+                if (cancelled) return;
+                setStoredState({
+                    pairKey,
+                    status: error instanceof AiGenerationError && error.status === 'timed_out'
+                        ? 'timedOut'
+                        : error instanceof AiGenerationError && error.reason === 'rate_limited'
+                            ? 'rateLimited'
+                        : 'error',
+                });
             }
         })();
         return () => {
@@ -63,14 +74,25 @@ export default function IntroRationaleLine({
     if (state.status === 'hidden') return null;
 
     if (state.status === 'loading') {
-        return <Skeleton className="mt-4 h-4 w-3/4" aria-busy />;
+        return (
+            <div className="mt-4 max-w-[70ch] space-y-2" aria-busy>
+                <p className="text-sm text-muted-foreground">{t('generating')}</p>
+                <Skeleton className="h-4 w-3/4" />
+            </div>
+        );
     }
 
-    if (state.status === 'rateLimited') {
+    if (state.status === 'rateLimited' || state.status === 'error' || state.status === 'timedOut') {
         return (
             <p className="mt-4 flex max-w-[70ch] items-start gap-1.5 text-sm leading-relaxed text-muted-foreground">
                 <LightBulbIcon className="mt-0.5 size-3.5 shrink-0" aria-label={t('label')} />
-                <span>{t('rateLimited')}</span>
+                <span>
+                    {state.status === 'rateLimited'
+                        ? t('rateLimited')
+                        : state.status === 'timedOut'
+                            ? t('timedOut')
+                            : t('error')}
+                </span>
             </p>
         );
     }

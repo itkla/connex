@@ -57,6 +57,7 @@ public class AiInvocationService {
     private final AiMediaAdmissionService aiMediaAdmissionService;
     private final AiProviderConfigService aiProviderConfigService;
     private final AiProviderRouter aiProviderRouter;
+    private final AiRestrictionEpoch aiRestrictionEpoch;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -280,9 +281,11 @@ public class AiInvocationService {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
                         workspaceId, orgId, correlationId, invocation, structured));
             }
-            invocationCommitment.run();
-            AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
-                    .complete(request(resolved, invocation, outputMode));
+            AiCompletionResult result = aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
+                invocationCommitment.run();
+                return aiProviderRouter.adapterFor(resolved.provider())
+                        .complete(request(resolved, invocation, outputMode));
+            });
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
         } catch (AiProviderException exception) {

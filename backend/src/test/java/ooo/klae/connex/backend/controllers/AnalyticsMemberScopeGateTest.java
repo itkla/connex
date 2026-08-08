@@ -16,8 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import ooo.klae.connex.backend.ai.brief.DealBriefService;
-import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.ActivityService;
@@ -33,8 +32,7 @@ class AnalyticsMemberScopeGateTest {
     @Mock private DealService dealService;
     @Mock private BulkOperationService bulkOperationService;
     @Mock private DealRiskService dealRiskService;
-    @Mock private DealBriefService dealBriefService;
-    @Mock private DealRiskRationaleService dealRiskRationaleService;
+    @Mock private AiGenerationAdapterService aiGenerationAdapterService;
     @Mock private ActivityService activityService;
     @Mock private TaskService taskService;
     @Mock private WorkspaceService workspaceService;
@@ -43,8 +41,8 @@ class AnalyticsMemberScopeGateTest {
     private static final MemberScope MEMBER_SCOPE = new MemberScope(MemberScope.Mode.MEMBERS, null, List.of(3));
 
     private DealController dealController() {
-        return new DealController(dealService, bulkOperationService, dealRiskService, dealBriefService,
-            dealRiskRationaleService, workspaceService, memberScopeResolver);
+        return new DealController(dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
     }
 
     private ActivityController activityController() {

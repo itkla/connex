@@ -4,6 +4,7 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
 
@@ -572,17 +573,40 @@ async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, { ...init, method: "GET" });
 }
 
+async function pollAiGeneration<T>(
+    initial: Types.AiGenerationStatus<T>,
+    init: RequestInit,
+): Promise<T> {
+    return resolveAiGeneration(
+        initial,
+        (handle) => getJson<Types.AiGenerationStatus<T>>(
+            `/api/ai/generations/${encodeURIComponent(handle)}`,
+            { ...init, cache: 'no-store' },
+        ),
+        {
+            signal: init.signal,
+            shouldRetryError: (error) => !(error instanceof ApiError)
+                || error.status === 408
+                || error.status === 425
+                || error.status === 429
+                || error.status >= 500,
+        },
+    );
+}
+
 /**
  * De-duplicates concurrent AI mutations only within one opaque server-issued authenticated-session
  * generation, active workspace, and locale. Requests without a provable identity bypass de-duplication.
  */
 async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (typeof window === "undefined" || Object.keys(init).length > 0) {
-        return postJson<T>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        return pollAiGeneration(accepted, init);
     }
     const identity = await currentClientRequestIdentity();
     if (identity == null) {
-        return postJson<T>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        return pollAiGeneration(accepted, init);
     }
     const key = `${identity}\u0000${path}`;
     const existing = inFlightAiMutations.get(key);
@@ -591,7 +615,12 @@ async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T
     }
     const controller = new AbortController();
     const request = (async () => {
-        const response = await postJson<T>(path, {}, { signal: controller.signal });
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(
+            path,
+            {},
+            { signal: controller.signal },
+        );
+        const response = await pollAiGeneration<T>(accepted, { signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error("AI request identity changed before completion");
         }
@@ -603,6 +632,34 @@ async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T
     });
     inFlightAiMutations.set(key, { controller, request });
     return request;
+}
+
+/** Resolves a previously accepted generation using only the shared status endpoint. */
+export async function resolveAcceptedAiGeneration<T>(
+    initial: Types.AiGenerationStatus<T>,
+    init: RequestInit = {},
+): Promise<T> {
+    if (typeof window === 'undefined') {
+        return pollAiGeneration(initial, init);
+    }
+    const identity = await currentClientRequestIdentity();
+    if (identity == null) {
+        throw new Error('Unable to establish the authenticated AI request identity');
+    }
+    const controller = new AbortController();
+    inFlightReportRequests.add(controller);
+    const signal = init.signal
+        ? AbortSignal.any([controller.signal, init.signal])
+        : controller.signal;
+    try {
+        const response = await pollAiGeneration<T>(initial, { ...init, signal });
+        if (await currentClientRequestIdentity() !== identity) {
+            throw new Error('AI request identity changed before completion');
+        }
+        return response;
+    } finally {
+        inFlightReportRequests.delete(controller);
+    }
 }
 
 async function putJson<T>(path: string, body: unknown = {}, init: RequestInit = {}): Promise<T> {
@@ -2279,9 +2336,8 @@ export function getIntroSuggestions(init: RequestInit = {}, limit?: number) {
 }
 
 /**
- * AI-generated "why introduce them" rationale for a suggested reverse introduction. Returns a graceful
- * unavailability result (never an error) when AI is not configured or the pair is not a current
- * suggestion; generation is slow (an LLM call), so invoke client-side. Mirrors {@link generateDealRationale}.
+ * AI-generated "why introduce them" rationale for a suggested reverse introduction. Graceful domain
+ * unavailability resolves normally; provider failure and timeout reject distinctly.
  */
 export function generateIntroRationale(personAId: number, personBId: number, init: RequestInit = {}) {
     return dedupedAiPost<Types.IntroRationale>(
@@ -2879,8 +2935,8 @@ export function getDealRiskAnalytics(scope: Types.MemberScopeParams = {}, init: 
 }
 
 /**
- * AI-generated brief for a deal. Returns a graceful unavailability result (never an error) when AI
- * is not configured for the organization; generation is slow (an LLM call), so invoke client-side.
+ * AI-generated brief for a deal. Graceful domain unavailability resolves normally; provider failure
+ * and timeout reject distinctly.
  */
 export function generateDealBrief(id: number, refresh = false, init: RequestInit = {}) {
     return dedupedAiPost<Types.DealBrief>(
@@ -2890,9 +2946,8 @@ export function generateDealBrief(id: number, refresh = false, init: RequestInit
 }
 
 /**
- * AI-generated risk rationale for a deal. Returns a graceful unavailability result (never an error)
- * when the deal is not at risk or AI is not configured for the organization; generation is slow (an
- * LLM call), so invoke client-side.
+ * AI-generated risk rationale for a deal. Graceful domain unavailability resolves normally;
+ * provider failure and timeout reject distinctly.
  */
 export function generateDealRationale(id: number, refresh = false, init: RequestInit = {}) {
     return dedupedAiPost<Types.DealRationale>(

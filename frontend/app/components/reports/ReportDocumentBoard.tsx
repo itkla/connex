@@ -31,9 +31,10 @@ import {
     exportReportSnapshotCsv,
     generateReport,
     getReportSnapshot,
+    resolveAcceptedAiGeneration,
 } from '@/app/lib/api';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import { recoverAiResult } from '@/app/lib/aiRecovery';
+import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
@@ -41,6 +42,7 @@ import type {
     ReportDefinition,
     ReportDocument,
     ReportGenerateInput,
+    AiGenerationStatus,
     ReportNarrativeClaim,
     ReportSnapshot,
     ReportSnapshotSummary,
@@ -71,10 +73,9 @@ type DocumentState =
     | { status: 'error' }
     | { status: 'ready'; document: ReportDocument };
 
-type NarrativeState = 'idle' | 'generating' | 'error';
+type NarrativeState = 'idle' | 'generating' | 'error' | 'rateLimited' | 'timedOut';
 
 const FIGURES_TIMEOUT_MS = 30_000;
-const NARRATIVE_TIMEOUT_MS = 90_000;
 
 /**
  * Rejects if the wrapped promise has not settled within {@link ms}. The underlying request keeps
@@ -139,6 +140,7 @@ export default function ReportDocumentBoard({
     const generationInputRef = useRef<ReportGenerateInput>({});
     const snapshotRequestRef = useRef(0);
     const generationRef = useRef(0);
+    const generationAbortRef = useRef<AbortController | null>(null);
     const paperRef = useRef<HTMLElement>(null);
     const hasAttainment = definition.config.widgets.some((widget) => widget.measure === 'attainment');
 
@@ -146,39 +148,50 @@ export default function ReportDocumentBoard({
         ? activeSnapshot?.computedResult ?? null
         : state.status === 'ready' ? state.document : null;
 
-    /**
-     * Generates the narrative, then recovers from a request that was cut in transit. The server
-     * completes and caches the narrative regardless of whether the client still holds the
-     * connection, so a lost response is resolved by polling the provider-free cached mode rather
-     * than by surfacing an error the reader has to retry by hand.
-     */
-    const runNarrative = useCallback(async (generationId: number) => {
+    /** Resolves an accepted narrative handle, or starts a fresh handle for an explicit retry. */
+    const runNarrative = useCallback(async (
+        generationId: number,
+        accepted?: AiGenerationStatus<ReportDocument>,
+    ) => {
+        generationAbortRef.current?.abort();
+        const controller = new AbortController();
+        generationAbortRef.current = controller;
         setNarrativeState('generating');
-        const apply = (document: ReportDocument) => {
-            setState({ status: 'ready', document });
-            setNarrativeState('idle');
-        };
         try {
-            const full = await withTimeout(
-                generateReport(definition.id, generationInputRef.current, 'full'),
-                NARRATIVE_TIMEOUT_MS,
+            let generation = accepted;
+            if (!generation) {
+                const started = await withTimeout(
+                    generateReport(definition.id, generationInputRef.current, 'full'),
+                    FIGURES_TIMEOUT_MS,
+                );
+                if (generationRef.current !== generationId) return;
+                setState({ status: 'ready', document: started });
+                generation = started.generation ?? undefined;
+                if (!generation) {
+                    setNarrativeState(started.narrative.available ? 'idle' : 'error');
+                    return;
+                }
+            }
+            const resolved = await resolveAcceptedAiGeneration<ReportDocument>(
+                generation,
+                { signal: controller.signal },
             );
             if (generationRef.current !== generationId) return;
-            apply(full);
-            return;
-        } catch {
-            if (generationRef.current !== generationId) return;
-        }
-        const recovered = await recoverAiResult(
-            () => generateReport(definition.id, generationInputRef.current, 'cached'),
-            (document) => document.narrative.available,
-            () => generationRef.current !== generationId,
-        );
-        if (generationRef.current !== generationId) return;
-        if (recovered) {
-            apply(recovered);
-        } else {
-            setNarrativeState('error');
+            setState({ status: 'ready', document: resolved });
+            setNarrativeState('idle');
+        } catch (error) {
+            if (generationRef.current !== generationId || controller.signal.aborted) return;
+            if (error instanceof AiGenerationError && error.status === 'timed_out') {
+                setNarrativeState('timedOut');
+            } else if (error instanceof AiGenerationError && error.reason === 'rate_limited') {
+                setNarrativeState('rateLimited');
+            } else {
+                setNarrativeState('error');
+            }
+        } finally {
+            if (generationAbortRef.current === controller) {
+                generationAbortRef.current = null;
+            }
         }
     }, [definition.id]);
 
@@ -189,7 +202,7 @@ export default function ReportDocumentBoard({
             let figures: ReportDocument;
             try {
                 figures = await withTimeout(
-                    generateReport(definition.id, generationInputRef.current, 'cached'),
+                    generateReport(definition.id, generationInputRef.current, 'full'),
                     FIGURES_TIMEOUT_MS,
                 );
             } catch {
@@ -200,17 +213,21 @@ export default function ReportDocumentBoard({
             setState({ status: 'ready', document: figures });
             setStart(figures.periodStart);
             setEnd(figures.periodEnd);
-            if (figures.narrative.reason === 'not_cached') {
-                void runNarrative(generationId);
+            if (figures.generation) {
+                void runNarrative(generationId, figures.generation);
+            } else {
+                setNarrativeState('idle');
             }
         })();
         return () => {
+            generationAbortRef.current?.abort();
             generationRef.current += 1;
         };
     }, [definition.id, refreshKey, runNarrative, liveRequested]);
 
     const retryNarrative = () => {
-        void runNarrative(generationRef.current);
+        const generationId = (generationRef.current += 1);
+        void runNarrative(generationId);
     };
 
     const generationInput = (): ReportGenerateInput | null => {
@@ -507,11 +524,13 @@ export default function ReportDocumentBoard({
                             ? null
                             : narrativeState === 'generating'
                                 ? 'generating'
-                                : narrativeState === 'error'
-                                    || document.narrative.reason === 'rate_limited'
-                                    || document.narrative.reason === 'provider_error'
-                                    ? 'error'
-                                    : null}
+                                : narrativeState === 'timedOut'
+                                    ? 'timedOut'
+                                    : narrativeState === 'rateLimited'
+                                        ? 'rateLimited'
+                                        : narrativeState === 'error'
+                                            ? 'error'
+                                            : null}
                         onRetryNarrative={activeSnapshot != null ? undefined : retryNarrative}
                     />
                 ) : null}
@@ -554,7 +573,7 @@ function ReportPaper({
     document: ReportDocument;
     snapshot: ReportSnapshot | null;
     paperRef: RefObject<HTMLElement | null>;
-    narrativePhase: 'generating' | 'error' | null;
+    narrativePhase: 'generating' | 'error' | 'rateLimited' | 'timedOut' | null;
     onRetryNarrative?: () => void;
 }) {
     const t = useTranslations('Reports');
@@ -664,15 +683,23 @@ function ReportPaper({
                             <p className="mt-1 text-sm text-muted-foreground">{t('document.narrativeGeneratingBody')}</p>
                         </div>
                     </div>
-                ) : narrativePhase === 'error' ? (
+                ) : narrativePhase === 'error'
+                    || narrativePhase === 'rateLimited'
+                    || narrativePhase === 'timedOut' ? (
                     <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-8">
                         <div className="flex items-start gap-3">
                             <ExclamationCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
                             <div>
-                                <p className="text-sm font-medium text-foreground">{t('document.narrativeErrorTitle')}</p>
+                                <p className="text-sm font-medium text-foreground">
+                                    {narrativePhase === 'timedOut'
+                                        ? t('document.narrativeTimedOutTitle')
+                                        : t('document.narrativeErrorTitle')}
+                                </p>
                                 <p className="mt-1 text-sm text-muted-foreground">
-                                    {document.narrative.reason === 'rate_limited'
+                                    {narrativePhase === 'rateLimited'
                                         ? t('document.narrativeRateLimitedBody')
+                                        : narrativePhase === 'timedOut'
+                                            ? t('document.narrativeTimedOutBody')
                                         : t('document.narrativeErrorBody')}
                                 </p>
                             </div>

@@ -13,8 +13,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 /**
  * Fails closed unless the instance AI kill switch is enabled, the current actor
  * has {@link Permission#AI_USE} in the active workspace, and the active
- * organization has an enabled, fully-configured BYOP provider. This gate runs on the request
- * thread only and uses the current tenant context through {@link WorkspaceService}.
+ * organization has an enabled, fully-configured BYOP provider. This gate uses the current tenant
+ * and security contexts from either the request thread or a propagated automation thread.
  */
 @Service
 @RequiredArgsConstructor

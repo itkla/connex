@@ -15,6 +15,7 @@ import java.util.List;
  * @param appendix deterministic source appendix
  * @param citations server-resolved cited sources
  * @param generatedAt document generation timestamp
+ * @param generation asynchronous narrative status when a cache miss was accepted
  */
 public record ReportDocumentDto(
         ReportDefinitionDto definition,
@@ -26,5 +27,31 @@ public record ReportDocumentDto(
         List<ReportWidgetDataDto> widgets,
         List<ReportAppendixRowDto> appendix,
         List<ReportCitationDto> citations,
-        String generatedAt) {
+        String generatedAt,
+        AiGenerationStatusDto generation) {
+
+    public ReportDocumentDto(
+            ReportDefinitionDto definition,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            LocalDate priorPeriodStart,
+            LocalDate priorPeriodEnd,
+            ReportNarrativeDto narrative,
+            List<ReportWidgetDataDto> widgets,
+            List<ReportAppendixRowDto> appendix,
+            List<ReportCitationDto> citations,
+            String generatedAt) {
+        this(
+                definition,
+                periodStart,
+                periodEnd,
+                priorPeriodStart,
+                priorPeriodEnd,
+                narrative,
+                widgets,
+                appendix,
+                citations,
+                generatedAt,
+                null);
+    }
 }

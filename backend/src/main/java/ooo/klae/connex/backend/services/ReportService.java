@@ -30,13 +30,17 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
+import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.AiGenerationService;
+import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.beans.ReportGoal;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSchedule;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
@@ -93,6 +97,10 @@ public class ReportService {
     private static final long MAX_SNAPSHOT_BYTES_PER_WORKSPACE = 268_435_456;
     private static final String SNAPSHOT_ORIGIN_MANUAL = "manual";
     private static final String SNAPSHOT_ORIGIN_SCHEDULED = "scheduled";
+    private static final String NARRATIVE_NOT_CACHED = "not_cached";
+    private static final String NARRATIVE_NOT_CONFIGURED = "not_configured";
+    private static final Set<String> NARRATIVE_FAILURE_REASONS = Set.of(
+            "provider_error", "invalid_grounding", "rate_limited");
     private static final int RISK_ID_BATCH_SIZE = 1_000;
     private static final int FORECAST_HORIZON_MONTHS = 3;
     private static final int FORECAST_HISTORY_PRIOR_DEALS = 10;
@@ -147,7 +155,9 @@ public class ReportService {
     private final DealRiskService dealRiskService;
     private final ReportNetworkService reportNetworkService;
     private final AiReportNarrativeService aiReportNarrativeService;
+    private final AiGenerationService aiGenerationService;
     private final AiRestrictionEpoch aiRestrictionEpoch;
+    private final ReportPermissionPolicy reportPermissionPolicy;
     private final AuditService auditService;
     private final DeletionPolicy deletionPolicy;
     private final ObjectMapper objectMapper;
@@ -156,9 +166,9 @@ public class ReportService {
 
     /**
      * Controls how a generated document resolves its AI narrative. {@code NONE} skips it (exports),
-     * {@code CACHED} returns a cached narrative without ever calling the provider (interactive
-     * figures-first load), and {@code FULL} performs the blocking generation (client follow-up and
-     * snapshot freeze).
+     * {@code CACHED} returns a cached narrative without ever calling the provider, and {@code FULL}
+     * performs blocking generation for internal snapshot and delivery callers. Interactive HTTP
+     * generation uses {@link #generateInteractive(int, ReportGenerateRequest, NarrativeMode)}.
      */
     public enum NarrativeMode {
         NONE,
@@ -339,12 +349,67 @@ public class ReportService {
     /**
      * Generates deterministic figures and resolves the grounded narrative per the requested mode.
      * {@link NarrativeMode#CACHED} never invokes the AI provider, so the figures return immediately
-     * and the client resolves a {@code not_cached} narrative with a follow-up {@link NarrativeMode#FULL}
-     * request.
+     * and a cache miss yields an explicit {@code not_cached} narrative.
      */
     @RequirePermission(Permission.REPORT_READ)
     public ReportDocumentDto generate(int id, ReportGenerateRequest request, NarrativeMode mode) {
         return generateInternal(id, request, mode);
+    }
+
+    /**
+     * Generates interactive figures once and starts a shared asynchronous narrative on a cache miss.
+     * The returned handle resolves to a document built from these exact frozen figures.
+     */
+    @RequirePermission(Permission.REPORT_READ)
+    public ReportDocumentDto generateInteractive(
+            int id,
+            ReportGenerateRequest request,
+            NarrativeMode mode) {
+        if (mode != NarrativeMode.FULL) {
+            return generateInternal(id, request, mode);
+        }
+        PreparedReport prepared = prepareReport(id, request);
+        ReportNarrativeDto cached = aiReportNarrativeService.cachedNarrative(
+                id,
+                prepared.definitionName(),
+                prepared.period().start(),
+                prepared.period().end(),
+                prepared.figures().appendix());
+        ReportDocumentDto initial = document(prepared, cached);
+        if (!NARRATIVE_NOT_CACHED.equals(cached.reason())) {
+            return initial;
+        }
+
+        Set<Permission> requiredPermissions = new HashSet<>(reportPermissionPolicy.requiredFor(initial));
+        requiredPermissions.add(Permission.AI_USE);
+        ReportDocumentDto unavailable = document(
+                prepared,
+                ReportNarrativeDto.unavailable(NARRATIVE_NOT_CONFIGURED));
+        AiGenerationStatusDto generation = aiGenerationService.startAtRestrictionEpoch(
+                AiFeature.REPORT_NARRATIVE,
+                new ReportGenerationIdentity(
+                        id,
+                        prepared.definition(),
+                        prepared.period().start(),
+                        prepared.period().end(),
+                        prepared.figures(),
+                        prepared.restrictionEpoch()),
+                requiredPermissions,
+                unavailable,
+                () -> generateNarrative(prepared),
+                prepared.restrictionEpoch());
+        return new ReportDocumentDto(
+                initial.definition(),
+                initial.periodStart(),
+                initial.periodEnd(),
+                initial.priorPeriodStart(),
+                initial.priorPeriodEnd(),
+                initial.narrative(),
+                initial.widgets(),
+                initial.appendix(),
+                initial.citations(),
+                initial.generatedAt(),
+                generation);
     }
 
     /** Freezes a generated report document as an immutable snapshot. */
@@ -550,6 +615,27 @@ public class ReportService {
     }
 
     private ReportDocumentDto generateInternal(int id, ReportGenerateRequest request, NarrativeMode mode) {
+        PreparedReport prepared = prepareReport(id, request);
+        ReportNarrativeDto narrative = switch (mode) {
+            case NONE -> ReportNarrativeDto.unavailable("not_requested");
+            case CACHED -> aiReportNarrativeService.cachedNarrative(
+                    id,
+                    prepared.definitionName(),
+                    prepared.period().start(),
+                    prepared.period().end(),
+                    prepared.figures().appendix());
+            case FULL -> aiReportNarrativeService.generate(
+                    id,
+                    prepared.definitionName(),
+                    prepared.period().start(),
+                    prepared.period().end(),
+                    prepared.figures().appendix(),
+                    prepared.restrictionEpoch());
+        };
+        return document(prepared, narrative);
+    }
+
+    private PreparedReport prepareReport(int id, ReportGenerateRequest request) {
         ReportDefinition definition = requireDefinition(id);
         ReportConfig config = parseConfig(definition.getConfigJson());
         validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
@@ -558,18 +644,45 @@ public class ReportService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long restrictionEpoch = aiRestrictionEpoch.current(workspaceId);
         GeneratedFigures figures = generateFigures(workspaceId, config, period);
-        ReportNarrativeDto narrative = switch (mode) {
-            case NONE -> ReportNarrativeDto.unavailable("not_requested");
-            case CACHED -> aiReportNarrativeService.cachedNarrative(
-                    id, definition.getName(), period.start(), period.end(), figures.appendix());
-            case FULL -> aiReportNarrativeService.generate(
-                    id, definition.getName(), period.start(), period.end(), figures.appendix(),
-                    restrictionEpoch);
-        };
-        List<ReportCitationDto> citations = citations(narrative, figures.appendix());
+        return new PreparedReport(
+                toDefinitionDto(definition),
+                definition.getName(),
+                period,
+                figures,
+                restrictionEpoch,
+                Instant.now(clock).toString());
+    }
+
+    private AiGenerationTaskResult<ReportDocumentDto> generateNarrative(PreparedReport prepared) {
+        ReportNarrativeDto narrative = aiReportNarrativeService.generate(
+                prepared.definition().id(),
+                prepared.definitionName(),
+                prepared.period().start(),
+                prepared.period().end(),
+                prepared.figures().appendix(),
+                prepared.restrictionEpoch());
+        if (narrative.available()) {
+            return AiGenerationTaskResult.resolved(document(prepared, narrative));
+        }
+        if (NARRATIVE_FAILURE_REASONS.contains(narrative.reason())) {
+            return AiGenerationTaskResult.failed(narrative.reason());
+        }
+        return AiGenerationTaskResult.unavailable(document(prepared, narrative));
+    }
+
+    private ReportDocumentDto document(PreparedReport prepared, ReportNarrativeDto narrative) {
+        List<ReportCitationDto> citations = citations(narrative, prepared.figures().appendix());
         return new ReportDocumentDto(
-                toDefinitionDto(definition), period.start(), period.end(), period.priorStart(), period.priorEnd(),
-                narrative, figures.widgets(), figures.appendix(), citations, Instant.now(clock).toString());
+                prepared.definition(),
+                prepared.period().start(),
+                prepared.period().end(),
+                prepared.period().priorStart(),
+                prepared.period().priorEnd(),
+                narrative,
+                prepared.figures().widgets(),
+                prepared.figures().appendix(),
+                citations,
+                prepared.generatedAt());
     }
 
     /** Generates every widget's figures and appendix rows for the resolved reporting period. */
@@ -1737,6 +1850,24 @@ public class ReportService {
     private record GeneratedFigures(
             List<ReportWidgetDataDto> widgets,
             List<ReportAppendixRowDto> appendix) {
+    }
+
+    private record PreparedReport(
+            ReportDefinitionDto definition,
+            String definitionName,
+            PeriodWindow period,
+            GeneratedFigures figures,
+            long restrictionEpoch,
+            String generatedAt) {
+    }
+
+    private record ReportGenerationIdentity(
+            int reportId,
+            ReportDefinitionDto definition,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            GeneratedFigures figures,
+            long restrictionEpoch) {
     }
 
     private record RowPair(List<ReportAggregateRow> current, List<ReportAggregateRow> prior) {
