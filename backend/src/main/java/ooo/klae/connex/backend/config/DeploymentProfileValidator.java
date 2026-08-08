@@ -15,6 +15,8 @@ import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.capability.CapabilityRegistry;
 
 /**
  * Enforces deployment-profile posture constraints during startup. A deployed instance must
@@ -46,11 +48,11 @@ import lombok.RequiredArgsConstructor;
  * managed mail while this validator saw {@code false} and admitted the on-prem boot — the exact
  * hole this refusal closes. Binding here guarantees the validator reads what the beans read.
  *
- * <p>Invalid values remain the responsibility of bean validation on
- * {@link DeploymentProperties}. Forced cookie security and database transport checks are
- * intentionally outside this matrix because existing fail-closed validators already own those
- * requirements. The effective capability matrix is logged separately by
- * {@code CapabilityProfileMatrixLogger}.
+ * <p>Invalid profile values are also rejected here so they fail before the web server is created;
+ * bean validation on {@link DeploymentProperties} retains the same configuration-properties
+ * boundary check. Forced cookie security and database transport checks are intentionally outside
+ * this matrix because existing fail-closed validators already own those requirements. The
+ * effective capability matrix is logged separately by {@code CapabilityProfileMatrixLogger}.
  */
 @Component
 @RequiredArgsConstructor
@@ -77,32 +79,49 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     private static final Map<String, List<String>> FORBIDDEN_KEYS_BY_PROFILE = Map.of(
         DeploymentProperties.PROFILE_SAAS, INTERNAL_ACCESS_KEYS,
         DeploymentProperties.PROFILE_SILO, List.of(),
-        DeploymentProperties.PROFILE_ON_PREM, List.of(MAIL_MANAGED)
+        DeploymentProperties.PROFILE_ON_PREM, List.of()
+    );
+    private static final Map<String, Capability> CAPABILITY_BY_POSTURE_KEY = Map.of(
+        MAIL_MANAGED, Capability.MANAGED_MAIL
     );
     private static final Logger log = LoggerFactory.getLogger(DeploymentProfileValidator.class);
 
-    private final DeploymentProperties properties;
     private final Environment environment;
 
     @Override
     public void run(ApplicationArguments args) {
-        if (!properties.isConfigured()) {
+        ValidationResult result = evaluate(environment);
+        if (!result.configured()) {
+            log.debug("deployment profile unset (dev/test/seeder) — posture enforcement inactive");
+            return;
+        }
+        log.info("Deployment profile {} posture enforced: {}",
+            result.profile(), formatPosture(result.posture()));
+    }
+
+    static void validate(Environment environment) {
+        evaluate(environment);
+    }
+
+    private static ValidationResult evaluate(Environment environment) {
+        Binder binder = Binder.get(environment);
+        String profile = binder.bind("connex.deployment.profile", String.class).orElse("");
+        if (profile.isBlank()) {
             if (environment.acceptsProfiles(Profiles.of("dev", "test", "seeder"))) {
-                log.debug("deployment profile unset (dev/test/seeder) — posture enforcement inactive");
-                return;
+                return new ValidationResult(profile, Map.of());
             }
             throw new IllegalStateException(
                 "CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem outside dev/test/seeder");
         }
 
-        String profile = properties.getProfile();
         List<String> forbiddenKeys = FORBIDDEN_KEYS_BY_PROFILE.get(profile);
         if (forbiddenKeys == null) {
             throw new IllegalStateException("Unsupported connex.deployment.profile=" + profile);
         }
 
-        Map<String, Boolean> posture = readPosture();
-        List<String> violations = forbiddenKeys.stream()
+        Map<String, Boolean> posture = readPosture(binder);
+        List<String> violations = POSTURE_KEYS.stream()
+            .filter(key -> isForbidden(profile, forbiddenKeys, key))
             .filter(key -> Boolean.TRUE.equals(posture.get(key)))
             .map(key -> key + "=true")
             .toList();
@@ -111,11 +130,18 @@ public class DeploymentProfileValidator implements ApplicationRunner {
                 + " forbids: " + String.join(", ", violations));
         }
 
-        log.info("Deployment profile {} posture enforced: {}", profile, formatPosture(posture));
+        return new ValidationResult(profile, posture);
     }
 
-    private Map<String, Boolean> readPosture() {
-        Binder binder = Binder.get(environment);
+    private static boolean isForbidden(String profile, List<String> forbiddenKeys, String key) {
+        if (forbiddenKeys.contains(key)) {
+            return true;
+        }
+        Capability capability = CAPABILITY_BY_POSTURE_KEY.get(key);
+        return capability != null && !CapabilityRegistry.isAllowedForProfile(capability, profile);
+    }
+
+    private static Map<String, Boolean> readPosture(Binder binder) {
         Map<String, Boolean> posture = new LinkedHashMap<>();
         for (String key : POSTURE_KEYS) {
             posture.put(key, binder.bind(key, Boolean.class).orElse(false));
@@ -123,9 +149,16 @@ public class DeploymentProfileValidator implements ApplicationRunner {
         return posture;
     }
 
-    private String formatPosture(Map<String, Boolean> posture) {
+    private static String formatPosture(Map<String, Boolean> posture) {
         return posture.entrySet().stream()
             .map(entry -> entry.getKey() + "=" + entry.getValue())
             .collect(Collectors.joining(", "));
+    }
+
+    private record ValidationResult(String profile, Map<String, Boolean> posture) {
+
+        private boolean configured() {
+            return !profile.isBlank();
+        }
     }
 }

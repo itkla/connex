@@ -181,12 +181,9 @@ jobs:
           CONNEX_DEPLOYMENT_PROFILE=on-prem CONNEX_MAIL_MANAGED=true \
             java -jar "$WAR" > /tmp/boot-on-prem-managed.log 2>&1 &
           PID=$!
-          # The profile check throws after Tomcat has already bound :8080, so a forbidden
-          # instance answers /api/version for a moment before dying. Answering therefore
-          # proves nothing on its own: only the process outliving the whole deadline counts
-          # as booted. Sampling liveness once after a fixed settle would still invert
-          # whenever shutdown, or an ApplicationRunner ahead of the validator, took longer
-          # than that one sample.
+          # The deployment-profile environment processor refuses this before application-context
+          # creation, while the backend startup canary separately proves no web server is created.
+          # This packaged smoke retains the process-lifetime and exact-message assertions.
           REFUSED=0
           for _ in $(seq 1 90); do
             if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; break; fi
