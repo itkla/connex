@@ -370,6 +370,7 @@ function isCsrfRetryExemptMutation(path: string): boolean {
 async function requestJson<T>(
     path: string,
     init: RequestInit = {},
+    workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
 ): Promise<T> {
     const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
@@ -412,13 +413,83 @@ async function requestJson<T>(
         throw await getApiError(res);
     }
 
-    const text = await res.text();
+    try {
+        const text = await res.text();
 
-    if (!text) {
-        return undefined as T;
+        if (!text) {
+            if (workspaceSelectionBody === "required") {
+                throw new SyntaxError("Workspace selection response body was empty");
+            }
+            return undefined as T;
+        }
+
+        return JSON.parse(text) as T;
+    } catch (error) {
+        if (workspaceSelectionBody !== "standard") {
+            throw new WorkspaceSelectionResponseBodyError(error);
+        }
+        throw error;
     }
+}
 
-    return JSON.parse(text) as T;
+class WorkspaceSelectionResponseBodyError extends Error {
+    readonly responseBodyError: unknown;
+
+    constructor(responseBodyError: unknown) {
+        super(responseBodyError instanceof Error
+            ? responseBodyError.message
+            : "Workspace selection response body failed");
+        this.name = "WorkspaceSelectionResponseBodyError";
+        this.responseBodyError = responseBodyError;
+    }
+}
+
+/**
+ * Reports that a successful workspace-selection response changed the browser cookie but neither
+ * its body nor the authoritative workspace snapshot could establish the selection to publish.
+ * Callers with a mounted {@code WorkspaceProvider} must fail closed until an ordered retry succeeds.
+ */
+export class WorkspaceSelectionUnavailableError extends Error {
+    readonly responseBodyError: unknown;
+    readonly recoveryError: unknown;
+
+    constructor(responseBodyError: unknown, recoveryError: unknown) {
+        super(recoveryError instanceof Error
+            ? recoveryError.message
+            : "Workspace selection is temporarily unavailable");
+        this.name = "WorkspaceSelectionUnavailableError";
+        this.responseBodyError = responseBodyError;
+        this.recoveryError = recoveryError;
+    }
+}
+
+/**
+ * Completes a selection-changing request whose successful headers arrived before its body failed.
+ * Fetch failures before a {@code Response} exists and non-success responses reject unchanged. Once
+ * successful headers may have applied {@code connex_workspace}, this performs an ordered read of
+ * the authoritative workspace snapshot and projects it into the endpoint's normal return shape so
+ * the existing success path publishes and navigates exactly once. Recovery remains awaited by the
+ * caller, so a surrounding selection mutex stays held. A failed or inconsistent re-read throws
+ * {@link WorkspaceSelectionUnavailableError} instead of allowing stale provider state to continue.
+ */
+export async function recoverWorkspaceSelectionResponse<T>(
+    request: () => Promise<T>,
+    recover: (snapshot: Types.MyWorkspaces) => T,
+): Promise<T> {
+    try {
+        return await request();
+    } catch (error) {
+        if (!(error instanceof WorkspaceSelectionResponseBodyError)) throw error;
+        try {
+            return recover(await readAuthoritativeWorkspaceSelection(false));
+        } catch (recoveryError) {
+            signalClientRequestIdentityTransition("workspace");
+            throw new WorkspaceSelectionUnavailableError(
+                error.responseBodyError,
+                recoveryError,
+            );
+        }
+    }
 }
 
 async function requestMultipart<T>(
@@ -558,6 +629,17 @@ async function postJson<T>(path: string, body: unknown = {}, init: RequestInit =
         method: "POST",
         body: JSON.stringify(body),
     });
+}
+
+async function postWorkspaceSelectionJson<T>(
+    path: string,
+    body: unknown = {},
+    bodyRequired = true,
+): Promise<T> {
+    return requestJson<T>(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+    }, bodyRequired ? "required" : "optional");
 }
 
 async function postFormData<T>(path: string, body: FormData, init: RequestInit = {}): Promise<T> {
@@ -3590,18 +3672,93 @@ export function getMyWorkspaces(init: RequestInit = {}) {
     return getJson<Types.MyWorkspaces>(`/api/workspaces`, { cache: "no-store", ...init });
 }
 
-export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<Types.MyWorkspaces> {
-    if (!cookie) return EMPTY_WORKSPACES;
-    return getMyWorkspaces({ headers: { cookie }, cache: "no-store" });
+function workspaceSelectionForBrowserCookie(snapshot: Types.MyWorkspaces): Types.MyWorkspaces | null {
+    if (!Array.isArray(snapshot.workspaces)) return null;
+    const cookieWorkspaceId = typeof document === "undefined"
+        ? null
+        : workspaceIdFromCookieHeader(document.cookie);
+    if (cookieWorkspaceId === null) {
+        return snapshot.workspaces.length === 0 && snapshot.activeWorkspaceId === null
+            ? snapshot
+            : null;
+    }
+    if (!snapshot.workspaces.some((workspace) => workspace.id === cookieWorkspaceId)) return null;
+    return snapshot.activeWorkspaceId === cookieWorkspaceId
+        ? snapshot
+        : { ...snapshot, activeWorkspaceId: cookieWorkspaceId };
 }
 
-export function getMyWorkspacesResultFromCookie(cookie: string | null) {
-    return resultWithCookie<Types.MyWorkspaces>((init) => getMyWorkspaces(init), cookie);
+/**
+ * Re-reads the browser's active workspace from the server after the cookie may have changed.
+ * The returned memberships validate the strict current {@code connex_workspace} cookie, which is
+ * then published as active. The endpoint's active ID is only a user-wide remembered fallback and
+ * can legitimately differ after another browser changes it, so it cannot override this browser's
+ * accessible cookie. Every attempt can invalidate browser request identity and notify peer tabs to
+ * abandon their prior workspace. Callers must publish the returned snapshot explicitly; refreshed
+ * provider props remain unordered.
+ * @param notifyTransition - whether this read owns the workspace-transition notification
+ */
+export async function readAuthoritativeWorkspaceSelection(
+    notifyTransition = true,
+): Promise<Types.MyWorkspaces> {
+    try {
+        const selection = workspaceSelectionForBrowserCookie(await getMyWorkspaces());
+        if (selection) return selection;
+        throw new Error("Authoritative workspace selection did not match the browser cookie");
+    } finally {
+        if (notifyTransition) signalClientRequestIdentityTransition("workspace");
+    }
+}
+
+function activeWorkspaceFromSelection(snapshot: Types.MyWorkspaces): Types.Workspace {
+    const activeWorkspace = snapshot.workspaces.find(
+        (workspace) => workspace.id === snapshot.activeWorkspaceId,
+    );
+    if (!activeWorkspace) {
+        throw new Error("Authoritative workspace selection has no active membership");
+    }
+    return activeWorkspace;
+}
+
+export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<Types.MyWorkspaces> {
+    if (!cookie) return EMPTY_WORKSPACES;
+    return workspaceSnapshotForForwardedCookie(
+        await getMyWorkspaces({ headers: { cookie }, cache: "no-store" }),
+        cookie,
+    );
+}
+
+function workspaceSnapshotForForwardedCookie(
+    snapshot: Types.MyWorkspaces,
+    cookie: string,
+): Types.MyWorkspaces {
+    const cookieWorkspaceId = workspaceIdFromCookieHeader(cookie);
+    return cookieWorkspaceId !== null
+        && snapshot.workspaces.some((workspace) => workspace.id === cookieWorkspaceId)
+        && snapshot.activeWorkspaceId !== cookieWorkspaceId
+        ? { ...snapshot, activeWorkspaceId: cookieWorkspaceId }
+        : snapshot;
+}
+
+/**
+ * Reads the server-rendered workspace snapshot and publishes an accessible forwarded cookie as
+ * active because it defines this request's tenant. The endpoint's active ID remains the fallback
+ * for a missing or revoked cookie, preserving the backend's stale-pin healing path (#1109).
+ */
+export async function getMyWorkspacesResultFromCookie(
+    cookie: string | null,
+): Promise<CookieResult<Types.MyWorkspaces>> {
+    const result = await resultWithCookie<Types.MyWorkspaces>((init) => getMyWorkspaces(init), cookie);
+    if (!result.ok || cookie === null) return result;
+    return { ok: true, data: workspaceSnapshotForForwardedCookie(result.data, cookie) };
 }
 
 export function createWorkspace(name: string) {
     return withClientRequestIdentityReset(
-        () => postJson<Types.Workspace>(`/api/workspaces`, { name }),
+        () => recoverWorkspaceSelectionResponse(
+            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }),
+            activeWorkspaceFromSelection,
+        ),
         "workspace",
     );
 }
@@ -3625,7 +3782,14 @@ export function updateWorkspaceIdentity(
 
 export function switchWorkspace(id: number) {
     return withClientRequestIdentityReset(
-        () => postJson<void>(`/api/workspaces/${id}/switch`, {}),
+        () => recoverWorkspaceSelectionResponse(
+            () => postWorkspaceSelectionJson<void>(`/api/workspaces/${id}/switch`, {}, false),
+            (snapshot) => {
+                if (snapshot.activeWorkspaceId !== id) {
+                    throw new Error("Authoritative workspace selection did not confirm the switch");
+                }
+            },
+        ),
         "workspace",
     );
 }
@@ -3636,7 +3800,15 @@ export function getPendingWorkspaces(init: RequestInit = {}) {
 
 export function acceptWorkspace(id: number) {
     return withClientRequestIdentityReset(
-        () => postJson<Types.Workspace>(`/api/workspaces/${id}/accept`, {}),
+        () => recoverWorkspaceSelectionResponse(
+            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces/${id}/accept`, {}),
+            (snapshot) => {
+                if (snapshot.activeWorkspaceId !== id) {
+                    throw new Error("Authoritative workspace selection did not confirm acceptance");
+                }
+                return activeWorkspaceFromSelection(snapshot);
+            },
+        ),
         "workspace",
     );
 }
@@ -3647,7 +3819,15 @@ export function declineWorkspace(id: number) {
 
 export function leaveWorkspace(id: number) {
     return withClientRequestIdentityReset(
-        () => postJson<Types.WorkspaceSelection>(`/api/workspaces/${id}/leave`, {}),
+        () => recoverWorkspaceSelectionResponse(
+            () => postWorkspaceSelectionJson<Types.WorkspaceSelection>(`/api/workspaces/${id}/leave`, {}),
+            (snapshot) => {
+                if (snapshot.activeWorkspaceId === id) {
+                    throw new Error("Authoritative workspace selection still names the left workspace");
+                }
+                return { activeWorkspaceId: snapshot.activeWorkspaceId };
+            },
+        ),
         "workspace",
     );
 }
@@ -4596,7 +4776,10 @@ export function getInvitePreview(token: string, init: RequestInit = {}) {
 
 export function acceptInvite(token: string) {
     return withClientRequestIdentityReset(
-        () => postJson<Types.Workspace>(`/api/invites/${token}/accept`, {}),
+        () => recoverWorkspaceSelectionResponse(
+            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/invites/${token}/accept`, {}),
+            activeWorkspaceFromSelection,
+        ),
         "workspace",
     );
 }
@@ -4622,7 +4805,10 @@ export function getInviteLinkPreview(token: string, init: RequestInit = {}) {
 
 export function acceptInviteLink(token: string) {
     return withClientRequestIdentityReset(
-        () => postJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {}),
+        () => recoverWorkspaceSelectionResponse(
+            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {}),
+            activeWorkspaceFromSelection,
+        ),
         "workspace",
     );
 }
