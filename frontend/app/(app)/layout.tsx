@@ -3,12 +3,13 @@ import { Suspense } from "react";
 import Sidebar from "@/app/components/Sidebar";
 import SidebarFallback from "@/app/components/SidebarFallback";
 import ContentShell from "@/app/components/ContentShell";
+import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import {
     DEFAULT_CAPABILITIES,
     getCapabilities,
     getCurrentUserFromCookie,
     getEffectivePermissionsResultFromCookie,
-    getMyWorkspacesFromCookie,
+    getMyWorkspacesResultFromCookie,
 } from "@/app/lib/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -54,7 +55,11 @@ export default async function AppLayout({
         redirect(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
     }
 
-    const { workspaces, activeWorkspaceId } = await getMyWorkspacesFromCookie(cookie);
+    const workspacesResult = await getMyWorkspacesResultFromCookie(cookie);
+    if (!workspacesResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const { workspaces, activeWorkspaceId } = workspacesResult.data;
     if (workspaces.length === 0) {
         redirect('/onboarding');
     }

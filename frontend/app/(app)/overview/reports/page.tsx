@@ -8,8 +8,8 @@ import {
     getCurrentUserFromCookie,
     getEffectivePermissionsResultFromCookie,
     getReportComposerAvailabilityResultFromCookie,
-    getReportsFromCookie,
-    getReportTemplatesFromCookie,
+    getReports,
+    getReportTemplates,
 } from '@/app/lib/api';
 
 export async function generateMetadata() {
@@ -21,10 +21,11 @@ export default async function ReportsPage() {
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
+    const init = { headers: { cookie: cookie ?? '' } } as const;
 
     const [templates, reports, permissionsResult, composerAvailabilityResult] = await Promise.all([
-        getReportTemplatesFromCookie(cookie),
-        getReportsFromCookie(cookie),
+        getReportTemplates(init),
+        getReports(init),
         getEffectivePermissionsResultFromCookie(cookie),
         getReportComposerAvailabilityResultFromCookie(cookie),
     ]);

@@ -8,11 +8,10 @@ import {
     getActiveWorkspaceMembersResultFromCookie,
     getCurrentUserFromCookie,
     getEffectivePermissionsResultFromCookie,
-    getPipelinesFromCookie,
-    getReportTemplatesFromCookie,
-    getTagsFromCookie,
+    getPipelines,
+    getReportTemplates,
+    getTags,
 } from '@/app/lib/api';
-import type { Tag } from '@/app/lib/types';
 
 export async function generateMetadata() {
     const t = await getTranslations('Reports');
@@ -28,11 +27,12 @@ export default async function NewReportPage({
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
     const { template: templateKey } = await searchParams;
+    const init = { headers: { cookie: cookie ?? '' } } as const;
     const [templates, pipelines, ownersResult, tags, permissionsResult] = await Promise.all([
-        getReportTemplatesFromCookie(cookie),
-        getPipelinesFromCookie(cookie),
+        getReportTemplates(init),
+        getPipelines(init),
         getActiveWorkspaceMembersResultFromCookie(cookie),
-        getTagsFromCookie(cookie).catch((): Tag[] => []),
+        getTags(init),
         getEffectivePermissionsResultFromCookie(cookie),
     ]);
     if (!permissionsResult.ok) return <PermissionsUnavailablePage />;

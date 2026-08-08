@@ -3358,11 +3358,7 @@ const EMPTY_SEARCH_RESULTS: Types.SearchResults = {
  */
 export async function searchFromCookie(cookie: string | null, query: string): Promise<Types.SearchResults> {
     if (!cookie || !query.trim()) return EMPTY_SEARCH_RESULTS;
-    try {
-        return await search(query, { headers: { cookie }, cache: "no-store" });
-    } catch {
-        return EMPTY_SEARCH_RESULTS;
-    }
+    return search(query, { headers: { cookie }, cache: "no-store" });
 }
 
 /*
@@ -3568,6 +3564,10 @@ export function getMyWorkspaces(init: RequestInit = {}) {
 export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<Types.MyWorkspaces> {
     if (!cookie) return EMPTY_WORKSPACES;
     return getMyWorkspaces({ headers: { cookie }, cache: "no-store" });
+}
+
+export function getMyWorkspacesResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.MyWorkspaces>((init) => getMyWorkspaces(init), cookie);
 }
 
 export function createWorkspace(name: string) {

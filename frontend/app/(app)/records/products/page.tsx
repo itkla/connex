@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getProductsFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
+import { getProducts, getCurrentUserFromCookie } from "@/app/lib/api";
 import { type Product } from "@/app/lib/types";
 import ProductsBrowser from "@/app/components/records/products/ProductsBrowser";
 
@@ -12,7 +12,10 @@ export default async function ProductsPage() {
         redirect('/auth/login');
     }
 
-    const products: Product[] = await getProductsFromCookie(cookie);
+    const products: Product[] = await getProducts({}, {
+        headers: { cookie: cookie ?? "" },
+        cache: "no-store",
+    });
 
     return <ProductsBrowser products={products} />;
 }

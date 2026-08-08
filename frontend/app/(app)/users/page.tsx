@@ -1,7 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentUserFromCookie, getUsers } from "@/app/lib/api";
-import { type User } from "@/app/lib/types";
 import UsersBrowser from "@/app/components/records/users/UsersBrowser";
 
 export default async function UsersPage() {
@@ -12,7 +11,7 @@ export default async function UsersPage() {
         redirect("/auth/login");
     }
 
-    const users = await getUsers({ headers: { cookie: cookie ?? "" }, cache: "no-store" }).catch(() => [] as User[]);
+    const users = await getUsers({ headers: { cookie: cookie ?? "" }, cache: "no-store" });
 
     return <UsersBrowser users={users} />;
 }

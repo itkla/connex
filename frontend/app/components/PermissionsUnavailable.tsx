@@ -26,10 +26,15 @@ const NO_ACTIONS: ReadonlyArray<PageStateAction> = [];
  * headingless state, and optional for the compact in-panel card
  * @param body localized explanation that the check, not the caller, is what failed
  * @param actions destinations offered from the full-page variant; the first is emphasized
- * @param action a recovery control for the in-panel card, supplied by the client tree that owns it
+ * @param action a recovery control supplied by the client tree that owns the failed check
  */
 export type PermissionsUnavailableProps = { body: string } & (
-    | { variant?: 'page'; title: string; actions?: ReadonlyArray<PageStateAction> }
+    | {
+        variant?: 'page';
+        title: string;
+        actions?: ReadonlyArray<PageStateAction>;
+        action?: ReactNode;
+    }
     | { variant: 'inline'; title?: string; action?: ReactNode }
 );
 
@@ -54,6 +59,7 @@ export default function PermissionsUnavailable(props: PermissionsUnavailableProp
             title={props.title}
             body={props.body}
             actions={props.actions ?? NO_ACTIONS}
+            action={props.action}
         />
     );
 }

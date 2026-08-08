@@ -1,13 +1,12 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
+    getContacts,
     getCurrentUserFromCookie,
-    getNotesFromCookie,
-    getContactsFromCookie,
-    getDealsFromCookie,
+    getDeals,
+    getNotes,
     getUsers,
 } from "@/app/lib/api";
-import type { User } from "@/app/lib/types";
 import NotesBrowser from "@/app/components/activity/notes/NotesBrowser";
 
 export default async function NotesPage() {
@@ -17,13 +16,13 @@ export default async function NotesPage() {
         redirect('/auth/login');
     }
 
-    const init = cookie ? { headers: { cookie }, cache: 'no-store' as const } : undefined;
+    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
 
     const [allNotes, persons, deals, users] = await Promise.all([
-        getNotesFromCookie(cookie),
-        getContactsFromCookie(cookie),
-        getDealsFromCookie(cookie),
-        (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
+        getNotes(init),
+        getContacts({}, init),
+        getDeals(init),
+        getUsers(init),
     ]);
 
     return (

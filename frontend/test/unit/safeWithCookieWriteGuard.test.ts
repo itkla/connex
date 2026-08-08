@@ -13,6 +13,34 @@ const DELETED_SSR_WRITE_WRAPPERS = [
 ] as const;
 
 const SWALLOWING_READ_CALL_SITES = 37;
+const HONEST_ROUTE_READS = [
+    ['app/(app)/activity/all/page.tsx', 'getActivitiesFromCookie'],
+    ['app/(app)/activity/all/page.tsx', 'getContactsFromCookie'],
+    ['app/(app)/activity/all/page.tsx', 'getDealsFromCookie'],
+    ['app/(app)/activity/all/page.tsx', '.catch(() => []'],
+    ['app/(app)/activity/notes/page.tsx', 'getNotesFromCookie'],
+    ['app/(app)/activity/notes/page.tsx', 'getContactsFromCookie'],
+    ['app/(app)/activity/notes/page.tsx', 'getDealsFromCookie'],
+    ['app/(app)/activity/notes/page.tsx', '.catch(() => []'],
+    ['app/(app)/activity/tasks/page.tsx', 'getTasksFromCookie'],
+    ['app/(app)/activity/tasks/page.tsx', 'getContactsFromCookie'],
+    ['app/(app)/activity/tasks/page.tsx', 'getDealsFromCookie'],
+    ['app/(app)/activity/tasks/page.tsx', 'getEffectivePermissionsFromCookie'],
+    ['app/(app)/activity/tasks/page.tsx', '.catch(() => []'],
+    ['app/(app)/users/page.tsx', '.catch(() => []'],
+    ['app/(app)/records/pipelines/page.tsx', 'getPipelinesFromCookie'],
+    ['app/(app)/library/tags/page.tsx', 'getTagsFromCookie'],
+    ['app/(app)/records/products/page.tsx', 'getProductsFromCookie'],
+    ['app/(app)/library/documents/page.tsx', 'getDocumentTemplatesFromCookie'],
+    ['app/(app)/records/approval-policies/page.tsx', 'getApprovalPoliciesFromCookie'],
+    ['app/(app)/overview/reports/page.tsx', 'getReportsFromCookie'],
+    ['app/(app)/overview/reports/page.tsx', 'getReportTemplatesFromCookie'],
+    ['app/(app)/overview/reports/new/page.tsx', 'getReportTemplatesFromCookie'],
+    ['app/(app)/overview/reports/new/page.tsx', 'getPipelinesFromCookie'],
+    ['app/(app)/overview/reports/new/page.tsx', 'getTagsFromCookie'],
+    ['app/(app)/overview/reports/[id]/edit/page.tsx', 'getPipelinesFromCookie'],
+    ['app/(app)/overview/reports/[id]/edit/page.tsx', 'getTagsFromCookie'],
+] as const;
 
 const ANY_SINGLE_PARAM_ARROW_TO_FETCHER = /\(\s*\w+\s*\)\s*=>\s*(\w+)\(/;
 
@@ -112,6 +140,17 @@ describe('the error-swallowing cookie wrapper stays off write paths', () => {
     it('keeps no SSR write wrapper that cannot carry a CSRF header', () => {
         for (const wrapper of DELETED_SSR_WRITE_WRAPPERS) {
             expect(API_CODE).not.toContain(wrapper);
+        }
+    });
+
+    it('does not turn a failed global search into an ordinary no-results response', () => {
+        expect(bodyOf(API_CODE, 'searchFromCookie')).not.toContain('catch');
+    });
+
+    it('keeps the audited simple route-level collection failures out of ordinary empty states', () => {
+        for (const [relativePath, swallowingRead] of HONEST_ROUTE_READS) {
+            const route = readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
+            expect(route, relativePath).not.toContain(swallowingRead);
         }
     });
 });
