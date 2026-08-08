@@ -129,7 +129,7 @@ describe('authenticated surfaces keep the backend-unreachable guard', () => {
     it('leaves the app shell on the guarded resolver', () => {
         const layout = source('app/(app)/layout.tsx');
 
-        expect(layout).toContain('getCurrentUserFromCookie');
+        expect(layout).toContain('getCurrentUserResultFromCookie');
         expect(layout).not.toContain('getPublicPageUserFromCookie');
     });
 

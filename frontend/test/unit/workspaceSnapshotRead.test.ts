@@ -8,6 +8,7 @@ import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage"
 import OnboardingForm from "@/app/onboarding/OnboardingForm";
 import OnboardingPage from "@/app/onboarding/page";
 import {
+    getCurrentUserResultFromCookie,
     getMyWorkspacesFromCookie,
     getMyWorkspacesResultFromCookie,
 } from "@/app/lib/api";
@@ -32,6 +33,7 @@ vi.mock("next/navigation", async (importOriginal) => {
 });
 
 type WorkspaceResponse = "unavailable" | "empty" | "ready";
+type AuthenticationResponse = "authenticated" | "network" | 401 | 403 | 503;
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
@@ -48,10 +50,19 @@ function json(body: unknown): Response {
     });
 }
 
-function stubAppShellReads(workspaceResponse: WorkspaceResponse) {
+function stubAppShellReads(
+    workspaceResponse: WorkspaceResponse,
+    authenticationResponse: AuthenticationResponse = "authenticated",
+) {
     const fetch = vi.fn((input: string | URL | Request) => {
         const url = String(input);
         if (url.endsWith("/api/auth/me")) {
+            if (authenticationResponse === "network") {
+                return Promise.reject(new TypeError("fetch failed"));
+            }
+            if (authenticationResponse !== "authenticated") {
+                return Promise.resolve(new Response("", { status: authenticationResponse }));
+            }
             return Promise.resolve(json({ id: 9, locale: "en", timezone: "Pacific/Honolulu" }));
         }
         if (url.endsWith("/api/workspaces")) {
@@ -158,7 +169,81 @@ describe("workspace snapshot reads", () => {
     });
 });
 
+describe("authenticated user snapshot reads", () => {
+    it("reports a successful authentication check with the resolved user", async () => {
+        stubAppShellReads("ready");
+
+        await expect(getCurrentUserResultFromCookie("JSESSIONID=session; connex_workspace=7"))
+            .resolves.toEqual({
+                ok: true,
+                data: { id: 9, locale: "en", timezone: "Pacific/Honolulu" },
+            });
+    });
+
+    it("reports a 401 as an unauthenticated decision", async () => {
+        stubAppShellReads("ready", 401);
+
+        await expect(getCurrentUserResultFromCookie("JSESSIONID=session; connex_workspace=7"))
+            .resolves.toEqual({ ok: true, data: null });
+    });
+
+    it("reports a 503 as unavailable", async () => {
+        stubAppShellReads("ready", 503);
+
+        await expect(getCurrentUserResultFromCookie("JSESSIONID=session; connex_workspace=7"))
+            .resolves.toEqual({ ok: false });
+    });
+
+    it("does not treat a 403 as an expired session", async () => {
+        stubAppShellReads("ready", 403);
+
+        await expect(getCurrentUserResultFromCookie("JSESSIONID=session; connex_workspace=7"))
+            .resolves.toEqual({ ok: false });
+    });
+
+    it("reports a network failure as unavailable", async () => {
+        stubAppShellReads("ready", "network");
+
+        await expect(getCurrentUserResultFromCookie("JSESSIONID=session; connex_workspace=7"))
+            .resolves.toEqual({ ok: false });
+    });
+});
+
 describe("the app shell distinguishes workspace membership from lookup availability", () => {
+    it("redirects a 401 authentication decision before attempting workspace reads", async () => {
+        const fetch = stubAppShellReads("ready", 401);
+
+        await expect(AppLayout({ children: createElement("div") }))
+            .rejects.toThrow("redirect:/auth/login?redirect=%2Fdashboard");
+        expect(redirectMock).toHaveBeenCalledWith("/auth/login?redirect=%2Fdashboard");
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/workspaces")))
+            .toBe(false);
+    });
+
+    it("renders the unavailable branch for a 503 authentication check", async () => {
+        const fetch = stubAppShellReads("ready", 503);
+        const workspaceScopedContent = createElement("div", { "data-workspace-scoped": true });
+
+        const rendered = await AppLayout({ children: workspaceScopedContent });
+
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
+        expect(redirectMock).not.toHaveBeenCalled();
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/workspaces")))
+            .toBe(false);
+    });
+
+    it("renders the unavailable branch for a network authentication failure", async () => {
+        const fetch = stubAppShellReads("ready", "network");
+        const workspaceScopedContent = createElement("div", { "data-workspace-scoped": true });
+
+        const rendered = await AppLayout({ children: workspaceScopedContent });
+
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
+        expect(redirectMock).not.toHaveBeenCalled();
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/workspaces")))
+            .toBe(false);
+    });
+
     it("renders the unavailable branch without redirecting or exposing workspace-scoped content", async () => {
         const fetch = stubAppShellReads("unavailable");
         const workspaceScopedContent = createElement("div", { "data-workspace-scoped": true }, "Workspace data");
@@ -214,6 +299,30 @@ describe("the app shell distinguishes workspace membership from lookup availabil
 });
 
 describe("onboarding only claims a user has no workspaces after a resolved lookup", () => {
+    it("renders the unavailable state for a 503 authentication check", async () => {
+        const fetch = stubAppShellReads("empty", 503);
+
+        const rendered = await OnboardingPage();
+
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
+        expect(isValidElement(rendered) ? rendered.type : null).not.toBe(OnboardingForm);
+        expect(redirectMock).not.toHaveBeenCalled();
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/workspaces")))
+            .toBe(false);
+    });
+
+    it("renders the unavailable state for a network authentication failure", async () => {
+        const fetch = stubAppShellReads("empty", "network");
+
+        const rendered = await OnboardingPage();
+
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
+        expect(isValidElement(rendered) ? rendered.type : null).not.toBe(OnboardingForm);
+        expect(redirectMock).not.toHaveBeenCalled();
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/workspaces")))
+            .toBe(false);
+    });
+
     it("renders the unavailable state instead of onboarding during a transient failure", async () => {
         stubAppShellReads("unavailable");
 
@@ -241,14 +350,7 @@ describe("onboarding only claims a user has no workspaces after a resolved looku
     });
 
     it("redirects an expired session to login before attempting the workspace read", async () => {
-        const fetch = vi.fn((input: string | URL | Request) => {
-            const url = String(input);
-            if (url.endsWith("/api/auth/me")) {
-                return Promise.resolve(new Response("", { status: 401 }));
-            }
-            return Promise.resolve(json({ workspaces: [], activeWorkspaceId: null }));
-        });
-        vi.stubGlobal("fetch", fetch);
+        const fetch = stubAppShellReads("empty", 401);
 
         await expect(OnboardingPage()).rejects.toThrow("redirect:/auth/login");
         expect(redirectMock).toHaveBeenCalledWith("/auth/login");

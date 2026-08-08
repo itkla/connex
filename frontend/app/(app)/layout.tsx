@@ -7,7 +7,7 @@ import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage"
 import {
     DEFAULT_CAPABILITIES,
     getCapabilities,
-    getCurrentUserFromCookie,
+    getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getMyWorkspacesResultFromCookie,
 } from "@/app/lib/api";
@@ -48,8 +48,12 @@ export default async function AppLayout({
 
     const headerList = await headers();
     const cookie = headerList.get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
 
+    if (!userResult.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const user = userResult.data;
     if (!user) {
         const pathname = headerList.get('x-pathname') ?? '/dashboard';
         redirect(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
