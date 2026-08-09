@@ -52,6 +52,23 @@ async function createAmbiguityPair(
     };
 }
 
+async function createReviewedDeal(
+    seed: Seeder,
+    deal: Record<string, unknown> & { name: string; company?: number | null },
+): Promise<Record<string, unknown>> {
+    const review = await seed.post("/api/duplicate-preflight/deals", {
+        name: deal.name,
+        companyId: deal.company,
+    });
+    if (typeof review.reviewToken !== "string") {
+        throw new Error("Deal duplicate preflight did not return a review token");
+    }
+    return seed.post("/api/deals", {
+        ...deal,
+        duplicateReviewToken: review.reviewToken,
+    });
+}
+
 /**
  * Provisions an isolated tenant for this run: registers a fresh user (which, under the dev
  * profile, also logs in, creates a workspace, and sets the JSESSIONID + connex_workspace
@@ -167,14 +184,14 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
         failure: false,
     });
     for (const [index, value] of [120000, 45000, 8000].entries()) {
-        const deal = await seed.post("/api/deals", {
+        const deal = await createReviewedDeal(seed, {
             name: `E2E Deal ${index + 1} ${runId}`,
             value,
             actualValue: 0,
             currency: "USD",
             pipeline: pipeline.id,
             stage: stage.id,
-            company: company.id,
+            company: fixture.companies.primary.id,
         });
         if (index === 0) fixture.deals.primary.id = Number(deal.id);
     }
