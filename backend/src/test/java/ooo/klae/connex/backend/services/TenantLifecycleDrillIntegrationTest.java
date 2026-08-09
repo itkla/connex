@@ -164,11 +164,20 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(entries.containsKey("data/notification.jsonl"));
         assertTrue(entries.containsKey("data/saved_view.jsonl"));
         assertTrue(entries.containsKey("data/ai_output_cache.jsonl"));
+        assertTrue(entries.containsKey("data/ai_chat_session.jsonl"));
+        assertTrue(entries.containsKey("data/ai_chat_session_participant.jsonl"));
+        assertTrue(entries.containsKey("data/ai_chat_message.jsonl"));
+        assertTrue(entries.containsKey("data/ai_chat_tool_call.jsonl"));
+        assertTrue(entries.containsKey("data/ai_chat_turn.jsonl"));
         String personJsonl = text(entries, "data/person.jsonl");
         assertTrue(personJsonl.contains(fixture.restrictedPersonName()));
         assertTrue(personJsonl.contains("suspended_at"));
         assertTrue(personJsonl.contains("provision_ceased_at"));
         assertTrue(text(entries, "data/person_identity.jsonl").contains("backfill"));
+        assertTrue(text(entries, "data/ai_chat_session.jsonl").contains(fixture.chatTitle()));
+        assertTrue(text(entries, "data/ai_chat_message.jsonl").contains(fixture.chatMessage()));
+        assertTrue(text(entries, "data/ai_chat_tool_call.jsonl").contains(fixture.toolName()));
+        assertTrue(text(entries, "data/ai_chat_turn.jsonl").contains(fixture.terminalReason()));
         assertArrayEquals(BINARY, entries.get("objects/" + fixture.objectKey()));
         String manifest = text(entries, "manifest.json");
         assertTrue(manifest.contains("\"schemaVersion\":1"));
@@ -200,6 +209,11 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             residual.tableRows().size());
         assertEquals(0, residual.totalRows());
         assertTrue(residual.tableRows().values().stream().allMatch(count -> count == 0));
+        assertEquals(0, rowCount("ai_chat_session"));
+        assertEquals(0, rowCount("ai_chat_session_participant"));
+        assertEquals(0, rowCount("ai_chat_message"));
+        assertEquals(0, rowCount("ai_chat_tool_call"));
+        assertEquals(0, rowCount("ai_chat_turn"));
         assertFalse(Files.exists(fixture.objectPath()));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM workspace WHERE id = ?",
@@ -480,6 +494,53 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         cache.setWarnings(0);
         cache.setGeneratedAt("2026-07-25T00:00:00Z");
         aiOutputCacheMapper.upsert(cache);
+        String chatTitle = "Lifecycle assistant session " + unique();
+        String chatMessage = "Lifecycle assistant message " + unique();
+        String toolName = "lifecycle_lookup_" + unique();
+        String terminalReason = "Lifecycle timeout " + unique();
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_session"
+                + " (workspace_id, created_by_user_id, title, visibility, status)"
+                + " VALUES (?, ?, ?, 'shared', 'active')",
+            drillWorkspace.getId(),
+            currentUser.getId(),
+            chatTitle);
+        Integer chatSessionId = jdbcTemplate.queryForObject(
+            "SELECT LAST_INSERT_ID()", Integer.class);
+        assertNotNull(chatSessionId);
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_session_participant"
+                + " (workspace_id, session_id, user_id) VALUES (?, ?, ?)",
+            drillWorkspace.getId(),
+            chatSessionId,
+            currentUser.getId());
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_message"
+                + " (workspace_id, session_id, seq, author_kind, author_user_id, content)"
+                + " VALUES (?, ?, 1, 'user', ?, ?)",
+            drillWorkspace.getId(),
+            chatSessionId,
+            currentUser.getId(),
+            chatMessage);
+        Integer chatMessageId = jdbcTemplate.queryForObject(
+            "SELECT LAST_INSERT_ID()", Integer.class);
+        assertNotNull(chatMessageId);
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_tool_call"
+                + " (workspace_id, message_id, tool_name, status, arguments_json, result_json)"
+                + " VALUES (?, ?, ?, 'resolved', JSON_OBJECT('recognizable', true),"
+                + " JSON_OBJECT('retained', true))",
+            drillWorkspace.getId(),
+            chatMessageId,
+            toolName);
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_turn"
+                + " (workspace_id, session_id, requested_by_user_id, status, terminal_reason)"
+                + " VALUES (?, ?, ?, 'timed_out', ?)",
+            drillWorkspace.getId(),
+            chatSessionId,
+            currentUser.getId(),
+            terminalReason);
         identityBackfillTransaction.backfillPersonPage(
             null, drillWorkspace.getId(), 0, 500);
         identityBackfillTransaction.backfillCompanyPage(
@@ -495,7 +556,14 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             + "/attachments/" + token;
         Path objectPath = objectStorageProperties.filesystemRootPath()
             .resolve(objectKey + ".object");
-        return new Fixture(restricted.getName(), objectKey, objectPath);
+        return new Fixture(
+            restricted.getName(),
+            objectKey,
+            objectPath,
+            chatTitle,
+            chatMessage,
+            toolName,
+            terminalReason);
     }
 
     private int rowCount(String table) {
@@ -548,6 +616,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     private record Fixture(
             String restrictedPersonName,
             String objectKey,
-            Path objectPath) {
+            Path objectPath,
+            String chatTitle,
+            String chatMessage,
+            String toolName,
+            String terminalReason) {
     }
 }

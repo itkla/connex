@@ -58,6 +58,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * the workspace predicate.
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
+        MAPPERS + "AiChatMapper",
         MAPPERS + "CompanyMapper",
         MAPPERS + "IdentityCollisionMapper",
         MAPPERS + "IdentityMapper",
