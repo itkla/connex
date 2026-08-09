@@ -28,7 +28,12 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 
-/** Atomically creates or verifies legacy-rule workflow pairs for one pinned workspace catalog. */
+/**
+ * Atomically creates or verifies legacy-rule workflow pairs for one pinned workspace catalog. The
+ * generated rule row is a compatibility projection and the generated workflow/version aggregate is
+ * authoritative. Remove this transaction with the startup runner after the last supported database
+ * upgrade that can contain unpaired rules.
+ */
 @Service
 @RequiredArgsConstructor
 public class LegacyWorkflowBackfillTransaction {

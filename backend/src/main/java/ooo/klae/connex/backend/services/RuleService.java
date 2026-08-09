@@ -27,11 +27,12 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
- * Business logic for automation rules: CRUD scoped to the active workspace and gated by
- * {@link Permission#RULE_MANAGE}, with {@code system}-mode rules additionally requiring the admin
- * tier. The typed trigger / optional WHEN condition / THEN actions are validated through
- * {@link RuleDefinitionValidator} and stored through {@link RuleDefinitionCodec}. v1: a USER-mode
- * rule runs as its creator; WHEN conditions apply to {@code company} rules.
+ * Legacy compatibility application layer for automation rules. Reads project {@code rule} and
+ * {@code rule_execution}; mutations are scoped to the active workspace, gated by
+ * {@link Permission#RULE_MANAGE}, and delegated to {@link LegacyRuleWorkflowService}, which owns the
+ * transactional workflow aggregate update. {@code system}-mode mutations additionally require the
+ * admin tier. The typed trigger, optional WHEN condition, and THEN actions are validated through
+ * {@link RuleDefinitionValidator} and decoded through {@link RuleDefinitionCodec}.
  */
 @Service
 @RequiredArgsConstructor

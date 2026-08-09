@@ -10,11 +10,14 @@ import java.util.Objects;
 import org.springframework.stereotype.Component;
 
 /**
- * Derives bounded deterministic run keys shared by legacy and canonical claims.
- * Legacy plaintext schedule and throttle keys are dual-read until 2026-09-14T00:00:00Z,
- * six weeks after the canonical runtime rollout. This exceeds the seven-day maximum
- * throttle and weekly schedule windows. The compatibility methods stop returning keys
- * automatically at that instant and can be removed after the first release beyond it.
+ * Derives bounded deterministic run keys shared by legacy and canonical claims. Paired claims keep
+ * the established legacy-rule id as their primary identity for rolling-deployment compatibility;
+ * canonical-only workflows use the workflow id, and genuinely unpaired rules use the rule id. When
+ * rollback first attaches a rule, the claim service permanently dual-reads the earlier workflow-id
+ * hash. Legacy plaintext schedule and throttle keys are dual-read until
+ * 2026-09-14T00:00:00Z, six weeks after the canonical runtime rollout. This exceeds the seven-day
+ * maximum throttle and weekly schedule windows. The plaintext compatibility methods stop returning
+ * keys automatically at that instant and can be removed after the first release beyond it.
  */
 @Component
 public class WorkflowDedupeKey {

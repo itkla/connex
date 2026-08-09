@@ -11,7 +11,11 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-/** Preserves legacy after-commit execution while the durable worker gate is disabled. */
+/**
+ * Deployment compatibility listener that preserves after-commit legacy execution only while the
+ * durable canonical worker gate is disabled. When the gate is enabled it is inert and the committed
+ * outbox owns delivery. Remove it after deployments no longer support the disabled runtime gate.
+ */
 @Component
 @RequiredArgsConstructor
 public class RuleTriggerListener {

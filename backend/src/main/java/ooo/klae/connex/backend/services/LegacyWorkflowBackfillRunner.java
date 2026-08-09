@@ -16,7 +16,11 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-/** Backfills legacy automation rules into versioned workflows before readiness. */
+/**
+ * Startup compatibility consumer that backfills pre-workflow rules before readiness. It delegates
+ * each workspace to {@link LegacyWorkflowBackfillTransaction}; remove it after every supported
+ * upgrade path guarantees that no unpaired legacy rule can exist.
+ */
 @Component
 @ConditionalOnProperty(
     prefix = "connex.maintenance",

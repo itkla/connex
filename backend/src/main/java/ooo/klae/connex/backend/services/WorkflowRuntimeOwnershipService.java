@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
@@ -25,13 +26,20 @@ import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrinc
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
-/** Compare-and-swap transitions for the database-authoritative workflow runtime owner. */
+/**
+ * Compare-and-swap transitions for the database-authoritative workflow runtime owner.
+ * Canonical-only workflows with run history cannot attach their first legacy projection while
+ * mixed-version workers remain supported because older workers cannot read workflow-id aliases
+ * after that attachment. The guard may be removed only after the legacy runtime and its dedupe
+ * protocol are outside the supported rollout window.
+ */
 @Service
 @RequiredArgsConstructor
 public class WorkflowRuntimeOwnershipService {
 
     private final WorkflowMapper workflowMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
+    private final WorkflowRunMapper workflowRunMapper;
     private final RuleMapper ruleMapper;
     private final WorkflowPrincipalLockService principalLockService;
     private final WorkflowDefinitionValidator definitionValidator;
@@ -101,8 +109,12 @@ public class WorkflowRuntimeOwnershipService {
         if (!"canonical".equals(workflow.getRuntimeOwner())) {
             throw new ConflictException("Workflow runtime owner is invalid");
         }
-        CanonicalDraft canonical = requireCompiled(ownership.version());
         Rule rule = ownership.rule();
+        if (rule == null && hasCanonicalRunHistory(workflow)) {
+            throw new ConflictException(
+                "Canonical workflow with run history cannot attach its first legacy projection");
+        }
+        CanonicalDraft canonical = requireCompiled(ownership.version());
         Rule projection;
         try {
             projection = graphConverter.project(new ConvertedWorkflow(
@@ -162,6 +174,11 @@ public class WorkflowRuntimeOwnershipService {
             "Workflow runtime changed to legacy",
             java.util.Map.of("activeVersionId", expectedActiveVersionId));
         return workflowService.toDto(workflow);
+    }
+
+    private boolean hasCanonicalRunHistory(Workflow workflow) {
+        return workflowRunMapper.hasRunHistory(
+            workflow.getWorkspaceId(), workflow.getId());
     }
 
     private LockedOwnership lock(int workflowId, long expectedActiveVersionId) {
