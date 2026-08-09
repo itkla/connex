@@ -39,8 +39,12 @@ CREATE TABLE ai_chat_session_participant (
     workspace_id INT NOT NULL,
     session_id   INT NOT NULL,
     user_id      INT NOT NULL,
-    created_at   DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    role         VARCHAR(16)
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'member',
+    joined_at    DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     PRIMARY KEY (workspace_id, session_id, user_id),
+    CONSTRAINT chk_ai_chat_session_participant_role
+        CHECK (role IN ('owner', 'member')),
     CONSTRAINT fk_ai_chat_session_participant_session
         FOREIGN KEY (workspace_id, session_id)
         REFERENCES ai_chat_session(workspace_id, id) ON DELETE CASCADE,
@@ -60,6 +64,9 @@ CREATE TABLE ai_chat_message (
         CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
     author_user_id INT NULL,
     content        TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+    structured_json JSON NULL,
+    input_tokens    INT NULL,
+    output_tokens   INT NULL,
     created_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT chk_ai_chat_message_seq CHECK (seq > 0),
     CONSTRAINT chk_ai_chat_message_author_kind
@@ -76,26 +83,35 @@ CREATE TABLE ai_chat_message (
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='Gap-free ordered messages within an assistant session';
 
+-- A tool call reaches its session through ai_chat_message; session_id is not denormalized here.
 CREATE TABLE ai_chat_tool_call (
-    workspace_id  INT NOT NULL,
-    id            INT AUTO_INCREMENT PRIMARY KEY,
-    message_id    INT NOT NULL,
-    tool_name     VARCHAR(128)
+    workspace_id       INT NOT NULL,
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    message_id         INT NOT NULL,
+    tool_name          VARCHAR(128)
         CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-    status        VARCHAR(16)
-        CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'queued',
-    arguments_json JSON NULL,
-    result_json    JSON NULL,
-    created_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    status             VARCHAR(16)
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'proposed',
+    arguments_json     JSON NULL,
+    result_json        JSON NULL,
+    executed_by_user_id INT NULL,
+    executed_at        DATETIME(6) NULL,
+    idempotency_key    VARCHAR(64)
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+    created_at         DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at         DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
         ON UPDATE CURRENT_TIMESTAMP(6),
     CONSTRAINT chk_ai_chat_tool_call_status
-        CHECK (status IN ('queued', 'running', 'resolved', 'failed')),
+        CHECK (status IN ('proposed', 'approved', 'rejected', 'executed', 'failed')),
     CONSTRAINT fk_ai_chat_tool_call_message
         FOREIGN KEY (workspace_id, message_id)
         REFERENCES ai_chat_message(workspace_id, id) ON DELETE CASCADE,
+    UNIQUE KEY uq_ai_chat_tool_call_idempotency
+        (workspace_id, idempotency_key),
     INDEX idx_ai_chat_tool_call_message
-        (workspace_id, message_id, id)
+        (workspace_id, message_id, id),
+    INDEX idx_ai_chat_tool_call_executed_by
+        (executed_by_user_id, workspace_id)
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='Durable tool-call records associated with assistant messages';
 

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -62,6 +63,7 @@ public class UserOffboardingService {
 
     private final NoteMapper noteMapper;
     private final ActivityMapper activityMapper;
+    private final AiChatMapper aiChatMapper;
     private final IntroductionMapper introductionMapper;
     private final NotificationMapper notificationMapper;
     private final CompanyMapper companyMapper;
@@ -120,13 +122,14 @@ public class UserOffboardingService {
 
     /**
      * Clears personal workspace data for a user who is about to receive a
-     * brand-new membership. This removes saved views and preferences left by
-     * legacy removal flows, notifications inserted while an earlier removal
-     * was committing, and stale deal-collaborator seats. Guarded by a current
-     * locking read that proves no membership row exists, so a pending invitee's
-     * legitimate data is never touched and a stale repeatable-read snapshot
-     * cannot skip cleanup. Called by every fresh-membership path: invites,
-     * invite links, and SSO JIT provisioning.
+     * brand-new membership. This removes saved views and preferences, assistant
+     * chat grants and owned sessions left by legacy removal flows, notifications
+     * inserted while an earlier removal was committing, and stale
+     * deal-collaborator seats. Guarded by a current locking read that proves no
+     * membership row exists, so a pending invitee's legitimate data is never
+     * touched and a stale repeatable-read snapshot cannot skip cleanup. Called
+     * by every fresh-membership path: invites, invite links, and SSO JIT
+     * provisioning.
      *
      * @param workspaceId the workspace being joined
      * @param userId the joining user
@@ -140,6 +143,8 @@ public class UserOffboardingService {
             savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
+            aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
+            aiChatMapper.deleteOwnedSessionsForUser(workspaceId, userId);
             notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
                 workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
@@ -151,8 +156,8 @@ public class UserOffboardingService {
      * Detaches a departing member's content within one workspace the way the
      * dropped cross-plane constraints used to: tasks are unassigned and company,
      * contact, and deal ownership is cleared (SET NULL) so authored history survives,
-     * while the member's saved-view preferences, owned saved views, notifications, and
-     * deal-collaborator seats are deleted.
+     * while the member's saved-view preferences, owned saved views, assistant-chat
+     * grants and owned sessions, notifications, and deal-collaborator seats are deleted.
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
      * membership removal flows inside their transaction.
      *
@@ -168,6 +173,8 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deletePinsForUser(workspaceId, userId);
         savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
         savedViewMapper.deleteForUser(workspaceId, userId);
+        aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
+        aiChatMapper.deleteOwnedSessionsForUser(workspaceId, userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         companyMapper.clearMemberOwnership(workspaceId, userId);
         personMapper.clearMemberOwnership(workspaceId, userId);

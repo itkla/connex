@@ -13,6 +13,8 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -25,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -498,37 +502,47 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         String chatMessage = "Lifecycle assistant message " + unique();
         String toolName = "lifecycle_lookup_" + unique();
         String terminalReason = "Lifecycle timeout " + unique();
-        jdbcTemplate.update(
-            "INSERT INTO ai_chat_session"
-                + " (workspace_id, created_by_user_id, title, visibility, status)"
-                + " VALUES (?, ?, ?, 'shared', 'active')",
-            drillWorkspace.getId(),
-            currentUser.getId(),
-            chatTitle);
-        Integer chatSessionId = jdbcTemplate.queryForObject(
-            "SELECT LAST_INSERT_ID()", Integer.class);
-        assertNotNull(chatSessionId);
+        KeyHolder chatSessionKeyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO ai_chat_session"
+                    + " (workspace_id, created_by_user_id, title, visibility, status)"
+                    + " VALUES (?, ?, ?, 'shared', 'active')",
+                Statement.RETURN_GENERATED_KEYS);
+            statement.setInt(1, drillWorkspace.getId());
+            statement.setInt(2, currentUser.getId());
+            statement.setString(3, chatTitle);
+            return statement;
+        }, chatSessionKeyHolder);
+        Number chatSessionKey = chatSessionKeyHolder.getKey();
+        assertNotNull(chatSessionKey);
+        int chatSessionId = chatSessionKey.intValue();
         jdbcTemplate.update(
             "INSERT INTO ai_chat_session_participant"
                 + " (workspace_id, session_id, user_id) VALUES (?, ?, ?)",
             drillWorkspace.getId(),
             chatSessionId,
             currentUser.getId());
-        jdbcTemplate.update(
-            "INSERT INTO ai_chat_message"
-                + " (workspace_id, session_id, seq, author_kind, author_user_id, content)"
-                + " VALUES (?, ?, 1, 'user', ?, ?)",
-            drillWorkspace.getId(),
-            chatSessionId,
-            currentUser.getId(),
-            chatMessage);
-        Integer chatMessageId = jdbcTemplate.queryForObject(
-            "SELECT LAST_INSERT_ID()", Integer.class);
-        assertNotNull(chatMessageId);
+        KeyHolder chatMessageKeyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO ai_chat_message"
+                    + " (workspace_id, session_id, seq, author_kind, author_user_id, content)"
+                    + " VALUES (?, ?, 1, 'user', ?, ?)",
+                Statement.RETURN_GENERATED_KEYS);
+            statement.setInt(1, drillWorkspace.getId());
+            statement.setInt(2, chatSessionId);
+            statement.setInt(3, currentUser.getId());
+            statement.setString(4, chatMessage);
+            return statement;
+        }, chatMessageKeyHolder);
+        Number chatMessageKey = chatMessageKeyHolder.getKey();
+        assertNotNull(chatMessageKey);
+        int chatMessageId = chatMessageKey.intValue();
         jdbcTemplate.update(
             "INSERT INTO ai_chat_tool_call"
                 + " (workspace_id, message_id, tool_name, status, arguments_json, result_json)"
-                + " VALUES (?, ?, ?, 'resolved', JSON_OBJECT('recognizable', true),"
+                + " VALUES (?, ?, ?, 'executed', JSON_OBJECT('recognizable', true),"
                 + " JSON_OBJECT('retained', true))",
             drillWorkspace.getId(),
             chatMessageId,

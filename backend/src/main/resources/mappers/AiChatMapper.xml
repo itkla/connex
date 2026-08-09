@@ -111,6 +111,18 @@
       (#{workspaceId}, #{sessionId}, #{userId})
   </insert>
 
+  <delete id="deleteParticipantsForUser">
+    DELETE FROM ai_chat_session_participant
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+  </delete>
+
+  <delete id="deleteOwnedSessionsForUser">
+    DELETE FROM ai_chat_session
+    WHERE workspace_id = #{workspaceId}
+      AND created_by_user_id = #{userId}
+  </delete>
+
   <select id="isParticipant" resultType="boolean">
     SELECT EXISTS(
       SELECT 1

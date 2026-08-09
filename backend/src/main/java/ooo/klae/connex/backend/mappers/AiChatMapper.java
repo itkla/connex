@@ -47,6 +47,14 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("userId") int userId);
 
+    void deleteParticipantsForUser(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    void deleteOwnedSessionsForUser(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
     boolean isParticipant(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
