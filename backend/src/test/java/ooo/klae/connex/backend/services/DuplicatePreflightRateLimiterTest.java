@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -78,6 +79,49 @@ class DuplicatePreflightRateLimiterTest {
         assertNull(limiter.claimCommitAllowed(proof, context));
         assertNull(limiter.requireCommitAllowed(fingerprint, admission));
         assertThrows(TooManyRequestsException.class, () -> limiter.requireAllowed(1));
+    }
+
+    @Test
+    void interactiveReviewIsStableUntilItsExactOneUseClaim() {
+        DuplicatePreflightRateLimiter limiter = limiterAt("2026-07-26T12:00:10Z");
+        String workflow = "a".repeat(64);
+        String result = "b".repeat(64);
+
+        String first = limiter.issueInteractiveReview(workflow, result);
+        String repeated = limiter.issueInteractiveReview(workflow, result);
+
+        assertEquals(first, repeated);
+        assertTrue(limiter.consumeInteractiveReview(first, workflow, result));
+        assertTrue(!limiter.consumeInteractiveReview(first, workflow, result));
+        String refreshed = limiter.issueInteractiveReview(workflow, result);
+        assertTrue(!first.equals(refreshed));
+    }
+
+    @Test
+    void interactiveReviewRejectsExpiryAndPrincipalOrResultMismatch() {
+        MutableClock clock = new MutableClock("2026-07-26T12:00:10Z");
+        DuplicatePreflightRateLimiter limiter = new DuplicatePreflightRateLimiter(
+            properties, workspaceService, clock);
+        String workflow = "a".repeat(64);
+        String result = "b".repeat(64);
+        String proof = limiter.issueInteractiveReview(workflow, result);
+
+        when(workspaceService.getCurrentUserId()).thenReturn(10);
+        assertTrue(!limiter.consumeInteractiveReview(proof, workflow, result));
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        assertTrue(!limiter.consumeInteractiveReview(
+            proof,
+            "c".repeat(64),
+            result));
+        assertTrue(!limiter.consumeInteractiveReview(
+            proof,
+            workflow,
+            "d".repeat(64)));
+        assertTrue(!limiter.consumeInteractiveReview(proof, workflow, result));
+
+        String expiring = limiter.issueInteractiveReview(workflow, result);
+        clock.advanceSeconds(properties.getReviewProofTtl().toSeconds() + 1);
+        assertTrue(!limiter.consumeInteractiveReview(expiring, workflow, result));
     }
 
     @Test

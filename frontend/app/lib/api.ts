@@ -3061,6 +3061,18 @@ export function createDeal(payload: Types.CreateDealPayload, init: RequestInit =
     return postJson<Types.Deal>(`/api/deals`, payload, init);
 }
 
+/** Checks a proposed deal against the canonical normalized-name and company identity. */
+export function preflightDealDuplicates(
+    payload: Types.DealDuplicatePreflightRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.DuplicatePreflightResponse>(
+        `/api/duplicate-preflight/deals`,
+        payload,
+        init,
+    );
+}
+
 export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
     return putJson<Types.Deal>(`/api/deals/${id}`, payload);
 }

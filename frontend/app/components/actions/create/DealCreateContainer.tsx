@@ -127,7 +127,7 @@ export default function DealCreateContainer({
     };
     const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
 
-    const createNewDeal = async () => {
+    const createNewDeal = async (duplicateReviewToken: string) => {
         clearPendingClose();
         setSucceeded(false);
         setCreating(true);
@@ -141,6 +141,7 @@ export default function DealCreateContainer({
                     currency: payload.currency.trim() || 'USD',
                     pipeline: payload.pipeline || null,
                     stage: payload.stage || null,
+                    duplicateReviewToken,
                     expectedCloseDate: payload.expectedCloseDate || undefined,
                 },
                 requestInit,
@@ -175,6 +176,7 @@ export default function DealCreateContainer({
                 isCreating={creating}
                 isSuccess={succeeded}
                 createNewDeal={createNewDeal}
+                requestInit={requestInit}
             />
         );
     }
@@ -191,6 +193,7 @@ export default function DealCreateContainer({
             isSuccess={succeeded}
             isDirty={isDirty}
             createNewDeal={createNewDeal}
+            requestInit={requestInit}
         />
     );
 }

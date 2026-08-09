@@ -748,7 +748,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         }
     };
 
-    const createNewDeal = async () => {
+    const createNewDeal = async (duplicateReviewToken: string) => {
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
@@ -760,6 +760,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 currency: newPayload.currency.trim() || 'USD',
                 pipeline: newPayload.pipeline || null,
                 stage: newPayload.stage || null,
+                duplicateReviewToken,
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('dealCreated'));

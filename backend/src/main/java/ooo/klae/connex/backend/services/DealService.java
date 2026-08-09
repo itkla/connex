@@ -21,6 +21,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import tools.jackson.databind.ObjectMapper;
@@ -45,6 +46,7 @@ import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
@@ -124,6 +126,8 @@ public class DealService {
     private final SegmentService segmentService;
     private final DealValueService dealValueService;
     private final DealOutcomeWriter dealOutcomeWriter;
+    private final DuplicatePreflightService duplicatePreflightService;
+    private final DuplicateDecisionLockService duplicateDecisionLockService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -913,9 +917,32 @@ public class DealService {
      * @param deal
      * @return
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
+        duplicateDecisionLockService.lockCurrentOrganization();
+        return createAfterDuplicateDecisionLock(deal);
+    }
+
+    /**
+     * Rechecks and creates a deal from an interactive reviewed request.
+     *
+     * @param deal reviewed deal values
+     * @param duplicateReviewToken token from the exact accepted duplicate review
+     * @return created deal
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.DEAL_CREATE)
+    public Deal createReviewed(Deal deal, String duplicateReviewToken) {
+        duplicatePreflightService.requireReviewedDealCreation(
+            new DealDuplicatePreflightRequest(
+                deal.getName(),
+                deal.getCompanyId()),
+            duplicateReviewToken);
+        return createAfterDuplicateDecisionLock(deal);
+    }
+
+    private Deal createAfterDuplicateDecisionLock(Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
@@ -946,10 +973,11 @@ public class DealService {
      * @param deal
      * @return
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
         boolean currencyChanged = deal.getCurrency() != null
             && !deal.getCurrency().equalsIgnoreCase(before.getCurrency());
@@ -999,10 +1027,11 @@ public class DealService {
      * @param name the replacement name
      * @return the refreshed deal
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateName(int id, String name) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
         if (Objects.equals(before.getName(), name)) {
             return hydrateReferences(workspaceId, before);
@@ -1210,12 +1239,12 @@ public class DealService {
      * Deletes a {@code Deal} record by ID, throwing a {@code ResourceNotFoundException} if not found.
      * @param id
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        duplicateDecisionLockService.lockCurrentOrganization();
+        Deal before = requireDealForUpdate(workspaceId, id);
         if (dealDocumentMapper.countNonDraftByDeal(workspaceId, id) > 0) {
             workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         }

@@ -314,6 +314,7 @@ class EncryptionGuardrailArchTest {
     private static final Set<String> APPROVED_SECRET_RESPONSE_FIELDS = Set.of(
         "ooo/klae/connex/backend/dto/CsrfBootstrapDto.java#token",
         "ooo/klae/connex/backend/dto/CompanyDto.java#duplicateReviewToken",
+        "ooo/klae/connex/backend/dto/DealDto.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/DeliveryWebhookTokenDto.java#token",
         "ooo/klae/connex/backend/dto/DuplicatePreflightResponse.java#reviewToken",
         "ooo/klae/connex/backend/dto/InviteDto.java#token",

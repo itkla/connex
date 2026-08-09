@@ -1,8 +1,10 @@
 'use client';
 
-import { Dispatch, FormEvent, SetStateAction, WheelEvent, useEffect } from 'react';
+import { Dispatch, FormEvent, SetStateAction, WheelEvent, useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
+import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
 import { ResponsiveDialog, ResponsiveDialogContent, ResponsiveDialogTitle, ResponsiveDialogDescription } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -71,7 +73,8 @@ type Props = {
     isSuccess?: boolean;
     /** Whether the payload has diverged from its seeded baseline; drives the accidental-discard guard. */
     isDirty?: boolean;
-    createNewDeal: () => void | Promise<void>;
+    createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
+    requestInit?: RequestInit;
 };
 
 export default function NewDealDialog({
@@ -85,6 +88,7 @@ export default function NewDealDialog({
     isSuccess = false,
     isDirty = false,
     createNewDeal,
+    requestInit,
 }: Props) {
     const t = useTranslations('DealsNewDialog');
     const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false), enabled: open && !isCreating });
@@ -110,6 +114,7 @@ export default function NewDealDialog({
                         isCreating={isCreating}
                         isSuccess={isSuccess}
                         createNewDeal={createNewDeal}
+                        requestInit={requestInit}
                     />
                 </ResponsiveDialogContent>
             </ResponsiveDialog>
@@ -127,7 +132,8 @@ type NewDealFormProps = {
     stagesByPipeline: Record<number, Stage[]>;
     isCreating: boolean;
     isSuccess?: boolean;
-    createNewDeal: () => void | Promise<void>;
+    createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
+    requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
 };
@@ -146,14 +152,23 @@ export function NewDealForm({
     isCreating,
     isSuccess = false,
     createNewDeal,
+    requestInit,
     onCancel,
 }: NewDealFormProps) {
     const t = useTranslations('DealsNewDialog');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const submissionPendingRef = useRef(false);
     const companySearch = useCompanySearch(active, [payload.company]);
+    const duplicatePreflight = useDuplicatePreflight('deal', {
+        name: payload.name.trim(),
+        companyId: payload.company,
+    }, active, requestInit);
 
     useEffect(() => {
-        if (!active) resetFieldErrors();
+        if (!active) {
+            submissionPendingRef.current = false;
+            resetFieldErrors();
+        }
     }, [active, resetFieldErrors]);
 
     useEffect(() => {
@@ -161,9 +176,13 @@ export function NewDealForm({
     }, [companySearch.error, t]);
 
     const handleCreate = async () => {
+        if (submissionPendingRef.current || duplicatePreflight.blocked) return;
+        submissionPendingRef.current = true;
         resetFieldErrors();
         try {
-            await createNewDeal();
+            const duplicateDecision = await duplicatePreflight.reviewNow();
+            if (!duplicateDecision.allowed || !duplicateDecision.duplicateReviewToken) return;
+            await createNewDeal(duplicateDecision.duplicateReviewToken);
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
@@ -172,13 +191,15 @@ export function NewDealForm({
                     requestAnimationFrame(() => document.getElementById(`deal-${firstKey}`)?.focus());
                 }
             }
+        } finally {
+            submissionPendingRef.current = false;
         }
     };
 
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault();
-        if (isCreating) return;
-        handleCreate();
+        if (isCreating || submissionPendingRef.current || duplicatePreflight.blocked) return;
+        void handleCreate();
     };
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
@@ -191,7 +212,8 @@ export function NewDealForm({
     const selectedCompany = companySearch.companies.find((c) => c.id === payload.company) ?? null;
     const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
     const selectedStage = stages.find((s) => s.id === payload.stage) ?? null;
-    const hasErrors = Object.keys(fieldErrors).length > 0;
+    const hasErrors = Object.keys(fieldErrors).length > 0
+        || duplicatePreflight.status === 'error';
     const status = resolveDialogStatus({ isLoading: isCreating, hasErrors, isSuccess });
 
     return (
@@ -229,7 +251,10 @@ export function NewDealForm({
                                 className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.name && fieldErrorClass)}
                                 placeholder={t('namePlaceholder')}
                                 aria-invalid={Boolean(fieldErrors.name)}
-                                aria-describedby={fieldErrors.name ? 'deal-name-error' : undefined}
+                                aria-describedby={[
+                                    fieldErrors.name && 'deal-name-error',
+                                    duplicatePreflight.status !== 'idle' && 'deal-duplicate-preflight',
+                                ].filter(Boolean).join(' ') || undefined}
                                 autoFocus
                                 required
                             />
@@ -237,6 +262,15 @@ export function NewDealForm({
                         {fieldErrors.name && (
                             <p id="deal-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>
                         )}
+                        <DuplicatePreflightWarning
+                            id="deal-duplicate-preflight"
+                            kind="deal"
+                            status={duplicatePreflight.status}
+                            response={duplicatePreflight.response}
+                            acknowledged={duplicatePreflight.acknowledged}
+                            onAcknowledgedChange={duplicatePreflight.setAcknowledged}
+                            onRetry={duplicatePreflight.retry}
+                        />
                     </div>
 
                     <div className="ncd-rise grid grid-cols-[1fr_120px] gap-3" style={{ animationDelay: '140ms' }}>
@@ -416,7 +450,7 @@ export function NewDealForm({
                         <Button
                             type="submit"
                             variant="brand"
-                            disabled={isCreating || isSuccess}
+                            disabled={isCreating || isSuccess || duplicatePreflight.blocked}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}

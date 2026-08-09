@@ -46,6 +46,67 @@ public class DuplicatePreflightRateLimiter {
     }
 
     /**
+     * Issues or reuses an unclaimed interactive review token for one unchanged result.
+     *
+     * @param workflowFingerprint SHA-256 fingerprint of the exact proposed values
+     * @param resultFingerprint SHA-256 fingerprint of the rendered candidate result
+     * @return opaque expiring review token
+     */
+    public synchronized String issueInteractiveReview(
+            String workflowFingerprint,
+            String resultFingerprint) {
+        Principal principal = principal();
+        long minute = currentMinute();
+        WorkflowKey key = workflowKey(principal, workflowFingerprint);
+        String context = requireFingerprint(workflowFingerprint, "review context");
+        String result = requireFingerprint(resultFingerprint, "result fingerprint");
+        trimPreviewCredits(minute);
+        String reusable = reviewProofs.entrySet().stream()
+            .filter(entry -> entry.getValue().workflowKey().equals(key))
+            .filter(entry -> entry.getValue().reviewContext().equals(context))
+            .filter(entry -> entry.getValue().resultFingerprint()
+                .filter(result::equals).isPresent())
+            .map(Map.Entry::getKey)
+            .findFirst()
+            .orElse(null);
+        if (reusable != null) {
+            reviewProofs.get(reusable);
+            return reusable;
+        }
+        return newReviewProof(key, context, Optional.of(result));
+    }
+
+    /**
+     * Atomically consumes an interactive review token bound to the current principal and result.
+     *
+     * @param reviewProof opaque token returned by the interactive preflight
+     * @param workflowFingerprint SHA-256 fingerprint of the exact proposed values
+     * @param resultFingerprint SHA-256 fingerprint of the current candidate result
+     * @return whether the token authorized this exact result
+     */
+    public synchronized boolean consumeInteractiveReview(
+            String reviewProof,
+            String workflowFingerprint,
+            String resultFingerprint) {
+        CommitAdmission admission;
+        try {
+            admission = claimCommitAllowed(reviewProof, workflowFingerprint);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+        try {
+            String reviewedResult = requireCommitAllowed(
+                workflowFingerprint,
+                admission);
+            return Objects.equals(
+                reviewedResult,
+                requireFingerprint(resultFingerprint, "result fingerprint"));
+        } finally {
+            releaseCommitAdmission(admission);
+        }
+    }
+
+    /**
      * Admits a preview and leaves one credit for the unchanged commit.
      *
      * @param workUnits normalized lookup work represented by the request
@@ -69,13 +130,13 @@ public class DuplicatePreflightRateLimiter {
         if (existing != null && existing.minute() == minute && existing.refreshAvailable()) {
             previewCredits.put(key, new PreviewCredit(minute, false));
             trimPreviewCredits(minute);
-            return newReviewProof(key, context);
+            return newReviewProof(key, context, Optional.empty());
         }
         charge(principal, workUnits, minute);
         boolean firstPreviewThisMinute = existing == null || existing.minute() != minute;
         previewCredits.put(key, new PreviewCredit(minute, firstPreviewThisMinute));
         trimPreviewCredits(minute);
-        return newReviewProof(key, context);
+        return newReviewProof(key, context, Optional.empty());
     }
 
     /**
@@ -307,7 +368,8 @@ public class DuplicatePreflightRateLimiter {
 
     private String newReviewProof(
             WorkflowKey workflowKey,
-            String reviewContext) {
+            String reviewContext,
+            Optional<String> resultFingerprint) {
         byte[] bytes = new byte[32];
         String proof;
         do {
@@ -322,7 +384,7 @@ public class DuplicatePreflightRateLimiter {
                     properties.getReviewProofTtl().toSeconds()),
                 workflowKey,
                 reviewContext,
-                Optional.empty()));
+                resultFingerprint));
         trimPreviewCredits(currentMinute());
         return proof;
     }

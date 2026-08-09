@@ -224,7 +224,7 @@ export default function CompanyActionsMenu({
         }
     };
 
-    const createNewDeal = async () => {
+    const createNewDeal = async (duplicateReviewToken: string) => {
         setDealCreationSucceeded(false);
         setIsCreatingDeal(true);
         try {
@@ -236,7 +236,7 @@ export default function CompanyActionsMenu({
                 currency: newDealPayload.currency.trim() || 'USD',
                 pipeline: newDealPayload.pipeline || null,
                 stage: newDealPayload.stage || null,
-                company: company.id,
+                duplicateReviewToken,
                 expectedCloseDate: newDealPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('toastDealCreated'));
@@ -250,7 +250,6 @@ export default function CompanyActionsMenu({
             if (isFieldError(err)) {
                 throw err;
             }
-            console.error(err);
             toastError(err instanceof Error ? err.message : t('toastCreateDealFailed'));
         } finally {
             setIsCreatingDeal(false);
