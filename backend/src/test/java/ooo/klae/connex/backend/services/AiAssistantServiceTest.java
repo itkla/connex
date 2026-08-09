@@ -1,0 +1,304 @@
+package ooo.klae.connex.backend.services;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
+
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+
+import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
+import ooo.klae.connex.backend.dto.AiChatMessageDto;
+import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
+import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
+import ooo.klae.connex.backend.dto.AiChatSessionDto;
+import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
+
+class AiAssistantServiceTest extends AbstractServiceTest {
+
+    private static final String INACCESSIBLE = "AI assistant session is not accessible";
+
+    @Autowired private AiAssistantService service;
+    @Autowired private AiChatMapper chatMapper;
+    @Autowired private RoleMapper roleMapper;
+    @MockitoSpyBean private WorkspaceService workspaceService;
+
+    @Test
+    void createDefaultsToPrivateActiveAndOwnerCanRead() {
+        AiChatSessionDto created = service.create(createRequest("  Planning room  "));
+        AiChatSession persisted = chatMapper.getSessionById(
+            workspace.getId(), currentUser.getId(), created.getId());
+        AiChatSessionDetailDto detail = service.get(created.getId(), 1, 50);
+
+        assertNotEquals(0, created.getId());
+        assertEquals("Planning room", created.getTitle());
+        assertEquals("private", created.getVisibility());
+        assertEquals("active", created.getStatus());
+        assertFalse(created.isArchived());
+        assertTrue(created.isOwnedByCurrentUser());
+        assertNotNull(persisted);
+        assertEquals("active", persisted.getStatus());
+        assertEquals(created.getId(), detail.session().getId());
+        assertTrue(detail.messages().items().isEmpty());
+        assertEquals(0, detail.messages().total());
+    }
+
+    @Test
+    void sharedParticipantCanListReadAndAppend() {
+        AiChatSession session = sharedSession(currentUser, "Shared room");
+        User participant = aiUser("admin");
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), participant.getId());
+        authenticateAs(participant, workspace.getId());
+
+        AiChatMessageDto appended = service.appendMessage(
+            session.getId(), messageRequest("Participant message"));
+        AiChatSessionDetailDto detail = service.get(session.getId(), 1, 50);
+
+        assertEquals(1, service.page(1, 25).total());
+        assertEquals("user", appended.getAuthorKind());
+        assertEquals(participant.getId(), appended.getAuthorUserId());
+        assertEquals(1, appended.getSeq());
+        assertEquals("Participant message", detail.messages().items().getFirst().getContent());
+        assertFalse(detail.session().isOwnedByCurrentUser());
+    }
+
+    @Test
+    void sameWorkspaceNonParticipantAndOtherTenantUseIdenticalForbiddenMessage() {
+        AiChatSession session = sharedSession(currentUser, "Protected room");
+        User nonParticipant = aiUser("admin");
+        authenticateAs(nonParticipant, workspace.getId());
+        ForbiddenException sameWorkspace = assertThrows(
+            ForbiddenException.class,
+            () -> service.get(session.getId(), 1, 50));
+
+        Workspace other = newWorkspace();
+        workspaceMapper.addMember(other.getId(), nonParticipant.getId(), "admin");
+        authenticateAs(nonParticipant, other.getId());
+        ForbiddenException otherTenant = assertThrows(
+            ForbiddenException.class,
+            () -> service.get(session.getId(), 1, 50));
+        ForbiddenException unknown = assertThrows(
+            ForbiddenException.class,
+            () -> service.get(Integer.MAX_VALUE, 1, 50));
+
+        assertEquals(INACCESSIBLE, sameWorkspace.getMessage());
+        assertEquals(INACCESSIBLE, otherTenant.getMessage());
+        assertEquals(INACCESSIBLE, unknown.getMessage());
+    }
+
+    @Test
+    void participantCannotRenameOrArchive() {
+        AiChatSession session = sharedSession(currentUser, "Owner controlled");
+        User participant = aiUser("admin");
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), participant.getId());
+        authenticateAs(participant, workspace.getId());
+
+        ForbiddenException rename = assertThrows(
+            ForbiddenException.class,
+            () -> service.update(session.getId(), updateRequest("Renamed", null)));
+        ForbiddenException archive = assertThrows(
+            ForbiddenException.class,
+            () -> service.archive(session.getId()));
+
+        assertEquals(INACCESSIBLE, rename.getMessage());
+        assertEquals(INACCESSIBLE, archive.getMessage());
+    }
+
+    @Test
+    void archiveIsIdempotentAndArchivedAppendConflicts() {
+        AiChatSessionDto created = service.create(createRequest("Archive me"));
+
+        AiChatSessionDto patched = service.update(
+            created.getId(), updateRequest("Archived title", true));
+        service.archive(created.getId());
+        service.archive(created.getId());
+        AiChatSession archived = chatMapper.getSessionById(
+            workspace.getId(), currentUser.getId(), created.getId());
+        ConflictException conflict = assertThrows(
+            ConflictException.class,
+            () -> service.appendMessage(created.getId(), messageRequest("Too late")));
+
+        assertEquals("Archived title", patched.getTitle());
+        assertTrue(patched.isArchived());
+        assertNotNull(archived);
+        assertEquals("archived", archived.getStatus());
+        assertNotNull(archived.getArchivedAt());
+        assertEquals("Archived sessions cannot accept messages", conflict.getMessage());
+    }
+
+    @Test
+    void updateRequiresAFieldAndRejectsRestore() {
+        AiChatSessionDto created = service.create(createRequest("Validation"));
+
+        assertThrows(BadRequestException.class,
+            () -> service.update(created.getId(), new AiChatSessionUpdateRequest()));
+        assertThrows(BadRequestException.class,
+            () -> service.update(created.getId(), updateRequest(null, false)));
+        assertThrows(BadRequestException.class,
+            () -> service.update(created.getId(), updateRequest("   ", null)));
+    }
+
+    @Test
+    void ownerAppendsGapFreeMessagesAndReadsAscendingPages() {
+        AiChatSessionDto created = service.create(createRequest("Replay"));
+        service.appendMessage(created.getId(), messageRequest("one"));
+        service.appendMessage(created.getId(), messageRequest("two"));
+        service.appendMessage(created.getId(), messageRequest("three"));
+
+        AiChatSessionDetailDto secondPage = service.get(created.getId(), 2, 2);
+
+        assertEquals(3, secondPage.messages().total());
+        assertEquals(List.of(3),
+            secondPage.messages().items().stream().map(AiChatMessageDto::getSeq).toList());
+        assertEquals("three", secondPage.messages().items().getFirst().getContent());
+    }
+
+    @Test
+    void paginationRejectsInvalidBounds() {
+        assertThrows(BadRequestException.class, () -> service.page(0, 25));
+        assertThrows(BadRequestException.class, () -> service.page(1, 0));
+        assertThrows(BadRequestException.class, () -> service.page(1, 101));
+        assertThrows(BadRequestException.class, () -> service.get(1, 0, 50));
+        assertThrows(BadRequestException.class, () -> service.get(1, 1, 101));
+    }
+
+    @Test
+    void everyPublicEntryPointRequiresAiUseAndMissingPermissionIsDenied() {
+        List<Method> publicMethods = Arrays.stream(AiAssistantService.class.getDeclaredMethods())
+            .filter(method -> Modifier.isPublic(method.getModifiers()))
+            .filter(method -> !method.isSynthetic() && !method.isBridge())
+            .toList();
+
+        assertEquals(6, publicMethods.size());
+        assertTrue(publicMethods.stream().allMatch(method -> {
+            RequirePermission permission = method.getAnnotation(RequirePermission.class);
+            return permission != null && permission.value() == Permission.AI_USE;
+        }));
+
+        User member = newUser();
+        authenticateAs(member, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> service.page(1, 25));
+    }
+
+    @Test
+    void appendRevalidatesAiUseAfterMembershipLockBeforeWriting() {
+        User caller = newUser();
+        WorkspaceRole permitted = customRole("AI permitted", List.of(Permission.AI_USE.name()));
+        WorkspaceRole revoked = customRole("AI revoked", List.of());
+        workspaceMapper.setMemberCustomRole(
+            workspace.getId(), caller.getId(), permitted.getId());
+        authenticateAs(caller, workspace.getId());
+        AiChatSession session = sharedSession(caller, "Permission race");
+        AiChatSession before = chatMapper.getSessionById(
+            workspace.getId(), caller.getId(), session.getId());
+        long sessionCount = chatMapper.countAccessibleSessions(
+            workspace.getId(), caller.getId());
+
+        doAnswer(invocation -> {
+            workspaceMapper.setMemberCustomRole(
+                workspace.getId(), caller.getId(), revoked.getId());
+            return invocation.callRealMethod();
+        }).when(workspaceService).lockAndRequireMember(
+            workspace.getId(), caller.getId());
+        clearInvocations(workspaceService);
+
+        ForbiddenException forbidden = assertThrows(
+            ForbiddenException.class,
+            () -> service.appendMessage(session.getId(), messageRequest("Blocked message")));
+
+        InOrder authorizationOrder = inOrder(workspaceService);
+        authorizationOrder.verify(workspaceService).requirePermission(Permission.AI_USE);
+        authorizationOrder.verify(workspaceService).lockAndRequireMember(
+            workspace.getId(), caller.getId());
+        authorizationOrder.verify(workspaceService).requirePermission(
+            workspace.getId(), caller.getId(), Permission.AI_USE);
+        AiChatSession after = chatMapper.getSessionById(
+            workspace.getId(), caller.getId(), session.getId());
+        assertEquals("Requires the AI_USE permission in this workspace", forbidden.getMessage());
+        assertEquals(sessionCount, chatMapper.countAccessibleSessions(
+            workspace.getId(), caller.getId()));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+        assertNotNull(before);
+        assertNotNull(after);
+        assertEquals(before.getLastMessageAt(), after.getLastMessageAt());
+    }
+
+    private AiChatSession sharedSession(User owner, String title) {
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(owner.getId());
+        session.setTitle(title);
+        session.setVisibility("shared");
+        session.setStatus("active");
+        chatMapper.insertSession(session);
+        return session;
+    }
+
+    private User aiUser(String role) {
+        User user = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), user.getId(), role);
+        return user;
+    }
+
+    private WorkspaceRole customRole(String name, List<String> permissions) {
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName(name + " " + unique());
+        roleMapper.insertRole(role);
+        if (!permissions.isEmpty()) {
+            roleMapper.insertPermissions(workspace.getId(), role.getId(), permissions);
+        }
+        return role;
+    }
+
+    private Workspace newWorkspace() {
+        Workspace created = new Workspace();
+        created.setName("AI chat " + unique());
+        created.setSlug("ai-chat-" + unique());
+        workspaceMapper.insert(created);
+        return created;
+    }
+
+    private AiChatSessionCreateRequest createRequest(String title) {
+        AiChatSessionCreateRequest request = new AiChatSessionCreateRequest();
+        request.setTitle(title);
+        return request;
+    }
+
+    private AiChatSessionUpdateRequest updateRequest(String title, Boolean archived) {
+        AiChatSessionUpdateRequest request = new AiChatSessionUpdateRequest();
+        request.setTitle(title);
+        request.setArchived(archived);
+        return request;
+    }
+
+    private AiChatMessageCreateRequest messageRequest(String content) {
+        AiChatMessageCreateRequest request = new AiChatMessageCreateRequest();
+        request.setContent(content);
+        return request;
+    }
+}

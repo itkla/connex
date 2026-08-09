@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.CampaignAudienceSnapshot;
 import ooo.klae.connex.backend.beans.Company;
@@ -32,6 +34,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.UserDashboard;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -53,6 +56,7 @@ import tools.jackson.databind.ObjectMapper;
 class UserOffboardingServiceTest extends AbstractServiceTest {
 
     @Autowired private UserOffboardingService offboardingService;
+    @Autowired private AiChatMapper aiChatMapper;
     @Autowired private NotificationMapper notificationMapper;
     @Autowired private SavedViewMapper savedViewMapper;
     @Autowired private SavedViewPreferenceMapper savedViewPreferenceMapper;
@@ -200,6 +204,25 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void memberDetachmentRemovesChatAccessAndOwnershipOnlyForTheDepartingMember() {
+        User departing = newUser();
+        User retainedOwner = newUser();
+        AiChatSession departingSession = chatSession(departing);
+        AiChatSession retainedSession = chatSession(retainedOwner);
+        aiChatMapper.insertParticipant(
+            workspace.getId(), retainedSession.getId(), departing.getId());
+
+        offboardingService.detachMemberContent(workspace.getId(), departing.getId());
+
+        assertFalse(aiChatMapper.isParticipant(
+            workspace.getId(), retainedSession.getId(), departing.getId()));
+        assertNull(aiChatMapper.getSessionById(
+            workspace.getId(), departing.getId(), departingSession.getId()));
+        assertNotNull(aiChatMapper.getSessionById(
+            workspace.getId(), retainedOwner.getId(), retainedSession.getId()));
+    }
+
+    @Test
     void freshMembershipPurgesResidualSavedViewDataOnlyInTheRejoinedWorkspace() {
         User returning = newUser();
         SavedView residualView = savedView(returning);
@@ -222,6 +245,26 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             workspace.getId(), returning.getId(), "company"));
         assertNotNull(savedViewMapper.getAccessibleById(
             otherWorkspace.getId(), returning.getId(), retainedView.getId()));
+    }
+
+    @Test
+    void freshMembershipRemovesResidualChatAccessAndOwnershipOnlyForTheReturningMember() {
+        User returning = newUser();
+        User retainedOwner = newUser();
+        AiChatSession returningSession = chatSession(returning);
+        AiChatSession retainedSession = chatSession(retainedOwner);
+        aiChatMapper.insertParticipant(
+            workspace.getId(), retainedSession.getId(), returning.getId());
+        workspaceMapper.removeMember(workspace.getId(), returning.getId());
+
+        offboardingService.prepareFreshMembership(workspace.getId(), returning.getId());
+
+        assertFalse(aiChatMapper.isParticipant(
+            workspace.getId(), retainedSession.getId(), returning.getId()));
+        assertNull(aiChatMapper.getSessionById(
+            workspace.getId(), returning.getId(), returningSession.getId()));
+        assertNotNull(aiChatMapper.getSessionById(
+            workspace.getId(), retainedOwner.getId(), retainedSession.getId()));
     }
 
     private Workspace newOtherWorkspace() {
@@ -253,6 +296,17 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
 
     private SavedView savedView(User owner) {
         return savedViewInWorkspace(workspace, owner);
+    }
+
+    private AiChatSession chatSession(User owner) {
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(owner.getId());
+        session.setTitle("Offboarding session " + unique());
+        session.setVisibility("shared");
+        session.setStatus("active");
+        aiChatMapper.insertSession(session);
+        return session;
     }
 
     private SavedView savedViewInWorkspace(Workspace targetWorkspace, User owner) {
