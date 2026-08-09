@@ -7,11 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,10 +25,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -37,6 +43,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.dto.RuleAction;
@@ -52,6 +59,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
+import ooo.klae.connex.backend.services.WorkflowRuntimeClaimService.CanonicalClaim;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
@@ -68,6 +76,7 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
     @Autowired private WorkflowService workflowService;
     @Autowired private WorkflowRuntimeService workflowRuntimeService;
     @Autowired private WorkflowRuntimeOwnershipService ownershipService;
+    @Autowired private WorkflowRuntimeClaimService claimService;
     @Autowired private WorkflowRuntimeClaimTransaction claimTransaction;
     @Autowired private WorkflowTriggerOutboxDeliveryService outboxDeliveryService;
     @Autowired private WorkflowTriggerOutboxWorker outboxWorker;
@@ -82,6 +91,7 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoBean private AuditService auditService;
+    @MockitoSpyBean private WorkflowPrincipalLockService principalLockService;
     @MockitoSpyBean private RuleActionExecutor actionExecutor;
 
     private final List<Integer> createdCompanyIds = new ArrayList<>();
@@ -152,6 +162,67 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
         drainSchedulerWork();
 
         assertSingleCanonicalEffect(workflow.id(), title);
+    }
+
+    @Test
+    void committedCanonicalClaimBetweenRollbackDiscoveryAndLockIsVisibleToFence() {
+        String title = "Interleaved rollback " + unique();
+        WorkflowDto workflow = createEnabledWorkflow(title);
+        Company company = createCompany();
+        WorkflowTriggerDispatch.EntityChange dispatch = entityDispatch(
+            company.getId(), "interleaved-" + unique());
+        AtomicBoolean claimCommitted = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (claimCommitted.compareAndSet(false, true)) {
+                CanonicalClaim claim = claimService.claimEntity(workflow.id(), dispatch);
+                assertTrue(claim.started());
+            }
+            return invocation.callRealMethod();
+        }).when(principalLockService).lockUserMutation(
+            eq(workspace.getId()), eq(currentUser.getId()), any(), any());
+
+        assertThrows(
+            ConflictException.class,
+            () -> ownershipService.rollBackToLegacy(
+                workflow.id(), workflow.activeVersionId()));
+
+        assertTrue(claimCommitted.get());
+        Workflow persisted = workflowMapper.getById(workspace.getId(), workflow.id());
+        assertNull(persisted.getLegacyRuleId());
+        assertEquals("canonical", persisted.getRuntimeOwner());
+        assertEquals(
+            1,
+            count("SELECT COUNT(*) FROM workflow_run"
+                + " WHERE workspace_id = ? AND workflow_id = ?",
+                workspace.getId(), workflow.id()));
+    }
+
+    @Test
+    void databaseRejectsOldBinaryFirstLegacyAttachmentAfterCanonicalHistory()
+            throws Exception {
+        String title = "Old binary rollback " + unique();
+        WorkflowDto workflow = createEnabledWorkflow(title);
+        Company company = createCompany();
+        CanonicalClaim claim = claimService.claimEntity(
+            workflow.id(), entityDispatch(company.getId(), "old-binary-" + unique()));
+        Rule legacyRule = insertUnpairedLegacyRule(title);
+        assertTrue(claim.started());
+
+        DataAccessException failure = assertThrows(
+            DataAccessException.class,
+            () -> workflowMapper.attachLegacyRuleAndCompareAndSwapRuntimeOwner(
+                workspace.getId(),
+                workflow.id(),
+                workflow.activeVersionId(),
+                legacyRule.getId(),
+                "canonical",
+                "legacy",
+                currentUser.getId()));
+
+        assertEquals("45000", sqlState(failure));
+        Workflow persisted = workflowMapper.getById(workspace.getId(), workflow.id());
+        assertNull(persisted.getLegacyRuleId());
+        assertEquals("canonical", persisted.getRuntimeOwner());
     }
 
     @Test
@@ -230,6 +301,50 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
             outbox.getTriggerEvent(),
             outbox.getTriggerKey(),
             outbox.getOccurredAt().toInstant(ZoneOffset.UTC));
+    }
+
+    private WorkflowTriggerDispatch.EntityChange entityDispatch(int companyId, String key) {
+        return new WorkflowTriggerDispatch.EntityChange(
+            workspace.getId(),
+            "company",
+            companyId,
+            "company.updated",
+            key,
+            Instant.parse("2026-08-08T12:00:00Z"));
+    }
+
+    private Rule insertUnpairedLegacyRule(String title) throws Exception {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("company.updated"));
+        RuleAction action = new RuleAction();
+        action.setType("notify");
+        action.setTitle(title);
+        Rule rule = new Rule();
+        rule.setWorkspaceId(workspace.getId());
+        rule.setName(title);
+        rule.setEnabled(false);
+        rule.setRecordType("company");
+        rule.setTriggerType("entity_change");
+        rule.setTriggerConfig(objectMapper.writeValueAsString(trigger));
+        rule.setActionsJson(objectMapper.writeValueAsString(List.of(action)));
+        rule.setExecutionMode("user");
+        rule.setRunAsUserId(currentUser.getId());
+        rule.setCreatedById(currentUser.getId());
+        ruleMapper.insert(rule);
+        assertTrue(rule.getId() > 0);
+        return rule;
+    }
+
+    private static String sqlState(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof SQLException sqlException) {
+                return sqlException.getSQLState();
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private void runConcurrentSchedulerRestart() throws Exception {

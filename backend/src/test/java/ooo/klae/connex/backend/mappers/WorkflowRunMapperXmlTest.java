@@ -134,6 +134,7 @@ class WorkflowRunMapperXmlTest {
         String runHistory = sql(configuration, "hasRunHistory", Map.of(
             "workspaceId", 7, "workflowId", 11));
         assertTrue(runHistory.startsWith("SELECT EXISTS("));
+        assertTrue(runHistory.contains("LIMIT 1 FOR SHARE"));
         assertFalse(runHistory.contains("started_at"));
     }
 

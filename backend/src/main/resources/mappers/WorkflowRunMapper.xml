@@ -534,6 +534,8 @@
       FROM workflow_run
       WHERE workspace_id = #{workspaceId}
         AND workflow_id = #{workflowId}
+      LIMIT 1
+      FOR SHARE
     )
   </select>
 
