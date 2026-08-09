@@ -6,25 +6,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.transaction.annotation.Isolation;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.ai.businesscard.BusinessCardAiExtractionService;
@@ -51,65 +49,106 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
-import ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper;
 
-@Transactional(isolation = Isolation.READ_COMMITTED)
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
 
-    private static final Instant NOW = Instant.parse("2026-08-08T12:00:00Z");
-
-    @Autowired private CompanyService companyService;
+    @Autowired private BusinessCardService service;
     @Autowired private PersonService personService;
-    @Autowired private AttachmentService attachmentService;
-    @Autowired private WorkspaceService workspaceService;
-    @Autowired private AuthService authService;
-    @Autowired private BusinessCardImportRequestMapper importRequestMapper;
-    @Autowired private DuplicateDecisionLockService duplicateDecisionLockService;
     @Autowired private DuplicatePreflightService duplicatePreflightService;
     @Autowired private ScoringService scoringService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private BusinessCardProperties properties;
+    @MockitoBean private BusinessCardImageValidator imageValidator;
+    @MockitoBean private BusinessCardOcrClient ocrClient;
+    @MockitoBean private BusinessCardExtractor extractor;
+    @MockitoBean private BusinessCardAiExtractionService aiExtractionService;
+    @MockitoBean private BusinessCardBinaryStore binaryStore;
+    @MockitoBean private CapabilityEntitlement capabilityEntitlement;
+    @MockitoBean private BusinessCardRateLimiter rateLimiter;
+    @MockitoBean private AuditService auditService;
+    @MockitoBean private RuleTriggerPublisher ruleTriggers;
+
+    private boolean scanningWasEnabled;
+    private String idempotencyKey;
+    private Integer persistedPersonId;
+    private Integer persistedTagId;
+
+    @BeforeEach
+    void enableScanning() {
+        scanningWasEnabled = properties.isEnabled();
+        properties.setEnabled(true);
+    }
+
+    @AfterEach
+    void cleanUpCommittedFixtures() {
+        properties.setEnabled(scanningWasEnabled);
+        if (workspace != null && idempotencyKey != null) {
+            jdbcTemplate.update(
+                "DELETE FROM business_card_import_request "
+                    + "WHERE workspace_id = ? AND idempotency_key = ?",
+                workspace.getId(),
+                idempotencyKey);
+        }
+        if (workspace != null && persistedPersonId != null) {
+            jdbcTemplate.update(
+                "DELETE FROM activity WHERE workspace_id = ? AND person_id = ?",
+                workspace.getId(),
+                persistedPersonId);
+            jdbcTemplate.update(
+                "DELETE FROM task WHERE workspace_id = ? AND person_id = ?",
+                workspace.getId(),
+                persistedPersonId);
+            jdbcTemplate.update(
+                "DELETE FROM attachment WHERE workspace_id = ? "
+                    + "AND entity_type = 'person' AND entity_id = ?",
+                workspace.getId(),
+                persistedPersonId);
+            jdbcTemplate.update(
+                "DELETE FROM person WHERE workspace_id = ? AND id = ?",
+                workspace.getId(),
+                persistedPersonId);
+        }
+        if (workspace != null && currentUser != null) {
+            jdbcTemplate.update(
+                "DELETE FROM notification WHERE workspace_id = ? AND recipient_id = ?",
+                workspace.getId(),
+                currentUser.getId());
+        }
+        if (workspace != null && persistedTagId != null) {
+            jdbcTemplate.update(
+                "DELETE FROM tag WHERE workspace_id = ? AND id = ?",
+                workspace.getId(),
+                persistedTagId);
+        }
+        if (workspace != null && currentUser != null) {
+            jdbcTemplate.update(
+                "DELETE FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+                workspace.getId(),
+                currentUser.getId());
+            jdbcTemplate.update(
+                "DELETE FROM app_user WHERE id = ?",
+                currentUser.getId());
+        }
+    }
 
     @Test
     void persistedBusinessCardThreeCycleReplayKeepsCanonicalPersonAndProvenance() throws Exception {
-        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        BusinessCardImageValidator imageValidator = mock(BusinessCardImageValidator.class);
-        BusinessCardOcrClient ocrClient = mock(BusinessCardOcrClient.class);
-        BusinessCardExtractor extractor = mock(BusinessCardExtractor.class);
-        BusinessCardBinaryStore binaryStore = mock(BusinessCardBinaryStore.class);
-        CapabilityEntitlement capabilityEntitlement = mock(CapabilityEntitlement.class);
-        BusinessCardRateLimiter rateLimiter = mock(BusinessCardRateLimiter.class);
-        BusinessCardProperties properties = new BusinessCardProperties();
-        properties.setEnabled(true);
-        BusinessCardService service = new BusinessCardService(
-            properties,
-            imageValidator,
-            ocrClient,
-            extractor,
-            mock(BusinessCardAiExtractionService.class),
-            binaryStore,
-            companyService,
-            personService,
-            attachmentService,
-            workspaceService,
-            authService,
-            importRequestMapper,
-            rateLimiter,
-            capabilityEntitlement,
-            duplicateDecisionLockService,
-            clock);
         byte[] content = {1, 2, 3};
         MockMultipartFile image = new MockMultipartFile(
             "image", "card.jpg", "image/jpeg", content);
         ValidatedBusinessCardImage validated = new ValidatedBusinessCardImage(
             content, "image/jpeg", "jpg", 120, 70);
         AtomicInteger storedCards = new AtomicInteger();
+        String storedCardPrefix = "replay-" + unique();
         when(imageValidator.validate(image)).thenReturn(validated);
         when(ocrClient.isReady()).thenReturn(true);
         when(ocrClient.isReadyForScan()).thenReturn(true);
         when(binaryStore.isReady()).thenReturn(true);
         when(binaryStore.store(anyInt(), anyString(), anyString(), any(byte[].class)))
             .thenAnswer(invocation -> new BusinessCardBinaryStore.StoredBusinessCard(
-                "/api/attachments/content/replay-" + storedCards.incrementAndGet(),
+                "/api/attachments/content/" + storedCardPrefix + "-"
+                    + storedCards.incrementAndGet(),
                 content.length));
         when(capabilityEntitlement.isEntitled(any())).thenReturn(true);
 
@@ -136,22 +175,25 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
             duplicatePreflightService.preflightPerson(duplicateRequest);
         BusinessCardContactRequest contact = contact(
             firstScan, initialReview.reviewToken());
-        String firstKey = reserveImport();
+        idempotencyKey = UUID.randomUUID().toString();
+        service.reserveImport(idempotencyKey);
 
         BusinessCardImportResponse first = service.importCard(
             image,
             contact,
             new BusinessCardPersonAction.Create(),
             new BusinessCardCompanyAction.None(),
-            firstKey);
+            idempotencyKey);
         int personId = first.contact().getId();
+        persistedPersonId = personId;
         Tag tag = newTag();
+        persistedTagId = tag.getId();
         personService.addTag(personId, tag.getId());
         Person person = personMapper.getPersonById(workspace.getId(), personId);
         newActivity(currentUser, person, null);
         newTask(currentUser, person, null);
         newNotification(workspace.getId(), currentUser.getId());
-        OcrReplayState afterFirst = replayState(personId, firstKey);
+        OcrReplayState afterFirst = replayState(personId, idempotencyKey);
 
         BusinessCardScanResponse secondScan = service.scan(image);
         BusinessCardImportResponse second = service.importCard(
@@ -159,8 +201,8 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
             contact,
             new BusinessCardPersonAction.Create(),
             new BusinessCardCompanyAction.None(),
-            firstKey);
-        OcrReplayState afterSecond = replayState(personId, firstKey);
+            idempotencyKey);
+        OcrReplayState afterSecond = replayState(personId, idempotencyKey);
 
         BusinessCardScanResponse thirdScan = service.scan(image);
         BusinessCardImportResponse third = service.importCard(
@@ -168,7 +210,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
             contact,
             new BusinessCardPersonAction.Create(),
             new BusinessCardCompanyAction.None(),
-            firstKey);
+            idempotencyKey);
 
         assertEquals(BusinessCardImportDisposition.CREATED, first.disposition());
         assertEquals(BusinessCardImportDisposition.CREATED, second.disposition());
@@ -183,7 +225,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
         assertTrue(afterFirst.artifacts().notifications() >= 1);
         assertEquals(2, afterFirst.artifacts().relationshipEvidenceEvents());
         assertEquals(afterFirst, afterSecond);
-        assertEquals(afterFirst, replayState(personId, firstKey));
+        assertEquals(afterFirst, replayState(personId, idempotencyKey));
         assertEquals(
             1,
             rowCount(
@@ -198,7 +240,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
                     + "AND acquired_at IS NOT NULL AND superseded_at IS NULL",
                 workspace.getId(),
                 personId,
-                "business-card:" + firstKey));
+                "business-card:" + idempotencyKey));
         assertEquals(
             "1,1,1,1",
             jdbcTemplate.queryForObject(
@@ -208,7 +250,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
                     + "AND idempotency_key = ?",
                 String.class,
                 workspace.getId(),
-                firstKey));
+                idempotencyKey));
         assertEquals(
             1,
             rowCount(
@@ -252,24 +294,48 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
             reviewToken);
     }
 
-    private String reserveImport() {
-        String idempotencyKey = UUID.randomUUID().toString();
-        LocalDateTime now = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
-        assertEquals(
-            1,
-            importRequestMapper.reserve(
-                workspace.getId(),
-                currentUser.getId(),
-                idempotencyKey,
-                1,
-                now.plusMinutes(2),
-                now.plusDays(1)));
-        return idempotencyKey;
-    }
-
     private OcrReplayState replayState(int personId, String idempotencyKey) {
         return new OcrReplayState(
             replayArtifacts(personId),
+            jdbcTemplate.queryForList(
+                "SELECT id, workspace_id, owner_id, name, email, phone, company_id, title, "
+                    + "image_url, created_at, updated_at FROM person "
+                    + "WHERE workspace_id = ? AND id = ?",
+                workspace.getId(),
+                personId),
+            jdbcTemplate.queryForList(
+                "SELECT id, workspace_id, type, subject, notes, person_id, deal_id, "
+                    + "created_by_id, timestamp FROM activity "
+                    + "WHERE workspace_id = ? AND person_id = ? ORDER BY id",
+                workspace.getId(),
+                personId),
+            jdbcTemplate.queryForList(
+                "SELECT id, workspace_id, description, completed, status, position, due_date, "
+                    + "assigned_to_id, person_id, deal_id, created_at, updated_at FROM task "
+                    + "WHERE workspace_id = ? AND person_id = ? ORDER BY id",
+                workspace.getId(),
+                personId),
+            jdbcTemplate.queryForList(
+                "SELECT t.id, t.workspace_id, t.name, t.color, pt.person_id "
+                    + "FROM tag t JOIN person_tag pt ON pt.tag_id = t.id "
+                    + "WHERE t.workspace_id = ? AND pt.person_id = ? ORDER BY t.id",
+                workspace.getId(),
+                personId),
+            jdbcTemplate.queryForList(
+                "SELECT id, workspace_id, person_id, company_id, company_name, title, "
+                    + "started_at, ended_at, created_at FROM person_employment "
+                    + "WHERE workspace_id = ? AND person_id = ? ORDER BY id",
+                workspace.getId(),
+                personId),
+            jdbcTemplate.queryForList(
+                "SELECT id, workspace_id, recipient_id, type, category, severity, "
+                    + "template_version, title, body, actor_id, actor_label, source_type, "
+                    + "source_id, source_label, context_type, context_id, context_label, "
+                    + "action_url, data, dedupe_key, triggered_at, read_at, dismissed_at, "
+                    + "resolved_at, created_at, updated_at FROM notification "
+                    + "WHERE workspace_id = ? AND recipient_id = ? ORDER BY id",
+                workspace.getId(),
+                currentUser.getId()),
             jdbcTemplate.queryForList(
                 "SELECT id, kind, `value`, normalized_value, source_system, source_channel, "
                     + "source_row_ref, acquired_at, superseded_at FROM person_identity "
@@ -349,6 +415,12 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
 
     private record OcrReplayState(
         ReplayArtifacts artifacts,
+        List<Map<String, Object>> people,
+        List<Map<String, Object>> activities,
+        List<Map<String, Object>> tasks,
+        List<Map<String, Object>> tags,
+        List<Map<String, Object>> employmentRelationships,
+        List<Map<String, Object>> notifications,
         List<Map<String, Object>> identities,
         List<Map<String, Object>> importRequests,
         List<Map<String, Object>> attachments

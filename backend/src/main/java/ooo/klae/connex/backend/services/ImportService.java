@@ -147,6 +147,7 @@ public class ImportService {
         final List<String> tagNames = new ArrayList<>();
         final List<PlanRow> sourceRows = new ArrayList<>();
         final Set<CanonicalIdentity> missingCanonicalIdentities = new HashSet<>();
+        boolean failedBecauseMatchedTargetVanished;
         String companyName;
         String companyDependencyKey;
         String companyDependencyError;
@@ -317,7 +318,13 @@ public class ImportService {
 
         int created = beans.size();
         List<RowError> failed = collectFailures(plan);
-        auditImport("person", created, updated, skipped, failed.size());
+        auditImport(
+            "person",
+            created,
+            updated,
+            skipped,
+            failed.size(),
+            allRowsFailedBecauseTargetsVanished(plan));
         return new ImportResult(created, updated, skipped, failed);
     }
 
@@ -654,7 +661,13 @@ public class ImportService {
 
         int created = beans.size();
         List<RowError> failed = collectFailures(plan);
-        auditImport("company", created, updated, skipped, failed.size());
+        auditImport(
+            "company",
+            created,
+            updated,
+            skipped,
+            failed.size(),
+            allRowsFailedBecauseTargetsVanished(plan));
         return new ImportResult(created, updated, skipped, failed);
     }
 
@@ -1109,7 +1122,13 @@ public class ImportService {
 
         int created = beans.size();
         List<RowError> failed = collectFailures(plan);
-        auditImport("deal", created, updated, skipped, failed.size());
+        auditImport(
+            "deal",
+            created,
+            updated,
+            skipped,
+            failed.size(),
+            allRowsFailedBecauseTargetsVanished(plan));
         return new ImportResult(created, updated, skipped, failed);
     }
 
@@ -1800,7 +1819,9 @@ public class ImportService {
             }
             for (PlanRow row : plan) {
                 if (MATCH.equals(row.status) && matchedId.equals(row.matchedId)) {
-                    fail(row, "Matched " + entityLabel + " #" + matchedId + " not found");
+                    failVanishedMatchedTarget(
+                        row,
+                        "Matched " + entityLabel + " #" + matchedId + " not found");
                 }
             }
         }
@@ -2236,7 +2257,9 @@ public class ImportService {
             int created,
             int updated,
             int skipped,
-            int failed) {
+            int failed,
+            boolean allRowsFailedBecauseTargetsVanished) {
+        if (created + updated + skipped == 0 && allRowsFailedBecauseTargetsVanished) return;
         if (created + updated + skipped + failed == 0) return;
         auditService.record("import." + entityType, entityType, null, "CSV import",
             "Imported " + entityType + "s: " + created + " created, " + updated
@@ -2256,6 +2279,19 @@ public class ImportService {
             }
         }
         return failed;
+    }
+
+    private static boolean allRowsFailedBecauseTargetsVanished(List<PlanRow> plan) {
+        if (plan.isEmpty()) {
+            return false;
+        }
+        for (PlanRow row : plan) {
+            if (!INVALID.equals(row.status)
+                    || !row.failedBecauseMatchedTargetVanished) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ===================================================================================
@@ -2665,6 +2701,14 @@ public class ImportService {
         for (PlanRow source : row.sourceRows) {
             fail(source, error);
         }
+    }
+
+    private static void failVanishedMatchedTarget(PlanRow row, String error) {
+        row.failedBecauseMatchedTargetVanished = true;
+        for (PlanRow source : row.sourceRows) {
+            source.failedBecauseMatchedTargetVanished = true;
+        }
+        fail(row, error);
     }
 
     private static String cell(Map<String, String> row, String column) {
