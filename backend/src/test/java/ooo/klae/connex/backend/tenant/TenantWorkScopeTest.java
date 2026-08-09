@@ -130,6 +130,24 @@ class TenantWorkScopeTest {
     }
 
     @Test
+    void siblingWorkspacesResolveIndependentlyInsideTheirSharedOrganizationCatalog() {
+        when(workspaceMapper.getOrgId(7)).thenReturn(42);
+        when(workspaceMapper.getOrgId(8)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_shared");
+
+        String restored = workScope.inWorkspace(7, () -> {
+            assertEquals("cnx_shared", workScope.inWorkspace(
+                    8, () -> tenantContext.getCatalog()));
+            return tenantContext.getCatalog();
+        });
+
+        assertEquals("cnx_shared", restored);
+        verify(workspaceMapper).getOrgId(7);
+        verify(workspaceMapper).getOrgId(8);
+        verify(tenantCatalogResolver, times(2)).resolveCatalog(42);
+    }
+
+    @Test
     void returningToAnOuterWorkspaceReusesItsOriginalSnapshot() {
         when(workspaceMapper.getOrgId(7)).thenReturn(42);
         when(workspaceMapper.getOrgId(8)).thenReturn(43);

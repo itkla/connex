@@ -102,10 +102,12 @@ class TenantDiagnosticsIsolationIntegrationTest {
     void diagnosticsAreTenantIsolatedAndCredentialMaterialIsAbsent() throws Exception {
         Organization organization = newOrganization();
         Workspace workspace = newWorkspace(organization);
+        Workspace siblingWorkspace = newWorkspace(organization);
         Organization foreignOrganization = newOrganization();
         Workspace foreignWorkspace = newWorkspace(foreignOrganization);
         User actor = newUser();
         workspaceMapper.addMember(workspace.getId(), actor.getId(), "owner");
+        workspaceMapper.addMember(siblingWorkspace.getId(), actor.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), actor.getId(), "owner");
         seedCredentialSentinels(workspace);
 
@@ -124,6 +126,10 @@ class TenantDiagnosticsIsolationIntegrationTest {
         assertRedacted(workspaceResponse);
         assertRedacted(organizationResponse);
 
+        mockMvc.perform(get("/api/workspaces/" + siblingWorkspace.getId() + "/diagnostics")
+                        .header("X-Workspace-Id", workspace.getId())
+                        .session(session))
+                .andExpect(status().isConflict());
         mockMvc.perform(get("/api/workspaces/" + foreignWorkspace.getId() + "/diagnostics")
                         .header("X-Workspace-Id", workspace.getId())
                         .session(session))

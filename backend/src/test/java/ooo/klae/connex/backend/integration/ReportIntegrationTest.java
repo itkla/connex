@@ -2004,12 +2004,16 @@ class ReportIntegrationTest {
     }
 
     @Test
-    void reportIdIsIsolatedAcrossWorkspacesForSameUser() throws Exception {
+    void reportAndSnapshotIdsAreIsolatedAcrossSiblingAndForeignOrganizationWorkspaces()
+            throws Exception {
         RequestContextHolder.resetRequestAttributes();
-        Workspace first = newWorkspace();
-        Workspace second = newWorkspace();
+        Organization organization = newOrganization();
+        Workspace first = newWorkspaceInOrg(organization.getId());
+        Workspace sibling = newWorkspaceInOrg(organization.getId());
+        Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
         User member = newMember(first, "member");
-        workspaceMapper.addMember(second.getId(), member.getId(), "member");
+        workspaceMapper.addMember(sibling.getId(), member.getId(), "member");
+        workspaceMapper.addMember(foreign.getId(), member.getId(), "member");
         MockHttpSession session = login(member.getUsername());
         int reportId = createReport(session, first);
         MvcResult snapshotResult = mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
@@ -2022,19 +2026,32 @@ class ReportIntegrationTest {
             .andReturn();
         int snapshotId = responseId(snapshotResult);
 
+        assertReportAbsent(session, sibling, reportId, snapshotId);
+        assertReportAbsent(session, foreign, reportId, snapshotId);
         mockMvc.perform(get("/api/reports/{id}", reportId)
-                .header("X-Workspace-Id", second.getId())
+                .header("X-Workspace-Id", first.getId())
+                .session(session))
+            .andExpect(status().isOk());
+    }
+
+    private void assertReportAbsent(
+            MockHttpSession session,
+            Workspace unauthorized,
+            int reportId,
+            int snapshotId) throws Exception {
+        mockMvc.perform(get("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", unauthorized.getId())
                 .session(session))
             .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/api/reports")
-                .header("X-Workspace-Id", second.getId())
+                .header("X-Workspace-Id", unauthorized.getId())
                 .session(session))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(0));
 
         mockMvc.perform(post("/api/reports/{id}/generate", reportId)
-                .header("X-Workspace-Id", second.getId())
+                .header("X-Workspace-Id", unauthorized.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
@@ -2042,17 +2059,17 @@ class ReportIntegrationTest {
             .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/api/reports/{id}/snapshots", reportId)
-                .header("X-Workspace-Id", second.getId())
+                .header("X-Workspace-Id", unauthorized.getId())
                 .session(session))
             .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
-                .header("X-Workspace-Id", second.getId())
+                .header("X-Workspace-Id", unauthorized.getId())
                 .session(session))
             .andExpect(status().isNotFound());
 
         mockMvc.perform(post("/api/reports/{id}/export.csv", reportId)
-                .header("X-Workspace-Id", second.getId())
+                .header("X-Workspace-Id", unauthorized.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .session(session)
@@ -2060,7 +2077,21 @@ class ReportIntegrationTest {
             .andExpect(status().isNotFound());
 
         mockMvc.perform(delete("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
-                .header("X-Workspace-Id", second.getId())
+                .header("X-Workspace-Id", unauthorized.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNotFound());
+
+        mockMvc.perform(put("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", unauthorized.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(REPORT_BODY)
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNotFound());
+
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", unauthorized.getId())
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isNotFound());
