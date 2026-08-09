@@ -127,6 +127,25 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     @Test
+    void unpairedWorkflowIdentityHashSuppressesReplayAfterRuleAttachment() {
+        stubCanonicalCompilation();
+        String primaryKey = entityDedupeKey(13);
+        String unpairedWorkflowKey = entityDedupeKey(11);
+        when(ruleMapper.getExecutionByDedupe(7, 13, primaryKey))
+            .thenReturn(null);
+        when(ruleMapper.getExecutionByDedupe(7, 13, unpairedWorkflowKey))
+            .thenReturn(new RuleExecution());
+
+        WorkflowRuntimeClaimService.CanonicalClaim claim = service.claimEntity(11, dispatch);
+
+        assertTrue(claim.replayed());
+        assertFalse(claim.started());
+        verify(ruleMapper).getExecutionByDedupe(7, 13, primaryKey);
+        verify(ruleMapper).getExecutionByDedupe(7, 13, unpairedWorkflowKey);
+        verify(workflowRunMapper, never()).insertRun(any());
+    }
+
+    @Test
     void unpairedLegacyRuleClaimsExactlyOnceAndDedupesRedelivery() {
         Rule rule = rule();
         RuleExecution persisted = new RuleExecution();
@@ -177,8 +196,10 @@ class WorkflowRuntimeClaimServiceTest {
         stubCanonicalCompilation();
         WorkflowRun replay = new WorkflowRun();
         replay.setId(91L);
-        when(workflowRunMapper.getByDedupe(eq(7), eq(11), anyString()))
+        when(workflowRunMapper.getByDedupe(7, 11, entityDedupeKey(13)))
             .thenReturn(null, replay);
+        when(workflowRunMapper.getByDedupe(7, 11, entityDedupeKey(11)))
+            .thenReturn(null);
         org.mockito.Mockito.doThrow(new DuplicateKeyException("duplicate"))
             .when(workflowRunMapper).insertRun(any());
 
@@ -208,6 +229,7 @@ class WorkflowRuntimeClaimServiceTest {
         assertEquals("trigger", run.getValue().getCurrentNodeId());
         assertEquals("queued", run.getValue().getStatus());
         assertEquals(7, run.getValue().getWorkspaceId());
+        assertEquals(entityDedupeKey(13), run.getValue().getDedupeKey());
         verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
         InOrder lockOrder = inOrder(workflowTriggerOutboxMapper, workflowMapper);
         lockOrder.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);

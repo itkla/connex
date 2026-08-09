@@ -34,7 +34,12 @@ import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraf
 import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
 import ooo.klae.connex.backend.tenant.Permission;
 
-/** Maintains the legacy rule API as a transactional projection of versioned workflows. */
+/**
+ * Maintains legacy rule mutations as a transactional projection of versioned workflows. This is the
+ * only write path behind {@code /api/rules}; the workflow aggregate and immutable versions remain
+ * authoritative, and canonical-owned workflows reject legacy mutation. Remove this projection after
+ * the supported rule-client inventory is empty and no workflow requires legacy rollback.
+ */
 @Service
 @RequiredArgsConstructor
 public class LegacyRuleWorkflowService {
@@ -150,6 +155,7 @@ public class LegacyRuleWorkflowService {
         LockedPrincipals principals = principalLockService.lockUserMutation(
             workspaceId, actorId, discovery.principalIds(), Set.of());
         LockedAggregate aggregate = lockAggregate(discovery, principals, true);
+        requireLegacyOwner(aggregate.workflow());
         requireDeletablePair(aggregate);
         Workflow workflow = aggregate.workflow();
         if (workflow.getArchivedAt() != null) {
@@ -847,6 +853,10 @@ public class LegacyRuleWorkflowService {
         if (workflow.getArchivedAt() != null) {
             throw new ConflictException("Archived workflow cannot be changed through the rule API");
         }
+        requireLegacyOwner(workflow);
+    }
+
+    private static void requireLegacyOwner(Workflow workflow) {
         if (!"legacy".equals(workflow.getRuntimeOwner())) {
             throw new ConflictException(
                 "Canonical-owned workflow cannot be changed through the rule API");

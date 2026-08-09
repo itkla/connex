@@ -22,8 +22,13 @@ import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.services.RuleService;
 
 /**
- * CRUD for automation rules. Every operation is gated by {@code RULE_MANAGE} in the service, and
- * {@code system}-mode rules additionally require the admin tier. All access is workspace-scoped.
+ * Legacy HTTP compatibility projection for automation-rule clients. Reads expose the rule and
+ * rule-execution projections; every mutation delegates through {@link RuleService} to the versioned
+ * workflow aggregate and cannot mutate a canonical-owned workflow. Every operation is gated by
+ * {@code RULE_MANAGE} in the service, and {@code system}-mode rules additionally require the admin
+ * tier. All access is workspace-scoped. The mutation surface can be removed once supported clients
+ * no longer call {@code /api/rules} and no workflow requires legacy ownership; historical execution
+ * reads can then retire with their API retention contract.
  */
 @RestController
 @RequestMapping("/api/rules")
