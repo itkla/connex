@@ -83,6 +83,33 @@ async function dragConnection(page: Page, source: Locator, target: Locator, vali
     await page.mouse.up();
 }
 
+async function expectCanvasViewportLocked(page: Page): Promise<void> {
+    const flow = page.locator(".react-flow");
+    const pane = flow.locator(".react-flow__pane");
+    const viewport = flow.locator(".react-flow__viewport");
+    await expect(page.getByRole("button", { name: "Zoom in" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Zoom out" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Fit view" })).toHaveCount(0);
+    const transform = await viewport.evaluate((element) => getComputedStyle(element).transform);
+    const point = await pane.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width * 0.85,
+            y: rect.top + rect.height * 0.2,
+        };
+    });
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.wheel(120, -240);
+    await page.mouse.dblclick(point.x, point.y);
+    await page.keyboard.down("Space");
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.down();
+    await page.mouse.move(point.x - 80, point.y + 80, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up("Space");
+    await expect.poll(() => viewport.evaluate((element) => getComputedStyle(element).transform)).toBe(transform);
+}
+
 test.describe("workflow canvas", () => {
     test("locks initial authoring until creation finishes", async ({ page }) => {
         let releaseCreate: () => void = () => undefined;
@@ -131,6 +158,7 @@ test.describe("workflow canvas", () => {
             await expect(page.getByRole("button", { name: "Saving draft…" })).toBeDisabled();
             await expect(page.getByLabel("Workflow name")).toBeDisabled();
             await expect(page.locator(".react-flow__node").first()).not.toHaveClass(/(?:^|\s)draggable(?:\s|$)/);
+            await expectCanvasViewportLocked(page);
         } finally {
             releaseCreate();
         }
@@ -139,6 +167,7 @@ test.describe("workflow canvas", () => {
             await navigationPending;
             await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
             await expect(page.getByLabel("Workflow name")).toBeDisabled();
+            await expectCanvasViewportLocked(page);
         } finally {
             releaseNavigation();
         }

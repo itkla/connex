@@ -258,8 +258,8 @@ export function useWorkflowEditor({
         && !switching;
     const permissionReadOnly = history.present.executionMode === "system" && !canRunAsSystem;
     const readOnly = !scopeReady || workflow?.archivedAt != null || inspection != null || permissionReadOnly;
-    const editingReadOnly = readOnly
-        || (workflowId == null && (busyAction === "save" || workflow != null));
+    const creationLocked = workflowId == null && (busyAction === "save" || workflow != null);
+    const editingReadOnly = readOnly || creationLocked;
     const displayDocument = inspection?.kind === "version"
         ? documentFromVersion(inspection.version)
         : inspection?.kind === "run" && inspection.run.version
@@ -626,6 +626,7 @@ export function useWorkflowEditor({
         focusRequestId,
         dirty,
         readOnly,
+        creationLocked,
         editingReadOnly,
         activeVersionNumber,
         setSelectedNodeId,

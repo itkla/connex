@@ -19,6 +19,10 @@ import {
     type Edge,
     type IsValidConnection,
     type OnConnectEnd,
+    type OnEdgesDelete,
+    type OnMoveEnd,
+    type OnNodeDrag,
+    type OnNodesDelete,
     type OnReconnect,
     type Viewport,
 } from "@xyflow/react";
@@ -204,6 +208,7 @@ type WorkflowCanvasEditorProps = {
     diagnostics: WorkflowDiagnostic[];
     run: WorkflowRunDetail | null;
     readOnly: boolean;
+    viewportLocked: boolean;
     focusNodeId: string | null;
     focusRequestId: number;
     nodeLabel: (nodeId: string) => string;
@@ -231,6 +236,7 @@ export default function WorkflowCanvasEditor({
     diagnostics,
     run,
     readOnly,
+    viewportLocked,
     focusNodeId,
     focusRequestId,
     nodeLabel,
@@ -347,7 +353,7 @@ export default function WorkflowCanvasEditor({
     useEffect(() => {
         const shouldFocus = focusNodeId != null && handledFocusRequestIdRef.current !== focusRequestId;
         handledFocusRequestIdRef.current = focusRequestId;
-        if (!shouldFocus) return;
+        if (!shouldFocus || viewportLocked) return;
         const node = getNode(focusNodeId);
         if (!node) return;
         void setCenter(
@@ -359,13 +365,14 @@ export default function WorkflowCanvasEditor({
             const element = globalThis.document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(focusNodeId)}"]`);
             element?.focus();
         });
-    }, [document.canvas.viewport.zoom, focusNodeId, focusRequestId, getNode, setCenter]);
+    }, [document.canvas.viewport.zoom, focusNodeId, focusRequestId, getNode, setCenter, viewportLocked]);
 
     const onConnect = useCallback((connection: Connection) => {
+        if (readOnly) return;
         if (connection.source && connection.target && isOutcome(connection.sourceHandle)) {
             onConnectBranch(connection.source, connection.sourceHandle, connection.target);
         }
-    }, [onConnectBranch]);
+    }, [onConnectBranch, readOnly]);
 
     const isValidConnection = useCallback<IsValidConnection>((connection) => (
         connection.targetHandle === "in"
@@ -379,10 +386,11 @@ export default function WorkflowCanvasEditor({
     ), [document.definition]);
 
     const onConnectEnd = useCallback<OnConnectEnd>((_, connectionState) => {
+        if (readOnly) return;
         if (connectionState.isValid === false) {
             toastError(t("invalidConnection"));
         }
-    }, [t]);
+    }, [readOnly, t]);
 
     const insertAtContextPosition = useCallback((
         sourceNodeId: string,
@@ -399,10 +407,31 @@ export default function WorkflowCanvasEditor({
     }, [onSelectNode]);
 
     const onReconnect = useCallback<OnReconnect>((oldEdge, connection) => {
+        if (readOnly) return;
         const semantic = document.definition.edges.find((edge) => edge.id === oldEdge.id);
         if (!semantic || !connection.target) return;
         onConnectBranch(semantic.sourceNodeId, semantic.outcome, connection.target);
-    }, [document.definition.edges, onConnectBranch]);
+    }, [document.definition.edges, onConnectBranch, readOnly]);
+
+    const onNodeDragStop = useCallback<OnNodeDrag<WorkflowFlowNode>>((_, node) => {
+        if (!readOnly) onMoveNode(node.id, node.position);
+    }, [onMoveNode, readOnly]);
+
+    const onNodesDelete = useCallback<OnNodesDelete<WorkflowFlowNode>>((deleted) => {
+        if (!readOnly) deleted.forEach((node) => onDeleteNode(node.id));
+    }, [onDeleteNode, readOnly]);
+
+    const onEdgesDelete = useCallback<OnEdgesDelete>((deleted) => {
+        if (readOnly) return;
+        deleted.forEach((edge) => {
+            const semantic = document.definition.edges.find((candidate) => candidate.id === edge.id);
+            if (semantic) onDisconnectBranch(semantic.sourceNodeId, semantic.outcome);
+        });
+    }, [document.definition.edges, onDisconnectBranch, readOnly]);
+
+    const onMoveEnd = useCallback<OnMoveEnd>((_, viewport) => {
+        if (!readOnly) onMoveViewport(viewport);
+    }, [onMoveViewport, readOnly]);
 
     return (
         <div className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-2xl border border-border bg-muted/20">
@@ -444,13 +473,10 @@ export default function WorkflowCanvasEditor({
                             colorMode={resolvedTheme === "dark" ? "dark" : "light"}
                             onNodeClick={(_, node) => onSelectNode(node.id)}
                             onNodeContextMenu={onNodeContextMenu}
-                            onNodeDragStop={(_, node) => onMoveNode(node.id, node.position)}
-                            onNodesDelete={(deleted) => deleted.forEach((node) => onDeleteNode(node.id))}
-                            onEdgesDelete={(deleted) => deleted.forEach((edge) => {
-                                const semantic = document.definition.edges.find((candidate) => candidate.id === edge.id);
-                                if (semantic) onDisconnectBranch(semantic.sourceNodeId, semantic.outcome);
-                            })}
-                            onMoveEnd={(_, viewport) => onMoveViewport(viewport)}
+                            onNodeDragStop={onNodeDragStop}
+                            onNodesDelete={onNodesDelete}
+                            onEdgesDelete={onEdgesDelete}
+                            onMoveEnd={onMoveEnd}
                             onConnect={onConnect}
                             onConnectEnd={onConnectEnd}
                             onReconnect={onReconnect}
@@ -463,7 +489,17 @@ export default function WorkflowCanvasEditor({
                             elementsSelectable
                             multiSelectionKeyCode={null}
                             deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
-                            panOnScroll
+                            autoPanOnConnect={!viewportLocked}
+                            autoPanOnNodeDrag={!viewportLocked}
+                            autoPanOnNodeFocus={!viewportLocked}
+                            autoPanOnSelection={!viewportLocked}
+                            panActivationKeyCode={viewportLocked ? null : undefined}
+                            zoomActivationKeyCode={viewportLocked ? null : undefined}
+                            panOnDrag={!viewportLocked}
+                            panOnScroll={!viewportLocked}
+                            zoomOnScroll={!viewportLocked}
+                            zoomOnPinch={!viewportLocked}
+                            zoomOnDoubleClick={!viewportLocked}
                             fitView={fitViewOnOpen}
                             fitViewOptions={{
                                 padding: 0.25,
@@ -491,7 +527,7 @@ export default function WorkflowCanvasEditor({
                                 gap={24}
                                 size={1.25}
                             />
-                            <Controls position="bottom-right" showInteractive={false} />
+                            {!viewportLocked ? <Controls position="bottom-right" showInteractive={false} /> : null}
                         </ReactFlow>
                     </div>
                 </ContextMenuTrigger>

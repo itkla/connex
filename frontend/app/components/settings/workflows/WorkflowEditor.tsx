@@ -465,6 +465,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                             <WorkflowCanvasEditor
                                 {...rendererProps}
                                 runStatusLabel={(status) => t(`runs.status.${status}`)}
+                                viewportLocked={editor.creationLocked}
                                 onMoveNode={editor.moveNode}
                                 onMoveViewport={editor.moveViewport}
                             />
