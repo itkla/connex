@@ -45,6 +45,7 @@ class OffboardingIndexArchTest {
         new String[] {"saved_view_pin", "user_id"},
         new String[] {"saved_view_default", "user_id"},
         new String[] {"user_dashboard", "user_id"},
+        new String[] {"relationship_signal_state", "user_id"},
         new String[] {"report_definition", "created_by"},
         new String[] {"report_snapshot", "generated_by"},
         new String[] {"campaign", "owner_user_id"},

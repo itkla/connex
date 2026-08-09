@@ -4,6 +4,7 @@ import type { useRouter } from "next/navigation";
 import type {
     NoteVisibility,
     User,
+    RadarSignal,
     WorkflowManualResolvedScope,
     WorkflowManualScope,
     WorkflowManualSourceSurface,
@@ -119,9 +120,25 @@ export type NoteDraft = {
 };
 export type ActivityDraft = { type?: string; subject?: string; notes?: string };
 
+/** Invocation metadata that routes the shared task composer through a canonical Radar signal. */
+export type RadarTaskInvocation = {
+    signalId: number;
+    version: string;
+    description: string;
+    mode: 'standard' | 'warm_path';
+    bridgePersonId?: number;
+    onCreated: (signal: RadarSignal) => void;
+};
+
 /** A shell-owned overlay an action can open. The union is closed; later work extends it additively. */
 export type OverlayRequest =
-    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft; restoredDraftGeneration?: number }
+    | {
+        kind: "create-task";
+        defaults?: CreateDefaults;
+        draft?: TaskDraft;
+        restoredDraftGeneration?: number;
+        radarTask?: RadarTaskInvocation;
+    }
     | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft; restoredDraftGeneration?: number }
     | {
         kind: "create-activity";
@@ -153,6 +170,7 @@ export type ActionHelpers = {
     openOverlay: (request: OverlayRequest) => void;
     closeOverlay: () => void;
     source: ActionSource;
+    radarTask?: RadarTaskInvocation;
     /** Translates a key within the `Actions` next-intl namespace. */
     translate: (key: string, values?: Record<string, string | number>) => string;
 };
@@ -220,7 +238,11 @@ export type ActionsContextValue = {
      */
     run: (
         id: ActionId,
-        options?: { source?: ActionSource; record?: ActiveRecordRef | null },
+        options?: {
+            source?: ActionSource;
+            record?: ActiveRecordRef | null;
+            radarTask?: RadarTaskInvocation;
+        },
     ) => Promise<ActionRunResult>;
     /** Resolves a live action by id. */
     getAction: (id: ActionId) => AppAction | undefined;

@@ -1,0 +1,188 @@
+{
+  "Radar": {
+    "metadata": {
+      "title": "Relationship Radar",
+      "description": "Prioritized relationship signals with their current evidence."
+    },
+    "title": "Relationship Radar",
+    "description": "Review cooling relationships, deal risk, and warm paths from one ranked, evidence-backed list.",
+    "listLabel": "Ranked relationship signals",
+    "family": {
+      "relationship_decay": "Cooling relationships",
+      "deal_risk": "Deal risk",
+      "warm_path": "Warm paths"
+    },
+    "subject": {
+      "person": "Contact",
+      "company": "Company",
+      "deal": "Deal"
+    },
+    "priority": {
+      "high": "High priority",
+      "medium": "Medium priority",
+      "cooling": "Cooling",
+      "opportunity": "Opportunity"
+    },
+    "state": {
+      "active": "Active",
+      "followed": "Following",
+      "snoozed": "Snoozed",
+      "dismissed": "Dismissed"
+    },
+    "filters": {
+      "label": "Radar filters",
+      "searchLabel": "Search relationship signals",
+      "searchPlaceholder": "Search people, companies, deals, or evidence",
+      "familyLabel": "Filter by signal family",
+      "stateLabel": "Filter by lifecycle state",
+      "allFamilies": "All families",
+      "allStates": "All states",
+      "attention": "Needs attention"
+    },
+    "rank": {
+      "heading": "Rank {position}",
+      "rule": "Ordered by {rule}",
+      "factor": "{key}: {value} ({direction})",
+      "rulePriority": "priority, then source strength, then subject",
+      "keyPriority": "Priority",
+      "keyDaysUntilCold": "Days until cold",
+      "keyDaysSinceTouch": "Days since last touch",
+      "keyRiskScore": "Risk score",
+      "keyPathScore": "Path strength",
+      "keySubject": "Stable subject order",
+      "directionAscending": "ascending",
+      "directionDescending": "descending",
+      "unknownRule": "the deterministic cross-family ranking rule",
+      "unknownFactor": "Additional deterministic factor",
+      "unknownDirection": "stable order"
+    },
+    "evidence": {
+      "heading": "Evidence",
+      "separator": ", ",
+      "parameter": "{key}: {value}",
+      "references": "Sources: {references}",
+      "typeRelationshipTemperature": "Relationship temperature",
+      "typeCloseOverdue": "Expected close date is overdue",
+      "typeClosingSoonQuiet": "Closing soon with little recent activity",
+      "typeStalled": "Deal activity has stalled",
+      "typeStakeholderCold": "Stakeholder relationship is cold",
+      "typeNoStakeholders": "No stakeholders are linked",
+      "typeWarmPath": "Warm introduction path",
+      "parameterBand": "Temperature band",
+      "parameterTrend": "Trend",
+      "parameterScore": "Score",
+      "parameterLastTouchAt": "Last touch",
+      "parameterDaysSinceTouch": "Days since touch",
+      "parameterGoesColdAt": "Predicted cold date",
+      "parameterDaysUntilCold": "Days until cold",
+      "parameterTouchCount": "Touch count",
+      "parameterModelVersion": "Model version",
+      "parameterSeverity": "Severity",
+      "parameterBridgePersonId": "Bridge contact",
+      "parameterBridgeName": "Path through",
+      "parameterReachType": "Opportunity type",
+      "parameterEvidenceType": "Path evidence",
+      "parameterEvidenceCompany": "Shared company",
+      "parameterOverlapStartYear": "Overlap started",
+      "parameterOverlapEndYear": "Overlap ended",
+      "parameterPathScore": "Path strength",
+      "parameterDaysOverdue": "Days overdue",
+      "parameterDaysUntilClose": "Days until close",
+      "parameterPersonId": "Stakeholder",
+      "parameterRole": "Stakeholder role",
+      "unknownType": "Additional relationship evidence",
+      "unknownParameter": "Additional source value",
+      "referencePerson": "contact",
+      "referenceCompany": "company",
+      "referenceDeal": "deal",
+      "referencePersonEdge": "relationship edge",
+      "unknownReference": "source record"
+    },
+    "value": {
+      "hot": "Hot",
+      "warm": "Warm",
+      "cool": "Cool",
+      "cold": "Cold",
+      "rising": "Rising",
+      "steady": "Steady",
+      "cooling": "Cooling",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low",
+      "opportunity": "Opportunity",
+      "connection": "Verified connection",
+      "colleagues": "Current colleagues",
+      "former_colleagues": "Former colleagues",
+      "reach": "Reach a new contact",
+      "rewarm": "Rewarm a relationship",
+      "yes": "Yes",
+      "no": "No",
+      "unavailable": "Unavailable"
+    },
+    "freshness": {
+      "heading": "Evidence as of",
+      "stale": "Stale",
+      "unavailable": "Time unavailable"
+    },
+    "actions": {
+      "label": "Actions for {subject}",
+      "follow": "Follow",
+      "followed": "Following",
+      "snooze": "Snooze",
+      "dismiss": "Dismiss",
+      "createTask": "Create task",
+      "taskCreated": "Task created",
+      "openContext": "Open context",
+      "followNamed": "Follow signal for {subject}",
+      "snoozeNamed": "Snooze signal for {subject}",
+      "dismissNamed": "Dismiss signal for {subject}",
+      "createTaskNamed": "Create a task for {subject}",
+      "taskCreatedNamed": "A task has already been created for {subject}",
+      "createTaskDeniedNamed": "Task creation is not permitted for {subject}",
+      "createTaskPermissionUnavailableNamed": "Task permission could not be checked for {subject}",
+      "createTaskStaleNamed": "Task creation is unavailable because the signal for {subject} is stale",
+      "createTaskPathUnavailableNamed": "Task creation is unavailable because the warm path for {subject} has no current bridge",
+      "openContextNamed": "Open the source record for {subject}",
+      "taskPermissionDenied": "You do not have permission to create tasks.",
+      "taskPermissionUnavailable": "Task permissions could not be checked. Retry before creating a task.",
+      "taskStale": "Refresh this stale signal before creating a task.",
+      "taskPathUnavailable": "The current warm-path bridge is unavailable. Refresh before creating a task.",
+      "cancel": "Cancel",
+      "snoozing": "Snoozing…"
+    },
+    "task": {
+      "defaultDescription": "Follow up on the Relationship Radar signal for {subject}"
+    },
+    "snooze": {
+      "title": "Snooze signal",
+      "description": "Choose when the signal for {subject} should return.",
+      "untilLabel": "Return at",
+      "hint": "Choose a future time within the next 30 days."
+    },
+    "feedback": {
+      "followed": "Now following {subject}.",
+      "snoozed": "Snoozed {subject}.",
+      "dismissed": "Dismissed {subject}.",
+      "taskCreated": "Created a task for {subject}.",
+      "actionFailed": "Could not update {subject}. Try again.",
+      "contextFailed": "Could not open the current context for {subject}."
+    },
+    "empty": {
+      "title": "Radar is clear",
+      "body": "No current relationship signals meet the deterministic detector rules."
+    },
+    "noResults": {
+      "title": "No signals match these filters",
+      "body": "Change the family, state, or search text to broaden the list."
+    },
+    "partial": {
+      "title": "Some signal families are unavailable",
+      "body": "Last-known results remain visible. Current data could not be loaded for: {families}."
+    },
+    "unavailable": {
+      "title": "Relationship Radar is unavailable",
+      "body": "Current signal data could not be loaded for: {families}.",
+      "routeBody": "Current signal data could not be loaded. Retry to check again."
+    }
+  }
+}

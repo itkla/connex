@@ -38,7 +38,7 @@ import { ApiError, createTask, isFieldError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
-import type { Contact, Deal, User } from '@/app/lib/types';
+import type { Contact, CreateTaskPayload, Deal, User } from '@/app/lib/types';
 
 /** The serializable task-composer fields persisted and restored as one workspace-scoped draft. */
 export type TaskDraftData = {
@@ -66,6 +66,10 @@ type Props = {
     initialDraftGeneration?: number;
     onDraftMounted?: () => void;
     requestInit?: RequestInit;
+    createRequest?: (payload: CreateTaskPayload, init?: RequestInit) => Promise<unknown>;
+    compact?: boolean;
+    hideLinks?: boolean;
+    failureMessage?: string;
 };
 
 export default function TaskDialog(props: Props) {
@@ -94,6 +98,10 @@ function ScopedTaskDialog({
     initialDraftGeneration,
     onDraftMounted,
     requestInit,
+    createRequest,
+    compact = false,
+    hideLinks = false,
+    failureMessage,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityTasksDialog');
@@ -147,6 +155,10 @@ function ScopedTaskDialog({
                         defaultDescription={defaultDescription}
                         ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
+                        createRequest={createRequest}
+                        compact={compact}
+                        hideLinks={hideLinks}
+                        failureMessage={failureMessage}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
@@ -182,6 +194,10 @@ type TaskDialogFormProps = {
     defaultDescription: string;
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
+    createRequest?: (payload: CreateTaskPayload, init?: RequestInit) => Promise<unknown>;
+    compact?: boolean;
+    hideLinks?: boolean;
+    failureMessage?: string;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -212,6 +228,10 @@ export function TaskDialogForm({
     defaultDescription,
     ownsInitialDraft = false,
     requestInit,
+    createRequest = createTask,
+    compact = false,
+    hideLinks = false,
+    failureMessage,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -299,7 +319,7 @@ export function TaskDialogForm({
         setSubmitting(true);
         onSubmittingChange(true);
         try {
-            await createTask(
+            await createRequest(
                 {
                     description: description.trim(),
                     dueDate: dueDate || undefined,
@@ -326,12 +346,12 @@ export function TaskDialogForm({
                 }
                 return;
             }
-            const message =
+            const message = failureMessage ?? (
                 err instanceof ApiError
                     ? err.message
                     : err instanceof Error
                       ? err.message
-                      : t('toastFailedCreate');
+                      : t('toastFailedCreate'));
             toastError(message);
         } finally {
             if (!requestInit?.signal?.aborted) {
@@ -393,7 +413,7 @@ export function TaskDialogForm({
                         {fieldErrors.description && <p id="task-description-error" className="text-sm text-destructive">{fieldErrors.description}</p>}
                     </div>
 
-                    <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '140ms' }}>
+                    {!compact ? <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '140ms' }}>
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-due">{t('dueDateLabel')}</Label>
                             <div className="group relative">
@@ -437,9 +457,9 @@ export function TaskDialogForm({
                                 </ComboboxContent>
                             </Combobox>
                         </div>
-                    </div>
+                    </div> : null}
 
-                    <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '190ms' }}>
+                    {!compact && !hideLinks ? <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '190ms' }}>
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-person">{t('personLabel')}</Label>
                             <Combobox
@@ -499,7 +519,7 @@ export function TaskDialogForm({
                                 </ComboboxContent>
                             </Combobox>
                         </div>
-                    </div>
+                    </div> : null}
 
                     <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '240ms' }}>
                         <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>

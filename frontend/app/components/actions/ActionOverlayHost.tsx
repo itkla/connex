@@ -5,8 +5,8 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import { getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
-import type { Contact, Deal, User } from "@/app/lib/types";
+import { createRadarTask, getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
+import type { Contact, CreateTaskPayload, Deal, User } from "@/app/lib/types";
 import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
 import { publishRecordMutation } from "@/app/lib/record-mutation-events";
@@ -382,6 +382,24 @@ export default function ActionOverlayHost({
     const defaultPerson = resolvePerson(persons, defaults);
     const defaultDeal = resolveDeal(deals, defaults);
     const taskDraft = rendered?.request.kind === "create-task" ? rendered.request.draft : undefined;
+    const radarTask = rendered?.request.kind === "create-task" ? rendered.request.radarTask : undefined;
+    const taskCreateRequest = radarTask
+        ? async (payload: CreateTaskPayload, init?: RequestInit) => {
+            const signal = await createRadarTask(
+                radarTask.signalId,
+                radarTask.version,
+                {
+                    ...payload,
+                    ...(radarTask.bridgePersonId === undefined
+                        ? {}
+                        : { bridgePersonId: radarTask.bridgePersonId }),
+                },
+                init,
+            );
+            radarTask.onCreated(signal);
+            return signal;
+        }
+        : undefined;
     const taskDefaultAssignee = taskDraft?.assigneeId == null
         ? null
         : users?.find((candidate) => candidate.id === taskDraft.assigneeId) ?? null;
@@ -420,6 +438,10 @@ export default function ActionOverlayHost({
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
                         onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
                         requestInit={requestInit}
+                        createRequest={taskCreateRequest}
+                        compact={radarTask?.mode === 'warm_path'}
+                        hideLinks={radarTask !== undefined}
+                        failureMessage={radarTask ? t('feedback.createFailed') : undefined}
                     />
                 ) : null}
                 {rendered?.request.kind === "create-note" && references && restoredDraftCanMount ? (

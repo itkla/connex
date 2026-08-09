@@ -1,0 +1,188 @@
+{
+  "Radar": {
+    "metadata": {
+      "title": "リレーションシップ・レーダー",
+      "description": "現在の根拠とともに優先順位付けされた関係性シグナルを確認できます。"
+    },
+    "title": "リレーションシップ・レーダー",
+    "description": "冷え込みつつある関係、案件リスク、ウォームパスを、根拠に基づく一つの優先リストで確認します。",
+    "listLabel": "優先順位順の関係性シグナル",
+    "family": {
+      "relationship_decay": "冷え込みつつある関係",
+      "deal_risk": "案件リスク",
+      "warm_path": "ウォームパス"
+    },
+    "subject": {
+      "person": "連絡先",
+      "company": "会社",
+      "deal": "案件"
+    },
+    "priority": {
+      "high": "優先度：高",
+      "medium": "優先度：中",
+      "cooling": "冷え込み中",
+      "opportunity": "機会"
+    },
+    "state": {
+      "active": "対応中",
+      "followed": "フォロー中",
+      "snoozed": "スヌーズ中",
+      "dismissed": "非表示"
+    },
+    "filters": {
+      "label": "レーダーの絞り込み",
+      "searchLabel": "関係性シグナルを検索",
+      "searchPlaceholder": "人物、会社、案件、根拠を検索",
+      "familyLabel": "シグナル種別で絞り込む",
+      "stateLabel": "対応状態で絞り込む",
+      "allFamilies": "すべての種別",
+      "allStates": "すべての状態",
+      "attention": "要対応"
+    },
+    "rank": {
+      "heading": "第{position}位",
+      "rule": "並び順：{rule}",
+      "factor": "{key}：{value}（{direction}）",
+      "rulePriority": "優先度、根拠の強さ、対象の安定順",
+      "keyPriority": "優先度",
+      "keyDaysUntilCold": "コールドまでの日数",
+      "keyDaysSinceTouch": "最終接触からの日数",
+      "keyRiskScore": "リスクスコア",
+      "keyPathScore": "パスの強さ",
+      "keySubject": "対象の安定順",
+      "directionAscending": "昇順",
+      "directionDescending": "降順",
+      "unknownRule": "決定論的な種別横断ランキング規則",
+      "unknownFactor": "追加の決定論的要素",
+      "unknownDirection": "安定順"
+    },
+    "evidence": {
+      "heading": "根拠",
+      "separator": "、",
+      "parameter": "{key}：{value}",
+      "references": "参照元：{references}",
+      "typeRelationshipTemperature": "関係性の温度",
+      "typeCloseOverdue": "予定クローズ日を超過",
+      "typeClosingSoonQuiet": "クローズ間近だが最近の動きが少ない",
+      "typeStalled": "案件の動きが停滞",
+      "typeStakeholderCold": "関係者との関係が冷えている",
+      "typeNoStakeholders": "関係者が紐付けられていない",
+      "typeWarmPath": "温かな紹介経路",
+      "parameterBand": "温度帯",
+      "parameterTrend": "傾向",
+      "parameterScore": "スコア",
+      "parameterLastTouchAt": "最終接触",
+      "parameterDaysSinceTouch": "最終接触からの日数",
+      "parameterGoesColdAt": "コールド予測日",
+      "parameterDaysUntilCold": "コールドまでの日数",
+      "parameterTouchCount": "接触回数",
+      "parameterModelVersion": "モデルバージョン",
+      "parameterSeverity": "深刻度",
+      "parameterBridgePersonId": "橋渡し役",
+      "parameterBridgeName": "橋渡し役の名前",
+      "parameterReachType": "機会の種類",
+      "parameterEvidenceType": "経路の根拠",
+      "parameterEvidenceCompany": "共通の会社",
+      "parameterOverlapStartYear": "在籍重複の開始年",
+      "parameterOverlapEndYear": "在籍重複の終了年",
+      "parameterPathScore": "パスの強さ",
+      "parameterDaysOverdue": "超過日数",
+      "parameterDaysUntilClose": "クローズまでの日数",
+      "parameterPersonId": "関係者",
+      "parameterRole": "関係者の役割",
+      "unknownType": "追加の関係性根拠",
+      "unknownParameter": "追加の参照値",
+      "referencePerson": "連絡先",
+      "referenceCompany": "会社",
+      "referenceDeal": "案件",
+      "referencePersonEdge": "関係性エッジ",
+      "unknownReference": "参照元レコード"
+    },
+    "value": {
+      "hot": "ホット",
+      "warm": "ウォーム",
+      "cool": "クール",
+      "cold": "コールド",
+      "rising": "上昇中",
+      "steady": "安定",
+      "cooling": "冷え込み中",
+      "high": "高",
+      "medium": "中",
+      "low": "低",
+      "opportunity": "機会",
+      "connection": "確認済みのつながり",
+      "colleagues": "現在の同僚",
+      "former_colleagues": "以前の同僚",
+      "reach": "新しい連絡先へのアプローチ",
+      "rewarm": "関係の再構築",
+      "yes": "はい",
+      "no": "いいえ",
+      "unavailable": "確認できません"
+    },
+    "freshness": {
+      "heading": "根拠の基準時刻",
+      "stale": "情報が古くなっています",
+      "unavailable": "時刻を確認できません"
+    },
+    "actions": {
+      "label": "{subject} の操作",
+      "follow": "フォロー",
+      "followed": "フォロー中",
+      "snooze": "スヌーズ",
+      "dismiss": "非表示",
+      "createTask": "タスクを作成",
+      "taskCreated": "タスク作成済み",
+      "openContext": "関連レコードを開く",
+      "followNamed": "{subject} のシグナルをフォロー",
+      "snoozeNamed": "{subject} のシグナルをスヌーズ",
+      "dismissNamed": "{subject} のシグナルを非表示",
+      "createTaskNamed": "{subject} のタスクを作成",
+      "taskCreatedNamed": "{subject} のタスクは作成済みです",
+      "createTaskDeniedNamed": "{subject} のタスクを作成する権限がありません",
+      "createTaskPermissionUnavailableNamed": "{subject} のタスク作成権限を確認できませんでした",
+      "createTaskStaleNamed": "{subject} のシグナルが古いため、タスクを作成できません",
+      "createTaskPathUnavailableNamed": "{subject} の現在の橋渡し役を確認できないため、タスクを作成できません",
+      "openContextNamed": "{subject} の参照元レコードを開く",
+      "taskPermissionDenied": "タスクを作成する権限がありません。",
+      "taskPermissionUnavailable": "タスク権限を確認できませんでした。再試行してからタスクを作成してください。",
+      "taskStale": "タスクを作成する前に、この古いシグナルを更新してください。",
+      "taskPathUnavailable": "現在の橋渡し役を確認できません。更新してからタスクを作成してください。",
+      "cancel": "キャンセル",
+      "snoozing": "スヌーズ中…"
+    },
+    "task": {
+      "defaultDescription": "リレーションシップ・レーダーの「{subject}」をフォローアップ"
+    },
+    "snooze": {
+      "title": "シグナルをスヌーズ",
+      "description": "{subject} のシグナルを再表示する日時を選んでください。",
+      "untilLabel": "再表示日時",
+      "hint": "現在から30日以内の日時を選んでください。"
+    },
+    "feedback": {
+      "followed": "{subject} をフォローしました。",
+      "snoozed": "{subject} をスヌーズしました。",
+      "dismissed": "{subject} を非表示にしました。",
+      "taskCreated": "{subject} のタスクを作成しました。",
+      "actionFailed": "{subject} を更新できませんでした。もう一度お試しください。",
+      "contextFailed": "{subject} の現在の関連レコードを開けませんでした。"
+    },
+    "empty": {
+      "title": "現在、対応が必要なシグナルはありません",
+      "body": "決定論的な検出条件に該当する関係性シグナルはありません。"
+    },
+    "noResults": {
+      "title": "条件に一致するシグナルがありません",
+      "body": "種別、状態、検索語を変更して対象を広げてください。"
+    },
+    "partial": {
+      "title": "一部のシグナル種別を読み込めません",
+      "body": "取得済みの結果は表示しています。現在のデータを取得できなかった種別：{families}。"
+    },
+    "unavailable": {
+      "title": "リレーションシップ・レーダーを利用できません",
+      "body": "現在のシグナルデータを取得できなかった種別：{families}。",
+      "routeBody": "現在のシグナルデータを取得できませんでした。再試行して確認してください。"
+    }
+  }
+}

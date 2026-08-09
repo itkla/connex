@@ -22,6 +22,7 @@
     },
     "navigate": {
       "dashboard": "ダッシュボード",
+      "radar": "リレーションシップ・レーダー",
       "companies": "会社",
       "contacts": "連絡先",
       "deals": "案件",

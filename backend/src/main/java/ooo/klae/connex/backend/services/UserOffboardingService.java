@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -72,6 +73,7 @@ public class UserOffboardingService {
     private final CampaignMapper campaignMapper;
     private final ConsentMapper consentMapper;
     private final ReportMapper reportMapper;
+    private final RelationshipSignalMapper relationshipSignalMapper;
     private final ShareMapper shareMapper;
     private final SuppressionMapper suppressionMapper;
     private final SavedViewPreferenceMapper savedViewPreferenceMapper;
@@ -140,6 +142,7 @@ public class UserOffboardingService {
             savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
+            relationshipSignalMapper.deleteActorState(workspaceId, userId);
             notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
                 workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
@@ -168,6 +171,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deletePinsForUser(workspaceId, userId);
         savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
         savedViewMapper.deleteForUser(workspaceId, userId);
+        relationshipSignalMapper.deleteActorState(workspaceId, userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         companyMapper.clearMemberOwnership(workspaceId, userId);
         personMapper.clearMemberOwnership(workspaceId, userId);
@@ -228,6 +232,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deleteDefaultsForUserAnywhere(userId);
         savedViewMapper.deleteForUserAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
+        relationshipSignalMapper.deleteActorStateAnywhere(userId);
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);
         dealMapper.removeCollaboratorAnywhere(userId);

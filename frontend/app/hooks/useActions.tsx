@@ -32,6 +32,7 @@ import {
     type ActiveSelection,
     type AppAction,
     type OverlayRequest,
+    type RadarTaskInvocation,
 } from "@/app/lib/actions/types";
 import { devInvariant } from "@/app/lib/actions/devInvariant";
 import { normalizeShortcut, RESERVED_CHORDS } from "@/app/lib/actions/shortcut";
@@ -237,8 +238,11 @@ export function ActionProvider({ user, children }: { user: User | null; children
         setOverlay((current) => (current?.generation === generation ? null : current));
         const invoker = lastInvokerRef.current;
         lastInvokerRef.current = null;
-        if (invoker && invoker.isConnected) {
-            requestAnimationFrame(() => invoker.focus());
+        const focusTarget = invoker?.isConnected
+            ? invoker
+            : document.querySelector<HTMLElement>('[data-action-focus-fallback]');
+        if (focusTarget) {
+            requestAnimationFrame(() => focusTarget.focus());
         }
     }, []);
     const closeOverlay = useCallback(() => {
@@ -271,7 +275,11 @@ export function ActionProvider({ user, children }: { user: User | null; children
     const run = useCallback(
         async (
             id: ActionId,
-            options?: { source?: ActionSource; record?: ActiveRecordRef | null },
+            options?: {
+                source?: ActionSource;
+                record?: ActiveRecordRef | null;
+                radarTask?: RadarTaskInvocation;
+            },
         ): Promise<ActionRunResult> => {
             const action = registryMapRef.current.get(id);
             if (!action) {
@@ -299,6 +307,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
                     openOverlay,
                     closeOverlay,
                     source: options?.source ?? "programmatic",
+                    radarTask: options?.radarTask,
                     translate,
                 });
                 return { status: "completed" };

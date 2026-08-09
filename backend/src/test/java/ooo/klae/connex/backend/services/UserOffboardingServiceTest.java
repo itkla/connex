@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
+import ooo.klae.connex.backend.beans.RelationshipSignal;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.beans.Stage;
@@ -36,6 +37,7 @@ import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
@@ -58,6 +60,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private SavedViewPreferenceMapper savedViewPreferenceMapper;
     @Autowired private UserDashboardMapper userDashboardMapper;
     @Autowired private ReportMapper reportMapper;
+    @Autowired private RelationshipSignalMapper relationshipSignalMapper;
     @Autowired private RuleMapper ruleMapper;
     @Autowired private CampaignMapper campaignMapper;
     @Autowired private ConsentMapper consentMapper;
@@ -175,6 +178,9 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         savedViewPreferenceMapper.insertPin(workspace.getId(), member.getId(), sharedTarget.getId(), 0);
         savedViewPreferenceMapper.upsertDefault(
             workspace.getId(), member.getId(), "company", sharedTarget.getId());
+        RelationshipSignal radarSignal = radarSignal();
+        relationshipSignalMapper.insertState(
+            workspace.getId(), radarSignal.getId(), member.getId(), "followed", null, null);
 
         offboardingService.detachMemberContent(workspace.getId(), member.getId());
 
@@ -196,6 +202,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(savedViewPreferenceMapper.getDefault(workspace.getId(), member.getId(), "company"));
         assertNotNull(savedViewMapper.getAccessibleById(
             otherWorkspace.getId(), member.getId(), retainedOtherWorkspaceView.getId()));
+        assertNull(relationshipSignalMapper.getActiveForActor(
+            workspace.getId(), radarSignal.getId(), member.getId()).getDisposition());
+        assertNotNull(relationshipSignalMapper.getActiveForActor(
+            workspace.getId(), radarSignal.getId(), currentUser.getId()));
         assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
     }
 
@@ -230,6 +240,26 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         other.setSlug("other-" + unique());
         workspaceMapper.insert(other);
         return other;
+    }
+
+    private RelationshipSignal radarSignal() {
+        RelationshipSignal signal = new RelationshipSignal();
+        signal.setWorkspaceId(workspace.getId());
+        signal.setFamily(RelationshipSignalDetectorService.RELATIONSHIP_DECAY);
+        signal.setSubjectType("person");
+        signal.setSubjectId(900_000 + Math.abs(unique().hashCode() % 90_000));
+        signal.setSubjectLabel("Radar subject");
+        signal.setPriority("cooling");
+        signal.setPriorityRank(2);
+        signal.setRankValue(10);
+        signal.setDedupeKey("offboarding:" + unique());
+        signal.setEvidenceJson("[]");
+        signal.setRankExplanationJson("{\"rule\":\"priority_then_source_strength_then_subject\",\"factors\":[]}");
+        signal.setEvidenceAsOf(java.time.LocalDateTime.of(2026, 8, 8, 12, 0));
+        signal.setSourceStateHash("a".repeat(64));
+        signal.setGenerationToken(unique());
+        relationshipSignalMapper.upsertSignal(signal);
+        return signal;
     }
 
     private Company companyInWorkspace(Workspace target, int ownerId) {

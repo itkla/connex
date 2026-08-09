@@ -79,6 +79,7 @@ describe("navigation targets resolve to real routes", () => {
             "/overview/map",
             "/overview/reports",
             "/overview/reports/goals",
+            "/radar",
             "/records/approval-policies",
             "/records/companies",
             "/records/contacts",

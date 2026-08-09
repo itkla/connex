@@ -26,6 +26,7 @@ import {
     MapIcon,
     PresentationChartLineIcon,
     ShieldCheckIcon,
+    SignalIcon,
     TagIcon,
     UserCircleIcon,
     UserGroupIcon,
@@ -111,6 +112,7 @@ function navigateAction(
  */
 export const SEED_ACTIONS: readonly AppAction[] = [
     navigateAction("navigate.dashboard", "navigate.dashboard", "/dashboard", HomeIcon, 10),
+    navigateAction("navigate.radar", "navigate.radar", "/radar", SignalIcon, 15),
     navigateAction("navigate.companies", "navigate.companies", "/records/companies", BuildingOffice2Icon, 20),
     navigateAction("navigate.contacts", "navigate.contacts", "/records/contacts", UsersIcon, 30, {
         keywordsKey: "keywords.navigate.contacts",
@@ -183,7 +185,12 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         shortcut: "mod+alt+t",
         keywordsKey: "keywords.create.task",
         execute: (context, helpers) => {
-            helpers.openOverlay({ kind: "create-task", defaults: deriveCreateDefaults(context, "task") });
+            helpers.openOverlay({
+                kind: "create-task",
+                defaults: deriveCreateDefaults(context, "task"),
+                draft: helpers.radarTask ? { description: helpers.radarTask.description } : undefined,
+                radarTask: helpers.radarTask,
+            });
         },
     },
     {

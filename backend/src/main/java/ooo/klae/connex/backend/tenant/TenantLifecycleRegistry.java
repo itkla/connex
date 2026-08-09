@@ -303,6 +303,8 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("entity_reference", 530));
         raw.add(direct("historical_notification_baseline", 535));
         raw.add(direct("notification", 540));
+        raw.add(direct("relationship_signal_family_state", 541));
+        raw.add(direct("relationship_signal", 542));
         raw.add(direct("product", 550));
         raw.add(direct("report_goal", 560));
         raw.add(direct("tag", 570));
@@ -333,6 +335,9 @@ public final class TenantLifecycleRegistry {
         raw.add(cascade("company_identity", "company",
             "fk_company_identity_company",
             link("workspace_id", "workspace_id"), link("company_id", "id")));
+        raw.add(cascade("relationship_signal_state", "relationship_signal",
+            "fk_relationship_signal_state_signal",
+            link("workspace_id", "workspace_id"), link("signal_id", "id")));
 
         Map<String, TableLifecycle> byTable = new LinkedHashMap<>();
         for (TableLifecycle declaration : raw) {
