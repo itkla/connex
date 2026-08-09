@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -52,6 +53,7 @@ class UserOffboardingOrderTest {
     @Mock private CompanyMapper companyMapper;
     @Mock private PersonMapper personMapper;
     @Mock private DealMapper dealMapper;
+    @Mock private DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
     @Mock private ReportMapper reportMapper;
     @Mock private TaskMapper taskMapper;
     @Mock private AttachmentMapper attachmentMapper;
@@ -80,13 +82,14 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(
             workspaceMapper, providerCapturePurgeService,
             savedViewPreferenceMapper, savedViewMapper,
-            notificationMapper, dealMapper);
+            dealDuplicateReviewProofMapper, notificationMapper, dealMapper);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(savedViewPreferenceMapper).deletePinsForFreshMembership(7, 9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForFreshMembership(7, 9);
         order.verify(savedViewMapper).deleteForFreshMembership(7, 9);
+        order.verify(dealDuplicateReviewProofMapper).deleteForActor(7, 9);
         order.verify(notificationMapper)
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
@@ -100,13 +103,15 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(
             providerCapturePurgeService, notificationMapper,
             savedViewPreferenceMapper, savedViewMapper,
-            taskMapper, companyMapper, personMapper, dealMapper, campaignMapper);
+            dealDuplicateReviewProofMapper, taskMapper, companyMapper, personMapper,
+            dealMapper, campaignMapper);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(savedViewPreferenceMapper).deletePinsForUser(7, 9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUser(7, 9);
         order.verify(savedViewMapper).deleteForUser(7, 9);
+        order.verify(dealDuplicateReviewProofMapper).deleteForActor(7, 9);
         order.verify(taskMapper).unassignMemberTasks(7, 9);
         order.verify(companyMapper).clearMemberOwnership(7, 9);
         order.verify(personMapper).clearMemberOwnership(7, 9);
@@ -132,7 +137,7 @@ class UserOffboardingOrderTest {
 
         InOrder order = inOrder(
             userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
-            stateVersionService, companyMapper, personMapper, dealMapper,
+            dealDuplicateReviewProofMapper, stateVersionService, companyMapper, personMapper, dealMapper,
             workflowOffboardingService);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
@@ -146,6 +151,7 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deletePinsForUserAnywhere(9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUserAnywhere(9);
         order.verify(savedViewMapper).deleteForUserAnywhere(9);
+        order.verify(dealDuplicateReviewProofMapper).deleteForActorAnywhere(9);
         order.verify(notificationMapper)
             .deleteHistoricalNotificationBaselinesForRecipientAnywhere(9);
         order.verify(notificationMapper).deleteAllForRecipientAnywhere(9);

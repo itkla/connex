@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -10,15 +11,23 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
+import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
 import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.IdentityCollisionGroupPageRow;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
+import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.IdentityCollisionMapper;
 
 class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
@@ -27,6 +36,10 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
     @Autowired private PersonService personService;
     @Autowired private CompanyService companyService;
     @Autowired private IdentityCollisionMapper identityCollisionMapper;
+    @Autowired private DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
+    @Autowired private WorkspaceService workspaceService;
+    @Autowired private DuplicatePreflightProperties duplicatePreflightProperties;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
     void personPreflightCombinesStrongCanonicalEvidenceAndWeakExactName() {
@@ -181,6 +194,134 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
                 .map(candidate -> candidate.recordId())
                 .collect(Collectors.toSet()));
         assertEquals(2, visibleCollisionGroups("company", "domain").getFirst().getCollisionSize());
+    }
+
+    @Test
+    void dealReviewProofRejectsMismatchedPrincipalBindingReuseAndExpiry() {
+        DealDuplicateReviewProofService issuer = new DealDuplicateReviewProofService(
+            dealDuplicateReviewProofMapper,
+            workspaceService,
+            duplicatePreflightProperties);
+        DealDuplicateReviewProofService consumer = new DealDuplicateReviewProofService(
+            dealDuplicateReviewProofMapper,
+            workspaceService,
+            duplicatePreflightProperties);
+        String workflow = "a".repeat(64);
+        String result = "b".repeat(64);
+        String proof = issuer.issue(workflow, result);
+
+        assertFalse(consumer.consume(proof, "c".repeat(64), result));
+        assertFalse(consumer.consume(proof, workflow, "d".repeat(64)));
+        User issuingUser = currentUser;
+        Workspace otherWorkspace = new Workspace();
+        otherWorkspace.setName("Proof isolation " + unique());
+        otherWorkspace.setSlug("proof-isolation-" + unique());
+        otherWorkspace.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(otherWorkspace);
+        workspaceMapper.addMember(otherWorkspace.getId(), issuingUser.getId(), "member");
+        authenticateAs(issuingUser, otherWorkspace.getId());
+        assertFalse(consumer.consume(proof, workflow, result));
+        authenticateAs(issuingUser, workspace.getId());
+        User otherUser = newUser();
+        authenticateAs(otherUser, workspace.getId());
+        assertFalse(consumer.consume(proof, workflow, result));
+        authenticateAs(issuingUser, workspace.getId());
+        assertTrue(consumer.consume(proof, workflow, result));
+        assertFalse(issuer.consume(proof, workflow, result));
+
+        String expiringProof = issuer.issue(workflow, result);
+        jdbcTemplate.update(
+            "UPDATE deal_duplicate_review_proof "
+                + "SET expires_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) "
+                + "WHERE workspace_id = ?",
+            workspace.getId());
+        assertFalse(consumer.consume(expiringProof, workflow, result));
+    }
+
+    @Test
+    void dealPreflightFiltersBeforeItsBoundAndSignalsTruncationAtFiftyOneMatches() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        for (int index = 0; index < 55; index++) {
+            newDeal(pipeline, stage, company);
+        }
+        Deal firstMatch = newDeal(pipeline, stage, company);
+        Deal secondMatch = newDeal(pipeline, stage, company);
+        dealMapper.updateName(
+            workspace.getId(), firstMatch.getId(), "Renewal  Opportunity", "renewal opportunity");
+        dealMapper.updateName(
+            workspace.getId(), secondMatch.getId(), "RENEWAL OPPORTUNITY", "renewal opportunity");
+
+        DuplicatePreflightResponse bounded = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest("renewal opportunity", company.getId()));
+
+        assertEquals(
+            List.of(firstMatch.getId(), secondMatch.getId()),
+            bounded.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        assertFalse(bounded.truncated());
+
+        for (int index = 0; index < 49; index++) {
+            Deal match = newDeal(pipeline, stage, company);
+            dealMapper.updateName(
+                workspace.getId(),
+                match.getId(),
+                "Renewal Opportunity",
+                "renewal opportunity");
+        }
+
+        DuplicatePreflightResponse truncated = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest("renewal opportunity", company.getId()));
+
+        assertEquals(50, truncated.candidates().size());
+        assertTrue(truncated.truncated());
+    }
+
+    @Test
+    void dealPreflightUsesCanonicalKeysAndSafelyIncludesLegacyReplicaRenames() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal canonical = newDeal(pipeline, stage, company);
+        canonical.setName("ＲＥＮＥＷＡＬ　ＯＰＰＯＲＴＵＮＩＴＹ");
+        dealMapper.update(canonical);
+        assertEquals(
+            "renewal opportunity",
+            jdbcTemplate.queryForObject(
+                "SELECT duplicate_normalized_name FROM deal "
+                    + "WHERE workspace_id = ? AND id = ?",
+                String.class,
+                workspace.getId(),
+                canonical.getId()));
+
+        DuplicatePreflightResponse indexed = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest("renewal opportunity", company.getId()));
+
+        assertEquals(
+            List.of(canonical.getId()),
+            indexed.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        assertFalse(indexed.truncated());
+
+        jdbcTemplate.update(
+            "UPDATE deal SET name = ? "
+                + "WHERE workspace_id = ? AND id = ?",
+            "ＬＥＧＡＣＹ　ＲＥＮＥＷＡＬ",
+            workspace.getId(),
+            canonical.getId());
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT duplicate_normalized_name FROM deal "
+                + "WHERE workspace_id = ? AND id = ?",
+            String.class,
+            workspace.getId(),
+            canonical.getId()));
+
+        DuplicatePreflightResponse legacy = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest("legacy renewal", company.getId()));
+
+        assertEquals(
+            List.of(canonical.getId()),
+            legacy.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        assertFalse(legacy.truncated());
     }
 
     private List<IdentityCollisionGroupPageRow> visibleCollisionGroups(

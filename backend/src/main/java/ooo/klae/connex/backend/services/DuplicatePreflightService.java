@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -63,6 +64,7 @@ public class DuplicatePreflightService {
 
     private static final int MAX_IDENTITY_VALUES = 16;
     private static final int PUBLIC_CANDIDATE_LIMIT = 50;
+    private static final int PUBLIC_CANDIDATE_QUERY_LIMIT = PUBLIC_CANDIDATE_LIMIT + 1;
     private static final int IMPORT_CANDIDATE_LIMIT = 8;
     private static final int IMPORT_AGGREGATE_CANDIDATE_LIMIT = 1_000;
     private static final int IMPORT_REQUEST_LIMIT = 5_000;
@@ -79,6 +81,7 @@ public class DuplicatePreflightService {
     private final WorkspaceService workspaceService;
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final DuplicatePreflightRateLimiter rateLimiter;
+    private final DealDuplicateReviewProofService dealReviewProofService;
 
     /**
      * Checks one proposed person using {@code PERSON_CREATE}.
@@ -120,7 +123,7 @@ public class DuplicatePreflightService {
      * @param request exact proposed deal identity
      * @return ranked owned candidates and an opaque one-use review token
      */
-    @Transactional(readOnly = true)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public DuplicatePreflightResponse preflightDeal(DealDuplicatePreflightRequest request) {
         NormalizedDealRequest normalized = normalizeDeal(
@@ -128,8 +131,9 @@ public class DuplicatePreflightService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String workflowFingerprint = dealWorkflowFingerprint(workspaceId, normalized);
         rateLimiter.requireAllowed(1);
+        duplicateDecisionLockService.lockCurrentOrganization();
         DealMatch match = matchDeal(workspaceId, normalized, workflowFingerprint);
-        String reviewToken = rateLimiter.issueInteractiveReview(
+        String reviewToken = dealReviewProofService.issue(
             workflowFingerprint,
             match.resultFingerprint());
         return new DuplicatePreflightResponse(
@@ -244,7 +248,7 @@ public class DuplicatePreflightService {
         rateLimiter.requireAllowed(1);
         duplicateDecisionLockService.lockCurrentOrganization();
         DealMatch match = matchDeal(workspaceId, normalized, workflowFingerprint);
-        boolean reviewed = rateLimiter.consumeInteractiveReview(
+        boolean reviewed = dealReviewProofService.consume(
             duplicateReviewToken,
             workflowFingerprint,
             match.resultFingerprint());
@@ -585,7 +589,12 @@ public class DuplicatePreflightService {
         String requestedKey = DealDuplicateKey.of(
             request.normalizedName(),
             request.companyId());
-        List<Deal> matched = dealMapper.getDealsForDedup(workspaceId).stream()
+        List<Deal> queried = dealMapper.findDuplicatePreflightCandidates(
+            workspaceId,
+            request.normalizedName(),
+            request.companyId(),
+            PUBLIC_CANDIDATE_QUERY_LIMIT);
+        List<Deal> matched = queried.stream()
             .filter(deal -> matchingService.normalizeName(deal.getName())
                 .map(normalizedName -> DealDuplicateKey.of(
                     normalizedName,
@@ -594,7 +603,8 @@ public class DuplicatePreflightService {
                 .isPresent())
             .sorted(Comparator.comparingInt(Deal::getId))
             .toList();
-        boolean truncated = matched.size() > PUBLIC_CANDIDATE_LIMIT;
+        boolean truncated = queried.size() >= PUBLIC_CANDIDATE_QUERY_LIMIT
+            || matched.size() > PUBLIC_CANDIDATE_LIMIT;
         Company company = request.companyId() == null
             ? null
             : companyMapper.getCompanyById(workspaceId, request.companyId());

@@ -1012,7 +1012,8 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(deal.getName(), updated.getName());
         assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
         assertEquals(0, applicationEvents.stream().count());
-        verify(dealMapperSpy, never()).updateName(anyInt(), anyInt(), any(String.class));
+        verify(dealMapperSpy, never()).updateName(
+            anyInt(), anyInt(), any(String.class), any(String.class));
     }
 
     @Test

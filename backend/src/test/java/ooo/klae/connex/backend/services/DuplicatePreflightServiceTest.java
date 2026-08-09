@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -52,6 +53,7 @@ class DuplicatePreflightServiceTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     @Mock private DuplicatePreflightRateLimiter rateLimiter;
+    @Mock private DealDuplicateReviewProofService dealReviewProofService;
     @Mock private DuplicatePreflightRateLimiter.CommitAdmission commitAdmission;
 
     private DuplicatePreflightService service;
@@ -66,7 +68,8 @@ class DuplicatePreflightServiceTest {
             matchingService,
             workspaceService,
             workspaceScopeControlAccess,
-            rateLimiter);
+            rateLimiter,
+            dealReviewProofService);
         org.mockito.Mockito.lenient()
             .when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         org.mockito.Mockito.lenient()
@@ -77,7 +80,7 @@ class DuplicatePreflightServiceTest {
             .when(workspaceScopeControlAccess.getForWorkspace(7))
             .thenReturn(new WorkspaceScope(3, List.of(7, 9), "[7,9]"));
         org.mockito.Mockito.lenient()
-            .when(rateLimiter.issueInteractiveReview(anyString(), anyString()))
+            .when(dealReviewProofService.issue(anyString(), anyString()))
             .thenReturn("e".repeat(64));
     }
 
@@ -318,10 +321,10 @@ class DuplicatePreflightServiceTest {
             .thenReturn(Optional.of("renewal"));
         when(matchingService.normalizeName("Different"))
             .thenReturn(Optional.of("different"));
-        when(dealMapper.getDealsForDedup(7)).thenReturn(List.of(
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "renewal", 18, 51)).thenReturn(List.of(
             deal(13, "Renewal", 18),
             deal(12, "RENEWAL", 18),
-            deal(14, "Renewal", 19),
             deal(15, "Different", 18)));
         Company company = new Company();
         company.setId(18);
@@ -338,7 +341,17 @@ class DuplicatePreflightServiceTest {
             DuplicateMatchKind.DEAL_KEY,
             response.candidates().getFirst().matches().getFirst().kind());
         assertEquals("e".repeat(64), response.reviewToken());
-        verify(rateLimiter).requireAllowed(1);
+        InOrder order = inOrder(
+            rateLimiter,
+            duplicateDecisionLockService,
+            dealMapper,
+            dealReviewProofService);
+        order.verify(rateLimiter).requireAllowed(1);
+        order.verify(duplicateDecisionLockService).lockCurrentOrganization();
+        order.verify(dealMapper).findDuplicatePreflightCandidates(
+            7, "renewal", 18, 51);
+        order.verify(dealReviewProofService).issue(anyString(), anyString());
+        verify(dealMapper, never()).getDealsForDedup(7);
     }
 
     @Test
@@ -348,11 +361,12 @@ class DuplicatePreflightServiceTest {
             null);
         when(matchingService.normalizeName("Renewal"))
             .thenReturn(Optional.of("renewal"));
-        when(dealMapper.getDealsForDedup(7)).thenReturn(
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "renewal", null, 51)).thenReturn(
             IntStream.rangeClosed(1, 51)
                 .mapToObj(id -> deal(id, "Renewal", null))
                 .toList());
-        when(rateLimiter.consumeInteractiveReview(
+        when(dealReviewProofService.consume(
                 any(),
                 anyString(),
                 anyString()))
@@ -376,21 +390,31 @@ class DuplicatePreflightServiceTest {
             null);
         when(matchingService.normalizeName("Renewal"))
             .thenReturn(Optional.of("renewal"));
-        when(dealMapper.getDealsForDedup(7)).thenReturn(List.of());
-        when(rateLimiter.consumeInteractiveReview(
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "renewal", null, 51)).thenReturn(List.of());
+        when(dealReviewProofService.consume(
                 any(),
                 anyString(),
                 anyString()))
             .thenReturn(true);
-        clearInvocations(rateLimiter, duplicateDecisionLockService, dealMapper);
+        clearInvocations(
+            rateLimiter,
+            duplicateDecisionLockService,
+            dealMapper,
+            dealReviewProofService);
 
         service.requireReviewedDealCreation(request, "e".repeat(64));
 
-        InOrder order = inOrder(rateLimiter, duplicateDecisionLockService, dealMapper);
+        InOrder order = inOrder(
+            rateLimiter,
+            duplicateDecisionLockService,
+            dealMapper,
+            dealReviewProofService);
         order.verify(rateLimiter).requireAllowed(1);
         order.verify(duplicateDecisionLockService).lockCurrentOrganization();
-        order.verify(dealMapper).getDealsForDedup(7);
-        order.verify(rateLimiter).consumeInteractiveReview(
+        order.verify(dealMapper).findDuplicatePreflightCandidates(
+            7, "renewal", null, 51);
+        order.verify(dealReviewProofService).consume(
             eq("e".repeat(64)),
             anyString(),
             anyString());
@@ -403,9 +427,10 @@ class DuplicatePreflightServiceTest {
             18);
         when(matchingService.normalizeName("Renewal"))
             .thenReturn(Optional.of("renewal"));
-        when(dealMapper.getDealsForDedup(7)).thenReturn(List.of(
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "renewal", 18, 51)).thenReturn(List.of(
             deal(12, "Renewal", 18)));
-        when(rateLimiter.consumeInteractiveReview(
+        when(dealReviewProofService.consume(
                 any(),
                 anyString(),
                 anyString()))

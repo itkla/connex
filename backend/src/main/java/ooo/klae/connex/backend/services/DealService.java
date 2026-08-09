@@ -89,6 +89,7 @@ import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
+import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
 
 /**
  * Business logic for logging and retrieving {@code Deal} records.
@@ -1036,7 +1037,11 @@ public class DealService {
         if (Objects.equals(before.getName(), name)) {
             return hydrateReferences(workspaceId, before);
         }
-        dealMapper.updateName(workspaceId, id, name);
+        dealMapper.updateName(
+            workspaceId,
+            id,
+            name,
+            CanonicalNameNormalizer.normalize(name).orElse(null));
         Deal after = requireDeal(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
             "Renamed deal " + before.getName() + " to " + after.getName(),

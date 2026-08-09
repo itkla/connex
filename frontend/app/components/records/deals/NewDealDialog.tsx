@@ -138,6 +138,260 @@ type NewDealFormProps = {
     onCancel: () => void;
 };
 
+type NewDealFieldsProps = {
+    payload: CreateDealPayload;
+    setPayload: Dispatch<SetStateAction<CreateDealPayload>>;
+    pipelines: Pipeline[];
+    stagesByPipeline: Record<number, Stage[]>;
+    fieldErrors: Record<string, string>;
+    clearError: (key: string) => void;
+    companySearch: ReturnType<typeof useCompanySearch>;
+    duplicatePreflight: ReturnType<typeof useDuplicatePreflight>;
+};
+
+function NewDealFields({
+    payload,
+    setPayload,
+    pipelines,
+    stagesByPipeline,
+    fieldErrors,
+    clearError,
+    companySearch,
+    duplicatePreflight,
+}: NewDealFieldsProps) {
+    const t = useTranslations('DealsNewDialog');
+    const selectedPipeline = pipelines.find((pipeline) => pipeline.id === payload.pipeline) ?? null;
+    const selectedCompany = companySearch.companies.find((company) => company.id === payload.company) ?? null;
+    const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
+    const selectedStage = stages.find((stage) => stage.id === payload.stage) ?? null;
+    const handleListWheel = (event: WheelEvent<HTMLDivElement>) => {
+        const lineHeightPx = 16;
+        const delta = event.deltaMode === 1 ? event.deltaY * lineHeightPx : event.deltaY;
+        event.currentTarget.scrollTop += delta;
+    };
+
+    return (
+        <>
+            <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
+                <Label htmlFor="deal-name">{t('name')}</Label>
+                <div className="group relative">
+                    <TagIcon className={fieldLeadIconClass} />
+                    <input
+                        id="deal-name"
+                        type="text"
+                        value={payload.name}
+                        onChange={(event) => {
+                            setPayload((previous) => ({ ...previous, name: event.target.value }));
+                            clearError('name');
+                        }}
+                        className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.name && fieldErrorClass)}
+                        placeholder={t('namePlaceholder')}
+                        aria-invalid={Boolean(fieldErrors.name)}
+                        aria-describedby={[
+                            fieldErrors.name && 'deal-name-error',
+                            duplicatePreflight.status !== 'idle' && 'deal-duplicate-preflight',
+                        ].filter(Boolean).join(' ') || undefined}
+                        autoFocus
+                        required
+                    />
+                </div>
+                {fieldErrors.name && (
+                    <p id="deal-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>
+                )}
+                <DuplicatePreflightWarning
+                    id="deal-duplicate-preflight"
+                    kind="deal"
+                    status={duplicatePreflight.status}
+                    response={duplicatePreflight.response}
+                    acknowledged={duplicatePreflight.acknowledged}
+                    onAcknowledgedChange={duplicatePreflight.setAcknowledged}
+                    onRetry={duplicatePreflight.retry}
+                />
+            </div>
+
+            <div className="ncd-rise grid grid-cols-[1fr_120px] gap-3" style={{ animationDelay: '140ms' }}>
+                <div className="grid gap-1.5">
+                    <Label htmlFor="deal-value">{t('value')}</Label>
+                    <div className="group relative">
+                        <BanknotesIcon className={fieldLeadIconClass} />
+                        <input
+                            id="deal-value"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={Number.isFinite(payload.value) ? payload.value : 0}
+                            onChange={(event) => {
+                                setPayload((previous) => ({ ...previous, value: Number(event.target.value) }));
+                                clearError('value');
+                            }}
+                            className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.value && fieldErrorClass)}
+                            aria-invalid={Boolean(fieldErrors.value)}
+                            aria-describedby={fieldErrors.value ? 'deal-value-error' : undefined}
+                            placeholder="0"
+                        />
+                    </div>
+                    {fieldErrors.value && (
+                        <p id="deal-value-error" className="text-sm text-destructive">{fieldErrors.value}</p>
+                    )}
+                </div>
+                <div className="grid gap-1.5">
+                    <Label htmlFor="deal-currency">{t('currency')}</Label>
+                    <input
+                        id="deal-currency"
+                        type="text"
+                        maxLength={8}
+                        value={payload.currency}
+                        onChange={(event) => setPayload((previous) => ({
+                            ...previous,
+                            currency: event.target.value.toUpperCase(),
+                        }))}
+                        className={cn(fieldInputClass, 'px-3')}
+                        placeholder="USD"
+                    />
+                </div>
+            </div>
+
+            <div className="ncd-rise grid grid-cols-2 gap-3" style={{ animationDelay: '190ms' }}>
+                <div className="grid gap-1.5">
+                    <Label htmlFor="deal-pipeline">{t('pipeline')}</Label>
+                    <Combobox
+                        items={pipelines}
+                        itemToStringLabel={(pipeline: Pipeline) => pipeline.name}
+                        value={selectedPipeline}
+                        onValueChange={(pipeline) => {
+                            setPayload((previous) => ({
+                                ...previous,
+                                pipeline: (pipeline as Pipeline | null)?.id ?? 0,
+                                stage: 0,
+                            }));
+                            clearError('pipeline');
+                            clearError('stage');
+                        }}
+                    >
+                        <ComboboxInput
+                            id="deal-pipeline"
+                            placeholder={t('selectPipeline')}
+                            aria-invalid={Boolean(fieldErrors.pipeline)}
+                            className={cn(comboInputClass, fieldErrors.pipeline && 'ring-2 ring-destructive')}
+                        >
+                            <InputGroupAddon align="inline-start">
+                                <FunnelIcon className={comboLeadIconClass} />
+                            </InputGroupAddon>
+                        </ComboboxInput>
+                        <ComboboxContent className="pointer-events-auto">
+                            <ComboboxList onWheel={handleListWheel}>
+                                <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
+                                {pipelines.map((pipeline) => (
+                                    <ComboboxItem key={pipeline.id} value={pipeline}>
+                                        {pipeline.name}
+                                    </ComboboxItem>
+                                ))}
+                            </ComboboxList>
+                        </ComboboxContent>
+                    </Combobox>
+                    {fieldErrors.pipeline && (
+                        <p className="text-sm text-destructive">{fieldErrors.pipeline}</p>
+                    )}
+                </div>
+                <div className="grid gap-1.5">
+                    <Label htmlFor="deal-stage">{t('stage')}</Label>
+                    <Combobox
+                        items={stages}
+                        itemToStringLabel={(stage: Stage) => stage.name}
+                        value={selectedStage}
+                        disabled={!payload.pipeline}
+                        onValueChange={(stage) => {
+                            setPayload((previous) => ({
+                                ...previous,
+                                stage: (stage as Stage | null)?.id ?? 0,
+                            }));
+                            clearError('stage');
+                        }}
+                    >
+                        <ComboboxInput
+                            id="deal-stage"
+                            placeholder={payload.pipeline ? t('selectStage') : t('pickPipelineFirst')}
+                            disabled={!payload.pipeline}
+                            aria-invalid={Boolean(fieldErrors.stage)}
+                            className={cn(comboInputClass, fieldErrors.stage && 'ring-2 ring-destructive')}
+                        >
+                            <InputGroupAddon align="inline-start">
+                                <FlagIcon className={comboLeadIconClass} />
+                            </InputGroupAddon>
+                        </ComboboxInput>
+                        <ComboboxContent className="pointer-events-auto">
+                            <ComboboxList onWheel={handleListWheel}>
+                                <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
+                                {stages.map((stage) => (
+                                    <ComboboxItem key={stage.id} value={stage}>
+                                        {stage.name}
+                                    </ComboboxItem>
+                                ))}
+                            </ComboboxList>
+                        </ComboboxContent>
+                    </Combobox>
+                    {fieldErrors.stage && (
+                        <p className="text-sm text-destructive">{fieldErrors.stage}</p>
+                    )}
+                </div>
+            </div>
+
+            <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
+                <Label htmlFor="deal-company">{t('company')}</Label>
+                <Combobox
+                    items={companySearch.companies}
+                    filter={null}
+                    itemToStringLabel={(company: Company) => company.name}
+                    value={selectedCompany}
+                    onInputValueChange={companySearch.onInputValueChange}
+                    onValueChange={(company) => setPayload((previous) => ({
+                        ...previous,
+                        company: (company as Company | null)?.id ?? null,
+                    }))}
+                >
+                    <ComboboxInput
+                        id="deal-company"
+                        placeholder={t('selectCompanyOptional')}
+                        showClear
+                        className={comboInputClass}
+                    >
+                        <InputGroupAddon align="inline-start">
+                            <BuildingOffice2Icon className={comboLeadIconClass} />
+                        </InputGroupAddon>
+                    </ComboboxInput>
+                    <ComboboxContent className="pointer-events-auto">
+                        <ComboboxList onWheel={handleListWheel}>
+                            <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
+                            {companySearch.companies.map((company) => (
+                                <ComboboxItem key={company.id} value={company}>
+                                    {company.name}
+                                </ComboboxItem>
+                            ))}
+                        </ComboboxList>
+                    </ComboboxContent>
+                </Combobox>
+            </div>
+
+            <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '290ms' }}>
+                <Label htmlFor="deal-close">{t('expectedCloseDate')}</Label>
+                <div className="group relative">
+                    <CalendarIcon className={fieldLeadIconClass} />
+                    <input
+                        id="deal-close"
+                        type="date"
+                        value={payload.expectedCloseDate ?? ''}
+                        onChange={(event) => setPayload((previous) => ({
+                            ...previous,
+                            expectedCloseDate: event.target.value || undefined,
+                        }))}
+                        className={cn(fieldInputClass, 'pl-9 pr-3')}
+                    />
+                </div>
+            </div>
+        </>
+    );
+}
+
 /**
  * The deal quick-create form body — free of any dialog/drawer shell so it can render inside the
  * standalone {@link NewDealDialog} (desktop dialog / mobile drawer) or embedded in the morphing
@@ -202,16 +456,6 @@ export function NewDealForm({
         void handleCreate();
     };
 
-    const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
-        const lineHeightPx = 16;
-        const delta = e.deltaMode === 1 ? e.deltaY * lineHeightPx : e.deltaY;
-        e.currentTarget.scrollTop += delta;
-    };
-
-    const selectedPipeline = pipelines.find((p) => p.id === payload.pipeline) ?? null;
-    const selectedCompany = companySearch.companies.find((c) => c.id === payload.company) ?? null;
-    const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
-    const selectedStage = stages.find((s) => s.id === payload.stage) ?? null;
     const hasErrors = Object.keys(fieldErrors).length > 0
         || duplicatePreflight.status === 'error';
     const status = resolveDialogStatus({ isLoading: isCreating, hasErrors, isSuccess });
@@ -236,214 +480,16 @@ export function NewDealForm({
                     }}
                     className="grid gap-5"
                 >
-                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
-                        <Label htmlFor="deal-name">{t('name')}</Label>
-                        <div className="group relative">
-                            <TagIcon className={fieldLeadIconClass} />
-                            <input
-                                id="deal-name"
-                                type="text"
-                                value={payload.name}
-                                onChange={(e) => {
-                                    setPayload((prev) => ({ ...prev, name: e.target.value }));
-                                    clearError('name');
-                                }}
-                                className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.name && fieldErrorClass)}
-                                placeholder={t('namePlaceholder')}
-                                aria-invalid={Boolean(fieldErrors.name)}
-                                aria-describedby={[
-                                    fieldErrors.name && 'deal-name-error',
-                                    duplicatePreflight.status !== 'idle' && 'deal-duplicate-preflight',
-                                ].filter(Boolean).join(' ') || undefined}
-                                autoFocus
-                                required
-                            />
-                        </div>
-                        {fieldErrors.name && (
-                            <p id="deal-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>
-                        )}
-                        <DuplicatePreflightWarning
-                            id="deal-duplicate-preflight"
-                            kind="deal"
-                            status={duplicatePreflight.status}
-                            response={duplicatePreflight.response}
-                            acknowledged={duplicatePreflight.acknowledged}
-                            onAcknowledgedChange={duplicatePreflight.setAcknowledged}
-                            onRetry={duplicatePreflight.retry}
-                        />
-                    </div>
-
-                    <div className="ncd-rise grid grid-cols-[1fr_120px] gap-3" style={{ animationDelay: '140ms' }}>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="deal-value">{t('value')}</Label>
-                            <div className="group relative">
-                                <BanknotesIcon className={fieldLeadIconClass} />
-                                <input
-                                    id="deal-value"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={Number.isFinite(payload.value) ? payload.value : 0}
-                                    onChange={(e) => {
-                                        setPayload((prev) => ({ ...prev, value: Number(e.target.value) }));
-                                        clearError('value');
-                                    }}
-                                    className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.value && fieldErrorClass)}
-                                    aria-invalid={Boolean(fieldErrors.value)}
-                                    aria-describedby={fieldErrors.value ? 'deal-value-error' : undefined}
-                                    placeholder="0"
-                                />
-                            </div>
-                            {fieldErrors.value && (
-                                <p id="deal-value-error" className="text-sm text-destructive">{fieldErrors.value}</p>
-                            )}
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="deal-currency">{t('currency')}</Label>
-                            <input
-                                id="deal-currency"
-                                type="text"
-                                maxLength={8}
-                                value={payload.currency}
-                                onChange={(e) => setPayload((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))}
-                                className={cn(fieldInputClass, 'px-3')}
-                                placeholder="USD"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="ncd-rise grid grid-cols-2 gap-3" style={{ animationDelay: '190ms' }}>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="deal-pipeline">{t('pipeline')}</Label>
-                            <Combobox
-                                items={pipelines}
-                                itemToStringLabel={(p: Pipeline) => p.name}
-                                value={selectedPipeline}
-                                onValueChange={(p) => {
-                                    setPayload((prev) => ({
-                                        ...prev,
-                                        pipeline: (p as Pipeline | null)?.id ?? 0,
-                                        stage: 0,
-                                    }));
-                                    clearError('pipeline');
-                                    clearError('stage');
-                                }}
-                            >
-                                <ComboboxInput
-                                    id="deal-pipeline"
-                                    placeholder={t('selectPipeline')}
-                                    aria-invalid={Boolean(fieldErrors.pipeline)}
-                                    className={cn(comboInputClass, fieldErrors.pipeline && 'ring-2 ring-destructive')}
-                                >
-                                    <InputGroupAddon align="inline-start">
-                                        <FunnelIcon className={comboLeadIconClass} />
-                                    </InputGroupAddon>
-                                </ComboboxInput>
-                                <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
-                                        {pipelines.map((p) => (
-                                            <ComboboxItem key={p.id} value={p}>
-                                                {p.name}
-                                            </ComboboxItem>
-                                        ))}
-                                    </ComboboxList>
-                                </ComboboxContent>
-                            </Combobox>
-                            {fieldErrors.pipeline && (
-                                <p className="text-sm text-destructive">{fieldErrors.pipeline}</p>
-                            )}
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="deal-stage">{t('stage')}</Label>
-                            <Combobox
-                                items={stages}
-                                itemToStringLabel={(s: Stage) => s.name}
-                                value={selectedStage}
-                                disabled={!payload.pipeline}
-                                onValueChange={(s) => {
-                                    setPayload((prev) => ({ ...prev, stage: (s as Stage | null)?.id ?? 0 }));
-                                    clearError('stage');
-                                }}
-                            >
-                                <ComboboxInput
-                                    id="deal-stage"
-                                    placeholder={payload.pipeline ? t('selectStage') : t('pickPipelineFirst')}
-                                    disabled={!payload.pipeline}
-                                    aria-invalid={Boolean(fieldErrors.stage)}
-                                    className={cn(comboInputClass, fieldErrors.stage && 'ring-2 ring-destructive')}
-                                >
-                                    <InputGroupAddon align="inline-start">
-                                        <FlagIcon className={comboLeadIconClass} />
-                                    </InputGroupAddon>
-                                </ComboboxInput>
-                                <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
-                                        {stages.map((s) => (
-                                            <ComboboxItem key={s.id} value={s}>
-                                                {s.name}
-                                            </ComboboxItem>
-                                        ))}
-                                    </ComboboxList>
-                                </ComboboxContent>
-                            </Combobox>
-                            {fieldErrors.stage && (
-                                <p className="text-sm text-destructive">{fieldErrors.stage}</p>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
-                        <Label htmlFor="deal-company">{t('company')}</Label>
-                        <Combobox
-                            items={companySearch.companies}
-                            filter={null}
-                            itemToStringLabel={(c: Company) => c.name}
-                            value={selectedCompany}
-                            onInputValueChange={companySearch.onInputValueChange}
-                            onValueChange={(c) =>
-                                setPayload((prev) => ({ ...prev, company: (c as Company | null)?.id ?? null }))
-                            }
-                        >
-                            <ComboboxInput
-                                id="deal-company"
-                                placeholder={t('selectCompanyOptional')}
-                                showClear
-                                className={comboInputClass}
-                            >
-                                <InputGroupAddon align="inline-start">
-                                    <BuildingOffice2Icon className={comboLeadIconClass} />
-                                </InputGroupAddon>
-                            </ComboboxInput>
-                            <ComboboxContent className="pointer-events-auto">
-                                <ComboboxList onWheel={handleListWheel}>
-                                    <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                                    {companySearch.companies.map((c) => (
-                                        <ComboboxItem key={c.id} value={c}>
-                                            {c.name}
-                                        </ComboboxItem>
-                                    ))}
-                                </ComboboxList>
-                            </ComboboxContent>
-                        </Combobox>
-                    </div>
-
-                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '290ms' }}>
-                        <Label htmlFor="deal-close">{t('expectedCloseDate')}</Label>
-                        <div className="group relative">
-                            <CalendarIcon className={fieldLeadIconClass} />
-                            <input
-                                id="deal-close"
-                                type="date"
-                                value={payload.expectedCloseDate ?? ''}
-                                onChange={(e) =>
-                                    setPayload((prev) => ({ ...prev, expectedCloseDate: e.target.value || undefined }))
-                                }
-                                className={cn(fieldInputClass, 'pl-9 pr-3')}
-                            />
-                        </div>
-                    </div>
+                    <NewDealFields
+                        payload={payload}
+                        setPayload={setPayload}
+                        pipelines={pipelines}
+                        stagesByPipeline={stagesByPipeline}
+                        fieldErrors={fieldErrors}
+                        clearError={clearError}
+                        companySearch={companySearch}
+                        duplicatePreflight={duplicatePreflight}
+                    />
 
                     <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '340ms' }}>
                         <Button type="button" variant="outline" disabled={isCreating} onClick={onCancel}>{t('cancel')}</Button>
