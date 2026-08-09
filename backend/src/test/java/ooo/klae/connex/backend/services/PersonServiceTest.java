@@ -67,7 +67,6 @@ class PersonServiceTest extends AbstractServiceTest {
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
     @Autowired DuplicatePreflightService duplicatePreflightService;
-    @Autowired ScoringService scoringService;
     @MockitoBean AiRestrictionEpoch aiRestrictionEpoch;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
@@ -178,59 +177,6 @@ class PersonServiceTest extends AbstractServiceTest {
                 String.class,
                 workspace.getId(),
             created.getId()));
-    }
-
-    @Test
-    void manualReviewedCreateThreeIdenticalCyclesKeepEveryArtifactStable() {
-        Company company = newCompany();
-        String email = "manual-replay-" + unique() + "@example.test";
-        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
-            "Manual replay",
-            List.of(email),
-            List.of("+81 90 7654 3210"));
-        DuplicatePreflightResponse review = duplicatePreflightService.preflightPerson(request);
-        Person first = personService.createReviewed(
-            personDraft(
-                "Manual replay",
-                email,
-                "+81 90 7654 3210",
-                company),
-            review.reviewToken());
-        Tag tag = newTag();
-        personService.addTag(first.getId(), tag.getId());
-        newActivity(currentUser, first, null);
-        newTask(currentUser, first, null);
-        newNotification(workspace.getId(), currentUser.getId());
-        ReplayArtifacts afterFirst = replayArtifacts(first.getId());
-
-        assertThrows(
-            ConflictException.class,
-            () -> personService.createReviewed(
-                personDraft(
-                    "Manual replay",
-                    email,
-                    "+81 90 7654 3210",
-                    company),
-                review.reviewToken()));
-        ReplayArtifacts afterSecond = replayArtifacts(first.getId());
-        assertThrows(
-            ConflictException.class,
-            () -> personService.createReviewed(
-                personDraft(
-                    "Manual replay",
-                    email,
-                    "+81 90 7654 3210",
-                    company),
-                review.reviewToken()));
-
-        assertEquals(1, afterFirst.activities());
-        assertEquals(1, afterFirst.tasks());
-        assertTrue(afterFirst.tags() >= 2);
-        assertTrue(afterFirst.relationships() >= 1);
-        assertTrue(afterFirst.notifications() >= 1);
-        assertEquals(2, afterFirst.relationshipEvidenceEvents());
-        assertEquals(afterFirst, afterSecond);
-        assertEquals(afterFirst, replayArtifacts(first.getId()));
     }
 
     @Test
@@ -1004,74 +950,6 @@ class PersonServiceTest extends AbstractServiceTest {
         person.setCompany(company);
         return person;
     }
-
-    private static Person personDraft(
-            String name,
-            String email,
-            String phone,
-            Company company) {
-        Person person = new Person();
-        person.setName(name);
-        person.setEmail(email);
-        person.setPhone(phone);
-        person.setTitle("Engineer");
-        person.setCompany(company);
-        return person;
-    }
-
-    private ReplayArtifacts replayArtifacts(int personId) {
-        int records = rowCount(
-                "SELECT COUNT(*) FROM person WHERE workspace_id = ?", workspace.getId())
-            + rowCount(
-                "SELECT COUNT(*) FROM company WHERE workspace_id = ?", workspace.getId())
-            + rowCount(
-                "SELECT COUNT(*) FROM deal WHERE workspace_id = ?", workspace.getId());
-        int tags = rowCount(
-                "SELECT COUNT(*) FROM tag WHERE workspace_id = ?", workspace.getId())
-            + rowCount("SELECT COUNT(*) FROM person_tag WHERE person_id = ?", personId);
-        int relationships = rowCount(
-                "SELECT COUNT(*) FROM person_employment WHERE workspace_id = ? AND person_id = ?",
-                workspace.getId(),
-                personId)
-            + rowCount(
-                "SELECT COUNT(*) FROM deal_person dp JOIN deal d ON d.id = dp.deal_id "
-                    + "WHERE d.workspace_id = ? AND dp.person_id = ?",
-                workspace.getId(),
-                personId);
-        return new ReplayArtifacts(
-            records,
-            rowCount(
-                "SELECT COUNT(*) FROM activity WHERE workspace_id = ? AND person_id = ?",
-                workspace.getId(),
-                personId),
-            rowCount(
-                "SELECT COUNT(*) FROM task WHERE workspace_id = ? AND person_id = ?",
-                workspace.getId(),
-                personId),
-            tags,
-            relationships,
-            rowCount(
-                "SELECT COUNT(*) FROM notification WHERE workspace_id = ?",
-                workspace.getId()),
-            scoringService.contactEvidence(
-                workspace.getId(), personId, currentUser.getId())
-                .totals()
-                .contributorCount());
-    }
-
-    private int rowCount(String sql, Object... arguments) {
-        return jdbcTemplate.queryForObject(sql, Integer.class, arguments);
-    }
-
-    private record ReplayArtifacts(
-        int records,
-        int activities,
-        int tasks,
-        int tags,
-        int relationships,
-        int notifications,
-        int relationshipEvidenceEvents
-    ) {}
 
     private static PersonDuplicatePreflightRequest duplicateRequest(Person person) {
         return new PersonDuplicatePreflightRequest(

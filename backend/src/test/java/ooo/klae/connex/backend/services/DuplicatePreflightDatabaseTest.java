@@ -182,6 +182,24 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
                 ? List.of(targetIds.get(row.targetKey()))
                 : List.of();
             assertEquals(expectedIds, actualIds, row.caseId());
+            if (row.expectedMatch()) {
+                assertEquals(
+                    row.expectedStrength(),
+                    response.candidates().getFirst().strength(),
+                    row.caseId());
+                assertEquals(
+                    Set.of(row.expectedKind()),
+                    response.candidates().getFirst().matches().stream()
+                        .map(match -> match.kind())
+                        .collect(Collectors.toSet()),
+                    row.caseId());
+                assertEquals(
+                    Set.of(row.expectedStrength()),
+                    response.candidates().getFirst().matches().stream()
+                        .map(match -> match.strength())
+                        .collect(Collectors.toSet()),
+                    row.caseId());
+            }
         }
     }
 
@@ -281,9 +299,17 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
                     continue;
                 }
                 String[] columns = line.split("\\t", -1);
-                if (columns.length != 12) {
+                if (columns.length != 14) {
                     throw new IllegalStateException(
                         "Exact-match fixture row has " + columns.length + " columns");
+                }
+                DuplicateMatchStrength expectedStrength = nullableStrength(columns[11]);
+                DuplicateMatchKind expectedKind = nullableKind(columns[12]);
+                boolean expectedMatch = Boolean.parseBoolean(columns[13]);
+                if ((expectedMatch && (expectedStrength == null || expectedKind == null))
+                        || (!expectedMatch && (expectedStrength != null || expectedKind != null))) {
+                    throw new IllegalStateException(
+                        "Exact-match fixture expectation is incomplete for " + columns[0]);
                 }
                 rows.add(new ExactMatchFixtureRow(
                     columns[0],
@@ -297,7 +323,9 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
                     nullable(columns[8]),
                     nullable(columns[9]),
                     nullable(columns[10]),
-                    Boolean.parseBoolean(columns[11])));
+                    expectedMatch,
+                    expectedStrength,
+                    expectedKind));
             }
         }
         return List.copyOf(rows);
@@ -305,6 +333,16 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
 
     private static String nullable(String value) {
         return value == null || value.isEmpty() ? null : value;
+    }
+
+    private static DuplicateMatchStrength nullableStrength(String value) {
+        String expected = nullable(value);
+        return expected == null ? null : DuplicateMatchStrength.valueOf(expected);
+    }
+
+    private static DuplicateMatchKind nullableKind(String value) {
+        String expected = nullable(value);
+        return expected == null ? null : DuplicateMatchKind.valueOf(expected);
     }
 
     private record ExactMatchFixtureRow(
@@ -319,7 +357,9 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
         String probeEmail,
         String probePhone,
         String probeWebsite,
-        boolean expectedMatch
+        boolean expectedMatch,
+        DuplicateMatchStrength expectedStrength,
+        DuplicateMatchKind expectedKind
     ) {}
 
 }
