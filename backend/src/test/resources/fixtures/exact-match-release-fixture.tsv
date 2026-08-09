@@ -1,0 +1,15 @@
+caseId	targetKey	recordType	storedName	storedEmail	storedPhone	storedWebsite	probeName	probeEmail	probePhone	probeWebsite	expectedMatch
+person-email-exact	person-email	person	Release Email Target	release.exact@example.com				 RELEASE.EXACT@EXAMPLE.COM 			true
+person-email-plus-is-distinct	person-email	person	Release Email Target	release.exact@example.com				release.exact+tag@example.com			false
+person-email-malformed	person-email	person	Release Email Target	release.exact@example.com			Malformed Email Probe	release..exact@example.com			false
+person-phone-exact	person-phone	person	Release Phone Target		+819011112222				090-1111-2222		true
+person-phone-extension-is-distinct	person-phone	person	Release Phone Target		+819011112222		Phone Extension Probe		090-1111-2222 ext 9		false
+person-name-exact	person-name	person	やまだ 太郎				ﾔﾏﾀﾞ　太郎				true
+person-name-near-is-distinct	person-name	person	やまだ 太郎				やまだ 太朗				false
+company-domain-exact	company-domain	company	Release Domain Target			https://sales.release-domain.co.jp				https://www.release-domain.co.jp/about	true
+company-domain-sibling-is-distinct	company-domain	company	Release Domain Target			https://sales.release-domain.co.jp				https://release-domain.example.com	false
+company-public-suffix-is-not-an-identity	company-domain	company	Release Domain Target			https://sales.release-domain.co.jp	Public Suffix Probe			co.jp	false
+company-phone-exact	company-phone	company	Release Company Phone		+819033334444				+81 90 3333 4444		true
+company-phone-extension-is-distinct	company-phone	company	Release Company Phone		+819033334444		Company Extension Probe		090-3333-4444 ext 2		false
+company-name-exact	company-name	company	Release Name Holdings				 release   name holdings 				true
+company-name-near-is-distinct	company-name	company	Release Name Holdings				Release Name Holding				false

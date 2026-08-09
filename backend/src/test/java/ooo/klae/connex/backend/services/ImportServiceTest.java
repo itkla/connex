@@ -205,7 +205,7 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void personImport_createsValidRowsAndReportsInvalidOnes() {
+    void personImport_createsValidRowsAndAuditsExactOutcomes() {
         ImportResult result = reviewAndCommitPersons(req(
             List.of(map("Name", "name"), map("Email", "email")),
             List.of(
@@ -217,6 +217,31 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getCreated());
         assertEquals(0, result.getUpdated());
         assertEquals(2, result.getFailed().size());
+        assertEquals(
+            "Imported persons: 1 created, 0 updated, 0 skipped, 2 failed",
+            jdbcTemplate.queryForObject(
+                "SELECT summary FROM audit_log WHERE workspace_id = ? "
+                    + "AND action = 'import.person' ORDER BY id DESC LIMIT 1",
+                String.class,
+                workspace.getId()));
+        assertEquals(
+            4,
+            jdbcTemplate.queryForObject(
+                "SELECT JSON_LENGTH(changes) FROM audit_log WHERE workspace_id = ? "
+                    + "AND action = 'import.person' ORDER BY id DESC LIMIT 1",
+                Integer.class,
+                workspace.getId()));
+        assertEquals(
+            "1,0,0,2",
+            jdbcTemplate.queryForObject(
+                "SELECT CONCAT(JSON_UNQUOTE(JSON_EXTRACT(changes, '$.created')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.updated')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.skipped')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.failed'))) "
+                    + "FROM audit_log WHERE workspace_id = ? "
+                    + "AND action = 'import.person' ORDER BY id DESC LIMIT 1",
+                String.class,
+                workspace.getId()));
     }
 
     @Test
@@ -2350,6 +2375,46 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void personImportCommitRefusesOriginalProofAfterCreatePermissionIsRevoked() {
+        WorkspaceRole role = roleService.createRole(
+            workspace.getId(),
+            currentUser.getId(),
+            "Revoked import " + unique(),
+            List.of("PERSON_CREATE"));
+        User importer = newUser();
+        workspaceService.assignCustomRole(
+            workspace.getId(), currentUser.getId(), importer.getId(), role.getId());
+        authenticateAs(importer, workspace.getId());
+        String email = "revoked-import-" + unique() + "@example.test";
+        ImportRequest request = req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(Map.of("Name", "Revoked import", "Email", email)),
+            "fill_empty");
+        ImportPreviewResult preview = importService.previewPersons(request);
+        request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+
+        authenticateAs(currentUser, workspace.getId());
+        roleService.updateRole(
+            workspace.getId(),
+            currentUser.getId(),
+            role.getId(),
+            role.getName(),
+            List.of("GOAL_READ"));
+        authenticateAs(importer, workspace.getId());
+        ImportState before = importState();
+
+        assertThrows(ForbiddenException.class, () -> importService.commitPersons(request));
+
+        assertEquals(before, importState());
+        assertEquals(
+            0,
+            rowCount(
+                "SELECT COUNT(*) FROM person WHERE workspace_id = ? AND email = ?",
+                workspace.getId(),
+                email));
+    }
+
+    @Test
     void companyAndDealPreviews_requireUpdatePermissionForMatchedRows() {
         Company companyDraft = new Company();
         companyDraft.setName("Permission company " + unique());
@@ -2632,6 +2697,31 @@ class ImportServiceTest extends AbstractServiceTest {
             workspaceId,
             companyId);
     }
+
+    private ImportState importState() {
+        return new ImportState(
+            rowCount("SELECT COUNT(*) FROM person WHERE workspace_id = ?", workspace.getId()),
+            rowCount("SELECT COUNT(*) FROM person_identity WHERE workspace_id = ?", workspace.getId()),
+            rowCount("SELECT COUNT(*) FROM company WHERE workspace_id = ?", workspace.getId()),
+            rowCount("SELECT COUNT(*) FROM tag WHERE workspace_id = ?", workspace.getId()),
+            rowCount("SELECT COUNT(*) FROM person_employment WHERE workspace_id = ?", workspace.getId()),
+            rowCount(
+                "SELECT COUNT(*) FROM custom_field_definition WHERE workspace_id = ?",
+                workspace.getId()),
+            rowCount(
+                "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'import.person'",
+                workspace.getId()));
+    }
+
+    private record ImportState(
+        int people,
+        int identities,
+        int companies,
+        int tags,
+        int employmentRelationships,
+        int customFieldDefinitions,
+        int importAudits
+    ) {}
 
     private int rowCount(String sql, Object... args) {
         return jdbcTemplate.queryForObject(sql, Integer.class, args);

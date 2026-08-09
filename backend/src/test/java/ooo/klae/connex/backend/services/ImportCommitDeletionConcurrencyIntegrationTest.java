@@ -152,7 +152,7 @@ class ImportCommitDeletionConcurrencyIntegrationTest extends AbstractServiceTest
         assertNull(customFieldDefinitionMapper.getByKey(
             workspaceId, "person", customFieldKey));
         assertEquals(
-            auditCountBefore,
+            auditCountBefore + 1,
             rowCount(
                 "SELECT COUNT(*) FROM audit_log "
                     + "WHERE workspace_id = ? AND action LIKE 'import.%'",
@@ -219,7 +219,7 @@ class ImportCommitDeletionConcurrencyIntegrationTest extends AbstractServiceTest
         assertNull(customFieldDefinitionMapper.getByKey(
             workspaceId, "company", customFieldKey));
         assertEquals(
-            auditCountBefore,
+            auditCountBefore + 1,
             rowCount(
                 "SELECT COUNT(*) FROM audit_log "
                     + "WHERE workspace_id = ? AND action LIKE 'import.%'",

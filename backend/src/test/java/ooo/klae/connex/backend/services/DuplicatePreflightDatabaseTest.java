@@ -4,7 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -126,6 +134,58 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
     }
 
     @Test
+    void exactMatchReleaseFixtureHasZeroFalsePositives() throws IOException {
+        List<ExactMatchFixtureRow> fixture = exactMatchFixture();
+        Map<String, Integer> targetIds = new HashMap<>();
+        for (ExactMatchFixtureRow row : fixture) {
+            if (targetIds.containsKey(row.targetKey())) {
+                continue;
+            }
+            int targetId;
+            if ("person".equals(row.recordType())) {
+                targetId = createPerson(
+                    row.storedName(),
+                    row.storedEmail(),
+                    row.storedPhone()).getId();
+            } else if ("company".equals(row.recordType())) {
+                Company company = new Company();
+                company.setName(row.storedName());
+                company.setWebsite(row.storedWebsite());
+                company.setPhone(row.storedPhone());
+                targetId = companyService.createCompany(company).getId();
+            } else {
+                throw new IllegalStateException(
+                    "Unsupported fixture record type: " + row.recordType());
+            }
+            targetIds.put(row.targetKey(), targetId);
+        }
+
+        for (ExactMatchFixtureRow row : fixture) {
+            DuplicatePreflightResponse response;
+            if ("person".equals(row.recordType())) {
+                response = duplicatePreflightService.preflightPerson(
+                    new PersonDuplicatePreflightRequest(
+                        row.probeName(),
+                        nullableList(row.probeEmail()),
+                        nullableList(row.probePhone())));
+            } else {
+                response = duplicatePreflightService.preflightCompany(
+                    new CompanyDuplicatePreflightRequest(
+                        row.probeName(),
+                        nullableList(row.probeWebsite()),
+                        nullableList(row.probePhone())));
+            }
+            List<Integer> actualIds = response.candidates().stream()
+                .map(candidate -> candidate.recordId())
+                .toList();
+            List<Integer> expectedIds = row.expectedMatch()
+                ? List.of(targetIds.get(row.targetKey()))
+                : List.of();
+            assertEquals(expectedIds, actualIds, row.caseId());
+        }
+    }
+
+    @Test
     void archivedRecordsLeavePreflightAndReturnAfterRestoreEvenWhenTheirKeysWereReused() {
         Person firstPerson = createPerson(
             "Archived person", "reused-person@example.com", null);
@@ -199,5 +259,67 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
         person.setPhone(phone);
         return personService.create(person);
     }
+
+    private static List<String> nullableList(String value) {
+        return value == null ? List.of() : List.of(value);
+    }
+
+    private static List<ExactMatchFixtureRow> exactMatchFixture() throws IOException {
+        InputStream stream = DuplicatePreflightDatabaseTest.class.getResourceAsStream(
+            "/fixtures/exact-match-release-fixture.tsv");
+        if (stream == null) {
+            throw new IllegalStateException("Exact-match release fixture is missing");
+        }
+        List<ExactMatchFixtureRow> rows = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            boolean header = true;
+            while ((line = reader.readLine()) != null) {
+                if (header) {
+                    header = false;
+                    continue;
+                }
+                String[] columns = line.split("\\t", -1);
+                if (columns.length != 12) {
+                    throw new IllegalStateException(
+                        "Exact-match fixture row has " + columns.length + " columns");
+                }
+                rows.add(new ExactMatchFixtureRow(
+                    columns[0],
+                    columns[1],
+                    columns[2],
+                    nullable(columns[3]),
+                    nullable(columns[4]),
+                    nullable(columns[5]),
+                    nullable(columns[6]),
+                    nullable(columns[7]),
+                    nullable(columns[8]),
+                    nullable(columns[9]),
+                    nullable(columns[10]),
+                    Boolean.parseBoolean(columns[11])));
+            }
+        }
+        return List.copyOf(rows);
+    }
+
+    private static String nullable(String value) {
+        return value == null || value.isEmpty() ? null : value;
+    }
+
+    private record ExactMatchFixtureRow(
+        String caseId,
+        String targetKey,
+        String recordType,
+        String storedName,
+        String storedEmail,
+        String storedPhone,
+        String storedWebsite,
+        String probeName,
+        String probeEmail,
+        String probePhone,
+        String probeWebsite,
+        boolean expectedMatch
+    ) {}
 
 }

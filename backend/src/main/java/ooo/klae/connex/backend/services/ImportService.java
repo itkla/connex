@@ -316,8 +316,9 @@ public class ImportService {
         }
 
         int created = beans.size();
-        auditImport("person", created, updated, skipped);
-        return new ImportResult(created, updated, skipped, collectFailures(plan));
+        List<RowError> failed = collectFailures(plan);
+        auditImport("person", created, updated, skipped, failed.size());
+        return new ImportResult(created, updated, skipped, failed);
     }
 
     private ImportAnalysis analyzePersons(
@@ -652,8 +653,9 @@ public class ImportService {
         }
 
         int created = beans.size();
-        auditImport("company", created, updated, skipped);
-        return new ImportResult(created, updated, skipped, collectFailures(plan));
+        List<RowError> failed = collectFailures(plan);
+        auditImport("company", created, updated, skipped, failed.size());
+        return new ImportResult(created, updated, skipped, failed);
     }
 
     private ImportAnalysis analyzeCompanies(
@@ -1106,8 +1108,9 @@ public class ImportService {
         }
 
         int created = beans.size();
-        auditImport("deal", created, updated, skipped);
-        return new ImportResult(created, updated, skipped, collectFailures(plan));
+        List<RowError> failed = collectFailures(plan);
+        auditImport("deal", created, updated, skipped, failed.size());
+        return new ImportResult(created, updated, skipped, failed);
     }
 
     private ImportAnalysis analyzeDeals(
@@ -2228,11 +2231,21 @@ public class ImportService {
         return new ImportPreviewResult(plan.size(), toCreate, toUpdate, toSkip, invalid, rows);
     }
 
-    private void auditImport(String entityType, int created, int updated, int skipped) {
-        if (created + updated + skipped == 0) return;
+    private void auditImport(
+            String entityType,
+            int created,
+            int updated,
+            int skipped,
+            int failed) {
+        if (created + updated + skipped + failed == 0) return;
         auditService.record("import." + entityType, entityType, null, "CSV import",
-            "Imported " + entityType + "s: " + created + " created, " + updated + " updated, " + skipped + " skipped",
-            Map.of("created", created, "updated", updated, "skipped", skipped));
+            "Imported " + entityType + "s: " + created + " created, " + updated
+                + " updated, " + skipped + " skipped, " + failed + " failed",
+            Map.of(
+                "created", created,
+                "updated", updated,
+                "skipped", skipped,
+                "failed", failed));
     }
 
     private static List<RowError> collectFailures(List<PlanRow> plan) {
