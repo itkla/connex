@@ -193,7 +193,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
-            if (editor.readOnly) return;
+            if (editor.editingReadOnly) return;
             const target = event.target;
             if (target instanceof HTMLElement && (
                 target.isContentEditable
@@ -307,7 +307,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
         selectedNodeId: editor.selectedNodeId,
         diagnostics: visibleDiagnostics,
         run: editor.run,
-        readOnly: editor.readOnly,
+        readOnly: editor.editingReadOnly,
         focusNodeId: editor.selectedNodeId,
         focusRequestId: editor.focusRequestId,
         nodeLabel,
@@ -327,7 +327,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
             fields={fields}
             options={options}
             diagnostics={visibleDiagnostics}
-            readOnly={editor.readOnly}
+            readOnly={editor.editingReadOnly}
             canRunAsSystem={canRunAsSystem}
             focusFieldPath={editor.focusFieldPath}
             focusRequestId={editor.focusRequestId}
@@ -385,7 +385,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                 canUndo={editor.history.past.length > 0 || editor.history.transientBase != null}
                 canRedo={editor.history.future.length > 0}
                 busyAction={editor.busyAction}
-                readOnly={editor.readOnly}
+                readOnly={editor.editingReadOnly}
                 onBack={() => router.push("/workflows")}
                 onNameChange={editor.changeName}
                 onNameCommit={editor.commitTransient}

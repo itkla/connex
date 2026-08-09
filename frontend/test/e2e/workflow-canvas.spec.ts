@@ -14,6 +14,13 @@ function workflowId(value: unknown): number {
     return value.id;
 }
 
+function workflowRevision(value: unknown): number {
+    if (!isRecord(value) || typeof value.draftRevision !== "number") {
+        throw new Error("Workflow response is missing a numeric draft revision");
+    }
+    return value.draftRevision;
+}
+
 function workflowDefinition(value: unknown): Record<string, unknown> {
     if (!isRecord(value) || !isRecord(value.definition)) {
         throw new Error("Workflow response is missing its definition");
@@ -77,6 +84,144 @@ async function dragConnection(page: Page, source: Locator, target: Locator, vali
 }
 
 test.describe("workflow canvas", () => {
+    test("locks initial authoring until creation finishes", async ({ page }) => {
+        let releaseCreate: () => void = () => undefined;
+        const createReleased = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        let markCreatePending: () => void = () => undefined;
+        const createPending = new Promise<void>((resolve) => {
+            markCreatePending = resolve;
+        });
+        let releaseNavigation: () => void = () => undefined;
+        const navigationReleased = new Promise<void>((resolve) => {
+            releaseNavigation = resolve;
+        });
+        let markNavigationPending: () => void = () => undefined;
+        const navigationPending = new Promise<void>((resolve) => {
+            markNavigationPending = resolve;
+        });
+
+        await page.goto("/workflows/new");
+        await page.getByLabel("Workflow name").fill("Create without lost edits");
+        await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
+            const pathname = new URL(route.request().url()).pathname;
+            if (!/^\/workflows\/\d+$/.test(pathname)) {
+                await route.continue();
+                return;
+            }
+            markNavigationPending();
+            await navigationReleased;
+            await route.continue();
+        });
+        await page.route("**/api/workflows", async (route) => {
+            if (route.request().method() !== "POST") {
+                await route.continue();
+                return;
+            }
+            markCreatePending();
+            const response = await route.fetch();
+            await createReleased;
+            await route.fulfill({ response });
+        });
+
+        try {
+            await page.getByRole("button", { name: "Save draft" }).click();
+            await createPending;
+            await expect(page.getByRole("button", { name: "Saving draft…" })).toBeDisabled();
+            await expect(page.getByLabel("Workflow name")).toBeDisabled();
+            await expect(page.locator(".react-flow__node").first()).not.toHaveClass(/(?:^|\s)draggable(?:\s|$)/);
+        } finally {
+            releaseCreate();
+        }
+
+        try {
+            await navigationPending;
+            await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
+            await expect(page.getByLabel("Workflow name")).toBeDisabled();
+        } finally {
+            releaseNavigation();
+        }
+
+        await expect(page).toHaveURL(/\/workflows\/\d+$/);
+        await expect(page.getByLabel("Workflow name")).toHaveValue("Create without lost edits");
+    });
+
+    test("keeps edits made while recovering from a stale revision", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const csrf = await csrfBootstrap(page.request);
+        const initialDocument = {
+            name: `Conflict recovery ${testInfo.retry}`,
+            description: null,
+            recordType: "deal",
+            executionMode: "user",
+            definition: {
+                schemaVersion: 1,
+                entryNodeId: "trigger",
+                nodes: [
+                    { id: "trigger", type: "TRIGGER", config: { type: "entity_change", events: ["deal.updated"] } },
+                    { id: "end", type: "END" },
+                ],
+                edges: [{ id: "edge", sourceNodeId: "trigger", targetNodeId: "end", outcome: "next" }],
+            },
+            canvas: {
+                positions: { trigger: { x: 80, y: 40 }, end: { x: 80, y: 280 } },
+                viewport: { x: 0, y: 0, zoom: 1 },
+            },
+        };
+        const createdResponse = await page.request.post("/api/workflows", {
+            headers: {
+                "X-Workspace-Id": String(fixture.workspaceId),
+                [csrf.headerName]: csrf.token,
+            },
+            data: initialDocument,
+        });
+        expect(createdResponse.status(), await createdResponse.text()).toBe(201);
+        const created: unknown = await createdResponse.json();
+        const id = workflowId(created);
+        let releaseSave: () => void = () => undefined;
+        const saveReleased = new Promise<void>((resolve) => {
+            releaseSave = resolve;
+        });
+        let markSavePending: () => void = () => undefined;
+        const savePending = new Promise<void>((resolve) => {
+            markSavePending = resolve;
+        });
+
+        await page.goto(`/workflows/${id}`);
+        await page.route(`**/api/workflows/${id}/draft`, async (route) => {
+            markSavePending();
+            await saveReleased;
+            await route.continue();
+        });
+        const name = page.getByLabel("Workflow name");
+        await name.fill("Submitted name");
+        await name.blur();
+        await page.getByRole("button", { name: "Save draft" }).click();
+        await savePending;
+        try {
+            await name.fill("Edited during conflict recovery");
+            await name.blur();
+            const competingResponse = await page.request.put(`/api/workflows/${id}/draft`, {
+                headers: {
+                    "X-Workspace-Id": String(fixture.workspaceId),
+                    [csrf.headerName]: csrf.token,
+                },
+                data: {
+                    ...initialDocument,
+                    description: "Changed by another editor",
+                    expectedRevision: workflowRevision(created),
+                },
+            });
+            expect(competingResponse.status(), await competingResponse.text()).toBe(200);
+        } finally {
+            releaseSave();
+        }
+
+        await expect(name).toHaveValue("Edited during conflict recovery");
+        await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
+    });
+
     test("creates deterministic connections and inserts at the invoked canvas position", async ({ page }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
         const csrf = await csrfBootstrap(page.request);

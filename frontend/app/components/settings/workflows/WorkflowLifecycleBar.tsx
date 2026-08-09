@@ -125,8 +125,17 @@ export default function WorkflowLifecycleBar({
                     {t("validate")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={onSave} disabled={!dirty || readOnly || busyAction !== null}>
-                    {busyAction === "save" ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : <DocumentCheckIcon className="size-4" />}
-                    {t("saveDraft")}
+                    {busyAction === "save" ? (
+                        <>
+                            <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" />
+                            {t("savingDraft")}
+                        </>
+                    ) : (
+                        <>
+                            <DocumentCheckIcon className="size-4" />
+                            {t("saveDraft")}
+                        </>
+                    )}
                 </Button>
                 <Button variant="brand" size="sm" onClick={onPublish} disabled={!canPublish || busyAction !== null}>
                     {busyAction === "publish" ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : t("publish")}

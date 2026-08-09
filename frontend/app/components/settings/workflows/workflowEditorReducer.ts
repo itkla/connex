@@ -69,7 +69,11 @@ export type WorkflowEditorAction =
     | { type: "undo" }
     | { type: "redo" }
     | { type: "rebase"; baseline: WorkflowEditorDocument; document: WorkflowEditorDocument }
-    | { type: "markSaved"; document: WorkflowEditorDocument };
+    | {
+        type: "markSaved";
+        submittedDocument: WorkflowEditorDocument;
+        document: WorkflowEditorDocument;
+    };
 
 const HISTORY_LIMIT = 50;
 
@@ -171,14 +175,16 @@ export function workflowEditorReducer(
                 baseline: structuredClone(action.baseline),
                 transientBase: null,
             };
-        case "markSaved":
+        case "markSaved": {
+            const changedWhileSaving = !equal(state.present, action.submittedDocument);
             return {
                 past: state.past,
-                present: structuredClone(action.document),
+                present: structuredClone(changedWhileSaving ? state.present : action.document),
                 future: state.future,
                 baseline: structuredClone(action.document),
-                transientBase: null,
+                transientBase: changedWhileSaving ? state.transientBase : null,
             };
+        }
     }
 }
 
