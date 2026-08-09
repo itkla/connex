@@ -200,6 +200,22 @@ class AiInvocationAdmissionServiceTest {
     }
 
     @Test
+    void identicalContentHashesInSiblingAndForeignOrganizationWorkspacesRunIndependentFlights() {
+        AiInvocationAdmissionService service = service();
+
+        try (Admission owner = service.acquire(identity(7, 29), "same-hash", false);
+                Admission sibling = service.acquire(identity(8, 29), "same-hash", false)) {
+            currentOrg.set(12);
+            try (Admission foreign = service.acquire(identity(9, 29), "same-hash", false)) {
+                assertEquals(Decision.LEADER, owner.decision());
+                assertEquals(Decision.LEADER, sibling.decision());
+                assertEquals(Decision.LEADER, foreign.decision());
+                assertEquals(3, service.activeFlightCount());
+            }
+        }
+    }
+
+    @Test
     void followerTimeoutFailsAndDeregistersLeaderFlight() {
         AiInvocationAdmissionService service = new AiInvocationAdmissionService(
                 properties, workspaceService, clock, Duration.ofMillis(25));

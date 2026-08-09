@@ -110,6 +110,30 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void identicalSubjectKeysRemainIndependentAcrossSiblingAndForeignOrganizations() {
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
+        save(workspace, "deal.brief", 29, 0, "same-hash", "{\"where\":\"owner\"}", 0);
+        save(sibling, "deal.brief", 29, 0, "same-hash", "{\"where\":\"sibling\"}", 0);
+        save(foreign, "deal.brief", 29, 0, "same-hash", "{\"where\":\"foreign\"}", 0);
+
+        assertTrue(aiOutputCacheMapper.getBySubject(
+                workspace.getId(), "deal.brief", 29, 0).getPayload().contains("owner"));
+        assertTrue(aiOutputCacheMapper.getBySubject(
+                sibling.getId(), "deal.brief", 29, 0).getPayload().contains("sibling"));
+        assertTrue(aiOutputCacheMapper.getBySubject(
+                foreign.getId(), "deal.brief", 29, 0).getPayload().contains("foreign"));
+        assertEquals(1, aiOutputCacheMapper.deleteBySubjectAndContentHash(
+                sibling.getId(), "deal.brief", 29, 0, "same-hash"));
+        assertNull(aiOutputCacheMapper.getBySubject(
+                sibling.getId(), "deal.brief", 29, 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+                workspace.getId(), "deal.brief", 29, 0));
+        assertNotNull(aiOutputCacheMapper.getBySubject(
+                foreign.getId(), "deal.brief", 29, 0));
+    }
+
+    @Test
     void deleteForPersonPurgesBriefsForCurrentStructuredDealLinksOnly() {
         Company company = newCompany();
         Person subject = newPerson(company);

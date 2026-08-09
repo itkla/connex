@@ -28,8 +28,10 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
@@ -44,6 +46,7 @@ class WorkflowIsolationIntegrationTest {
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
+    @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ObjectMapper objectMapper;
 
@@ -59,10 +62,13 @@ class WorkflowIsolationIntegrationTest {
     @Test
     void lifecycleHttpContractEnforcesTenantRbacAuthenticationAndCsrf() throws Exception {
         RequestContextHolder.resetRequestAttributes();
-        Workspace ownerWorkspace = newWorkspace();
-        Workspace foreignWorkspace = newWorkspace();
+        Organization organization = newOrganization();
+        Workspace ownerWorkspace = newWorkspace(organization.getId());
+        Workspace siblingWorkspace = newWorkspace(organization.getId());
+        Workspace foreignWorkspace = newWorkspace(newOrganization().getId());
         User owner = newMember(ownerWorkspace, "owner");
         User reader = newMember(ownerWorkspace, "member");
+        User siblingOwner = newMember(siblingWorkspace, "owner");
         User foreignOwner = newMember(foreignWorkspace, "owner");
         MockHttpSession ownerSession = login(owner.getUsername());
 
@@ -84,11 +90,14 @@ class WorkflowIsolationIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(workflowId));
 
-        MockHttpSession foreignSession = login(foreignOwner.getUsername());
-        mockMvc.perform(get("/api/workflows/" + workflowId)
-                .header("X-Workspace-Id", foreignWorkspace.getId())
-                .session(foreignSession))
-            .andExpect(status().isNotFound());
+        assertWorkflowAbsent(
+                login(siblingOwner.getUsername()), siblingWorkspace, workflowId);
+        assertWorkflowAbsent(
+                login(foreignOwner.getUsername()), foreignWorkspace, workflowId);
+        mockMvc.perform(get("/api/workflows/{id}", workflowId)
+                .header("X-Workspace-Id", ownerWorkspace.getId())
+                .session(ownerSession))
+            .andExpect(status().isOk());
 
         MockHttpSession readerSession = login(reader.getUsername());
         mockMvc.perform(get("/api/workflows/" + workflowId)
@@ -108,6 +117,30 @@ class WorkflowIsolationIntegrationTest {
             .andExpect(status().isForbidden());
     }
 
+    private void assertWorkflowAbsent(
+            MockHttpSession session,
+            Workspace unauthorized,
+            int workflowId) throws Exception {
+        mockMvc.perform(get("/api/workflows/{id}", workflowId)
+                .header("X-Workspace-Id", unauthorized.getId())
+                .session(session))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/workflows/{id}/versions", workflowId)
+                .header("X-Workspace-Id", unauthorized.getId())
+                .session(session))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/workflows/{id}/archive", workflowId)
+                .header("X-Workspace-Id", unauthorized.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/workflows")
+                .header("X-Workspace-Id", unauthorized.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(0));
+    }
+
     private MockHttpSession login(String username) throws Exception {
         String body = "{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD + "\"}";
         MvcResult result = mockMvc.perform(post("/api/auth/login")
@@ -120,13 +153,23 @@ class WorkflowIsolationIntegrationTest {
         return session;
     }
 
-    private Workspace newWorkspace() {
+    private Workspace newWorkspace(int orgId) {
         String slug = "workflow-" + UUID.randomUUID().toString().substring(0, 8);
         Workspace workspace = new Workspace();
         workspace.setName(slug);
         workspace.setSlug(slug);
+        workspace.setOrgId(orgId);
         workspaceMapper.insert(workspace);
         return workspace;
+    }
+
+    private Organization newOrganization() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Organization organization = new Organization();
+        organization.setName("Workflow " + suffix);
+        organization.setSlug("workflow-org-" + suffix);
+        organizationMapper.insert(organization);
+        return organization;
     }
 
     private User newMember(Workspace workspace, String role) {
