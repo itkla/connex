@@ -23,7 +23,10 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
-/** Durable assistant chat CRUD, access policy, and per-session message sequencing. */
+/**
+ * Durable assistant chat CRUD, access policy, and per-session message sequencing.
+ * Mutations revalidate {@link Permission#AI_USE} against the caller's locked membership state.
+ */
 @Service
 @RequiredArgsConstructor
 public class AiAssistantService {
@@ -63,6 +66,7 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
+        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspaceId);
         session.setCreatedByUserId(userId);
@@ -105,6 +109,7 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
+        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         requireOwnedLocked(workspaceId, userId, id);
         if (chatMapper.updateSession(workspaceId, id, title, status) != 1) {
             throw inaccessible();
@@ -119,6 +124,7 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
+        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         AiChatSession session = requireOwnedLocked(workspaceId, userId, id);
         if (!ARCHIVED.equals(session.getStatus())
                 && chatMapper.updateSession(workspaceId, id, null, ARCHIVED) != 1) {
@@ -134,6 +140,7 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
+        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         AiChatSession session = requireLocked(workspaceId, userId, id);
         requireAppendAccess(workspaceId, userId, session);
         if (ARCHIVED.equals(session.getStatus())) {

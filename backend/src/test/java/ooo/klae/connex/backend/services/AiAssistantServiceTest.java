@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -13,11 +16,14 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
@@ -28,6 +34,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -37,6 +44,8 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
     @Autowired private AiAssistantService service;
     @Autowired private AiChatMapper chatMapper;
+    @Autowired private RoleMapper roleMapper;
+    @MockitoSpyBean private WorkspaceService workspaceService;
 
     @Test
     void createDefaultsToPrivateActiveAndOwnerCanRead() {
@@ -195,6 +204,49 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class, () -> service.page(1, 25));
     }
 
+    @Test
+    void appendRevalidatesAiUseAfterMembershipLockBeforeWriting() {
+        User caller = newUser();
+        WorkspaceRole permitted = customRole("AI permitted", List.of(Permission.AI_USE.name()));
+        WorkspaceRole revoked = customRole("AI revoked", List.of());
+        workspaceMapper.setMemberCustomRole(
+            workspace.getId(), caller.getId(), permitted.getId());
+        authenticateAs(caller, workspace.getId());
+        AiChatSession session = sharedSession(caller, "Permission race");
+        AiChatSession before = chatMapper.getSessionById(
+            workspace.getId(), caller.getId(), session.getId());
+        long sessionCount = chatMapper.countAccessibleSessions(
+            workspace.getId(), caller.getId());
+
+        doAnswer(invocation -> {
+            workspaceMapper.setMemberCustomRole(
+                workspace.getId(), caller.getId(), revoked.getId());
+            return invocation.callRealMethod();
+        }).when(workspaceService).lockAndRequireMember(
+            workspace.getId(), caller.getId());
+        clearInvocations(workspaceService);
+
+        ForbiddenException forbidden = assertThrows(
+            ForbiddenException.class,
+            () -> service.appendMessage(session.getId(), messageRequest("Blocked message")));
+
+        InOrder authorizationOrder = inOrder(workspaceService);
+        authorizationOrder.verify(workspaceService).requirePermission(Permission.AI_USE);
+        authorizationOrder.verify(workspaceService).lockAndRequireMember(
+            workspace.getId(), caller.getId());
+        authorizationOrder.verify(workspaceService).requirePermission(
+            workspace.getId(), caller.getId(), Permission.AI_USE);
+        AiChatSession after = chatMapper.getSessionById(
+            workspace.getId(), caller.getId(), session.getId());
+        assertEquals("Requires the AI_USE permission in this workspace", forbidden.getMessage());
+        assertEquals(sessionCount, chatMapper.countAccessibleSessions(
+            workspace.getId(), caller.getId()));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+        assertNotNull(before);
+        assertNotNull(after);
+        assertEquals(before.getLastMessageAt(), after.getLastMessageAt());
+    }
+
     private AiChatSession sharedSession(User owner, String title) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
@@ -210,6 +262,17 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         User user = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), user.getId(), role);
         return user;
+    }
+
+    private WorkspaceRole customRole(String name, List<String> permissions) {
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName(name + " " + unique());
+        roleMapper.insertRole(role);
+        if (!permissions.isEmpty()) {
+            roleMapper.insertPermissions(workspace.getId(), role.getId(), permissions);
+        }
+        return role;
     }
 
     private Workspace newWorkspace() {
