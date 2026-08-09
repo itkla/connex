@@ -147,25 +147,28 @@ export function useWorkflowEditor({
         scopeRef.current.activeWorkspaceId === workspaceId && !scopeRef.current.switching
     ), []);
 
-    const loadVersions = useCallback(async (id: number, workspaceId: number) => {
+    const loadVersions = useCallback(async (id: number, workspaceId: number, signal?: AbortSignal) => {
+        if (signal?.aborted) return;
         setVersionsLoadState("loading");
         try {
             const loaded = await getWorkflowVersions(id, {
+                signal,
                 headers: { "X-Workspace-Id": String(workspaceId) },
             });
-            if (isCurrentWorkspace(workspaceId)) setVersions(loaded);
+            if (!signal?.aborted && isCurrentWorkspace(workspaceId)) setVersions(loaded);
         } catch {
-            if (isCurrentWorkspace(workspaceId)) toastError(t("versions.loadFailed"));
+            if (!signal?.aborted && isCurrentWorkspace(workspaceId)) toastError(t("versions.loadFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setVersionsLoadState("idle");
+            if (!signal?.aborted && isCurrentWorkspace(workspaceId)) setVersionsLoadState("idle");
         }
     }, [isCurrentWorkspace, t]);
 
     useEffect(() => {
         if (workflowId != null || activeWorkspaceId == null || switching) return;
         const workspaceId = activeWorkspaceId;
+        let ignore = false;
         void Promise.resolve().then(() => {
-            if (!isCurrentWorkspace(workspaceId)) return;
+            if (ignore || !isCurrentWorkspace(workspaceId)) return;
             searchControllerRef.current?.abort();
             if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
             setWorkflow(null);
@@ -187,13 +190,16 @@ export function useWorkflowEditor({
             dispatch({ type: "initialize", document: initialDocument });
             setSelectedNodeId(initialDocument.definition.entryNodeId);
         });
+        return () => {
+            ignore = true;
+        };
     }, [activeWorkspaceId, dispatch, initialDocument, isCurrentWorkspace, switching, workflowId]);
 
     useEffect(() => {
         if (!activeWorkspaceId || workflowId == null || switching) return;
         const workspaceId = activeWorkspaceId;
         const controller = new AbortController();
-        let active = true;
+        let ignore = false;
         void (async () => {
             setLoadState("loading");
             setWorkflow(null);
@@ -217,24 +223,26 @@ export function useWorkflowEditor({
                     signal: controller.signal,
                     headers: { "X-Workspace-Id": String(workspaceId) },
                 });
-                if (!active || controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
+                if (ignore || loaded.id !== workflowId) return;
+                if (controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
                 const document = documentFromWorkflow(loaded);
                 setWorkflow(loaded);
                 setLoadedWorkspaceId(workspaceId);
                 dispatch({ type: "initialize", document });
                 setSelectedNodeId(document.definition.entryNodeId);
-                if (loaded.activeVersionId != null) void loadVersions(loaded.id, workspaceId);
+                if (loaded.activeVersionId != null) void loadVersions(loaded.id, workspaceId, controller.signal);
             } catch (error) {
-                if (!active || controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
+                if (ignore) return;
+                if (controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
                 if (error instanceof ApiError && error.status === 403) setAccessDenied(true);
                 else if (error instanceof ApiError && error.status === 404) setMissing(true);
                 else setLoadError(true);
             } finally {
-                if (active && !controller.signal.aborted && isCurrentWorkspace(workspaceId)) setLoadState("idle");
+                if (!ignore && !controller.signal.aborted && isCurrentWorkspace(workspaceId)) setLoadState("idle");
             }
         })();
         return () => {
-            active = false;
+            ignore = true;
             controller.abort();
         };
     }, [activeWorkspaceId, dispatch, isCurrentWorkspace, loadAttempt, loadVersions, switching, workflowId]);
