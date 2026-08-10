@@ -122,14 +122,19 @@ class TenantScopeInterceptorTest {
      * were listed and the workspace-scoped ones it actually calls threw (#1011).
      */
     @Test
-    void freshMembershipProviderCapturePurgeRunsWithoutAResolvedContext() {
+    void freshMembershipScopedCleanupRunsWithoutAResolvedContext() {
         bindRequest();
-        for (String statement : new String[] {
-            "deleteProviderActivities", "deleteInteractions", "deleteSyncStates",
-            "deleteUserPolicy", "deleteDecisions", "countUserProviderResiduals",
-            "clearWorkspacePolicyUpdater",
+        for (String id : new String[] {
+            NS + "ProviderCaptureMapper.deleteProviderActivities",
+            NS + "ProviderCaptureMapper.deleteInteractions",
+            NS + "ProviderCaptureMapper.deleteSyncStates",
+            NS + "ProviderCaptureMapper.deleteUserPolicy",
+            NS + "ProviderCaptureMapper.deleteDecisions",
+            NS + "ProviderCaptureMapper.countUserProviderResiduals",
+            NS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
+            NS + "AiChatMapper.deleteParticipantsForUser",
+            NS + "AiChatMapper.deleteOwnedSessionsForUser",
         }) {
-            String id = NS + "ProviderCaptureMapper." + statement;
             assertFalse(interceptor.requiresResolvedContext(id), id);
             assertDoesNotThrow(() -> interceptor.enforce(id), id);
         }
