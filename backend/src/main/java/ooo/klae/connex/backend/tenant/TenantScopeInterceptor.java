@@ -58,6 +58,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * the workspace predicate.
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
+        MAPPERS + "AiChatMapper",
         MAPPERS + "CompanyMapper",
         MAPPERS + "IdentityCollisionMapper",
         MAPPERS + "IdentityMapper",
@@ -190,8 +191,8 @@ public class TenantScopeInterceptor implements Interceptor {
      * invites, invite links, SSO JIT provisioning — see
      * {@code UserOffboardingService.prepareFreshMembership}), all of which a user
      * with no active workspace may reach. The fresh-membership saved-view
-     * cleanup follows the same workspace-and-user-bound policy. These statements
-     * anchor {@code workspace_id} and the user id in SQL.
+     * and assistant-chat cleanup follows the same workspace-and-user-bound policy.
+     * These statements anchor {@code workspace_id} and the user id in SQL.
      *
      * <p>The workspace-scoped provider-capture purge belongs to that same
      * fresh-membership flow and is listed for the same reason. Only the
@@ -242,6 +243,12 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",
+        MAPPERS + "AiChatMapper.deleteParticipantsForUser",
+        MAPPERS + "AiChatMapper.deleteParticipantsForUserAnywhere",
+        MAPPERS + "AiChatMapper.clearSessionCreatorsAnywhere",
+        MAPPERS + "AiChatMapper.clearMessageAuthorsAnywhere",
+        MAPPERS + "AiChatMapper.clearToolCallExecutorsAnywhere",
+        MAPPERS + "AiChatMapper.clearTurnRequestersAnywhere",
         MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
         MAPPERS + "PersonMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.clearOwnershipAnywhere",

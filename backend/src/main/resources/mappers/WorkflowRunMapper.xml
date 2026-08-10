@@ -528,6 +528,17 @@
       AND current_node_id = #{expectedNodeId}
   </update>
 
+  <select id="hasRunHistory" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workflow_run
+      WHERE workspace_id = #{workspaceId}
+        AND workflow_id = #{workflowId}
+      LIMIT 1
+      FOR SHARE
+    )
+  </select>
+
   <select id="currentTimestamp" resultType="java.time.LocalDateTime">
     SELECT CURRENT_TIMESTAMP(6)
     FROM workflow

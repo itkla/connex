@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
@@ -39,6 +40,7 @@ class WorkflowRuntimeOwnershipServiceTest {
 
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;
+    @Mock private WorkflowRunMapper workflowRunMapper;
     @Mock private RuleMapper ruleMapper;
     @Mock private WorkflowPrincipalLockService principalLockService;
     @Mock private WorkflowDefinitionValidator definitionValidator;
@@ -56,6 +58,7 @@ class WorkflowRuntimeOwnershipServiceTest {
         service = new WorkflowRuntimeOwnershipService(
             workflowMapper,
             workflowVersionMapper,
+            workflowRunMapper,
             ruleMapper,
             principalLockService,
             definitionValidator,
@@ -154,6 +157,23 @@ class WorkflowRuntimeOwnershipServiceTest {
     }
 
     @Test
+    void firstRollbackWithCanonicalRunHistoryFailsBeforeProjectionOrOwnerWrite() {
+        Workflow workflow = workflow("canonical");
+        workflow.setLegacyRuleId(null);
+        stubLock(workflow, null);
+        when(workflowRunMapper.hasRunHistory(7, 11)).thenReturn(true);
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.rollBackToLegacy(11, 19L));
+
+        verifyNoInteractions(graphConverter);
+        verify(ruleMapper, never()).insert(any());
+        verify(workflowMapper, never()).attachLegacyRuleAndCompareAndSwapRuntimeOwner(
+            anyInt(), anyInt(), anyLong(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
     void systemOwnershipTransitionRequiresTheBuiltInAdminGate() {
         when(runtimeProperties.enabled()).thenReturn(true);
         Workflow workflow = workflow("canonical");
@@ -185,12 +205,16 @@ class WorkflowRuntimeOwnershipServiceTest {
         when(workspaceService.getCurrentUserId()).thenReturn(9);
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
-        when(ruleMapper.getById(7, 13)).thenReturn(rule);
+        if (workflow.getLegacyRuleId() != null) {
+            when(ruleMapper.getById(7, 13)).thenReturn(rule);
+        }
         when(principalLockService.lockUserMutation(7, 9, Set.of(), Set.of()))
             .thenReturn(new LockedPrincipals(Set.of(), Set.of()));
         when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getByIdForUpdate(7, 11, 19L)).thenReturn(version);
-        when(ruleMapper.getByIdForUpdate(7, 13)).thenReturn(rule);
+        if (workflow.getLegacyRuleId() != null) {
+            when(ruleMapper.getByIdForUpdate(7, 13)).thenReturn(rule);
+        }
     }
 
     private void stubCompiledVersion() {

@@ -29,11 +29,13 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 
 /**
- * The rule engine: given a committed entity change or a scheduled tick, finds the matching enabled
- * rules in a workspace, evaluates their optional WHEN condition (reusing the segment condition model
- * off-thread), and runs their actions as the rule's actor — the run-as member or the system actor —
- * recording each fire in {@code rule_execution} with an idempotency dedupe key. Runs off the request
- * thread (callers supply the workspace explicitly) and never throws to its caller.
+ * Legacy compatibility executor for workflows whose persisted {@code runtime_owner} is
+ * {@code legacy}, plus genuinely unpaired rules awaiting startup backfill. Every effect first claims
+ * through {@link WorkflowRuntimeClaimService}, which locks the paired workflow, checks both ledgers,
+ * and records the winner in {@code rule_execution}. It evaluates the optional WHEN condition and runs
+ * actions as the rule's actor off the request thread. Remove this executor after no workflow is
+ * legacy-owned, no unpaired rule remains, rollback support is retired, and the compatibility window
+ * has closed.
  */
 @Service
 @RequiredArgsConstructor

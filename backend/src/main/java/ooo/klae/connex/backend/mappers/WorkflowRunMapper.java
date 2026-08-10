@@ -236,6 +236,10 @@ public interface WorkflowRunMapper {
         @Param("id") long id,
         @Param("expectedNodeId") String expectedNodeId);
 
+    boolean hasRunHistory(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId);
+
     LocalDateTime currentTimestamp(
         @Param("workspaceId") int workspaceId,
         @Param("workflowId") int workflowId);

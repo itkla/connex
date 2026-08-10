@@ -19,10 +19,11 @@ import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Periodically evaluates time-based (schedule) rules. Mirrors the notification scheduler: it fans out
- * over the workspaces that have enabled schedule rules and asks the engine to run each cadence. The
- * engine's per-bucket idempotency makes a frequent tick safe — a daily rule fires once per day even
- * if this runs every few minutes. Toggle with {@code connex.rules.scheduling-enabled}.
+ * Compatibility schedule producer for legacy and canonical workflow owners. It persists canonical
+ * outbox targets for every cadence and invokes {@link RuleEngineService} directly only while the
+ * canonical runtime deployment gate is disabled; per-workflow {@code runtime_owner} and the shared
+ * claim service decide the executor. Remove the legacy enumeration and direct engine call once no
+ * legacy-owned or unpaired rule remains. Toggle with {@code connex.rules.scheduling-enabled}.
  */
 @Component
 @RequiredArgsConstructor

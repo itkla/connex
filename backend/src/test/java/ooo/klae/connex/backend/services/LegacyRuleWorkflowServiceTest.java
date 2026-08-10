@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -329,6 +331,33 @@ class LegacyRuleWorkflowServiceTest {
         order.verify(ruleMapper).getByIdForUpdate(7, 23);
         order.verify(ruleMapper).updateEnabled(7, 23, false);
         order.verify(workflowMapper).archive(7, 101, 9);
+    }
+
+    @Test
+    void deleteRejectsCanonicalOwnerWithoutMutatingEitherProjection() {
+        PersistedAggregate aggregate = persistedAggregate(true);
+        aggregate.workflow().setRuntimeOwner("canonical");
+        stubAggregate(aggregate);
+
+        assertThrows(
+            ConflictException.class,
+            () -> service.delete(7, 9, 23));
+
+        verify(ruleMapper, never()).updateEnabled(anyInt(), anyInt(), eq(false));
+        verify(workflowMapper, never()).archive(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void repeatedDeleteOfArchivedLegacyOwnerIsIdempotent() {
+        PersistedAggregate aggregate = persistedAggregate(false);
+        aggregate.workflow().setArchivedAt(java.time.LocalDateTime.now());
+        stubAggregate(aggregate);
+
+        Rule deleted = service.delete(7, 9, 23);
+
+        assertEquals(23, deleted.getId());
+        verify(ruleMapper, never()).updateEnabled(anyInt(), anyInt(), eq(false));
+        verify(workflowMapper, never()).archive(anyInt(), anyInt(), anyInt());
     }
 
     private void stubAggregate(PersistedAggregate aggregate) {

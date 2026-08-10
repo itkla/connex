@@ -73,6 +73,8 @@ class WorkflowRunMapperXmlTest {
             "failureCode", "execution_failed",
             "failureMessage", "Action failed",
             "finishedAt", now));
+        assertScoped(configuration, "hasRunHistory", Map.of(
+            "workspaceId", 7, "workflowId", 11));
         assertScoped(configuration, "currentTimestamp", Map.of(
             "workspaceId", 7, "workflowId", 11));
         assertScoped(configuration, "getPage", Map.of(
@@ -129,6 +131,11 @@ class WorkflowRunMapperXmlTest {
         assertTrue(lease.contains("w.intake_paused_at IS NULL"));
         assertTrue(sql(configuration, "findDueRunForUpdate", Map.of("workspaceId", 7))
             .contains("w.intake_paused_at IS NULL"));
+        String runHistory = sql(configuration, "hasRunHistory", Map.of(
+            "workspaceId", 7, "workflowId", 11));
+        assertTrue(runHistory.startsWith("SELECT EXISTS("));
+        assertTrue(runHistory.contains("LIMIT 1 FOR SHARE"));
+        assertFalse(runHistory.contains("started_at"));
     }
 
     private static Configuration configuration() throws Exception {

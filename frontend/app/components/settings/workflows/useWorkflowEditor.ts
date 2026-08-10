@@ -18,6 +18,7 @@ import {
     mergeWorkflowDocuments,
     workflowDocumentIsDirty,
     workflowEditorReducer,
+    type WorkflowEditorAction,
     type WorkflowEditorDocument,
     type WorkflowMergeConflict,
 } from "@/app/components/settings/workflows/workflowEditorReducer";
@@ -104,7 +105,19 @@ export function useWorkflowEditor({
         definition: initialGraph.definition,
         canvas: initialGraph.canvas,
     }), [initialGraph]);
-    const [history, dispatch] = useReducer(workflowEditorReducer, initialDocument, createWorkflowEditorHistory);
+    const [history, reduceHistory] = useReducer(workflowEditorReducer, initialDocument, createWorkflowEditorHistory);
+    const historyRef = useRef(history);
+    const documentGenerationRef = useRef(0);
+    const dispatch = useCallback((action: WorkflowEditorAction) => {
+        const currentHistory = historyRef.current;
+        const nextHistory = workflowEditorReducer(currentHistory, action);
+        const documentChanged = nextHistory.present !== currentHistory.present
+            || nextHistory.baseline !== currentHistory.baseline;
+        historyRef.current = nextHistory;
+        if (documentChanged) documentGenerationRef.current += 1;
+        reduceHistory(action);
+        return documentChanged;
+    }, []);
     const [workflow, setWorkflow] = useState<WorkflowDto | null>(null);
     const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<number | null>(workflowId == null ? activeWorkspaceId : null);
     const [loadState, setLoadState] = useState<PendingState>(workflowId != null ? "loading" : "idle");
@@ -127,37 +140,82 @@ export function useWorkflowEditor({
     const [inspection, setInspection] = useState<Inspection | null>(null);
     const searchControllerRef = useRef<AbortController | null>(null);
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const scopeRef = useRef({ activeWorkspaceId, switching });
+    const scopeRef = useRef({ activeWorkspaceId, switching, workflowId });
+    const editorScopeGenerationRef = useRef(0);
+    const versionsLoadGenerationRef = useRef(0);
+    const conflictRecoveryGenerationRef = useRef(0);
+    const simulationGenerationRef = useRef(0);
+    const busyActionGenerationRef = useRef(0);
+    const creationLockRef = useRef(false);
+    const creationContinuationRef = useRef(0);
 
     useLayoutEffect(() => {
-        scopeRef.current = { activeWorkspaceId, switching };
-    }, [activeWorkspaceId, switching]);
+        scopeRef.current = { activeWorkspaceId, switching, workflowId };
+        editorScopeGenerationRef.current += 1;
+    }, [activeWorkspaceId, switching, workflowId]);
+
+    useLayoutEffect(() => {
+        historyRef.current = history;
+    }, [history]);
 
     const isCurrentWorkspace = useCallback((workspaceId: number) => (
         scopeRef.current.activeWorkspaceId === workspaceId && !scopeRef.current.switching
     ), []);
 
-    const loadVersions = useCallback(async (id: number, workspaceId: number) => {
+    const isCurrentWorkflow = useCallback((id: number, workspaceId: number, scopeGeneration: number) => (
+        editorScopeGenerationRef.current === scopeGeneration
+        && scopeRef.current.workflowId === id
+        && isCurrentWorkspace(workspaceId)
+    ), [isCurrentWorkspace]);
+
+    const clearSimulation = useCallback(() => {
+        simulationGenerationRef.current += 1;
+        setSimulation(null);
+        setSimulationLoadState("idle");
+    }, []);
+
+    const invalidateDocumentEvidence = useCallback(() => {
+        searchControllerRef.current?.abort();
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        setValidation(null);
+        clearSimulation();
+        setSimulationRecords([]);
+    }, [clearSimulation]);
+
+    const loadVersions = useCallback(async (id: number, workspaceId: number, signal?: AbortSignal) => {
+        if (signal?.aborted) return;
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+        const loadGeneration = ++versionsLoadGenerationRef.current;
         setVersionsLoadState("loading");
         try {
             const loaded = await getWorkflowVersions(id, {
+                signal,
                 headers: { "X-Workspace-Id": String(workspaceId) },
             });
-            if (isCurrentWorkspace(workspaceId)) setVersions(loaded);
+            if (!signal?.aborted
+                && loadGeneration === versionsLoadGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setVersions(loaded);
         } catch {
-            if (isCurrentWorkspace(workspaceId)) toastError(t("versions.loadFailed"));
+            if (!signal?.aborted
+                && loadGeneration === versionsLoadGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("versions.loadFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setVersionsLoadState("idle");
+            if (!signal?.aborted
+                && loadGeneration === versionsLoadGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setVersionsLoadState("idle");
         }
-    }, [isCurrentWorkspace, t]);
+    }, [isCurrentWorkflow, t]);
 
     useEffect(() => {
         if (workflowId != null || activeWorkspaceId == null || switching) return;
         const workspaceId = activeWorkspaceId;
+        let ignore = false;
         void Promise.resolve().then(() => {
-            if (!isCurrentWorkspace(workspaceId)) return;
-            searchControllerRef.current?.abort();
-            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+            if (ignore || !isCurrentWorkspace(workspaceId)) return;
+            conflictRecoveryGenerationRef.current += 1;
+            versionsLoadGenerationRef.current += 1;
+            busyActionGenerationRef.current += 1;
             setWorkflow(null);
             setLoadedWorkspaceId(workspaceId);
             setLoadState("idle");
@@ -165,40 +223,38 @@ export function useWorkflowEditor({
             setLoadError(false);
             setAccessDenied(false);
             setBusyAction(null);
-            setValidation(null);
+            invalidateDocumentEvidence();
             setVersions([]);
             setVersionsLoadState("idle");
-            setSimulation(null);
-            setSimulationLoadState("idle");
-            setSimulationRecords([]);
             setConflict(null);
             setConflictOpen(false);
             setInspection(null);
             dispatch({ type: "initialize", document: initialDocument });
             setSelectedNodeId(initialDocument.definition.entryNodeId);
         });
-    }, [activeWorkspaceId, initialDocument, isCurrentWorkspace, switching, workflowId]);
+        return () => {
+            ignore = true;
+        };
+    }, [activeWorkspaceId, dispatch, initialDocument, invalidateDocumentEvidence, isCurrentWorkspace, switching, workflowId]);
 
     useEffect(() => {
         if (!activeWorkspaceId || workflowId == null || switching) return;
         const workspaceId = activeWorkspaceId;
         const controller = new AbortController();
-        let active = true;
+        let ignore = false;
         void (async () => {
+            conflictRecoveryGenerationRef.current += 1;
+            versionsLoadGenerationRef.current += 1;
+            busyActionGenerationRef.current += 1;
             setLoadState("loading");
             setWorkflow(null);
             setVersions([]);
             setVersionsLoadState("idle");
-            setValidation(null);
-            setSimulation(null);
-            setSimulationLoadState("idle");
-            setSimulationRecords([]);
+            invalidateDocumentEvidence();
             setConflict(null);
             setConflictOpen(false);
             setInspection(null);
             setBusyAction(null);
-            searchControllerRef.current?.abort();
-            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
             setMissing(false);
             setLoadError(false);
             setAccessDenied(false);
@@ -207,27 +263,29 @@ export function useWorkflowEditor({
                     signal: controller.signal,
                     headers: { "X-Workspace-Id": String(workspaceId) },
                 });
-                if (!active || controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
+                if (ignore || loaded.id !== workflowId) return;
+                if (controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
                 const document = documentFromWorkflow(loaded);
                 setWorkflow(loaded);
                 setLoadedWorkspaceId(workspaceId);
                 dispatch({ type: "initialize", document });
                 setSelectedNodeId(document.definition.entryNodeId);
-                if (loaded.activeVersionId != null) void loadVersions(loaded.id, workspaceId);
+                if (loaded.activeVersionId != null) void loadVersions(loaded.id, workspaceId, controller.signal);
             } catch (error) {
-                if (!active || controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
+                if (ignore) return;
+                if (controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
                 if (error instanceof ApiError && error.status === 403) setAccessDenied(true);
                 else if (error instanceof ApiError && error.status === 404) setMissing(true);
                 else setLoadError(true);
             } finally {
-                if (active && !controller.signal.aborted && isCurrentWorkspace(workspaceId)) setLoadState("idle");
+                if (!ignore && !controller.signal.aborted && isCurrentWorkspace(workspaceId)) setLoadState("idle");
             }
         })();
         return () => {
-            active = false;
+            ignore = true;
             controller.abort();
         };
-    }, [activeWorkspaceId, isCurrentWorkspace, loadAttempt, loadVersions, switching, workflowId]);
+    }, [activeWorkspaceId, dispatch, invalidateDocumentEvidence, isCurrentWorkspace, loadAttempt, loadVersions, switching, workflowId]);
 
     useEffect(() => () => {
         searchControllerRef.current?.abort();
@@ -240,6 +298,8 @@ export function useWorkflowEditor({
         && !switching;
     const permissionReadOnly = history.present.executionMode === "system" && !canRunAsSystem;
     const readOnly = !scopeReady || workflow?.archivedAt != null || inspection != null || permissionReadOnly;
+    const creationLocked = workflowId == null && (busyAction === "save" || workflow != null);
+    const editingReadOnly = readOnly || creationLocked;
     const displayDocument = inspection?.kind === "version"
         ? documentFromVersion(inspection.version)
         : inspection?.kind === "run" && inspection.run.version
@@ -257,11 +317,22 @@ export function useWorkflowEditor({
         ? null
         : versions.find((version) => version.id === workflow.activeVersionId)?.versionNumber ?? null;
 
-    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit" | "untracked") => {
-        dispatch({ type: mode === "transient" ? "replace" : mode === "untracked" ? "untracked" : "commit", document });
-        setValidation(null);
-        setSimulation(null);
+    useLayoutEffect(() => {
+        creationLockRef.current = creationLocked;
+    }, [creationLocked]);
+
+    const cancelCreationContinuation = useCallback(() => {
+        creationContinuationRef.current += 1;
     }, []);
+
+    useEffect(() => cancelCreationContinuation, [cancelCreationContinuation]);
+
+    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit" | "untracked") => {
+        if (creationLockRef.current) return false;
+        dispatch({ type: mode === "transient" ? "replace" : mode === "untracked" ? "untracked" : "commit", document });
+        invalidateDocumentEvidence();
+        return true;
+    }, [dispatch, invalidateDocumentEvidence]);
 
     const changeNode = useCallback((node: WorkflowNode, mode: "transient" | "commit") => {
         let document: WorkflowEditorDocument = {
@@ -318,6 +389,7 @@ export function useWorkflowEditor({
         type: Exclude<WorkflowNodeType, "TRIGGER">,
         position?: { x: number; y: number },
     ) => {
+        if (creationLockRef.current) return;
         const inserted = insertWorkflowNode(
             history.present.definition,
             history.present.canvas,
@@ -331,14 +403,14 @@ export function useWorkflowEditor({
             toastError(t("graphLimitReached"));
             return;
         }
-        updateDocument({ ...history.present, definition: inserted.definition, canvas: inserted.canvas }, "commit");
+        if (!updateDocument({ ...history.present, definition: inserted.definition, canvas: inserted.canvas }, "commit")) return;
         setSelectedNodeId(inserted.insertedNodeId);
         setFocusRequestId((current) => current + 1);
     }, [history.present, t, updateDocument]);
 
     const deleteNode = useCallback((nodeId: string) => {
         const removed = removeWorkflowNode(history.present.definition, history.present.canvas, nodeId);
-        updateDocument({ ...history.present, definition: removed.definition, canvas: removed.canvas }, "commit");
+        if (!updateDocument({ ...history.present, definition: removed.definition, canvas: removed.canvas }, "commit")) return;
         if (selectedNodeId === nodeId) setSelectedNodeId(history.present.definition.entryNodeId);
     }, [history.present, selectedNodeId, updateDocument]);
 
@@ -358,9 +430,11 @@ export function useWorkflowEditor({
 
     const reconcileServerWorkflow = useCallback((serverWorkflow: WorkflowDto) => {
         const serverDocument = documentFromWorkflow(serverWorkflow);
-        const merged = mergeWorkflowDocuments(history.baseline, history.present, serverDocument);
+        const currentHistory = historyRef.current;
+        const merged = mergeWorkflowDocuments(currentHistory.baseline, currentHistory.present, serverDocument);
+        conflictRecoveryGenerationRef.current += 1;
         setWorkflow(serverWorkflow);
-        setValidation(null);
+        invalidateDocumentEvidence();
         if (merged.conflicts.length === 0) {
             setConflict(null);
             setConflictOpen(false);
@@ -370,20 +444,28 @@ export function useWorkflowEditor({
             setConflict({ serverWorkflow, document: merged.document, conflicts: merged.conflicts });
             setConflictOpen(true);
         }
-    }, [history.baseline, history.present, t]);
+    }, [dispatch, invalidateDocumentEvidence, t]);
 
     const beginConflictRecovery = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || workspaceId == null || !scopeReady) return;
+        const id = workflow.id;
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+        const recoveryGeneration = ++conflictRecoveryGenerationRef.current;
         try {
-            const serverWorkflow = await getWorkflowById(workflow.id, {
+            const serverWorkflow = await getWorkflowById(id, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
             });
-            if (isCurrentWorkspace(workspaceId)) reconcileServerWorkflow(serverWorkflow);
+            if (recoveryGeneration !== conflictRecoveryGenerationRef.current
+                || serverWorkflow.id !== id
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+            reconcileServerWorkflow(serverWorkflow);
         } catch {
-            if (isCurrentWorkspace(workspaceId)) toastError(t("conflict.loadFailed"));
+            if (recoveryGeneration === conflictRecoveryGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("conflict.loadFailed"));
         }
-    }, [activeWorkspaceId, isCurrentWorkspace, reconcileServerWorkflow, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, isCurrentWorkflow, reconcileServerWorkflow, scopeReady, t, workflow]);
 
     const save = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
@@ -396,49 +478,82 @@ export function useWorkflowEditor({
             await beginConflictRecovery();
             return;
         }
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (workflow
+            ? !isCurrentWorkflow(workflow.id, workspaceId, scopeGeneration)
+            : !isCurrentWorkspace(workspaceId)) return;
+        const actionGeneration = ++busyActionGenerationRef.current;
+        const creationContinuation = creationContinuationRef.current;
+        let creationCompleted = false;
+        if (!workflow) creationLockRef.current = true;
         setBusyAction("save");
         try {
+            const submittedDocument = structuredClone(history.present);
+            const requestDocument = {
+                ...submittedDocument,
+                name: submittedDocument.name.trim(),
+            };
             if (!workflow) {
-                const created = await createWorkflow({
-                    ...history.present,
-                    name: history.present.name.trim(),
-                }, { headers: { "X-Workspace-Id": String(workspaceId) } });
-                if (!isCurrentWorkspace(workspaceId)) return;
+                const created = await createWorkflow(requestDocument, {
+                    headers: { "X-Workspace-Id": String(workspaceId) },
+                });
+                creationCompleted = true;
+                if (actionGeneration !== busyActionGenerationRef.current
+                    || !isCurrentWorkspace(workspaceId)
+                    || creationContinuation !== creationContinuationRef.current) return;
                 const savedDocument = documentFromWorkflow(created);
+                conflictRecoveryGenerationRef.current += 1;
                 setWorkflow(created);
-                dispatch({ type: "markSaved", document: savedDocument });
+                dispatch({ type: "markSaved", submittedDocument, document: savedDocument });
                 router.replace(`/workflows/${created.id}`);
                 toastSuccess(t("created"));
             } else {
                 const saved = await saveWorkflowDraft(workflow.id, {
-                    ...history.present,
-                    name: history.present.name.trim(),
+                    ...requestDocument,
                     expectedRevision: workflow.draftRevision,
                 }, { headers: { "X-Workspace-Id": String(workspaceId) } });
-                if (!isCurrentWorkspace(workspaceId)) return;
+                if (saved.id !== workflow.id
+                    || actionGeneration !== busyActionGenerationRef.current
+                    || !isCurrentWorkflow(workflow.id, workspaceId, scopeGeneration)) return;
                 const savedDocument = documentFromWorkflow(saved);
+                conflictRecoveryGenerationRef.current += 1;
                 setWorkflow(saved);
-                dispatch({ type: "markSaved", document: savedDocument });
+                dispatch({ type: "markSaved", submittedDocument, document: savedDocument });
                 toastSuccess(t("updated"));
             }
         } catch (error) {
-            if (!isCurrentWorkspace(workspaceId)) return;
+            const currentScope = workflow
+                ? isCurrentWorkflow(workflow.id, workspaceId, scopeGeneration)
+                : isCurrentWorkspace(workspaceId) && creationContinuation === creationContinuationRef.current;
+            if (!currentScope || actionGeneration !== busyActionGenerationRef.current) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
             else toastError(t("saveFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setBusyAction(null);
+            const creationContinuationCurrent = creationContinuation === creationContinuationRef.current;
+            if (!workflow && !creationCompleted && creationContinuationCurrent) creationLockRef.current = false;
+            const currentScope = workflow
+                ? isCurrentWorkflow(workflow.id, workspaceId, scopeGeneration)
+                : isCurrentWorkspace(workspaceId) && creationContinuationCurrent;
+            if (currentScope && actionGeneration === busyActionGenerationRef.current) setBusyAction(null);
         }
-    }, [activeWorkspaceId, beginConflictRecovery, conflict, history.present, isCurrentWorkspace, router, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, conflict, dispatch, history.present, isCurrentWorkflow, isCurrentWorkspace, router, scopeReady, t, workflow]);
 
     const validate = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || dirty || workspaceId == null || !scopeReady) return;
+        const id = workflow.id;
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+        const documentGeneration = documentGenerationRef.current;
+        const actionGeneration = ++busyActionGenerationRef.current;
         setBusyAction("validate");
         try {
-            const result = await validateWorkflow(workflow.id, {
+            const result = await validateWorkflow(id, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
             });
-            if (!isCurrentWorkspace(workspaceId)) return;
+            if (documentGeneration !== documentGenerationRef.current
+                || actionGeneration !== busyActionGenerationRef.current
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             if (result.draftRevision !== workflow.draftRevision) {
                 await beginConflictRecovery();
                 return;
@@ -446,83 +561,124 @@ export function useWorkflowEditor({
             setValidation(result);
             if (result.valid) toastSuccess(t("validationReady"));
         } catch {
-            if (isCurrentWorkspace(workspaceId)) toastError(t("validationFailed"));
+            if (documentGeneration === documentGenerationRef.current
+                && actionGeneration === busyActionGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("validationFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setBusyAction(null);
+            if (actionGeneration === busyActionGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
         }
-    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkspace, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkflow, scopeReady, t, workflow]);
 
     const publish = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || dirty || validation?.draftRevision !== workflow.draftRevision || !validation.canPublish
             || workspaceId == null || !scopeReady) return;
+        const id = workflow.id;
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+        const actionGeneration = ++busyActionGenerationRef.current;
         setBusyAction("publish");
         try {
-            const published = await publishWorkflow(workflow.id, workflow.draftRevision, {
+            const published = await publishWorkflow(id, workflow.draftRevision, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
             });
-            if (!isCurrentWorkspace(workspaceId)) return;
+            if (published.id !== id
+                || actionGeneration !== busyActionGenerationRef.current
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+            conflictRecoveryGenerationRef.current += 1;
             setWorkflow(published);
             setValidation(null);
             await loadVersions(published.id, workspaceId);
+            if (actionGeneration !== busyActionGenerationRef.current
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             toastSuccess(t("published"));
         } catch (error) {
-            if (!isCurrentWorkspace(workspaceId)) return;
+            if (actionGeneration !== busyActionGenerationRef.current
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
             else toastError(t("publishFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setBusyAction(null);
+            if (actionGeneration === busyActionGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
         }
-    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkspace, loadVersions, scopeReady, t, validation, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkflow, loadVersions, scopeReady, t, validation, workflow]);
 
     const toggleEnabled = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || workspaceId == null || !scopeReady) return;
+        const id = workflow.id;
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+        const actionGeneration = ++busyActionGenerationRef.current;
         setBusyAction("toggle");
         try {
             const init = { headers: { "X-Workspace-Id": String(workspaceId) } };
             const updated = workflow.enabled
-                ? await disableWorkflow(workflow.id, init)
-                : await enableWorkflow(workflow.id, init);
-            if (!isCurrentWorkspace(workspaceId)) return;
-            if (updated.draftRevision === workflow.draftRevision) setWorkflow(updated);
-            else reconcileServerWorkflow(updated);
+                ? await disableWorkflow(id, init)
+                : await enableWorkflow(id, init);
+            if (updated.id !== id
+                || actionGeneration !== busyActionGenerationRef.current
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+            if (updated.draftRevision === workflow.draftRevision) {
+                conflictRecoveryGenerationRef.current += 1;
+                setWorkflow(updated);
+            } else reconcileServerWorkflow(updated);
             toastSuccess(t(updated.enabled ? "enabled" : "disabled"));
         } catch {
-            if (isCurrentWorkspace(workspaceId)) toastError(t("lifecycleFailed"));
+            if (actionGeneration === busyActionGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("lifecycleFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setBusyAction(null);
+            if (actionGeneration === busyActionGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
         }
-    }, [activeWorkspaceId, isCurrentWorkspace, reconcileServerWorkflow, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, isCurrentWorkflow, reconcileServerWorkflow, scopeReady, t, workflow]);
 
     const runSimulation = useCallback(async (recordId: number) => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || dirty || workspaceId == null || !scopeReady) return;
+        const id = workflow.id;
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
+        const documentGeneration = documentGenerationRef.current;
+        const simulationGeneration = ++simulationGenerationRef.current;
         setSimulationLoadState("loading");
         try {
-            const result = await simulateWorkflow(workflow.id, workflow.draftRevision, recordId, {
+            const result = await simulateWorkflow(id, workflow.draftRevision, recordId, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
             });
-            if (isCurrentWorkspace(workspaceId)) setSimulation(result);
+            if (documentGeneration === documentGenerationRef.current
+                && simulationGeneration === simulationGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulation(result);
         } catch (error) {
-            if (!isCurrentWorkspace(workspaceId)) return;
+            if (documentGeneration !== documentGenerationRef.current
+                || simulationGeneration !== simulationGenerationRef.current
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
             else toastError(t("simulation.failed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setSimulationLoadState("idle");
+            if (simulationGeneration === simulationGenerationRef.current
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationLoadState("idle");
         }
-    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkspace, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkflow, scopeReady, t, workflow]);
 
     const searchSimulationRecords = useCallback((query: string) => {
+        const workspaceId = activeWorkspaceId;
+        if (!workflow || workspaceId == null || !scopeReady) return;
+        const id = workflow.id;
+        const scopeGeneration = editorScopeGenerationRef.current;
+        if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
         searchControllerRef.current?.abort();
         if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
         if (query.trim().length < 2) {
             setSimulationRecords([]);
             return;
         }
-        const workspaceId = activeWorkspaceId;
-        if (workspaceId == null || !scopeReady) return;
+        const documentGeneration = documentGenerationRef.current;
+        const recordType = history.present.recordType;
         searchTimerRef.current = setTimeout(() => {
+            if (documentGeneration !== documentGenerationRef.current
+                || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             const controller = new AbortController();
             searchControllerRef.current = controller;
             void search(query.trim(), {
@@ -530,8 +686,9 @@ export function useWorkflowEditor({
                 headers: { "X-Workspace-Id": String(workspaceId) },
             })
                 .then((results) => {
-                    if (controller.signal.aborted || !isCurrentWorkspace(workspaceId)) return;
-                    const recordType = history.present.recordType;
+                    if (controller.signal.aborted
+                        || documentGeneration !== documentGenerationRef.current
+                        || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
                     const options: RecordSelectOption[] = recordType === "company"
                         ? results.companies.map((company) => ({ id: company.id, label: company.name, imageUrl: company.logoUrl }))
                         : recordType === "person"
@@ -542,10 +699,12 @@ export function useWorkflowEditor({
                     setSimulationRecords(options.slice(0, 50));
                 })
                 .catch(() => {
-                    if (!controller.signal.aborted && isCurrentWorkspace(workspaceId)) setSimulationRecords([]);
+                    if (!controller.signal.aborted
+                        && documentGeneration === documentGenerationRef.current
+                        && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationRecords([]);
                 });
         }, 200);
-    }, [activeWorkspaceId, history.present.recordType, isCurrentWorkspace, scopeReady]);
+    }, [activeWorkspaceId, history.present.recordType, isCurrentWorkflow, scopeReady, workflow]);
 
     const selectDiagnostic = useCallback((diagnostic: WorkflowDiagnostic) => {
         if (!diagnostic.nodeId) return;
@@ -558,14 +717,16 @@ export function useWorkflowEditor({
     const resolveConflict = useCallback((document: WorkflowEditorDocument) => {
         if (!conflict) return;
         const baseline = documentFromWorkflow(conflict.serverWorkflow);
+        conflictRecoveryGenerationRef.current += 1;
         setWorkflow(conflict.serverWorkflow);
         dispatch({ type: "rebase", baseline, document });
+        invalidateDocumentEvidence();
         setConflict(null);
         setConflictOpen(false);
         setSelectedNodeId((current) => current && document.definition.nodes.some((node) => node.id === current)
             ? current
             : document.definition.entryNodeId);
-    }, [conflict]);
+    }, [conflict, dispatch, invalidateDocumentEvidence]);
 
     const inspectVersion = useCallback((version: WorkflowVersion) => {
         setInspection({ kind: "version", version });
@@ -577,6 +738,18 @@ export function useWorkflowEditor({
         setInspection({ kind: "run", run });
         setSelectedNodeId(run.version.definition.entryNodeId);
     }, []);
+
+    const commitTransient = useCallback(() => {
+        if (!creationLockRef.current) dispatch({ type: "commitTransient" });
+    }, [dispatch]);
+
+    const undo = useCallback(() => {
+        if (!creationLockRef.current && dispatch({ type: "undo" })) invalidateDocumentEvidence();
+    }, [dispatch, invalidateDocumentEvidence]);
+
+    const redo = useCallback(() => {
+        if (!creationLockRef.current && dispatch({ type: "redo" })) invalidateDocumentEvidence();
+    }, [dispatch, invalidateDocumentEvidence]);
 
     return {
         workflow,
@@ -602,27 +775,30 @@ export function useWorkflowEditor({
         focusRequestId,
         dirty,
         readOnly,
+        creationLocked,
+        editingReadOnly,
         activeVersionNumber,
         setSelectedNodeId,
         setFocusFieldPath,
         changeNode,
         changeMetadata,
         changeName,
-        commitTransient: () => dispatch({ type: "commitTransient" }),
-        undo: () => dispatch({ type: "undo" }),
-        redo: () => dispatch({ type: "redo" }),
+        commitTransient,
+        undo,
+        redo,
         connectBranch,
         disconnectBranch,
         insertNode,
         deleteNode,
         moveNode,
         moveViewport,
+        cancelCreationContinuation,
         save,
         validate,
         publish,
         toggleEnabled,
         runSimulation,
-        clearSimulation: () => setSimulation(null),
+        clearSimulation,
         searchSimulationRecords,
         selectDiagnostic,
         resolveConflict,

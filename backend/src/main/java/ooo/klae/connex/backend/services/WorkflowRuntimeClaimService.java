@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -31,7 +32,13 @@ import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 
-/** Serializes runtime ownership and dedupe claims on the exact workflow root. */
+/**
+ * Serializes runtime ownership and dedupe claims on the exact workflow root. A paired workflow keeps
+ * the established legacy-rule id as its primary trigger identity so older binaries can observe new
+ * claims during a rolling deployment. A canonical-only workflow uses its workflow id. After the
+ * first legacy rule is attached, claims permanently dual-read that earlier workflow-id hash so the
+ * ownership transition cannot replay work through the opposite ledger.
+ */
 @Service
 @RequiredArgsConstructor
 public class WorkflowRuntimeClaimService {
@@ -62,23 +69,15 @@ public class WorkflowRuntimeClaimService {
         if (!entityTriggerMatches(version, trigger, dispatch)) {
             return CanonicalClaim.rejectedClaim();
         }
-        String key = dedupeKey.entityChange(
-            dedupeIdentity(workflow),
-            dispatch.recordType(),
-            dispatch.recordId(),
-            dispatch.event(),
-            dispatch.triggerKey(),
-            dispatch.occurredAt(),
-            trigger.getThrottleMinutes());
-        String legacyKey = dedupeKey.legacyEntityChange(
-            dispatch.recordId(),
-            dispatch.event(),
-            dispatch.occurredAt(),
+        DedupeKeys keys = entityKeys(
+            workflow,
+            workflow.getId(),
+            dispatch,
             trigger.getThrottleMinutes());
         return claimCanonical(
             workflow, version, compiled, "entity_change", dispatch.event(),
-            dispatch.triggerKey(), dispatch.recordType(), dispatch.recordId(), key,
-            legacyKey, null, "queued");
+            dispatch.triggerKey(), dispatch.recordType(), dispatch.recordId(), keys,
+            null, "queued");
     }
 
     @Transactional(readOnly = true)
@@ -131,14 +130,16 @@ public class WorkflowRuntimeClaimService {
                 || !normalize(dispatch.cadence()).equals(normalize(trigger.getCadence()))) {
             return CanonicalClaim.rejectedClaim();
         }
-        String key = dedupeKey.schedule(
-            dedupeIdentity(workflow), version.getRecordType(), recordId,
-            normalize(dispatch.cadence()), dispatch.bucketKey());
-        String legacyKey = dedupeKey.legacySchedule(recordId, dispatch.bucketKey());
+        DedupeKeys keys = scheduleKeys(
+            workflow,
+            workflow.getId(),
+            version.getRecordType(),
+            recordId,
+            normalize(dispatch.cadence()),
+            dispatch.bucketKey());
         return claimCanonical(
             workflow, version, compiled, "schedule", normalize(dispatch.cadence()),
-            dispatch.bucketKey(), version.getRecordType(), recordId, key,
-            legacyKey, null, "queued");
+            dispatch.bucketKey(), version.getRecordType(), recordId, keys, null, "queued");
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -156,37 +157,34 @@ public class WorkflowRuntimeClaimService {
         CompiledWorkflow compiled = compiled(workflow, version);
         WorkflowNode.Trigger triggerNode = entryTrigger(compiled);
         RuleTrigger trigger = triggerNode.config();
-        String key;
-        String legacyKey;
+        DedupeKeys keys;
         if ("entity_change".equals(outbox.getTriggerType())) {
             if (outbox.getOccurredAt() == null
                     || !entityOutboxMatches(version, trigger, outbox, recordId)) {
                 return CanonicalClaim.rejectedClaim();
             }
-            key = dedupeKey.entityChange(
-                dedupeIdentity(workflow),
-                outbox.getRecordType(),
-                recordId,
-                outbox.getTriggerEvent(),
-                outbox.getTriggerKey(),
-                outbox.getOccurredAt().toInstant(java.time.ZoneOffset.UTC),
-                trigger.getThrottleMinutes());
-            legacyKey = dedupeKey.legacyEntityChange(
-                recordId,
-                outbox.getTriggerEvent(),
-                outbox.getOccurredAt().toInstant(java.time.ZoneOffset.UTC),
+            keys = entityKeys(
+                workflow,
+                workflow.getId(),
+                new WorkflowTriggerDispatch.EntityChange(
+                    outbox.getWorkspaceId(),
+                    outbox.getRecordType(),
+                    recordId,
+                    outbox.getTriggerEvent(),
+                    outbox.getTriggerKey(),
+                    outbox.getOccurredAt().toInstant(java.time.ZoneOffset.UTC)),
                 trigger.getThrottleMinutes());
         } else if ("schedule".equals(outbox.getTriggerType())) {
             if (!scheduleOutboxMatches(version, trigger, outbox)) {
                 return CanonicalClaim.rejectedClaim();
             }
-            key = dedupeKey.schedule(
-                dedupeIdentity(workflow),
+            keys = scheduleKeys(
+                workflow,
+                workflow.getId(),
                 version.getRecordType(),
                 recordId,
                 normalize(outbox.getTriggerEvent()),
                 outbox.getTriggerKey());
-            legacyKey = dedupeKey.legacySchedule(recordId, outbox.getTriggerKey());
         } else {
             return CanonicalClaim.rejectedClaim();
         }
@@ -199,8 +197,7 @@ public class WorkflowRuntimeClaimService {
             outbox.getTriggerKey(),
             outbox.getRecordType(),
             recordId,
-            key,
-            legacyKey,
+            keys,
             outbox.getId(),
             "queued");
     }
@@ -232,8 +229,7 @@ public class WorkflowRuntimeClaimService {
             triggerKey,
             version.getRecordType(),
             recordId,
-            key,
-            null,
+            new DedupeKeys(key, null, null),
             null,
             "queued");
     }
@@ -275,16 +271,10 @@ public class WorkflowRuntimeClaimService {
         if (!legacyOwnerCanClaim(workflow, rule, dispatch.workspaceId())) {
             return LegacyClaim.rejectedClaim();
         }
-        String key = dedupeKey.entityChange(
-            rule.getId(), dispatch.recordType(), dispatch.recordId(), dispatch.event(),
-            dispatch.triggerKey(), dispatch.occurredAt(), trigger.getThrottleMinutes());
-        String legacyKey = dedupeKey.legacyEntityChange(
-            dispatch.recordId(),
-            dispatch.event(),
-            dispatch.occurredAt(),
-            trigger.getThrottleMinutes());
+        DedupeKeys keys = entityKeys(
+            workflow, rule.getId(), dispatch, trigger.getThrottleMinutes());
         return claimLegacy(
-            workflow, rule, dispatch.recordType(), dispatch.recordId(), key, legacyKey);
+            workflow, rule, dispatch.recordType(), dispatch.recordId(), keys);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -297,12 +287,15 @@ public class WorkflowRuntimeClaimService {
         if (!legacyOwnerCanClaim(workflow, rule, dispatch.workspaceId())) {
             return LegacyClaim.rejectedClaim();
         }
-        String key = dedupeKey.schedule(
-            rule.getId(), rule.getRecordType(), recordId,
-            normalize(dispatch.cadence()), dispatch.bucketKey());
-        String legacyKey = dedupeKey.legacySchedule(recordId, dispatch.bucketKey());
+        DedupeKeys keys = scheduleKeys(
+            workflow,
+            rule.getId(),
+            rule.getRecordType(),
+            recordId,
+            normalize(dispatch.cadence()),
+            dispatch.bucketKey());
         return claimLegacy(
-            workflow, rule, rule.getRecordType(), recordId, key, legacyKey);
+            workflow, rule, rule.getRecordType(), recordId, keys);
     }
 
     private CanonicalClaim claimCanonical(
@@ -314,23 +307,18 @@ public class WorkflowRuntimeClaimService {
             String triggerKey,
             String recordType,
             int recordId,
-            String key,
-            String legacyKey,
+            DedupeKeys keys,
             Long triggerOutboxId,
             String initialStatus) {
         if (workflow.getLegacyRuleId() != null) {
-            RuleExecution current = ruleMapper.getExecutionByDedupe(
-                workflow.getWorkspaceId(), workflow.getLegacyRuleId(), key);
-            RuleExecution legacy = legacyKey == null || current != null
-                ? null
-                : ruleMapper.getExecutionByDedupe(
-                    workflow.getWorkspaceId(), workflow.getLegacyRuleId(), legacyKey);
-            if (current != null || legacy != null) {
+            RuleExecution opposite = findRuleExecution(
+                workflow.getWorkspaceId(), workflow.getLegacyRuleId(), keys);
+            if (opposite != null) {
                 return CanonicalClaim.replayedWithoutRun();
             }
         }
-        WorkflowRun existing = workflowRunMapper.getByDedupe(
-            workflow.getWorkspaceId(), workflow.getId(), key);
+        WorkflowRun existing = findWorkflowRun(
+            workflow.getWorkspaceId(), workflow.getId(), keys);
         if (existing != null) {
             return new CanonicalClaim(existing, false, true, false);
         }
@@ -344,7 +332,7 @@ public class WorkflowRuntimeClaimService {
         run.setTriggerKey(triggerKey);
         run.setRecordType(recordType);
         run.setRecordId(recordId);
-        run.setDedupeKey(key);
+        run.setDedupeKey(keys.primary());
         run.setTriggerOutboxId(triggerOutboxId);
         run.setExecutionMode(version.getExecutionMode());
         run.setActorUserId(actorUserId(version));
@@ -356,7 +344,7 @@ public class WorkflowRuntimeClaimService {
             return new CanonicalClaim(run, true, false, false);
         } catch (DuplicateKeyException exception) {
             WorkflowRun replay = workflowRunMapper.getByDedupe(
-                workflow.getWorkspaceId(), workflow.getId(), key);
+                workflow.getWorkspaceId(), workflow.getId(), keys.primary());
             return replay == null
                 ? CanonicalClaim.rejectedClaim()
                 : new CanonicalClaim(replay, false, true, false);
@@ -406,19 +394,14 @@ public class WorkflowRuntimeClaimService {
             Rule rule,
             String recordType,
             int recordId,
-            String key,
-            String legacyKey) {
+            DedupeKeys keys) {
         int workspaceId = rule.getWorkspaceId();
-        if (workflow != null && workflowRunMapper.getByDedupe(
-                workspaceId, workflow.getId(), key) != null) {
+        if (workflow != null && findWorkflowRun(
+                workspaceId, workflow.getId(), keys) != null) {
             return LegacyClaim.replayedClaim();
         }
-        RuleExecution existing = ruleMapper.getExecutionByDedupe(
-            workspaceId, rule.getId(), key);
-        if (existing == null && legacyKey != null) {
-            existing = ruleMapper.getExecutionByDedupe(
-                workspaceId, rule.getId(), legacyKey);
-        }
+        RuleExecution existing = findRuleExecution(
+            workspaceId, rule.getId(), keys);
         if (existing != null) {
             return LegacyClaim.replayedClaim();
         }
@@ -428,10 +411,10 @@ public class WorkflowRuntimeClaimService {
         execution.setTriggerEntityType(recordType);
         execution.setTriggerEntityId(recordId);
         execution.setStatus("running");
-        execution.setDedupeKey(key);
+        execution.setDedupeKey(keys.primary());
         try {
             ruleMapper.insertExecution(execution);
-            return new LegacyClaim(execution, key, true, false, false);
+            return new LegacyClaim(execution, keys.primary(), true, false, false);
         } catch (DuplicateKeyException exception) {
             return LegacyClaim.replayedClaim();
         }
@@ -527,9 +510,95 @@ public class WorkflowRuntimeClaimService {
                 && Objects.equals(workflow.getLegacyRuleId(), rule.getId()));
     }
 
-    private static int dedupeIdentity(Workflow workflow) {
+    private DedupeKeys entityKeys(
+            Workflow workflow,
+            int unpairedRuleId,
+            WorkflowTriggerDispatch.EntityChange dispatch,
+            Integer throttleMinutes) {
+        int primaryIdentity = primaryIdentity(workflow, unpairedRuleId);
+        Integer compatibilityIdentity = compatibilityIdentity(workflow, primaryIdentity);
+        return new DedupeKeys(
+            dedupeKey.entityChange(
+                primaryIdentity,
+                dispatch.recordType(),
+                dispatch.recordId(),
+                dispatch.event(),
+                dispatch.triggerKey(),
+                dispatch.occurredAt(),
+                throttleMinutes),
+            compatibilityIdentity == null
+                ? null
+                : dedupeKey.entityChange(
+                    compatibilityIdentity,
+                    dispatch.recordType(),
+                    dispatch.recordId(),
+                    dispatch.event(),
+                    dispatch.triggerKey(),
+                    dispatch.occurredAt(),
+                    throttleMinutes),
+            dedupeKey.legacyEntityChange(
+                dispatch.recordId(),
+                dispatch.event(),
+                dispatch.occurredAt(),
+                throttleMinutes));
+    }
+
+    private DedupeKeys scheduleKeys(
+            Workflow workflow,
+            int unpairedRuleId,
+            String recordType,
+            int recordId,
+            String cadence,
+            String bucketKey) {
+        int primaryIdentity = primaryIdentity(workflow, unpairedRuleId);
+        Integer compatibilityIdentity = compatibilityIdentity(workflow, primaryIdentity);
+        return new DedupeKeys(
+            dedupeKey.schedule(
+                primaryIdentity, recordType, recordId, cadence, bucketKey),
+            compatibilityIdentity == null
+                ? null
+                : dedupeKey.schedule(
+                    compatibilityIdentity, recordType, recordId, cadence, bucketKey),
+            dedupeKey.legacySchedule(recordId, bucketKey));
+    }
+
+    private RuleExecution findRuleExecution(
+            int workspaceId, int ruleId, DedupeKeys keys) {
+        for (String key : keys.readable()) {
+            RuleExecution execution = ruleMapper.getExecutionByDedupe(
+                workspaceId, ruleId, key);
+            if (execution != null) {
+                return execution;
+            }
+        }
+        return null;
+    }
+
+    private WorkflowRun findWorkflowRun(
+            int workspaceId, int workflowId, DedupeKeys keys) {
+        for (String key : keys.readable()) {
+            WorkflowRun run = workflowRunMapper.getByDedupe(
+                workspaceId, workflowId, key);
+            if (run != null) {
+                return run;
+            }
+        }
+        return null;
+    }
+
+    private static int primaryIdentity(Workflow workflow, int unpairedRuleId) {
+        if (workflow == null) {
+            return unpairedRuleId;
+        }
         Integer legacyRuleId = workflow.getLegacyRuleId();
         return legacyRuleId == null ? workflow.getId() : legacyRuleId;
+    }
+
+    private static Integer compatibilityIdentity(Workflow workflow, int primaryIdentity) {
+        if (workflow == null || workflow.getId() == primaryIdentity) {
+            return null;
+        }
+        return workflow.getId();
     }
 
     private int actorUserId(WorkflowVersion version) {
@@ -553,6 +622,21 @@ public class WorkflowRuntimeClaimService {
 
     private static String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private record DedupeKeys(
+        String primary,
+        String hashedCompatibility,
+        String plaintextCompatibility
+    ) {
+
+        private List<String> readable() {
+            return java.util.stream.Stream.of(
+                    primary, hashedCompatibility, plaintextCompatibility)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        }
     }
 
     /** Result of one serialized canonical claim. */

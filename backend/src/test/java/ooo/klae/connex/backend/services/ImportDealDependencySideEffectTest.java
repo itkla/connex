@@ -37,7 +37,7 @@ class ImportDealDependencySideEffectTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
 
     @Test
-    void allFailedRowsCreateNoDependenciesOrAuditEntry() {
+    void allFailedRowsCreateNoDependenciesAndAuditTheFailure() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal target = newDeal(pipeline, stage, newCompany());
@@ -78,7 +78,19 @@ class ImportDealDependencySideEffectTest extends AbstractServiceTest {
             workspace.getId(), "deal", customFieldKey));
         assertEquals(target.getName(), dealMapper.getDealById(
             workspace.getId(), target.getId()).getName());
-        assertEquals(0, importAuditCount());
+        assertEquals(1, importAuditCount());
+        assertEquals(
+            "0,0,0,1",
+            jdbcTemplate.queryForObject(
+                "SELECT CONCAT(JSON_UNQUOTE(JSON_EXTRACT(changes, '$.created')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.updated')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.skipped')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.failed'))) "
+                    + "FROM audit_log WHERE workspace_id = ? AND actor_id = ? "
+                    + "AND action = 'import.deal' ORDER BY id DESC LIMIT 1",
+                String.class,
+                workspace.getId(),
+                currentUser.getId()));
     }
 
     @Test

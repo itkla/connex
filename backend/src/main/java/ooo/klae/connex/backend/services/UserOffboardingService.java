@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -63,6 +64,7 @@ public class UserOffboardingService {
 
     private final NoteMapper noteMapper;
     private final ActivityMapper activityMapper;
+    private final AiChatMapper aiChatMapper;
     private final IntroductionMapper introductionMapper;
     private final NotificationMapper notificationMapper;
     private final CompanyMapper companyMapper;
@@ -122,13 +124,15 @@ public class UserOffboardingService {
 
     /**
      * Clears personal workspace data for a user who is about to receive a
-     * brand-new membership. This removes saved views and preferences left by
-     * legacy removal flows, notifications inserted while an earlier removal
-     * was committing, and stale deal-collaborator seats. Guarded by a current
-     * locking read that proves no membership row exists, so a pending invitee's
-     * legitimate data is never touched and a stale repeatable-read snapshot
-     * cannot skip cleanup. Called by every fresh-membership path: invites,
-     * invite links, and SSO JIT provisioning.
+     * brand-new membership. This removes saved views and preferences, assistant-chat
+     * participant grants, notifications inserted while an earlier removal was
+     * committing, and stale deal-collaborator seats. Chat sessions the user authored
+     * are workspace data and are retained with their provenance intact, so a
+     * returning member regains their own prior sessions. Guarded by a current locking read that proves no
+     * membership row exists, so a pending invitee's legitimate data is never
+     * touched and a stale repeatable-read snapshot cannot skip cleanup. Called
+     * by every fresh-membership path: invites, invite links, and SSO JIT
+     * provisioning.
      *
      * @param workspaceId the workspace being joined
      * @param userId the joining user
@@ -143,6 +147,7 @@ public class UserOffboardingService {
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
             dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
+            aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
             notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
                 workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
@@ -154,8 +159,10 @@ public class UserOffboardingService {
      * Detaches a departing member's content within one workspace the way the
      * dropped cross-plane constraints used to: tasks are unassigned and company,
      * contact, and deal ownership is cleared (SET NULL) so authored history survives,
-     * while the member's saved-view preferences, owned saved views, notifications, and
-     * deal-collaborator seats are deleted.
+     * while the member's saved-view preferences, owned saved views, assistant-chat
+     * participant grants, notifications, and deal-collaborator seats are deleted.
+     * Authored chat sessions are retained with {@code created_by_user_id} intact;
+     * only permanent account erasure nulls that provenance.
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
      * membership removal flows inside their transaction.
      *
@@ -172,6 +179,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
         savedViewMapper.deleteForUser(workspaceId, userId);
         dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
+        aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         companyMapper.clearMemberOwnership(workspaceId, userId);
         personMapper.clearMemberOwnership(workspaceId, userId);
@@ -186,10 +194,12 @@ public class UserOffboardingService {
     /**
      * Erases or detaches every org-data reference to the user, in the same
      * shape the dropped constraints had: personal artifacts are deleted
-     * (CASCADE — saved-view preferences, saved views, dashboards, notifications, collaborator seats)
+     * (CASCADE — saved-view preferences, saved views, dashboards, assistant-chat grants,
+     * notifications, collaborator seats)
      * and shared-history references are nulled (SET NULL — company, contact, deal, and
-     * campaign ownership, task assignment, uploader, notification actor, report and
-     * campaign actors, rule principals, consent/suppression actors, share grantors).
+     * campaign ownership, assistant-chat provenance, task assignment, uploader,
+     * notification actor, report and campaign actors, rule principals,
+     * consent/suppression actors, share grantors).
      * Statements are grouped deletes-then-nulls
      * for readability; no data dependency exists between them, so the order is otherwise
      * immaterial. Must run inside the caller's deletion transaction.
@@ -233,6 +243,7 @@ public class UserOffboardingService {
         savedViewMapper.deleteForUserAnywhere(userId);
         dealDuplicateReviewProofMapper.deleteForActorAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
+        aiChatMapper.deleteParticipantsForUserAnywhere(userId);
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);
         dealMapper.removeCollaboratorAnywhere(userId);
@@ -245,6 +256,10 @@ public class UserOffboardingService {
         companyMapper.clearOwnershipAnywhere(userId);
         personMapper.clearOwnershipAnywhere(userId);
         dealMapper.clearOwnershipAnywhere(userId);
+        aiChatMapper.clearSessionCreatorsAnywhere(userId);
+        aiChatMapper.clearMessageAuthorsAnywhere(userId);
+        aiChatMapper.clearToolCallExecutorsAnywhere(userId);
+        aiChatMapper.clearTurnRequestersAnywhere(userId);
         taskMapper.unassignAnywhere(userId);
         attachmentMapper.clearUploaderAnywhere(userId);
         campaignMapper.clearCampaignUserReferencesAnywhere(userId);

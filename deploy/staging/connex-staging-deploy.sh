@@ -1,30 +1,12 @@
 #!/bin/bash
 #
-# Health-gated, versioned auto-deploy for the Connex staging box (preview.connexcrm.jp).
+# Transactional, health-gated auto-deploy for the Connex staging box.
 #
-# Invoked every ~5 minutes by the root-installed thin wrapper
-# (see connex-staging-deploy-wrapper.sh) or manually as the `dev` user. Runs entirely
-# unprivileged except for the two NOPASSWD-sudo service restarts.
-#
-# Deploy contract (fixes #829 and #596):
-#   - Gates on a deployed-sha marker, not on HEAD, so a failed build is retried on the
-#     next cycle instead of being silently skipped.
-#   - Builds the backend with `clean bootJar` and stamps the git sha into build info,
-#     so the running JAR is verifiable via GET /api/version. Skips the backend step
-#     entirely when the running backend already serves the target sha.
-#   - Builds both artifacts before restarting anything; the frontend builds into
-#     .next-new (NEXT_DIST_DIR) and is swapped into .next only after the backend
-#     passes its health gate, so the live frontend keeps a consistent build dir.
-#   - Restarts the backend, then polls unit + HTTP health with a bounded timeout,
-#     verifies the served gitSha equals the target commit, and requires
-#     GET /api/health/ready to answer 200 (DB reachable, migrations applied, startup
-#     runners finished; falls back to /api/version for pre-readiness JARs); rechecks
-#     the same PID after a stability interval. Only then swaps and restarts the frontend.
-#   - On backend health failure: restores the previous JAR, restarts, and exits
-#     nonzero without touching the frontend or the marker.
-#
-# The whole body lives in functions with a single trailing `main` call so that the
-# `git reset --hard` mid-run cannot corrupt the interpreter's view of this file.
+# Each release is sealed under .staging/releases/<git-sha> as one verified pair:
+# a target-stamped backend JAR and a complete Next standalone runtime. The frontend
+# is stopped before backend activation, so incompatible component versions are never
+# served together. An atomic transaction record plus the EXIT/signal handler covers
+# ordinary failures; the next timer run recovers SIGKILL, reboot, and power-loss windows.
 
 set -euo pipefail
 
@@ -35,25 +17,40 @@ LOG_TAG="connex-staging-deploy"
 LOCK_FILE=/tmp/connex-staging-deploy.lock
 
 STATE_DIR="$STAGING_DIR/.staging"
-ART_DIR="$STATE_DIR/artifacts"
+RELEASES_DIR="$STATE_DIR/releases"
 MARKER="$STATE_DIR/deployed-sha"
+ROLLBACK_MARKER="$STATE_DIR/rollback-sha"
+FRONTEND_RELEASE_MARKER="$STATE_DIR/frontend-release"
+FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
+TRANSACTION_FILE="$STATE_DIR/deploy-transaction"
 LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
-ROLLBACK_JAR="$ART_DIR/rollback.jar"
 FRONTEND_ENV=/etc/connex-staging/frontend.env
-FRONTEND_SWAP_STATE=unchanged
-FRONTEND_TSCONFIG_CLEANUP_ARMED=0
+SMOKE_LOGIN_FILE=/etc/connex-staging/smoke-login.json
+SMOKE_LOGIN_REQUIRED_UID=0
+SMOKE_LOGIN_REQUIRED_GID="$(id -g)"
+SMOKE_LOGIN_REQUIRED_MODE=640
 
 BACKEND_URL=http://127.0.0.1:8081
 FRONTEND_URL=http://127.0.0.1:3001
-# /api/health/ready only turns green after every ApplicationRunner has finished (identity
-# backfill, legacy workflow backfill, secret rewrap), which is minutes on a large dataset and
-# runs on the rollback JAR too. These budgets must stay well clear of that or a healthy deploy
-# gets auto-rolled back — and the rollback then reports "manual intervention required".
 BACKEND_HEALTH_TIMEOUT=900
 ROLLBACK_HEALTH_TIMEOUT=600
 FRONTEND_HEALTH_TIMEOUT=90
 STABILITY_INTERVAL=15
 POLL_INTERVAL=5
+
+SMOKE_COOKIE_JAR=
+SMOKE_SESSION_ACTIVE=0
+ROLLBACK_ARMED=0
+ROLLBACK_IN_PROGRESS=0
+ROLLBACK_STATE=not_attempted
+RELEASE_COMMITTED=0
+FAILURE_ACTIVE=0
+FAILURE_GATE=none
+FAILURE_COMPONENT=release
+FAILURE_MESSAGE=
+DEPLOY_TARGET=unknown
+DEPLOY_PREVIOUS=unknown
+DEPLOY_RETAINED=unknown
 
 export PATH="$NODE_BIN:$PATH"
 export NODE_OPTIONS="--max-old-space-size=2048"
@@ -61,6 +58,52 @@ export GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx900m -Dorg.gradle.daemon=false"
 
 log() {
     echo "[$LOG_TAG] $*"
+}
+
+is_git_sha() {
+    [[ "$1" =~ ^[0-9a-f]{40}$ ]]
+}
+
+safe_sha_state() {
+    if is_git_sha "$1"; then
+        printf '%s\n' "$1"
+    else
+        case "$1" in
+            none|unknown|unavailable|legacy_unversioned) printf '%s\n' "$1" ;;
+            *) printf 'invalid\n' ;;
+        esac
+    fi
+}
+
+safe_alert_label() {
+    case "$1" in
+        bootstrap|preflight|build|bundle|frontend_quiesce|backend_restart|backend_health|frontend_restart|frontend_health|smoke_frontend|smoke_readiness|smoke_version|smoke_capabilities|smoke_auth_entry|smoke_login|smoke_authenticated_route|smoke_logout|smoke_cleanup|marker|recovery)
+            printf '%s\n' "$1"
+            ;;
+        backend|frontend|release|authentication)
+            printf '%s\n' "$1"
+            ;;
+        *)
+            printf 'invalid\n'
+            ;;
+    esac
+}
+
+safe_rollback_state() {
+    case "$ROLLBACK_STATE" in
+        not_attempted|in_progress|complete|failed) printf '%s\n' "$ROLLBACK_STATE" ;;
+        *) printf 'invalid\n' ;;
+    esac
+}
+
+read_sha_file() {
+    local path="$1" value
+    value="$(sed -n '1p' "$path" 2>/dev/null)" || return 1
+    if is_git_sha "$value"; then
+        printf '%s\n' "$value" || return 1
+        return 0
+    fi
+    return 1
 }
 
 backend_unit_state() {
@@ -71,15 +114,56 @@ backend_pid() {
     systemctl show -p MainPID --value connex-staging-backend
 }
 
+frontend_pid() {
+    systemctl show -p MainPID --value connex-staging-frontend
+}
+
 served_git_sha() {
     curl -fsS --max-time 5 "$BACKEND_URL/api/version" 2>/dev/null \
         | sed -n 's/.*"gitSha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p'
 }
 
-# Readiness-gated health: /api/health/ready must answer 200 (DB reachable, migrations
-# applied, startup runners finished). A 404/405 means the running JAR predates the
-# endpoint (e.g. a rollback artifact), so fall back to the old /api/version liveness
-# probe; any other status (notably 503 = not ready) fails the check.
+live_frontend_sha() {
+    read_sha_file "$FRONTEND_RELEASE_MARKER"
+}
+
+frontend_marker_absent() {
+    [ ! -e "$FRONTEND_RELEASE_MARKER" ] && [ ! -L "$FRONTEND_RELEASE_MARKER" ]
+}
+
+jar_git_sha() {
+    local jar="$1"
+    unzip -p "$jar" BOOT-INF/classes/META-INF/build-info.properties 2>/dev/null \
+        | sed -n 's/^build\.gitSha=\([0-9a-f]\{40\}\)$/\1/p'
+}
+
+set_failure_context() {
+    FAILURE_ACTIVE=1
+    FAILURE_GATE="$1"
+    FAILURE_COMPONENT="$2"
+    FAILURE_MESSAGE="$3"
+}
+
+deploy_failure_alert() {
+    local marker backend frontend rollback
+    if ! marker="$(read_sha_file "$MARKER" 2>/dev/null)"; then marker=unavailable; fi
+    if ! backend="$(served_git_sha 2>/dev/null)"; then backend=; fi
+    if ! frontend="$(live_frontend_sha 2>/dev/null)"; then frontend=; fi
+    if ! rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)"; then rollback=unavailable; fi
+    [ -n "$backend" ] || backend=unavailable
+    [ -n "$frontend" ] || frontend=legacy_unversioned
+    printf '[%s] ALERT status=failure gate=%s component=%s target_sha=%s marker_sha=%s backend_sha=%s frontend_sha=%s rollback_sha=%s rollback_state=%s\n' \
+        "$LOG_TAG" \
+        "$(safe_alert_label "$FAILURE_GATE")" \
+        "$(safe_alert_label "$FAILURE_COMPONENT")" \
+        "$(safe_sha_state "$DEPLOY_TARGET")" \
+        "$(safe_sha_state "$marker")" \
+        "$(safe_sha_state "$backend")" \
+        "$(safe_sha_state "$frontend")" \
+        "$(safe_sha_state "$rollback")" \
+        "$(safe_rollback_state)" >&2
+}
+
 backend_http_healthy() {
     local code
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$BACKEND_URL/api/health/ready" 2>/dev/null)" || return 1
@@ -91,399 +175,905 @@ backend_http_healthy() {
 }
 
 wait_for_backend_sha() {
-    local target="$1" deadline sha
-    deadline=$(( $(date +%s) + BACKEND_HEALTH_TIMEOUT ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
-        sha="$(served_git_sha || true)"
+    local target="$1" timeout="$2" deadline now sha unit_state
+    now="$(date +%s)" || return 1
+    deadline=$((now + timeout))
+    while true; do
+        now="$(date +%s)" || return 1
+        [ "$now" -lt "$deadline" ] || break
+        if ! sha="$(served_git_sha)"; then
+            sha=
+        fi
         if [ "$sha" = "$target" ] && backend_http_healthy; then
             return 0
         fi
         if [ "$sha" = "$target" ]; then
-            log "Backend serving sha ${target:0:8} but /api/health/ready not green yet; waiting..."
+            log "Backend serving sha ${target:0:8} but readiness is not green yet; waiting..."
         elif [ -n "$sha" ]; then
-            log "Backend answering but serving sha ${sha:0:8}, want ${target:0:8}; waiting..."
+            log "Backend answering with sha ${sha:0:8}, want ${target:0:8}; waiting..."
         fi
-        sleep "$POLL_INTERVAL"
+        sleep "$POLL_INTERVAL" || return 1
     done
-    log "Backend health gate FAILED: no healthy response with sha ${target:0:8} within ${BACKEND_HEALTH_TIMEOUT}s (unit state: $(backend_unit_state))"
-    return 1
-}
-
-wait_for_backend_http() {
-    local timeout="$1" deadline
-    deadline=$(( $(date +%s) + timeout ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
-        if backend_http_healthy; then
-            return 0
-        fi
-        sleep "$POLL_INTERVAL"
-    done
+    if ! unit_state="$(backend_unit_state 2>/dev/null)"; then unit_state=unavailable; fi
+    log "Backend health gate FAILED for sha ${target:0:8} after ${timeout}s (unit state: $unit_state)"
     return 1
 }
 
 verify_backend_stability() {
-    local target="$1" pid_before pid_after
-    pid_before="$(backend_pid)"
-    sleep "$STABILITY_INTERVAL"
-    pid_after="$(backend_pid)"
+    local target="$1" pid_before pid_after served
+    pid_before="$(backend_pid)" || return 1
+    sleep "$STABILITY_INTERVAL" || return 1
+    pid_after="$(backend_pid)" || return 1
     if [ "$pid_before" != "$pid_after" ] || [ "$pid_after" = "0" ]; then
-        log "Backend stability check FAILED: PID changed ($pid_before -> $pid_after) within ${STABILITY_INTERVAL}s of passing health"
+        log "Backend stability check FAILED: PID changed ($pid_before -> $pid_after)"
         return 1
     fi
-    if ! systemctl is-active --quiet connex-staging-backend || [ "$(served_git_sha || true)" != "$target" ]; then
-        log "Backend stability check FAILED: unhealthy on recheck (unit state: $(backend_unit_state))"
+    if ! systemctl is-active --quiet connex-staging-backend; then
+        log "Backend stability check FAILED on unit or sha recheck"
         return 1
     fi
-    # One transient readiness blip (GC pause, momentary DB hiccup) must not roll back a
-    # healthy deploy: retry the readiness probe once before declaring the recheck failed.
+    served="$(served_git_sha)" || return 1
+    if [ "$served" != "$target" ]; then
+        log "Backend stability check FAILED on unit or sha recheck"
+        return 1
+    fi
     if ! backend_http_healthy; then
-        log "Backend readiness blip on stability recheck; retrying once in ${POLL_INTERVAL}s..."
-        sleep "$POLL_INTERVAL"
+        log "Backend readiness blip on stability recheck; retrying once..."
+        sleep "$POLL_INTERVAL" || return 1
         if ! backend_http_healthy; then
-            log "Backend stability check FAILED: unhealthy on recheck (unit state: $(backend_unit_state))"
+            log "Backend stability check FAILED on readiness recheck"
             return 1
         fi
-    fi
-    return 0
-}
-
-rollback_backend() {
-    if [ ! -f "$ROLLBACK_JAR" ]; then
-        log "No rollback artifact at $ROLLBACK_JAR — backend left as-is; manual intervention required"
-        return 0
-    fi
-    log "Rolling back backend to previous JAR..."
-    if ! cp -f "$ROLLBACK_JAR" "$LIVE_JAR"; then
-        log "Backend rollback FAILED while restoring $LIVE_JAR; manual intervention required"
-        return 1
-    fi
-    if ! sudo systemctl restart connex-staging-backend; then
-        log "Rollback restart command failed (unit state: $(backend_unit_state)); manual intervention required"
-        return 1
-    fi
-    if wait_for_backend_http "$ROLLBACK_HEALTH_TIMEOUT"; then
-        log "Rollback complete: previous backend restored and answering"
-        return 0
-    else
-        log "Rollback restart did not become healthy within ${ROLLBACK_HEALTH_TIMEOUT}s (unit state: $(backend_unit_state)); manual intervention required"
-        return 1
     fi
 }
 
 wait_for_frontend() {
-    local deadline
-    deadline=$(( $(date +%s) + FRONTEND_HEALTH_TIMEOUT ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
+    local deadline now
+    now="$(date +%s)" || return 1
+    deadline=$((now + FRONTEND_HEALTH_TIMEOUT))
+    while true; do
+        now="$(date +%s)" || return 1
+        [ "$now" -lt "$deadline" ] || break
         if curl -fsS --max-time 5 -o /dev/null "$FRONTEND_URL/" 2>/dev/null; then
             return 0
         fi
-        sleep "$POLL_INTERVAL"
+        sleep "$POLL_INTERVAL" || return 1
     done
     return 1
 }
 
-prune_artifacts() {
-    find "$ART_DIR" -maxdepth 1 -name 'backend-*.jar' -printf '%T@ %p\n' \
-        | sort -rn | tail -n +6 | cut -d' ' -f2- | xargs -r rm -f
-}
-
-build_backend() {
-    local target="$1"
-    if ! cd "$STAGING_DIR/backend"; then
-        log "Backend build FAILED: cannot enter $STAGING_DIR/backend"
-        return 1
-    fi
-    if [ -f "$LIVE_JAR" ]; then
-        if ! cp -f "$LIVE_JAR" "$ROLLBACK_JAR"; then
-            log "Backend build FAILED: could not snapshot the previous JAR"
-            return 1
-        fi
-    fi
-    log "Building backend (clean bootJar, sha ${target:0:8})..."
-    if ! bash ./gradlew clean bootJar -q -PgitSha="$target"; then
-        if [ -f "$ROLLBACK_JAR" ] && [ ! -f "$LIVE_JAR" ]; then
-            if cp -f "$ROLLBACK_JAR" "$LIVE_JAR"; then
-                log "Backend build FAILED; restored previous JAR on disk (running service untouched)"
-            else
-                log "Backend build FAILED and the previous JAR could not be restored on disk; running service untouched"
-            fi
-        else
-            log "Backend build FAILED"
-        fi
-        return 1
-    fi
-    if ! cp -f "$LIVE_JAR" "$ART_DIR/backend-$target.jar"; then
-        log "Backend build FAILED: could not archive the target-stamped JAR"
+write_sha_marker() {
+    local path="$1" sha="$2" temporary
+    is_git_sha "$sha" || return 1
+    temporary="$(mktemp "$STATE_DIR/.marker.XXXXXX")" || return 1
+    if ! printf '%s\n' "$sha" > "$temporary" || ! mv -f "$temporary" "$path"; then
+        rm -f "$temporary"
         return 1
     fi
 }
 
-restore_frontend_tsconfig() {
-    if [ "$FRONTEND_TSCONFIG_CLEANUP_ARMED" != "1" ]; then
-        return 0
-    fi
-    if ! git checkout -- tsconfig.json; then
-        log "Frontend tsconfig restore FAILED: git checkout did not succeed"
-        return 1
-    fi
-    if ! git diff --quiet -- tsconfig.json; then
-        log "Frontend tsconfig restore FAILED: tsconfig.json still differs from HEAD"
-        return 1
-    fi
-    FRONTEND_TSCONFIG_CLEANUP_ARMED=0
+release_manifest_value() {
+    local manifest="$1" key="$2"
+    awk -F '\t' -v wanted="$key" '
+        $1 == wanted { count += 1; value = $2 }
+        END { if (count == 1) print value; else exit 1 }
+    ' "$manifest"
 }
 
-frontend_tsconfig_exit_cleanup() {
-    local exit_status="$1" cleanup_status=0
-    restore_frontend_tsconfig || cleanup_status=$?
-    if [ "$exit_status" -ne 0 ]; then
-        exit "$exit_status"
-    fi
-    exit "$cleanup_status"
-}
-
-frontend_tsconfig_signal_cleanup() {
-    local signal_name="$1" signal_status="$2" cleanup_status=0
-    trap - INT TERM
-    log "Frontend build interrupted by $signal_name; restoring tsconfig.json"
-    restore_frontend_tsconfig || cleanup_status=$?
-    if [ "$cleanup_status" -eq 0 ]; then
-        trap - EXIT
-    fi
-    exit "$signal_status"
-}
-
-build_frontend() {
-    local build_status=0 restore_status=0
-    cd "$STAGING_DIR/frontend"
-    log "Building frontend (into .next-new)..."
-    set -a; source "$FRONTEND_ENV"; set +a
-    "$PNPM" install --frozen-lockfile --silent
-    # Only generated route types are safe to remove from the live .next tree before the
-    # swap. The running frontend still reads .next/server and .next/static, so never clean
-    # .next wholesale here. .next-new is disposable until it becomes the live build.
-    if ! rm -rf .next-new .next/types .next/dev/types; then
-        log "Frontend build FAILED while removing disposable generated output"
-        return 1
-    fi
-    # Next rewrites tsconfig.json during a build. The EXIT trap covers shell termination and
-    # the signal traps preserve conventional signal exit statuses; all remain armed until a
-    # checkout plus a clean diff proves that the tracked file is back at HEAD.
-    FRONTEND_TSCONFIG_CLEANUP_ARMED=1
-    trap 'frontend_tsconfig_exit_cleanup "$?"' EXIT
-    trap 'frontend_tsconfig_signal_cleanup INT 130' INT
-    trap 'frontend_tsconfig_signal_cleanup TERM 143' TERM
-    NEXT_DIST_DIR=.next-new "$PNPM" build || build_status=$?
-    restore_frontend_tsconfig || restore_status=$?
-    if [ "$restore_status" -eq 0 ]; then
-        trap - EXIT INT TERM
-    fi
-    if [ "$build_status" -ne 0 ]; then
-        return "$build_status"
-    fi
-    return "$restore_status"
-}
-
-swap_frontend_build() {
-    if ! cd "$STAGING_DIR/frontend"; then
-        log "Frontend swap FAILED: cannot enter $STAGING_DIR/frontend"
-        return 1
-    fi
-    FRONTEND_SWAP_STATE=unchanged
-    if ! rm -rf .next-old; then
-        log "Frontend swap FAILED while removing the previous rollback tree"
-        return 1
-    fi
-    if [ ! -d .next-new ]; then
-        log "Frontend swap FAILED: .next-new is missing"
-        return 1
-    fi
-    if [ -d .next ]; then
-        if ! mv .next .next-old; then
-            log "Frontend swap FAILED while saving the live .next tree; new build left in .next-new"
-            return 1
-        fi
-        FRONTEND_SWAP_STATE=previous_saved
-    else
-        FRONTEND_SWAP_STATE=no_previous
-    fi
-    if ! mv .next-new .next; then
-        log "Frontend swap FAILED while moving .next-new into place"
-        return 1
-    fi
-    if [ "$FRONTEND_SWAP_STATE" = "previous_saved" ]; then
-        FRONTEND_SWAP_STATE=new_live_with_previous
-    else
-        FRONTEND_SWAP_STATE=new_live_without_previous
-    fi
-    # next.config.ts sets output: standalone, so the build bakes its distDir into
-    # standalone/server.js as .next-new — a directory this swap has just renamed away. Staging
-    # serves with `next start` and never reads it, but leaving an unusable server.js behind is a
-    # trap for anyone who later switches to the standalone runtime, so drop it.
-    if [ -d .next/standalone ]; then
-        if ! rm -rf .next/standalone; then
-            log "Frontend swap FAILED while removing unusable standalone output"
-            return 1
-        fi
-        log "Removed standalone output (its baked distDir does not survive the .next-new swap)"
-    fi
-}
-
-restore_frontend_build() {
-    if ! cd "$STAGING_DIR/frontend"; then
-        log "Frontend restore FAILED: cannot enter $STAGING_DIR/frontend"
-        return 1
-    fi
-    case "$FRONTEND_SWAP_STATE" in
-        previous_saved)
-            if [ -e .next ] || [ -L .next ]; then
-                log "Frontend restore FAILED: refusing to move .next-old into an occupied .next path"
-                return 1
-            fi
-            if ! mv .next-old .next; then
-                log "Frontend restore FAILED while moving .next-old back into place"
-                return 1
-            fi
-            FRONTEND_SWAP_STATE=previous_restored
-            ;;
-        new_live_with_previous)
-            if [ -e .next-new ] || [ -L .next-new ]; then
-                log "Frontend restore FAILED: .next-new is occupied, so the active tree cannot be parked safely"
-                return 1
-            fi
-            if ! mv .next .next-new; then
-                log "Frontend restore FAILED while parking the active build; previous build remains in .next-old"
-                return 1
-            fi
-            FRONTEND_SWAP_STATE=new_build_parked
-            if ! mv .next-old .next; then
-                log "Frontend restore FAILED while moving .next-old back into place"
-                if mv .next-new .next; then
-                    FRONTEND_SWAP_STATE=new_live_with_previous
-                    log "Returned the failed new build to .next after the restore failure"
+frontend_tree_sha256() {
+    local runtime="$1"
+    (
+        local path value digest_line digest
+        cd "$runtime" || exit 1
+        find . \( -type f -o -type l \) -print0 \
+            | LC_ALL=C sort -z \
+            | while IFS= read -r -d '' path; do
+                if [ -L "$path" ]; then
+                    value="$(readlink "$path")" || exit 1
+                    printf 'symlink\t%s\t%s\0' "$path" "$value" || exit 1
                 else
-                    FRONTEND_SWAP_STATE=restore_incomplete
-                    log "Could not return the failed new build to .next; manual intervention required"
+                    digest_line="$(sha256sum "$path")" || exit 1
+                    digest="${digest_line%% *}"
+                    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || exit 1
+                    printf 'file\t%s\t%s\0' "$path" "$digest" || exit 1
                 fi
-                return 1
-            fi
-            FRONTEND_SWAP_STATE=previous_restored
-            ;;
-        previous_restored)
-            ;;
-        new_live_without_previous)
-            log "Frontend restore FAILED: there is no previous .next tree to restore"
-            return 1
-            ;;
-        *)
-            log "Frontend restore FAILED: swap state '$FRONTEND_SWAP_STATE' is not restorable"
-            return 1
-            ;;
-    esac
-    if ! sudo systemctl restart connex-staging-frontend; then
-        log "Frontend restore restart command failed; restored tree retained for manual recovery"
-        return 1
-    fi
-    # The failed tree is renamed, rather than deleted, while the old process may still be
-    # serving it. Only a successful restart makes it safe to remove that parked tree.
-    if [ -e .next-new ] || [ -L .next-new ]; then
-        if ! rm -rf .next-new; then
-            log "Frontend restore FAILED while removing the parked failed build"
-            return 1
-        fi
-    fi
-    FRONTEND_SWAP_STATE=restored
-    log "Frontend restored to previous build"
+            done
+    ) | sha256sum | awk '{print $1}'
 }
 
-deploy_backend() {
-    local target="$1"
-    if [ "$(served_git_sha || true)" = "$target" ]; then
-        log "Backend already serving sha ${target:0:8}; skipping backend build/restart"
+verify_release_directory() {
+    local sha="$1" release_dir="$2" manifest schema manifest_sha backend_hash frontend_hash provenance
+    local actual_backend_hash actual_frontend_hash embedded_sha frontend_sha
+    is_git_sha "$sha" || return 1
+    manifest="$release_dir/manifest.tsv"
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || return 1
+    [ -f "$release_dir/backend.jar" ] && [ ! -L "$release_dir/backend.jar" ] || return 1
+    [ -d "$release_dir/frontend" ] && [ ! -L "$release_dir/frontend" ] || return 1
+    [ -f "$release_dir/frontend/server.js" ] || return 1
+    [ -d "$release_dir/frontend/public" ] || return 1
+    [ -f "$release_dir/frontend/release-sha" ] || return 1
+    if [ -d "$release_dir/frontend/.next-new/server" ]; then
+        [ -d "$release_dir/frontend/.next-new/static" ] || return 1
+    elif [ -d "$release_dir/frontend/.next/server" ]; then
+        [ -d "$release_dir/frontend/.next/static" ] || return 1
+    else
+        return 1
+    fi
+
+    schema="$(release_manifest_value "$manifest" schema_version)" || return 1
+    manifest_sha="$(release_manifest_value "$manifest" release_sha)" || return 1
+    [ "$schema" = "1" ] && [ "$manifest_sha" = "$sha" ] || return 1
+    backend_hash="$(release_manifest_value "$manifest" backend_sha256)" || return 1
+    frontend_hash="$(release_manifest_value "$manifest" frontend_sha256)" || return 1
+    provenance="$(release_manifest_value "$manifest" frontend_provenance)" || return 1
+    [[ "$backend_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ "$frontend_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+    case "$provenance" in
+        built-from-target|rebuilt-from-marker-commit) ;;
+        *) return 1 ;;
+    esac
+
+    actual_backend_hash="$(sha256sum "$release_dir/backend.jar" | awk '{print $1}')" || return 1
+    actual_frontend_hash="$(frontend_tree_sha256 "$release_dir/frontend")" || return 1
+    [ "$actual_backend_hash" = "$backend_hash" ] || return 1
+    [ "$actual_frontend_hash" = "$frontend_hash" ] || return 1
+    embedded_sha="$(jar_git_sha "$release_dir/backend.jar")" || return 1
+    frontend_sha="$(read_sha_file "$release_dir/frontend/release-sha")" || return 1
+    [ "$embedded_sha" = "$sha" ] && [ "$frontend_sha" = "$sha" ]
+}
+
+verify_release_bundle() {
+    local sha="$1"
+    verify_release_directory "$sha" "$RELEASES_DIR/$sha"
+}
+
+assemble_frontend_runtime() {
+    local source_root="$1" dist_name="$2" runtime="$3" sha="$4"
+    local dist_dir="$source_root/$dist_name"
+    [ -f "$dist_dir/standalone/server.js" ] || return 1
+    [ -d "$dist_dir/static" ] || return 1
+    if ! mkdir -p "$runtime" \
+        || ! cp -a "$dist_dir/standalone/." "$runtime/" \
+        || ! mkdir -p "$runtime/$dist_name/static" \
+        || ! cp -a "$dist_dir/static/." "$runtime/$dist_name/static/" \
+        || ! mkdir -p "$runtime/public" \
+        || ! cp -a "$source_root/public/." "$runtime/public/" \
+        || ! printf '%s\n' "$sha" > "$runtime/release-sha"; then
+        return 1
+    fi
+}
+
+seal_release_bundle() {
+    local sha="$1" backend_jar="$2" runtime="$3" provenance="$4"
+    local pending final backend_hash frontend_hash
+    is_git_sha "$sha" || return 1
+    final="$RELEASES_DIR/$sha"
+    if [ -e "$final" ]; then
+        if verify_release_directory "$sha" "$final"; then
+            log "Reusing verified release bundle ${sha:0:8}"
+            return 0
+        fi
+        log "Release bundle $final exists but is invalid; refusing to overwrite it"
+        return 1
+    fi
+    pending="$(mktemp -d "$RELEASES_DIR/.release-${sha}.XXXXXX")" || return 1
+    if ! cp -f "$backend_jar" "$pending/backend.jar" \
+        || ! cp -a "$runtime" "$pending/frontend"; then
+        rm -rf "$pending" || true
+        return 1
+    fi
+    backend_hash="$(sha256sum "$pending/backend.jar" | awk '{print $1}')" || {
+        rm -rf "$pending" || true
+        return 1
+    }
+    frontend_hash="$(frontend_tree_sha256 "$pending/frontend")" || {
+        rm -rf "$pending" || true
+        return 1
+    }
+    if ! {
+        printf 'schema_version\t1\n' \
+            && printf 'release_sha\t%s\n' "$sha" \
+            && printf 'backend_sha256\t%s\n' "$backend_hash" \
+            && printf 'frontend_sha256\t%s\n' "$frontend_hash" \
+            && printf 'frontend_provenance\t%s\n' "$provenance"
+    } > "$pending/manifest.tsv"; then
+        rm -rf "$pending" || true
+        return 1
+    fi
+    if ! verify_release_directory "$sha" "$pending" || ! mv "$pending" "$final"; then
+        rm -rf "$pending" || true
+        return 1
+    fi
+}
+
+select_previous_backend_artifact() {
+    local sha="$1" candidate candidate_sha
+    for candidate in \
+        "$LIVE_JAR" \
+        "$STATE_DIR/artifacts/backend-$sha.jar" \
+        "$STATE_DIR/artifacts/rollback.jar"; do
+        [ -f "$candidate" ] || continue
+        if ! candidate_sha="$(jar_git_sha "$candidate")"; then
+            continue
+        fi
+        if [ "$candidate_sha" = "$sha" ]; then
+            printf '%s\n' "$candidate" || return 1
+            return 0
+        fi
+    done
+    return 1
+}
+
+load_frontend_environment() {
+    if [ ! -r "$FRONTEND_ENV" ]; then
+        return 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    if ! source "$FRONTEND_ENV"; then
+        set +a
+        return 1
+    fi
+    set +a
+}
+
+verify_frontend_build_assets() {
+    local frontend_root="$1" dist_dir="$2"
+    "$NODE_BIN/node" "$frontend_root/ci/verify_build_chunks.mjs" "$dist_dir"
+}
+
+build_frontend_runtime_from_source() (
+    local sha="$1" source_root="$2" dist_name="$3" output="$4"
+    local frontend_root="$source_root/frontend" original_tsconfig build_status=0 restore_status=0
+    original_tsconfig="$source_root/tsconfig.original"
+    if ! cp -f "$frontend_root/tsconfig.json" "$original_tsconfig" \
+        || ! cd "$frontend_root" \
+        || ! load_frontend_environment \
+        || ! "$PNPM" install --frozen-lockfile --silent; then
+        return 1
+    fi
+    NEXT_DIST_DIR="$dist_name" "$PNPM" build || build_status=$?
+    if ! cp -f "$original_tsconfig" "$frontend_root/tsconfig.json" \
+        || ! cmp -s "$original_tsconfig" "$frontend_root/tsconfig.json"; then
+        restore_status=1
+    fi
+    if [ "$build_status" -ne 0 ] || [ "$restore_status" -ne 0 ] \
+        || ! verify_frontend_build_assets "$frontend_root" "$frontend_root/$dist_name" \
+        || ! assemble_frontend_runtime "$frontend_root" "$dist_name" "$output" "$sha"; then
+        return 1
+    fi
+)
+
+rebuild_previous_frontend_runtime() {
+    local sha="$1" output="$2" scratch source_root status=0
+    scratch="$(mktemp -d "$STATE_DIR/.previous-frontend-${sha}.XXXXXX")" || return 1
+    source_root="$scratch/source"
+    if ! mkdir -p "$source_root"; then
+        rm -rf "$scratch" || true
+        return 1
+    fi
+    log "Rebuilding previous frontend ${sha:0:8} into a complete rollback runtime..."
+    if ! git -C "$STAGING_DIR" archive "$sha" frontend | tar -x -C "$source_root" \
+        || ! build_frontend_runtime_from_source "$sha" "$source_root" .next "$output"; then
+        status=1
+    fi
+    if ! rm -rf "$scratch"; then
+        status=1
+    fi
+    return "$status"
+}
+
+ensure_previous_release() {
+    local sha="$1" backend_artifact scratch runtime
+    if verify_release_bundle "$sha"; then
         return 0
     fi
-    if ! build_backend "$target"; then
-        log "Backend build step FAILED; backend not restarted"
+    if ! backend_artifact="$(select_previous_backend_artifact "$sha")"; then
+        log "Cannot prove a previous backend artifact for ${sha:0:8}"
         return 1
     fi
-    log "Restarting backend..."
-    if ! sudo systemctl restart connex-staging-backend \
-        || ! wait_for_backend_sha "$target" \
-        || ! verify_backend_stability "$target"; then
-        if ! rollback_backend; then
-            log "Backend rollback did not complete; manual intervention required"
-        fi
+    scratch="$(mktemp -d "$STATE_DIR/.previous-release-${sha}.XXXXXX")" || return 1
+    runtime="$scratch/frontend"
+    if ! rebuild_previous_frontend_runtime "$sha" "$runtime" \
+        || ! seal_release_bundle "$sha" "$backend_artifact" "$runtime" rebuilt-from-marker-commit; then
+        rm -rf "$scratch" || true
         return 1
     fi
-    log "Backend healthy and serving sha ${target:0:8}"
+    rm -rf "$scratch" || return 1
 }
 
-deploy_frontend() {
-    if ! swap_frontend_build; then
-        case "$FRONTEND_SWAP_STATE" in
-            previous_saved|new_live_with_previous|new_live_without_previous)
-                if ! restore_frontend_build; then
-                    log "Frontend restore after the failed swap did not complete; manual intervention may be required"
-                fi
-                ;;
-        esac
+build_target_release() {
+    local target="$1" scratch source_root runtime backend_jar embedded_sha status=0
+    scratch="$(mktemp -d "$STATE_DIR/.target-release-${target}.XXXXXX")" || return 1
+    source_root="$scratch/source"
+    runtime="$scratch/frontend"
+    if ! mkdir -p "$source_root"; then
+        rm -rf "$scratch" || true
         return 1
     fi
-    log "Restarting frontend..."
-    if ! sudo systemctl restart connex-staging-frontend; then
-        log "Frontend restart command FAILED; restoring previous build"
-        if ! restore_frontend_build; then
-            log "Frontend restore after the failed restart did not complete; manual intervention required"
+    log "Building isolated frontend and backend release ${target:0:8}..."
+    if ! git -C "$STAGING_DIR" archive "$target" | tar -x -C "$source_root" \
+        || ! build_frontend_runtime_from_source "$target" "$source_root" .next-new "$runtime" \
+        || ! (
+            cd "$source_root/backend"
+            bash ./gradlew clean bootJar -q -PgitSha="$target"
+        ); then
+        status=1
+    else
+        backend_jar="$source_root/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
+        if ! embedded_sha="$(jar_git_sha "$backend_jar")"; then
+            status=1
+        elif [ "$embedded_sha" != "$target" ] \
+            || ! seal_release_bundle "$target" "$backend_jar" "$runtime" built-from-target; then
+            status=1
         fi
+    fi
+    if ! rm -rf "$scratch"; then
+        status=1
+    fi
+    return "$status"
+}
+
+write_transaction() {
+    local phase="$1" temporary
+    case "$phase" in
+        prepared|frontend_stopped|backend_live|frontend_live|committed) ;;
+        *) return 1 ;;
+    esac
+    is_git_sha "$DEPLOY_PREVIOUS" && is_git_sha "$DEPLOY_TARGET" \
+        && is_git_sha "$DEPLOY_RETAINED" || return 1
+    temporary="$(mktemp "$STATE_DIR/.transaction.XXXXXX")" || return 1
+    if ! {
+        printf 'schema_version\t2\n' \
+            && printf 'prior_sha\t%s\n' "$DEPLOY_PREVIOUS" \
+            && printf 'target_sha\t%s\n' "$DEPLOY_TARGET" \
+            && printf 'retained_sha\t%s\n' "$DEPLOY_RETAINED" \
+            && printf 'phase\t%s\n' "$phase"
+    } > "$temporary"; then
+        rm -f "$temporary" || true
         return 1
     fi
-    if ! wait_for_frontend; then
-        log "Frontend did not answer on $FRONTEND_URL within ${FRONTEND_HEALTH_TIMEOUT}s after restart; restoring previous build"
-        if ! restore_frontend_build; then
-            log "Frontend restore after the failed health gate did not complete; manual intervention required"
+    if ! mv -f "$temporary" "$TRANSACTION_FILE"; then
+        rm -f "$temporary" || true
+        return 1
+    fi
+}
+
+commit_release_markers() {
+    local prior="$1" target="$2"
+    # Recovery must remain armed until both release markers and the committed
+    # transaction are written; any earlier disarm can strand a partial release live.
+    write_sha_marker "$ROLLBACK_MARKER" "$prior" || return 1
+    write_sha_marker "$MARKER" "$target" || return 1
+    write_transaction committed || return 1
+    RELEASE_COMMITTED=1
+    ROLLBACK_ARMED=0
+}
+
+read_transaction() {
+    local manifest="$TRANSACTION_FILE" schema prior target retained phase
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || return 1
+    schema="$(release_manifest_value "$manifest" schema_version)" || return 1
+    prior="$(release_manifest_value "$manifest" prior_sha)" || return 1
+    target="$(release_manifest_value "$manifest" target_sha)" || return 1
+    retained="$(release_manifest_value "$manifest" retained_sha)" || return 1
+    phase="$(release_manifest_value "$manifest" phase)" || return 1
+    [ "$schema" = "2" ] && is_git_sha "$prior" && is_git_sha "$target" \
+        && is_git_sha "$retained" || return 1
+    case "$phase" in
+        prepared|frontend_stopped|backend_live|frontend_live|committed) ;;
+        *) return 1 ;;
+    esac
+    printf '%s\t%s\t%s\t%s\n' "$prior" "$target" "$retained" "$phase"
+}
+
+activate_backend() {
+    local sha="$1"
+    verify_release_bundle "$sha" || return 1
+    if ! cp -f "$RELEASES_DIR/$sha/backend.jar" "$LIVE_JAR" \
+        || ! sudo systemctl restart connex-staging-backend \
+        || ! wait_for_backend_sha "$sha" "$BACKEND_HEALTH_TIMEOUT" \
+        || ! verify_backend_stability "$sha"; then
+        return 1
+    fi
+}
+
+ensure_frontend_launcher() {
+    local target="$1" start_command
+    is_git_sha "$target" || return 1
+    start_command="$(git -C "$STAGING_DIR" show "$target:frontend/package.json" 2>/dev/null \
+        | jq -r '.scripts.start // empty')" || return 1
+    [ "$start_command" = "bash ../deploy/staging/connex-frontend-start.sh" ] || return 1
+    git -C "$STAGING_DIR" cat-file -e "$target:deploy/staging/connex-frontend-start.sh" || return 1
+    git -C "$STAGING_DIR" reset --hard "$target" --quiet || return 1
+    [ -f "$STAGING_DIR/deploy/staging/connex-frontend-start.sh" ] \
+        && git -C "$STAGING_DIR" diff --quiet "$target" -- \
+            frontend/package.json deploy/staging/connex-frontend-start.sh
+}
+
+frontend_runtime_matches() {
+    local sha="$1" running_sha pid extra expected actual
+    [ -f "$FRONTEND_RUNNING_MARKER" ] && [ ! -L "$FRONTEND_RUNNING_MARKER" ] || return 1
+    IFS=$'\t' read -r running_sha pid extra < "$FRONTEND_RUNNING_MARKER" || return 1
+    [ "$running_sha" = "$sha" ] && [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -z "$extra" ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    expected="$(readlink -f "$RELEASES_DIR/$sha/frontend")" || return 1
+    actual="$(readlink -f "/proc/$pid/cwd")" || return 1
+    [ "$actual" = "$expected" ]
+}
+
+activate_frontend() {
+    local sha="$1" pid frontend_sha
+    verify_release_bundle "$sha" || return 1
+    if ! write_sha_marker "$FRONTEND_RELEASE_MARKER" "$sha" \
+        || ! sudo systemctl restart connex-staging-frontend \
+        || ! wait_for_frontend; then
+        return 1
+    fi
+    frontend_sha="$(live_frontend_sha)" || return 1
+    [ "$frontend_sha" = "$sha" ] || return 1
+    pid="$(frontend_pid)" || return 1
+    systemctl is-active --quiet connex-staging-frontend \
+        && [ "$pid" != "0" ] \
+        && frontend_runtime_matches "$sha"
+}
+
+quiesce_frontend_and_switch_checkout() {
+    local target="$1"
+    if ! sudo systemctl stop connex-staging-frontend; then
+        ROLLBACK_ARMED=0
+        return 1
+    fi
+    ROLLBACK_ARMED=1
+    write_transaction frontend_stopped || return 1
+    ensure_frontend_launcher "$target"
+}
+
+rollback_release() {
+    local sha="$1" backend frontend
+    ROLLBACK_IN_PROGRESS=1
+    ROLLBACK_STATE=in_progress
+    if ! verify_release_bundle "$sha" || ! verify_release_bundle "$DEPLOY_RETAINED"; then
+        log "Rollback FAILED: rollback or retained release bundle is invalid"
+        ROLLBACK_STATE=failed
+        return 1
+    fi
+    log "Rolling back the complete application to ${sha:0:8}..."
+    if ! sudo systemctl stop connex-staging-frontend \
+        || ! ensure_frontend_launcher "$DEPLOY_TARGET" \
+        || ! cp -f "$RELEASES_DIR/$sha/backend.jar" "$LIVE_JAR" \
+        || ! sudo systemctl restart connex-staging-backend \
+        || ! wait_for_backend_sha "$sha" "$ROLLBACK_HEALTH_TIMEOUT" \
+        || ! verify_backend_stability "$sha" \
+        || ! activate_frontend "$sha"; then
+        log "Rollback FAILED; component or release-marker state is uncertain"
+        ROLLBACK_STATE=failed
+        return 1
+    fi
+    backend="$(served_git_sha)" || {
+        ROLLBACK_STATE=failed
+        return 1
+    }
+    frontend="$(live_frontend_sha)" || {
+        ROLLBACK_STATE=failed
+        return 1
+    }
+    if [ "$backend" != "$sha" ] \
+        || [ "$frontend" != "$sha" ] \
+        || ! frontend_runtime_matches "$sha" \
+        || ! write_sha_marker "$MARKER" "$sha" \
+        || ! write_sha_marker "$ROLLBACK_MARKER" "$DEPLOY_RETAINED" \
+        || ! rm -f "$TRANSACTION_FILE"; then
+        log "Rollback FAILED; component or release-marker state is uncertain"
+        ROLLBACK_STATE=failed
+        return 1
+    fi
+    ROLLBACK_STATE=complete
+    ROLLBACK_ARMED=0
+    log "Rollback complete: frontend and backend ${sha:0:8} restored"
+}
+
+validate_smoke_login_file() {
+    local owner group mode
+    command -v jq >/dev/null 2>&1 || return 1
+    [ -f "$SMOKE_LOGIN_FILE" ] && [ ! -L "$SMOKE_LOGIN_FILE" ] && [ -r "$SMOKE_LOGIN_FILE" ] || return 1
+    owner="$(stat -c '%u' "$SMOKE_LOGIN_FILE")" || return 1
+    group="$(stat -c '%g' "$SMOKE_LOGIN_FILE")" || return 1
+    mode="$(stat -c '%a' "$SMOKE_LOGIN_FILE")" || return 1
+    [ "$owner" = "$SMOKE_LOGIN_REQUIRED_UID" ] \
+        && [ "$group" = "$SMOKE_LOGIN_REQUIRED_GID" ] \
+        && [ "$mode" = "$SMOKE_LOGIN_REQUIRED_MODE" ] || return 1
+    jq -e '
+        type == "object"
+        and (keys | sort) == ["password", "username"]
+        and (.username | type == "string" and length > 0 and length <= 255)
+        and (.password | type == "string" and length > 0 and length <= 255)
+    ' "$SMOKE_LOGIN_FILE" >/dev/null 2>&1
+}
+
+validate_live_components() {
+    local expected="$1" allow_legacy_frontend="$2" backend frontend live_jar
+    backend="$(served_git_sha)" || return 1
+    if ! frontend="$(live_frontend_sha)"; then
+        frontend=
+    fi
+    [ "$backend" = "$expected" ] || return 1
+    live_jar="$(jar_git_sha "$LIVE_JAR")" || return 1
+    [ "$live_jar" = "$expected" ] || return 1
+    if [ "$frontend" = "$expected" ]; then
+        frontend_runtime_matches "$expected" || return 1
+    else
+        [ "$allow_legacy_frontend" = "1" ] && frontend_marker_absent || return 1
+    fi
+    systemctl is-active --quiet connex-staging-backend \
+        && systemctl is-active --quiet connex-staging-frontend
+}
+
+verify_no_change_release() {
+    local deployed="$1" retained
+    validate_live_components "$deployed" 0 || return 1
+    verify_release_bundle "$deployed" || return 1
+    retained="$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    [ "$retained" != "$deployed" ] || return 1
+    verify_release_bundle "$retained"
+}
+
+prepare_retained_rollback() {
+    local deployed="$1"
+    if [ -e "$ROLLBACK_MARKER" ] || [ -L "$ROLLBACK_MARKER" ]; then
+        DEPLOY_RETAINED="$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+        verify_release_bundle "$DEPLOY_RETAINED" || return 1
+        return 0
+    fi
+    frontend_marker_absent || return 1
+    DEPLOY_RETAINED="$deployed"
+}
+
+logout_smoke_session() {
+    [ "$SMOKE_SESSION_ACTIVE" = "1" ] || return 0
+    [ -f "$SMOKE_COOKIE_JAR" ] && [ ! -L "$SMOKE_COOKIE_JAR" ] && [ -s "$SMOKE_COOKIE_JAR" ] || return 1
+    awk -F '\t' 'NF == 7 && $6 == "JSESSIONID" && length($7) > 0 { found = 1 } END { exit !found }' \
+        "$SMOKE_COOKIE_JAR" || return 1
+    if ! curl -fsS --max-time 5 --cookie "$SMOKE_COOKIE_JAR" -X POST -o /dev/null \
+        "$FRONTEND_URL/api/auth/logout" 2>/dev/null; then
+        return 1
+    fi
+    SMOKE_SESSION_ACTIVE=0
+}
+
+cleanup_smoke_work() {
+    local work sensitive scrub_status=0
+    [ -n "$SMOKE_COOKIE_JAR" ] || return 0
+    case "$SMOKE_COOKIE_JAR" in
+        "$STATE_DIR"/.smoke.*/cookies) ;;
+        *) return 1 ;;
+    esac
+    work="${SMOKE_COOKIE_JAR%/cookies}"
+    if rm -rf -- "$work"; then
+        SMOKE_COOKIE_JAR=
+        return 0
+    fi
+    for sensitive in "$SMOKE_COOKIE_JAR" "$work/dashboard.html"; do
+        if [ -f "$sensitive" ] && ! : > "$sensitive"; then
+            scrub_status=1
         fi
+    done
+    if [ "$scrub_status" -eq 0 ]; then
+        log "Smoke artifact cleanup FAILED; sensitive files were scrubbed but the directory remains"
+    else
+        log "Smoke artifact cleanup FAILED; credential material may remain on disk"
+    fi
+    return 1
+}
+
+post_deploy_smoke() {
+    local target="$1" work frontend_body readiness_body version_body capabilities_body login_body dashboard_body
+    work="$(mktemp -d "$STATE_DIR/.smoke.XXXXXX")" || return 1
+    umask 077
+    SMOKE_COOKIE_JAR="$work/cookies"
+    frontend_body="$work/frontend.html"
+    readiness_body="$work/readiness.json"
+    version_body="$work/version.json"
+    capabilities_body="$work/capabilities.json"
+    login_body="$work/login.html"
+    dashboard_body="$work/dashboard.html"
+
+    set_failure_context smoke_frontend frontend "Post-deploy frontend smoke FAILED"
+    curl -fsS --max-time 15 -o "$frontend_body" "$FRONTEND_URL/" || return 1
+    grep -q '<main' "$frontend_body" || return 1
+
+    set_failure_context smoke_readiness backend "Post-deploy readiness smoke FAILED"
+    curl -fsS --max-time 15 -o "$readiness_body" "$BACKEND_URL/api/health/ready" || return 1
+    jq -e '.status == "UP"' "$readiness_body" >/dev/null || return 1
+
+    set_failure_context smoke_version release "Post-deploy version smoke FAILED"
+    curl -fsS --max-time 15 -o "$version_body" "$FRONTEND_URL/api/version" || return 1
+    jq -e --arg sha "$target" '.gitSha == $sha' "$version_body" >/dev/null || return 1
+
+    set_failure_context smoke_capabilities backend "Post-deploy capabilities smoke FAILED"
+    curl -fsS --max-time 15 -o "$capabilities_body" "$FRONTEND_URL/api/capabilities" || return 1
+    jq -e '
+        type == "object"
+        and (.sso | type == "boolean")
+        and (.socialLogin | type == "object"
+            and (.google | type == "boolean")
+            and (.microsoft | type == "boolean"))
+        and (.connectedAccounts | type == "object"
+            and (.google | type == "boolean")
+            and (.microsoft | type == "boolean"))
+        and (.connectedCapture | type == "object"
+            and (.google | type == "boolean")
+            and (.microsoft | type == "boolean"))
+        and (.mailManaged | type == "boolean")
+        and (.businessCardScanning | type == "boolean")
+        and (.businessCardImport | type == "boolean")
+        and (.campaignDelivery | type == "boolean")
+    ' "$capabilities_body" >/dev/null || return 1
+
+    set_failure_context smoke_auth_entry authentication "Post-deploy authentication entry smoke FAILED"
+    curl -fsS --max-time 15 -o "$login_body" "$FRONTEND_URL/auth/login" || return 1
+    grep -q 'id="login-username"' "$login_body" || return 1
+
+    set_failure_context smoke_login authentication "Post-deploy smoke login FAILED"
+    # The server can create a session before curl observes a transport or write failure,
+    # so EXIT must attempt logout even when the login request itself returns nonzero.
+    SMOKE_SESSION_ACTIVE=1
+    curl -fsS --max-time 15 \
+        --cookie-jar "$SMOKE_COOKIE_JAR" \
+        -H 'Content-Type: application/json' \
+        --data-binary "@$SMOKE_LOGIN_FILE" \
+        -o /dev/null \
+        "$FRONTEND_URL/api/auth/login" || return 1
+
+    set_failure_context smoke_authenticated_route frontend "Post-deploy authenticated core route smoke FAILED"
+    curl -fsS --max-time 30 \
+        --cookie "$SMOKE_COOKIE_JAR" \
+        -o "$dashboard_body" \
+        "$FRONTEND_URL/dashboard" || return 1
+    grep -q 'data-app-main' "$dashboard_body" || return 1
+
+    set_failure_context smoke_logout authentication "Post-deploy smoke logout FAILED; session may require operator invalidation"
+    logout_smoke_session || return 1
+
+    set_failure_context smoke_cleanup authentication "Post-deploy smoke cleanup FAILED; restoring previous release"
+    cleanup_smoke_work || return 1
+}
+
+prune_releases() {
+    local deployed rollback paths path sha kept=0
+    deployed="$(read_sha_file "$MARKER" 2>/dev/null)" || return 1
+    rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)" || return 1
+    paths="$(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -printf '%T@ %p\n' \
+        | sort -rn | cut -d' ' -f2-)" || return 1
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        sha="$(basename "$path")" || return 1
+        if ! is_git_sha "$sha"; then
+            continue
+        fi
+        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ]; then
+            continue
+        fi
+        kept=$((kept + 1))
+        if [ "$kept" -gt 3 ]; then
+            rm -rf "$path" || return 1
+        fi
+    done <<< "$paths"
+}
+
+deployment_exit() {
+    local status="$1" cleanup_status=0
+    trap - EXIT INT TERM
+    if [ "$SMOKE_SESSION_ACTIVE" = "1" ]; then
+        if ! logout_smoke_session; then
+            log "Smoke session logout FAILED during exit; authenticated server-side session may remain"
+            cleanup_status=1
+        fi
+    fi
+    if [ -n "$SMOKE_COOKIE_JAR" ]; then
+        if ! cleanup_smoke_work; then
+            cleanup_status=1
+        fi
+    fi
+    if [ "$status" -ne 0 ] && [ "$ROLLBACK_ARMED" = "1" ] && [ "$ROLLBACK_IN_PROGRESS" != "1" ] \
+        && [ "$RELEASE_COMMITTED" != "1" ]; then
+        rollback_release "$DEPLOY_PREVIOUS" || cleanup_status=1
+    fi
+    if [ "$status" -ne 0 ] && [ "$FAILURE_ACTIVE" = "1" ]; then
+        [ -z "$FAILURE_MESSAGE" ] || log "$FAILURE_MESSAGE"
+        deploy_failure_alert
+    fi
+    if [ "$cleanup_status" -ne 0 ]; then
+        status=1
+    fi
+    exit "$status"
+}
+
+arm_global_cleanup() {
+    trap 'deployment_exit "$?"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+}
+
+guard_wrapper_contract() {
+    local pinned_target="$1" previous
+    if [ "${CONNEX_DEPLOY_LOCK_HELD:-0}" != "1" ] || [ -n "$pinned_target" ]; then
+        return 0
+    fi
+    if ! previous="$(read_sha_file "$MARKER" 2>/dev/null)"; then previous=; fi
+    if is_git_sha "$previous"; then
+        git reset --hard "$previous" --quiet || return 1
+        DEPLOY_PREVIOUS="$previous"
+    fi
+    set_failure_context preflight release "Deploy refused: installed wrapper is stale; prior checkout restored and operator update required"
+    return 1
+}
+
+recover_transaction() {
+    local record prior target retained phase backend frontend marker rollback live_jar
+    if ! record="$(read_transaction)"; then record=; fi
+    if [ -z "$record" ]; then
+        sudo systemctl stop connex-staging-frontend || true
+        set_failure_context recovery release "Deployment recovery FAILED: transaction record is invalid"
         return 1
     fi
-    return 0
+    IFS=$'\t' read -r prior target retained phase <<< "$record"
+    DEPLOY_PREVIOUS="$prior"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$retained"
+    if ! verify_release_bundle "$prior" || ! verify_release_bundle "$target" \
+        || ! verify_release_bundle "$retained"; then
+        sudo systemctl stop connex-staging-frontend || true
+        set_failure_context recovery release "Deployment recovery FAILED: a recorded release bundle is invalid"
+        return 1
+    fi
+    if ! backend="$(served_git_sha)"; then backend=; fi
+    if ! frontend="$(live_frontend_sha)"; then frontend=; fi
+    if ! marker="$(read_sha_file "$MARKER" 2>/dev/null)"; then marker=; fi
+    if ! rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)"; then rollback=; fi
+    if ! live_jar="$(jar_git_sha "$LIVE_JAR")"; then live_jar=; fi
+    log "Recovering deploy transaction phase=$phase prior=${prior:0:8} target=${target:0:8}"
+
+    if [ "$phase" = "committed" ] && [ "$marker" = "$target" ] \
+        && [ "$rollback" = "$prior" ] \
+        && [ "$backend" = "$target" ] && [ "$frontend" = "$target" ] \
+        && [ "$live_jar" = "$target" ] \
+        && frontend_runtime_matches "$target"; then
+        rm -f "$TRANSACTION_FILE"
+        FAILURE_ACTIVE=0
+        return 0
+    fi
+    if [ "$phase" = "prepared" ] && [ "$backend" = "$prior" ] \
+        && { [ "$frontend" = "$prior" ] || frontend_marker_absent; } \
+        && systemctl is-active --quiet connex-staging-backend \
+        && systemctl is-active --quiet connex-staging-frontend; then
+        rm -f "$TRANSACTION_FILE"
+        set_failure_context recovery release "Interrupted deploy had not activated anything; prior release stayed live and target will retry next cycle"
+        return 1
+    fi
+    if { [ "$phase" = "backend_live" ] || [ "$phase" = "frontend_live" ]; } \
+        && [ "$backend" = "$target" ]; then
+        if ! validate_smoke_login_file; then
+            set_failure_context preflight authentication "Recovery refused: smoke credential file is missing or unsafe"
+            ROLLBACK_ARMED=1
+            return 1
+        fi
+        ROLLBACK_ARMED=1
+        set_failure_context backend_restart backend "Recovery could not reinstall and health-gate the target backend"
+        sudo systemctl stop connex-staging-frontend || return 1
+        ensure_frontend_launcher "$target" || return 1
+        activate_backend "$target" || return 1
+        set_failure_context frontend_restart frontend "Recovery could not activate the target frontend"
+        activate_frontend "$target" || return 1
+        set_failure_context smoke_frontend release "Recovery smoke FAILED"
+        post_deploy_smoke "$target" || return 1
+        set_failure_context marker release "Recovery completed components but could not commit release markers"
+        commit_release_markers "$prior" "$target" || return 1
+        rm -f "$TRANSACTION_FILE"
+        FAILURE_ACTIVE=0
+        log "Recovered and committed release ${target:0:8}"
+        return 0
+    fi
+
+    ROLLBACK_ARMED=1
+    set_failure_context recovery release "Interrupted deployment restored the previous complete release; target will retry next cycle"
+    rollback_release "$prior" || return 1
+    return 1
 }
 
 main() {
+    local pinned_target="${CONNEX_DEPLOY_TARGET:-}"
+    arm_global_cleanup
+    set_failure_context bootstrap release "Deploy FAILED during bootstrap"
     if [ "${CONNEX_DEPLOY_LOCK_HELD:-0}" != "1" ]; then
         exec 9>"$LOCK_FILE"
-        flock -n 9 || { log "Deploy already in progress, skipping"; exit 0; }
+        flock -n 9 || { log "Deploy already in progress, skipping"; FAILURE_ACTIVE=0; return 0; }
+    fi
+    if ! cd "$STAGING_DIR"; then
+        return 1
+    fi
+    guard_wrapper_contract "$pinned_target" || return 1
+    if [ -n "$pinned_target" ]; then
+        if ! is_git_sha "$pinned_target" || ! git cat-file -e "$pinned_target^{commit}"; then
+            set_failure_context preflight release "Deploy refused: wrapper supplied an invalid target commit"
+            return 1
+        fi
+    elif ! git fetch origin main --quiet; then
+        return 1
+    else
+        pinned_target="$(git rev-parse origin/main)"
+    fi
+    mkdir -p "$STATE_DIR" "$RELEASES_DIR"
+
+    if [ -e "$TRANSACTION_FILE" ]; then
+        recover_transaction
+        return $?
     fi
 
-    cd "$STAGING_DIR"
-    git fetch origin main --quiet
-    local target deployed
-    target="$(git rev-parse origin/main)"
-    deployed="$(cat "$MARKER" 2>/dev/null || echo none)"
-    if [ "$target" = "$deployed" ]; then
-        exit 0
+    DEPLOY_TARGET="$pinned_target"
+    if ! DEPLOY_PREVIOUS="$(read_sha_file "$MARKER" 2>/dev/null)"; then DEPLOY_PREVIOUS=; fi
+    if ! is_git_sha "$DEPLOY_TARGET" || ! is_git_sha "$DEPLOY_PREVIOUS"; then
+        set_failure_context preflight release "Deploy refused: target or deployed marker is not a full git sha"
+        return 1
     fi
 
-    if [ ! -r "$FRONTEND_ENV" ]; then
-        log "Deploy FAILED: $FRONTEND_ENV is missing or unreadable"
-        exit 1
+    if [ "$DEPLOY_TARGET" = "$DEPLOY_PREVIOUS" ]; then
+        if ! verify_no_change_release "$DEPLOY_PREVIOUS"; then
+            set_failure_context preflight release "Deploy refused: live components or retained rollback pair are missing or invalid"
+            return 1
+        fi
+        FAILURE_ACTIVE=0
+        return 0
     fi
 
-    mkdir -p "$ART_DIR"
-    log "Deploying ${target:0:8} (previously deployed: ${deployed:0:8})..."
-    git reset --hard "$target" --quiet
-
-    build_frontend
-    if ! deploy_backend "$target"; then
-        log "Deploy of ${target:0:8} FAILED at the backend build or health gate; frontend untouched, will retry next cycle"
-        exit 1
+    if ! validate_live_components "$DEPLOY_PREVIOUS" 1; then
+        set_failure_context preflight release "Deploy refused: live component identities or unit state do not match the deployed marker"
+        return 1
     fi
-    if ! deploy_frontend; then
-        log "Deploy of ${target:0:8} FAILED at the frontend; marker not updated, will retry next cycle"
-        exit 1
+    if ! validate_smoke_login_file; then
+        set_failure_context preflight authentication "Deploy refused: smoke login file must be root-owned mode 0640 with exact username/password JSON"
+        return 1
+    fi
+    if ! prepare_retained_rollback "$DEPLOY_PREVIOUS"; then
+        set_failure_context preflight release "Deploy refused: retained rollback marker or bundle is invalid"
+        return 1
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        set_failure_context preflight backend "Deploy refused: unzip is required to verify JAR release identity"
+        return 1
     fi
 
-    printf '%s\n' "$target" > "$MARKER"
-    prune_artifacts
-    log "Done — ${target:0:8} live and health-verified"
+    log "Preparing release ${DEPLOY_TARGET:0:8} (currently ${DEPLOY_PREVIOUS:0:8})..."
+    set_failure_context bundle release "Deploy FAILED while sealing the previous complete release"
+    ensure_previous_release "$DEPLOY_PREVIOUS" || return 1
+
+    set_failure_context build release "Deploy FAILED while building the isolated target release; live release untouched"
+    build_target_release "$DEPLOY_TARGET" || return 1
+
+    set_failure_context bundle release "Deploy FAILED while verifying the target release pair"
+    verify_release_bundle "$DEPLOY_PREVIOUS" && verify_release_bundle "$DEPLOY_TARGET" || return 1
+    write_transaction prepared || return 1
+
+    set_failure_context frontend_quiesce frontend "Deploy FAILED while quiescing or switching the checkout; prior release remains committed"
+    quiesce_frontend_and_switch_checkout "$DEPLOY_TARGET" || return 1
+
+    set_failure_context backend_restart backend "Deploy FAILED at backend activation or health gate; restoring previous release"
+    activate_backend "$DEPLOY_TARGET" || return 1
+    write_transaction backend_live || return 1
+
+    set_failure_context frontend_restart frontend "Deploy FAILED at frontend activation or health gate; restoring previous release"
+    activate_frontend "$DEPLOY_TARGET" || return 1
+    write_transaction frontend_live || return 1
+
+    set_failure_context smoke_frontend release "Deploy FAILED the post-deploy smoke; restoring previous release"
+    post_deploy_smoke "$DEPLOY_TARGET" || return 1
+
+    set_failure_context marker release "Deploy components passed smoke but release markers could not be committed"
+    commit_release_markers "$DEPLOY_PREVIOUS" "$DEPLOY_TARGET" || return 1
+    rm -f "$TRANSACTION_FILE"
+    prune_releases
+    FAILURE_ACTIVE=0
+    log "Done — release ${DEPLOY_TARGET:0:8} live as one verified frontend/backend unit"
 }
 
 main "$@"
