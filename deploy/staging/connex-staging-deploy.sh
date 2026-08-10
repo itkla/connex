@@ -41,6 +41,7 @@ ROLLBACK_HEALTH_TIMEOUT=600
 FRONTEND_HEALTH_TIMEOUT=90
 STABILITY_INTERVAL=15
 POLL_INTERVAL=5
+QUARANTINE_ALERT_THRESHOLD=8
 
 SMOKE_COOKIE_JAR=
 SMOKE_SESSION_ACTIVE=0
@@ -55,6 +56,7 @@ FAILURE_MESSAGE=
 DEPLOY_TARGET=unknown
 DEPLOY_PREVIOUS=unknown
 DEPLOY_RETAINED=unknown
+QUARANTINE_ALERT_EMITTED=0
 
 export PATH="$NODE_BIN:$PATH"
 export NODE_OPTIONS="--max-old-space-size=2048"
@@ -891,7 +893,7 @@ post_deploy_smoke() {
 }
 
 process_uses_release_tree() {
-    local pid="$1" resolved="$2" raw_cwd cwd state
+    local pid="$1" resolved="$2" raw_cwd cwd state stripped_cwd stripped_resolved
     if ! raw_cwd="$(readlink "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
         [ ! -d "$PROC_ROOT/$pid" ] && return 1
         state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' \
@@ -902,21 +904,29 @@ process_uses_release_tree() {
         [ "$state" = "Z" ] && return 1
         return 2
     fi
-    [[ "$raw_cwd" = *" (deleted)" ]] && return 1
-    if ! cwd="$(readlink -f "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
+    if cwd="$(readlink -f "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
+        if [ "$cwd" = "$resolved" ] || [[ "$cwd" = "$resolved/"* ]]; then
+            return 0
+        fi
+        return 1
+    fi
+    [ ! -d "$PROC_ROOT/$pid" ] && return 1
+    state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' \
+        "$PROC_ROOT/$pid/status" 2>/dev/null)" || {
         [ ! -d "$PROC_ROOT/$pid" ] && return 1
-        state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' \
-            "$PROC_ROOT/$pid/status" 2>/dev/null)" || {
-            [ ! -d "$PROC_ROOT/$pid" ] && return 1
-            return 2
-        }
-        [ "$state" = "Z" ] && return 1
         return 2
+    }
+    [ "$state" = "Z" ] && return 1
+    if [[ "$raw_cwd" = *" (deleted)" ]]; then
+        stripped_cwd="${raw_cwd% (deleted)}"
+        if [[ "$stripped_cwd" = /* ]] \
+            && stripped_resolved="$(readlink -f -- "$stripped_cwd" 2>/dev/null)" \
+            && [ "$stripped_resolved" != "$resolved" ] \
+            && [[ "$stripped_resolved" != "$resolved/"* ]]; then
+            return 1
+        fi
     fi
-    if [ "$cwd" = "$resolved" ] || [[ "$cwd" = "$resolved/"* ]]; then
-        return 0
-    fi
-    return 1
+    return 2
 }
 
 list_process_directories() {
@@ -977,35 +987,25 @@ ensure_prune_needed() {
     fi
 }
 
-quarantine_entry_eligible() {
-    local marker="$1/.prune-eligible"
-    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
-    awk 'NR == 1 { valid = ($0 == "eligible"); next } { valid = 0 } END { exit !valid }' \
-        "$marker"
-}
-
-mark_quarantine_entry_eligible() {
-    local quarantine="$1" marker="$1/.prune-eligible" temporary
-    if [ -e "$marker" ] || [ -L "$marker" ]; then
-        quarantine_entry_eligible "$quarantine"
-        return $?
-    fi
-    temporary="$(mktemp "$quarantine/.prune-eligible.XXXXXX")" || return 1
-    if ! printf 'eligible\n' > "$temporary" || ! mv -f "$temporary" "$marker"; then
-        rm -f "$temporary" || true
-        return 1
-    fi
-}
-
-revoke_quarantine_entry_eligibility() {
-    local marker="$1/.prune-eligible"
-    if [ -e "$marker" ] || [ -L "$marker" ]; then
-        rm -f -- "$marker"
-    fi
+atomic_quarantine_move_supported() {
+    LC_ALL=C command mv --help 2>&1 | grep -q -- '--no-copy'
 }
 
 quarantine_has_entries() {
     find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
+}
+
+report_quarantine_occupancy() {
+    local count
+    count="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -printf 'entry\n' \
+        | awk 'END { print NR + 0 }')" || return 1
+    log "Release quarantine occupancy: $count entries; alert threshold is more than $QUARANTINE_ALERT_THRESHOLD"
+    if [ "$count" -gt "$QUARANTINE_ALERT_THRESHOLD" ] \
+        && [ "$QUARANTINE_ALERT_EMITTED" -eq 0 ]; then
+        printf '[%s] ALERT status=warning gate=recovery component=release quarantine_entries=%s threshold=%s\n' \
+            "$LOG_TAG" "$count" "$QUARANTINE_ALERT_THRESHOLD" >&2
+        QUARANTINE_ALERT_EMITTED=1
+    fi
 }
 
 prune_backlog_present() {
@@ -1015,7 +1015,11 @@ prune_backlog_present() {
 
 prune_releases() {
     local deployed rollback running running_sha running_pid extra control_group paths path sha usage kept=0
-    local quarantine_paths quarantine eligible blocked=0
+    local quarantine_paths quarantine blocked=0 quarantined=0
+    if ! atomic_quarantine_move_supported; then
+        log "Release pruning refused: mv does not support atomic no-copy quarantine moves"
+        return 1
+    fi
     if ! ensure_prune_needed; then
         log "Release pruning refused: prune-needed state is invalid or unwritable"
         return 1
@@ -1023,8 +1027,8 @@ prune_releases() {
     deployed="$(read_sha_file "$MARKER" 2>/dev/null)" || return 1
     rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)" || return 1
     # Serving-state attestation protects the committed and rollback trees from even
-    # entering quarantine. Candidate inspection only controls how quickly an atomic
-    # quarantine move becomes eligible for later deletion; it is not the safety edge.
+    # entering quarantine. Process inspection is advisory operator reporting only;
+    # the script never unlinks a quarantined tree.
     if ! running="$(read_frontend_running)"; then
         log "Release pruning refused: frontend serving state is missing or inconsistent"
         return 1
@@ -1034,8 +1038,10 @@ prune_releases() {
         log "Release pruning refused: attested frontend does not match the committed release"
         return 1
     fi
-    control_group="$(frontend_control_group)" || return 1
-    [[ "$control_group" = /* ]] || return 1
+    if ! control_group="$(frontend_control_group 2>/dev/null)" \
+        || [[ "$control_group" != /* ]]; then
+        control_group=
+    fi
     quarantine_paths="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -print)" \
         || return 1
     while IFS= read -r path; do
@@ -1052,43 +1058,20 @@ prune_releases() {
         [ -n "$path" ] || continue
         sha="$(basename "$path")" || return 1
         usage=0
-        release_tree_in_use "$path" "$control_group" || usage=$?
-        if [ "$usage" -eq 0 ]; then
-            if ! revoke_quarantine_entry_eligibility "$path"; then
-                log "Release pruning refused: could not revoke eligibility for quarantined $sha"
-                blocked=1
-                continue
-            fi
-            log "Release pruning pending: a process still uses quarantined $sha"
-            blocked=1
-            continue
-        fi
-        if [ "$usage" -ne 1 ]; then
-            if ! revoke_quarantine_entry_eligibility "$path"; then
-                log "Release pruning refused: could not revoke eligibility for quarantined $sha"
-            fi
-            log "Release pruning pending: could not resolve quarantined $sha"
-            blocked=1
-            continue
-        fi
-        eligible=0
-        if [ -e "$path/.prune-eligible" ] || [ -L "$path/.prune-eligible" ]; then
-            if ! quarantine_entry_eligible "$path"; then
-                log "Release pruning refused: quarantined $sha has invalid eligibility state"
-                blocked=1
-                continue
-            fi
-            eligible=1
-        fi
-        if [ "$eligible" -eq 1 ]; then
-            rm -rf -- "$path" || return 1
-            log "Pruned quarantined release ${sha:0:8} after a clean later cycle"
-        elif ! mark_quarantine_entry_eligible "$path"; then
-            log "Release pruning refused: could not promote quarantined $sha"
-            blocked=1
+        if [ -n "$control_group" ]; then
+            release_tree_in_use "$path" "$control_group" || usage=$?
         else
-            log "Quarantined release ${sha:0:8} was clean this cycle; deletion waits for the next run"
+            usage=2
         fi
+        if [ "$usage" -eq 0 ]; then
+            log "Release quarantine report: advisory scan observed a matching consumer for $sha"
+            continue
+        fi
+        if [ "$usage" -eq 1 ]; then
+            log "Release quarantine report: advisory scan detected no matching consumer for $sha"
+            continue
+        fi
+        log "Release quarantine report: advisory scan was indeterminate for $sha"
     done <<< "$quarantine_paths"
     paths="$(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -printf '%T@ %p\n' \
         | sort -rn | cut -d' ' -f2-)" || return 1
@@ -1104,7 +1087,11 @@ prune_releases() {
         kept=$((kept + 1))
         if [ "$kept" -gt 3 ]; then
             usage=0
-            release_tree_in_use "$path" "$control_group" || usage=$?
+            if [ -n "$control_group" ]; then
+                release_tree_in_use "$path" "$control_group" || usage=$?
+            else
+                usage=2
+            fi
             quarantine="$RELEASE_QUARANTINE_DIR/$sha"
             if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
                 log "Release pruning refused: quarantine destination already exists for $sha"
@@ -1114,29 +1101,28 @@ prune_releases() {
             # rename(2) within .staging is atomic. Existing cwd and open handles
             # follow the inode, so even a consumer that entered after the scan keeps
             # a complete runtime while the old public release path disappears.
-            if ! mv -T -- "$path" "$quarantine"; then
+            # --no-copy refuses cross-device copy-then-unlink, which would destroy
+            # that safety property if either child directory were separately mounted.
+            if ! command mv --no-copy -T -- "$path" "$quarantine"; then
                 log "Release pruning refused: could not quarantine $sha"
                 blocked=1
                 continue
             fi
+            quarantined=1
             if [ "$usage" -eq 1 ]; then
-                if ! mark_quarantine_entry_eligible "$quarantine"; then
-                    log "Release pruning refused: could not promote quarantined $sha"
-                    blocked=1
-                    continue
-                fi
-                log "Quarantined unused release ${sha:0:8}; deletion waits for the next run"
+                log "Quarantined release $sha; advisory scan detected no matching consumer"
             elif [ "$usage" -eq 0 ]; then
-                log "Release pruning pending: quarantined $sha because a process still uses it"
-                blocked=1
+                log "Quarantined release $sha; advisory scan observed a matching consumer"
             else
-                log "Release pruning pending: quarantined $sha with indeterminate process state"
-                blocked=1
+                log "Quarantined release $sha; advisory scan was indeterminate"
             fi
         fi
     done <<< "$paths"
-    if [ "$blocked" -eq 0 ] && ! quarantine_has_entries; then
+    if [ "$blocked" -eq 0 ]; then
         rm -f -- "$PRUNE_NEEDED_MARKER" || return 1
+    fi
+    if [ "$quarantined" -eq 1 ]; then
+        report_quarantine_occupancy || return 1
     fi
     [ "$blocked" -eq 0 ]
 }
@@ -1252,7 +1238,10 @@ recover_transaction() {
         post_deploy_smoke "$target" || return 1
         set_failure_context marker release "Recovery completed components but could not commit release markers"
         commit_release_markers "$prior" "$target" || return 1
-        rm -f "$TRANSACTION_FILE"
+        set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
+        ensure_prune_needed || return 1
+        rm -f "$TRANSACTION_FILE" || return 1
+        prune_releases || return 1
         FAILURE_ACTIVE=0
         log "Recovered and committed release ${target:0:8}"
         return 0
@@ -1276,6 +1265,11 @@ main() {
     if ! cd "$STAGING_DIR"; then
         return 1
     fi
+    mkdir -p "$STATE_DIR" "$RELEASES_DIR" "$RELEASE_QUARANTINE_DIR"
+    if ! report_quarantine_occupancy; then
+        set_failure_context recovery release "Deploy refused: release quarantine occupancy could not be measured"
+        return 1
+    fi
     guard_wrapper_contract "$pinned_target" || return 1
     if [ -n "$pinned_target" ]; then
         if ! is_git_sha "$pinned_target" || ! git cat-file -e "$pinned_target^{commit}"; then
@@ -1288,7 +1282,10 @@ main() {
         pinned_target="$(git rev-parse origin/main)"
     fi
     DEPLOY_TARGET="$pinned_target"
-    mkdir -p "$STATE_DIR" "$RELEASES_DIR" "$RELEASE_QUARANTINE_DIR"
+    if ! atomic_quarantine_move_supported; then
+        set_failure_context preflight release "Deploy refused: mv lacks atomic no-copy quarantine support"
+        return 1
+    fi
 
     if [ -e "$TRANSACTION_FILE" ]; then
         if transaction_record="$(read_transaction 2>/dev/null)"; then

@@ -98,22 +98,26 @@ deployed by logic loaded from the older commit. The candidate
    `deployed-sha`. A missing, stale, orphaned, or cross-release record prevents any release from
    entering the pruning lifecycle.
 
-   An old candidate is never unlinked from `releases/`. It is atomically renamed on the same
-   filesystem into `.staging/release-quarantine/<sha>`, so an undetected consumer's cwd and open
-   handles continue to reference the complete runtime. Candidate inspection is only a promotion
-   signal: a clean scan records eligibility, but deletion waits for a later timer run and another
-   clean scan. An observed or unreadable live process revokes eligibility and keeps the run
-   nonzero. A candidate first quarantined under uncertainty needs a clean later run to become
-   eligible and one further clean run before deletion. `.staging/prune-needed` persists while the
-   quarantine is non-empty or pruning cannot finish, and ordinary no-change timer runs retry it;
-   a continuing consumer or indeterminate process therefore repeats the failure alert instead of
-   becoming an invisible disk backlog. Proven zombies, vanished processes, and processes already
-   rooted in unrelated deleted directories do not block that retry. This is application rollback
-   only; Flyway schema migrations remain forward-only.
-8. **Emits a sanitized failure alert.** The stderr `ALERT` record includes only allow-listed gate,
+   An old candidate is never automatically deleted. It is atomically renamed on the same filesystem
+   into `.staging/release-quarantine/<sha>`, so an undetected consumer's cwd and open handles
+   continue to reference the complete runtime. The deploy preflights GNU `mv --no-copy` support;
+   separately mounted `releases/` or `release-quarantine/` directories make the rename fail loudly
+   instead of degrading to copy-then-unlink. Mounting the whole `.staging` directory separately is
+   safe because both children remain on the same filesystem.
+
+   Quarantine is the script's terminal state. There is no eligibility marker or automatic unlink
+   sweep because a second advisory process scan cannot prove that no unobserved consumer started
+   using the tree. The scan remains only as operator-facing reporting and never authorizes
+   deletion. Every timer run logs quarantine occupancy; more than eight entries emits a sanitized
+   warning `ALERT` so reclamation is scheduled before disk pressure is urgent. `.staging/prune-needed`
+   persists only when a candidate could not be moved safely, while a non-empty quarantine still
+   causes no-change runs to repeat the advisory usage report. This is application rollback only;
+   Flyway schema migrations remain forward-only.
+8. **Emits sanitized alerts.** The stderr failure `ALERT` record includes only allow-listed gate,
    component and rollback state values plus validated target, marker, backend, frontend, and
-   rollback shas. It never interpolates response bodies, command output, environment values,
-   credentials, cookies, or filenames.
+   rollback shas. The quarantine warning `ALERT` contains only fixed labels and numeric occupancy
+   and threshold values. Neither record interpolates response bodies, command output, environment
+   values, credentials, cookies, or filenames.
 
 ### Installing / updating the wrapper (root, one-time)
 
@@ -178,16 +182,61 @@ For artifact recovery, read `rollback-sha`, then inspect the matching
 `.staging/releases/<sha>/manifest.tsv`. The automatic rollback verifies the manifest, both
 digests, and both embedded identities again before using the pair.
 
-An entry in `release-quarantine` for one timer interval is normal: the quarantine protocol always
-requires a later clean cycle before unlinking. If the same sha remains for multiple cycles, or the
-journal repeats `Release pruning pending` / `Release prune backlog remains unresolved`, do not
-delete or move the directory manually. Find the process or unit named by the adjacent journal
-message, stop or restart that out-of-band consumer through its owning service, and let the timer
-rescan the quarantine. For an indeterminate process, first determine whether it is a live process,
-a zombie, or a stale/deleted cwd and correct the owning service. Escalate persistent unreadable
-state or an invalid quarantine/marker to the staging owner; retain the directory until absence is
-proved. Once the backlog is clean, the timer removes eligible entries and clears `prune-needed`
-without operator deletion.
+A `release-quarantine/<sha>` entry means the deploy script retired that release from the public
+release set with an atomic rename. It does **not** mean the release is unused. The journal's
+`advisory scan detected no matching consumer` message covers the frontend cgroup and deploy-UID
+processes the timer can inspect; it is useful evidence, but never proof that another UID, service,
+cwd, or open file does not use the tree. The timer will report the entry forever and will never
+unlink it. More than eight entries produces a warning `ALERT`; schedule deliberate reclamation at
+or before that threshold.
+
+To reclaim one entry, first identify its owning release and prove that neither Connex nor an
+out-of-band process serves it. Run the following on staging in an interactive maintenance window,
+substituting the quarantined 40-character sha:
+
+```bash
+sha=0123456789abcdef0123456789abcdef01234567
+state=/opt/connex-staging/.staging
+entry="$state/release-quarantine/$sha"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid sha' >&2; exit 1; }
+[ -d "$entry" ] && [ ! -L "$entry" ] || { echo 'invalid quarantine entry' >&2; exit 1; }
+for marker in deployed-sha rollback-sha frontend-release; do
+    marker_sha="$(cat "$state/$marker")" || { echo "cannot read $marker" >&2; exit 1; }
+    [[ "$marker_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "$marker is invalid" >&2; exit 1; }
+    [ "$marker_sha" != "$sha" ] || { echo "$marker still protects $sha" >&2; exit 1; }
+done
+IFS=$'\t' read -r running_sha running_pid running_extra < "$state/frontend-running" \
+    || { echo 'cannot read frontend-running' >&2; exit 1; }
+[[ "$running_sha" =~ ^[0-9a-f]{40}$ ]] && [[ "$running_pid" =~ ^[1-9][0-9]*$ ]] \
+    && [ -z "$running_extra" ] || { echo 'frontend-running is invalid' >&2; exit 1; }
+[ "$running_sha" != "$sha" ] || { echo "frontend still serves $sha" >&2; exit 1; }
+lsof_report="$(mktemp)" || exit 1
+lsof_errors="$(mktemp)" || { rm -f "$lsof_report"; exit 1; }
+trap 'rm -f "$lsof_report" "$lsof_errors"' EXIT
+sudo lsof -nP > "$lsof_report" 2> "$lsof_errors" || { cat "$lsof_errors" >&2; exit 1; }
+[ ! -s "$lsof_errors" ] || { cat "$lsof_errors" >&2; exit 1; }
+if grep -F -- "$entry" "$lsof_report"; then
+    echo "a process still references $sha" >&2
+    exit 1
+fi
+```
+
+The full root-visible `lsof` scan must complete without warnings and contain no quarantine-entry
+path. Unlike `lsof +D`, this scans processes rather than walking only the existing directory tree,
+so textual paths such as `<entry>/removed-child (deleted)` remain visible. If it reports any cwd,
+executable, mapped file, or open file, stop or restart that process through its owning service and
+repeat the checks. If the inspection emits a warning, cannot complete, or the deploy journal
+reports an indeterminate advisory scan, retain the entry and escalate to the staging owner. After
+all marker checks still pass and a fresh full-process scan reports no matching path, remove exactly
+that validated entry deliberately:
+
+```bash
+sudo rm -rf -- "$entry"
+```
+
+This manual proof is intentionally stronger than the timer's advisory scan. Automatic disk
+reclamation cannot justify risking a live release tree; operator reclamation is scheduled
+maintenance, while unlinking a serving runtime is an outage.
 
 ## Operator preflight for maintenance releases
 

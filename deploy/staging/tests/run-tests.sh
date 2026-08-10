@@ -514,13 +514,13 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     trap 'kill "$serving_pid" "$orphan_pid" 2>/dev/null || true; wait "$serving_pid" "$orphan_pid" 2>/dev/null || true' EXIT
     output="$(prune_cycle 2>&1)"
     status=$?
-    assert_status detached_process_quarantines_and_alerts 1 "$status" || return 1
-    assert_contains detached_process_reports_pending 'quarantined 4545454545454545454545454545454545454545 because a process still uses it' \
+    assert_status detached_process_quarantines_without_destructive_gate 0 "$status" || return 1
+    assert_contains detached_process_is_reported 'Quarantined release 4545454545454545454545454545454545454545; advisory scan observed a matching consumer' \
         <(printf '%s\n' "$output") || return 1
     assert_file_missing detached_process_leaves_public_release_path "$RELEASES_DIR/$first_extra" || return 1
     assert_file_exists detached_process_runtime_survives_quarantine \
         "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
-    assert_file_exists detached_process_persists_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
+    assert_file_missing detached_process_does_not_leave_prune_marker "$PRUNE_NEEDED_MARKER" || return 1
     kill "$orphan_pid" || return 1
     wait "$orphan_pid" 2>/dev/null || true
     rm -rf "$mock_proc_root/${orphan_pid:?}"
@@ -528,15 +528,15 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
 
     prune_cycle >/dev/null 2>&1
-    assert_status reconciled_state_promotes_quarantine 0 "$?" || return 1
+    assert_status reconciled_state_reports_quarantine 0 "$?" || return 1
     assert_file_exists reconciled_prune_preserves_serving_tree "$RELEASES_DIR/$serving" || return 1
-    assert_file_exists reconciled_prune_waits_one_clean_cycle "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
+    assert_file_exists reconciled_prune_keeps_terminal_quarantine "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
     prune_cycle >/dev/null 2>&1
-    assert_status later_clean_cycle_allows_unlink 0 "$?" || return 1
-    assert_file_missing later_clean_cycle_removes_quarantine "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
+    assert_status later_clean_cycle_only_reports 0 "$?" || return 1
+    assert_file_exists later_clean_cycle_never_unlinks_quarantine "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
 )
 
-case_prune_refuses_unknown_deploy_process_state() (
+case_prune_reports_unknown_deploy_process_state() (
     local root="$SANDBOX/prune-unknown-process" deployed rollback candidate sha serving_pid mock_unit_pid
     local fake_proc fake_cgroup unknown_pid status output
     deployed=5656565656565656565656565656565656565656
@@ -586,30 +586,30 @@ case_prune_refuses_unknown_deploy_process_state() (
     assert_status unreadable_deploy_process_is_indeterminate 2 "$status" || return 1
     output="$(prune_releases 2>&1)"
     status=$?
-    assert_status unknown_deploy_process_quarantines_and_alerts 1 "$status" || return 1
+    assert_status unknown_deploy_process_quarantines_without_destructive_gate 0 "$status" || return 1
     assert_contains unknown_process_reports_indeterminate_candidate \
-        "Release pruning pending: quarantined $candidate with indeterminate process state" \
+        "Quarantined release $candidate; advisory scan was indeterminate" \
         <(printf '%s\n' "$output") || return 1
     assert_file_missing unknown_process_removes_public_candidate_path "$RELEASES_DIR/$candidate" || return 1
     assert_file_exists unknown_process_preserves_quarantined_candidate \
         "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
-    assert_file_exists unknown_process_persists_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
+    assert_file_missing unknown_process_clears_completed_prune_marker "$PRUNE_NEEDED_MARKER" || return 1
 
     output="$(prune_releases 2>&1)"
     status=$?
-    assert_status repeated_unknown_process_stays_loud 1 "$status" || return 1
-    assert_contains repeated_unknown_process_reports_pending \
-        "Release pruning pending: could not resolve quarantined $candidate" \
+    assert_status repeated_unknown_process_is_advisory 0 "$status" || return 1
+    assert_contains repeated_unknown_process_reports_indeterminate \
+        "Release quarantine report: advisory scan was indeterminate for $candidate" \
         <(printf '%s\n' "$output") || return 1
 
     printf 'Name:\tunknown\nState:\tZ (zombie)\nPPid:\t1\n' > "$fake_proc/$unknown_pid/status"
     prune_releases >/dev/null 2>&1
-    assert_status zombie_no_longer_blocks_promotion 0 "$?" || return 1
-    assert_file_exists promoted_quarantine_survives_clean_cycle \
+    assert_status zombie_is_reported_as_no_matching_consumer 0 "$?" || return 1
+    assert_file_exists terminal_quarantine_survives_clean_cycle \
         "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
     prune_releases >/dev/null 2>&1
-    assert_status later_cycle_deletes_promoted_quarantine 0 "$?" || return 1
-    assert_file_missing promoted_quarantine_deleted "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    assert_status later_cycle_remains_advisory 0 "$?" || return 1
+    assert_file_exists terminal_quarantine_survives_later_cycle "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
     assert_file_missing completed_backlog_clears_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
 )
 
@@ -618,20 +618,12 @@ case_process_state_classification_ignores_terminal_processes() (
     load_deploy "$root"
     release="$RELEASES_DIR/abababababababababababababababababababab"
     fake_proc="$root/proc"
-    mkdir -p "$release" "$fake_proc/70001" "$fake_proc/70002" "$fake_proc/70003"
+    mkdir -p "$release" "$fake_proc/70001" "$fake_proc/70003"
     PROC_ROOT="$fake_proc"
-
-    process_uses_release_tree 79999 "$release"
-    assert_status nonexistent_process_is_not_indeterminate 1 "$?" || return 1
 
     printf 'Name:\tzombie\nState:\tZ (zombie)\nPPid:\t1\n' > "$fake_proc/70001/status"
     process_uses_release_tree 70001 "$release"
     assert_status zombie_process_is_not_indeterminate 1 "$?" || return 1
-
-    ln -s "$root/unrelated-runtime (deleted)" "$fake_proc/70002/cwd"
-    printf 'Name:\tdeleted\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/70002/status"
-    process_uses_release_tree 70002 "$release"
-    assert_status deleted_unrelated_cwd_is_not_indeterminate 1 "$?" || return 1
 
     ln -s "$root/unreadable-live-runtime" "$fake_proc/70003/cwd"
     printf 'Name:\tlive\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/70003/status"
@@ -645,6 +637,87 @@ case_process_state_classification_ignores_terminal_processes() (
     status=$?
     unset -f readlink
     assert_status unreadable_live_process_remains_indeterminate 2 "$status" || return 1
+)
+
+case_vanished_process_short_circuits_status_fallback() (
+    local root="$SANDBOX/process-vanished" release fake_proc status pid=79999
+    load_deploy "$root"
+    release="$RELEASES_DIR/abababababababababababababababababababab"
+    fake_proc="$root/proc"
+    mkdir -p "$release" "$fake_proc"
+    PROC_ROOT="$fake_proc"
+    readlink() {
+        if [ "${1:-}" = "$fake_proc/$pid/cwd" ]; then
+            return 1
+        fi
+        command readlink "$@"
+    }
+    sed() {
+        if [ "${3:-}" = "$fake_proc/$pid/status" ]; then
+            printf 'S\n'
+            return 0
+        fi
+        command sed "$@"
+    }
+
+    process_uses_release_tree "$pid" "$release"
+    status=$?
+    assert_status vanished_process_is_irrelevant_before_status_fallback 1 "$status" || return 1
+)
+
+case_existing_deleted_suffix_directory_is_detected() (
+    local root="$SANDBOX/process-existing-deleted-suffix" release fake_proc pid=70004
+    load_deploy "$root"
+    release="$RELEASES_DIR/abababababababababababababababababababab"
+    fake_proc="$root/proc"
+    mkdir -p "$release/live (deleted)" "$fake_proc/$pid"
+    PROC_ROOT="$fake_proc"
+    ln -s "$release/live (deleted)" "$fake_proc/$pid/cwd"
+
+    process_uses_release_tree "$pid" "$release"
+    assert_status existing_deleted_suffix_directory_is_in_use 0 "$?" || return 1
+)
+
+case_deleted_candidate_cwd_is_indeterminate() (
+    local root="$SANDBOX/process-deleted-candidate" release fake_proc status pid=70005
+    load_deploy "$root"
+    release="$RELEASES_DIR/abababababababababababababababababababab"
+    fake_proc="$root/proc"
+    mkdir -p "$release" "$fake_proc/$pid"
+    PROC_ROOT="$fake_proc"
+    ln -s "$release/removed-child (deleted)" "$fake_proc/$pid/cwd"
+    printf 'Name:\tdeleted-inside\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/$pid/status"
+    readlink() {
+        if [ "${1:-}" = "-f" ] && [ "${2:-}" = "$fake_proc/$pid/cwd" ]; then
+            return 1
+        fi
+        command readlink "$@"
+    }
+
+    process_uses_release_tree "$pid" "$release"
+    status=$?
+    assert_status deleted_candidate_cwd_is_not_reported_irrelevant 2 "$status" || return 1
+)
+
+case_deleted_unrelated_cwd_requires_outside_proof() (
+    local root="$SANDBOX/process-deleted-unrelated" release fake_proc status pid=70006
+    load_deploy "$root"
+    release="$RELEASES_DIR/abababababababababababababababababababab"
+    fake_proc="$root/proc"
+    mkdir -p "$release" "$fake_proc/$pid"
+    PROC_ROOT="$fake_proc"
+    ln -s "$root/unrelated-runtime (deleted)" "$fake_proc/$pid/cwd"
+    printf 'Name:\tdeleted-outside\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/$pid/status"
+    readlink() {
+        if [ "${1:-}" = "-f" ] && [ "${2:-}" = "$fake_proc/$pid/cwd" ]; then
+            return 1
+        fi
+        command readlink "$@"
+    }
+
+    process_uses_release_tree "$pid" "$release"
+    status=$?
+    assert_status deleted_unrelated_cwd_is_irrelevant_after_outside_proof 1 "$status" || return 1
 )
 
 case_cgroup_only_consumer_is_quarantined() (
@@ -665,8 +738,8 @@ case_cgroup_only_consumer_is_quarantined() (
 
     output="$(prune_releases 2>&1)"
     status=$?
-    assert_status cgroup_only_consumer_keeps_backlog_loud 1 "$status" || return 1
-    assert_contains cgroup_only_consumer_reported 'because a process still uses it' \
+    assert_status cgroup_only_consumer_is_advisory 0 "$status" || return 1
+    assert_contains cgroup_only_consumer_reported 'advisory scan observed a matching consumer' \
         <(printf '%s\n' "$output") || return 1
     assert_file_exists cgroup_only_consumer_runtime_quarantined \
         "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
@@ -689,15 +762,15 @@ case_same_uid_different_unit_consumer_is_quarantined() (
 
     output="$(prune_releases 2>&1)"
     status=$?
-    assert_status same_uid_other_unit_keeps_backlog_loud 1 "$status" || return 1
-    assert_contains same_uid_other_unit_consumer_reported 'because a process still uses it' \
+    assert_status same_uid_other_unit_is_advisory 0 "$status" || return 1
+    assert_contains same_uid_other_unit_consumer_reported 'advisory scan observed a matching consumer' \
         <(printf '%s\n' "$output") || return 1
     assert_file_exists same_uid_other_unit_runtime_quarantined \
         "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
 )
 
 case_different_uid_consumer_survives_quarantine() (
-    local root="$SANDBOX/prune-different-uid" deployed rollback candidate consumer_pid other_uid status
+    local root="$SANDBOX/prune-different-uid" deployed rollback candidate consumer_pid other_uid status cycle
     deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     rollback=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     candidate=cccccccccccccccccccccccccccccccccccccccc
@@ -720,14 +793,44 @@ case_different_uid_consumer_survives_quarantine() (
         command stat "$@"
     }
 
-    prune_releases >/dev/null 2>&1
-    status=$?
-    assert_status different_uid_scan_does_not_block_atomic_quarantine 0 "$status" || return 1
+    for cycle in 1 2 3 4; do
+        prune_releases >/dev/null 2>&1
+        status=$?
+        assert_status "different_uid_cycle_${cycle}_is_advisory" 0 "$status" || return 1
+        assert_file_exists "different_uid_cycle_${cycle}_keeps_terminal_quarantine" \
+            "$RELEASE_QUARANTINE_DIR/$candidate/live-sentinel" || return 1
+    done
     assert_file_missing different_uid_consumer_loses_old_path "$RELEASES_DIR/$candidate" || return 1
-    assert_file_exists different_uid_consumer_runtime_survives_in_quarantine \
-        "$RELEASE_QUARANTINE_DIR/$candidate/live-sentinel" || return 1
-    assert_file_exists different_uid_quarantine_waits_for_later_cycle \
+    assert_file_missing different_uid_never_creates_eligibility_marker \
         "$RELEASE_QUARANTINE_DIR/$candidate/.prune-eligible" || return 1
+)
+
+case_cross_device_quarantine_move_fails_closed() (
+    local root="$SANDBOX/prune-cross-device" deployed rollback candidate quarantine_root output status
+    deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    rollback=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    candidate=cccccccccccccccccccccccccccccccccccccccc
+    setup_prune_fixture "$root" "$deployed" "$rollback" "$candidate" \
+        dddddddddddddddddddddddddddddddddddddddd \
+        eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+        ffffffffffffffffffffffffffffffffffffffff
+    quarantine_root="$(mktemp -d /dev/shm/connex-staging-quarantine.XXXXXX)" || return 1
+    trap 'rm -rf "$quarantine_root"' EXIT
+    RELEASE_QUARANTINE_DIR="$quarantine_root/release-quarantine"
+    mkdir -p "$RELEASE_QUARANTINE_DIR"
+    if [ "$(stat -c '%d' "$RELEASES_DIR")" = "$(stat -c '%d' "$RELEASE_QUARANTINE_DIR")" ]; then
+        printf 'cross-device fixture unexpectedly shares a device\n'
+        return 1
+    fi
+
+    output="$(prune_releases 2>&1)"
+    status=$?
+    assert_status cross_device_quarantine_refused 1 "$status" || return 1
+    assert_contains cross_device_quarantine_failure_is_loud \
+        "Release pruning refused: could not quarantine $candidate" \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_exists cross_device_candidate_remains_public "$RELEASES_DIR/$candidate/live-sentinel" || return 1
+    assert_file_missing cross_device_destination_was_not_copied "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
 )
 
 case_process_appearing_after_scan_survives_quarantine() (
@@ -786,19 +889,44 @@ case_no_change_run_retries_prune_backlog() (
     git() { [ "$1" = "cat-file" ] && [ "$2" = "-e" ]; }
     verify_no_change_release() { return 0; }
     prune_releases() { printf 'retried\n' > "$retry_log"; return 1; }
-    deploy_failure_alert() { printf 'ALERT prune backlog\n' >&2; }
 
-    CONNEX_DEPLOY_TARGET="$deployed" \
-        CONNEX_DEPLOY_LOCK_HELD=1 \
-        main > "$main_log" 2>&1
+    (
+        CONNEX_DEPLOY_TARGET="$deployed" \
+            CONNEX_DEPLOY_LOCK_HELD=1 \
+            main
+    ) > "$main_log" 2>&1
     status=$?
-    trap - EXIT INT TERM
     assert_status no_change_prune_failure_stays_nonzero 1 "$status" || return 1
     assert_file_exists no_change_path_retries_prune "$retry_log" || return 1
-    assert_equals no_change_prune_failure_remains_alertable 1 "$FAILURE_ACTIVE" || return 1
-    deploy_failure_alert >> "$main_log" 2>&1
-    assert_contains no_change_prune_failure_realerts 'ALERT prune backlog' \
+    assert_contains no_change_run_reports_quarantine_occupancy \
+        'Release quarantine occupancy: 0 entries; alert threshold is more than 8' \
         "$main_log" || return 1
+    assert_contains no_change_prune_failure_realerts_from_exit_trap \
+        'ALERT status=failure gate=recovery component=release' \
+        "$main_log" || return 1
+)
+
+case_quarantine_occupancy_alerts_above_threshold() (
+    local root="$SANDBOX/quarantine-occupancy" sha output
+    load_deploy "$root"
+    for sha in 1 2 3 4 5 6 7 8; do
+        mkdir -p "$RELEASE_QUARANTINE_DIR/$(printf '%040d' "$sha")"
+    done
+    output="$(report_quarantine_occupancy 2>&1)"
+    assert_contains quarantine_threshold_is_reported \
+        'Release quarantine occupancy: 8 entries; alert threshold is more than 8' \
+        <(printf '%s\n' "$output") || return 1
+    assert_absent quarantine_at_threshold_does_not_alert 'ALERT status=warning' \
+        <(printf '%s\n' "$output") || return 1
+
+    mkdir -p "$RELEASE_QUARANTINE_DIR/$(printf '%040d' 9)"
+    output="$(report_quarantine_occupancy 2>&1)"
+    assert_contains quarantine_over_threshold_reports_count \
+        'Release quarantine occupancy: 9 entries; alert threshold is more than 8' \
+        <(printf '%s\n' "$output") || return 1
+    assert_contains quarantine_over_threshold_alerts \
+        'ALERT status=warning gate=recovery component=release quarantine_entries=9 threshold=8' \
+        <(printf '%s\n' "$output") || return 1
 )
 
 case_isolated_frontend_build_preserves_working_directory() (
@@ -1622,36 +1750,52 @@ case_each_smoke_gate_fails_closed() (
     done
 )
 
-case_backend_live_transaction_recovers_and_commits() (
-    local root="$SANDBOX/recovery" previous target
+case_live_transaction_recovers_commits_and_prunes() (
+    local root previous target phase prune_log
     previous=9999999999999999999999999999999999999999
     target=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    load_deploy "$root"
-    make_bundle "$root" "$previous" rebuilt-from-marker-commit
-    make_bundle "$root" "$target"
-    cp "$RELEASES_DIR/$previous/backend.jar" "$LIVE_JAR"
-    printf '%s\n' "$previous" > "$MARKER"
-    printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
-    DEPLOY_PREVIOUS="$previous"
-    DEPLOY_TARGET="$target"
-    DEPLOY_RETAINED="$previous"
-    write_transaction backend_live || return 1
-    served_git_sha() { printf '%s\n' "$target"; }
-    validate_smoke_login_file() { return 0; }
-    systemctl() { systemctl_active_stub "$@"; }
-    sudo() { return 0; }
-    ensure_frontend_launcher() { [ "$1" = "$target" ]; }
-    wait_for_backend_sha() { [ "$1" = "$target" ]; }
-    verify_backend_stability() { [ "$1" = "$target" ]; }
-    activate_frontend() { write_sha_marker "$FRONTEND_RELEASE_MARKER" "$1"; }
-    post_deploy_smoke() { return 0; }
-    recover_transaction
-    assert_status recovered 0 "$?" || return 1
-    assert_equals committed_marker "$target" "$(read_sha_file "$MARKER")" || return 1
-    assert_equals rollback_marker "$previous" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
-    assert_equals frontend_marker "$target" "$(read_sha_file "$FRONTEND_RELEASE_MARKER")" || return 1
-    assert_equals target_backend_reinstalled "$target" "$(jar_git_sha "$LIVE_JAR")" || return 1
-    assert_file_missing transaction_removed "$TRANSACTION_FILE" || return 1
+    for phase in backend_live frontend_live; do
+        root="$SANDBOX/recovery-$phase"
+        prune_log="$root/prune.log"
+        load_deploy "$root"
+        make_bundle "$root" "$previous" rebuilt-from-marker-commit
+        make_bundle "$root" "$target"
+        cp "$RELEASES_DIR/$previous/backend.jar" "$LIVE_JAR"
+        printf '%s\n' "$previous" > "$MARKER"
+        printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
+        DEPLOY_PREVIOUS="$previous"
+        DEPLOY_TARGET="$target"
+        DEPLOY_RETAINED="$previous"
+        write_transaction "$phase" || return 1
+        served_git_sha() { printf '%s\n' "$target"; }
+        validate_smoke_login_file() { return 0; }
+        systemctl() { systemctl_active_stub "$@"; }
+        sudo() { return 0; }
+        ensure_frontend_launcher() { [ "$1" = "$target" ]; }
+        wait_for_backend_sha() { [ "$1" = "$target" ]; }
+        verify_backend_stability() { [ "$1" = "$target" ]; }
+        activate_frontend() { write_sha_marker "$FRONTEND_RELEASE_MARKER" "$1"; }
+        post_deploy_smoke() { return 0; }
+        ensure_prune_needed() {
+            printf 'ensure\n' >> "$prune_log"
+            printf 'pending\n' > "$PRUNE_NEEDED_MARKER"
+        }
+        prune_releases() {
+            [ ! -e "$TRANSACTION_FILE" ] || return 1
+            prune_needed_state_valid || return 1
+            printf 'prune\n' >> "$prune_log"
+            rm -f "$PRUNE_NEEDED_MARKER"
+        }
+
+        recover_transaction
+        assert_status "${phase}_recovered" 0 "$?" || return 1
+        assert_equals "${phase}_committed_marker" "$target" "$(read_sha_file "$MARKER")" || return 1
+        assert_equals "${phase}_rollback_marker" "$previous" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+        assert_equals "${phase}_frontend_marker" "$target" "$(read_sha_file "$FRONTEND_RELEASE_MARKER")" || return 1
+        assert_equals "${phase}_target_backend_reinstalled" "$target" "$(jar_git_sha "$LIVE_JAR")" || return 1
+        assert_file_missing "${phase}_transaction_removed" "$TRANSACTION_FILE" || return 1
+        assert_equals "${phase}_prune_sequence" $'ensure\nprune' "$(sed -n '1,2p' "$prune_log")" || return 1
+    done
 )
 
 case_recovery_commit_failure_rolls_back_and_restores_markers() (
@@ -1816,13 +1960,19 @@ run_case case_complete_pair_integrity_and_tamper_refusal
 run_case case_no_change_requires_valid_retained_pair
 run_case case_prune_aborts_when_protected_marker_read_fails
 run_case case_consecutive_prunes_preserve_recorded_serving_release
-run_case case_prune_refuses_unknown_deploy_process_state
+run_case case_prune_reports_unknown_deploy_process_state
 run_case case_process_state_classification_ignores_terminal_processes
+run_case case_vanished_process_short_circuits_status_fallback
+run_case case_existing_deleted_suffix_directory_is_detected
+run_case case_deleted_candidate_cwd_is_indeterminate
+run_case case_deleted_unrelated_cwd_requires_outside_proof
 run_case case_cgroup_only_consumer_is_quarantined
 run_case case_same_uid_different_unit_consumer_is_quarantined
 run_case case_different_uid_consumer_survives_quarantine
+run_case case_cross_device_quarantine_move_fails_closed
 run_case case_process_appearing_after_scan_survives_quarantine
 run_case case_no_change_run_retries_prune_backlog
+run_case case_quarantine_occupancy_alerts_above_threshold
 run_case case_isolated_frontend_build_preserves_working_directory
 run_case case_first_transactional_run_preserves_live_legacy_trees
 run_case case_backend_activation_never_skips_target
@@ -1843,7 +1993,7 @@ run_case case_failed_authenticated_route_logs_out_on_exit
 run_case case_failed_smoke_cleanup_scrubs_and_does_not_block_rollback
 run_case case_incomplete_capabilities_fail_closed
 run_case case_each_smoke_gate_fails_closed
-run_case case_backend_live_transaction_recovers_and_commits
+run_case case_live_transaction_recovers_commits_and_prunes
 run_case case_recovery_commit_failure_rolls_back_and_restores_markers
 run_case case_frontend_stopped_transaction_rolls_back
 run_case case_alert_is_actionable_and_secret_free
