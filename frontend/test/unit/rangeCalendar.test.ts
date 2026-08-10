@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    DAY_GRID_CELLS,
+    WEEK_STARTS_ON,
     YEAR_PAGE_SIZE,
     bandCaps,
     endOfMonth,
@@ -14,6 +16,7 @@ import {
     spanPeriods,
     startOfYear,
     sumSeries,
+    visibleSpan,
     withinSpanLimit,
     yearCellsForPage,
     yearPageStart,
@@ -293,5 +296,41 @@ describe("sumSeries", () => {
         ]);
         expect(sumSeries(dst, { from: "2026-03-07", to: "2026-03-09" })).toBe(3);
         expect(sumSeries(dst, { from: "2026-10-31", to: "2026-11-02" })).toBe(2);
+    });
+});
+
+describe("visibleSpan", () => {
+    it("covers both six-week day grids of a two-panel view", () => {
+        expect(visibleSpan("day", parseDayKey("2026-08-01")!, 2)).toEqual({
+            from: "2026-07-26",
+            to: "2026-10-10",
+        });
+    });
+
+    it("covers a single grid when only one panel is shown", () => {
+        expect(visibleSpan("day", parseDayKey("2026-08-01")!, 1)).toEqual({
+            from: "2026-07-26",
+            to: "2026-09-05",
+        });
+    });
+
+    it("starts on the configured first day of the week", () => {
+        const span = visibleSpan("day", parseDayKey("2026-08-01")!, 1);
+        expect(parseDayKey(span.from)!.getDay()).toBe(WEEK_STARTS_ON);
+        expect(rangeDays(span)).toBe(DAY_GRID_CELLS);
+    });
+
+    it("covers the whole year at month zoom", () => {
+        expect(visibleSpan("month", parseDayKey("2026-08-01")!, 2)).toEqual({
+            from: "2026-01-01",
+            to: "2026-12-31",
+        });
+    });
+
+    it("covers the whole page at year zoom", () => {
+        expect(visibleSpan("year", parseDayKey("2026-08-01")!, 2)).toEqual({
+            from: "2016-01-01",
+            to: "2027-12-31",
+        });
     });
 });

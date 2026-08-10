@@ -19,8 +19,11 @@ import {
     periodRange,
     spanPeriods,
     withinSpanLimit,
+    visibleSpan,
     yearCellsForPage,
     yearPageStart,
+    DAY_GRID_CELLS,
+    WEEK_STARTS_ON,
     type CalendarZoom,
     type DateRange,
     type DaySeries,
@@ -72,8 +75,6 @@ interface Draft {
 
 const DAY_COLUMNS = 7;
 const PERIOD_COLUMNS = 4;
-const DAY_CELLS = 42;
-const WEEK_STARTS_ON = 0;
 const EMPTY_SERIES: DaySeries = new Map();
 
 const STILL: ViewMotion = { offset: 0, scaleIn: 1, scaleOut: 1, blur: 0, duration: 0.16 };
@@ -97,7 +98,7 @@ const viewVariants = {
 /** The 42 cells of a fixed six-week month grid, so panel height never changes between months. */
 function dayCells(monthStart: Date): Date[] {
     const start = startOfWeek(monthStart, WEEK_STARTS_ON);
-    return Array.from({ length: DAY_CELLS }, (_, index) => addDays(start, index));
+    return Array.from({ length: DAY_GRID_CELLS }, (_, index) => addDays(start, index));
 }
 
 function cellValueAt(x: number, y: number): string | null {
@@ -170,6 +171,128 @@ function Sparkline({
     );
 }
 
+/** A panel of the grid: its caption, its year, and the cells it plots. */
+interface CalendarPanel {
+    key: string;
+    caption: string;
+    year: string;
+    cells: CellLayout[];
+}
+
+/**
+ * Builds the panels on screen and the axis they share. Depends only on where the grid is pointed
+ * and what data it was given, never on the pending selection, so sweeping out a range re-tints
+ * cells without rebuilding the layout or re-aggregating the series.
+ */
+function useCalendarLayout({
+    zoom,
+    anchorMonth,
+    panelCount,
+    locale,
+    series,
+    today,
+}: {
+    zoom: CalendarZoom;
+    anchorMonth: Date;
+    panelCount: number;
+    locale: string;
+    series: DaySeries;
+    today?: string;
+}): { panels: CalendarPanel[]; peak: number; weekdays: { short: string; full: string }[] } {
+    const formatters = useMemo(() => ({
+        weekday: new Intl.DateTimeFormat(locale, { weekday: 'narrow' }),
+        weekdayFull: new Intl.DateTimeFormat(locale, { weekday: 'long' }),
+        month: new Intl.DateTimeFormat(locale, { month: 'long' }),
+        monthShort: new Intl.DateTimeFormat(locale, { month: 'short' }),
+        monthLong: new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long' }),
+        year: new Intl.DateTimeFormat(locale, { year: 'numeric' }),
+        day: new Intl.DateTimeFormat(locale, { day: 'numeric' }),
+        full: new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', day: 'numeric' }),
+    }), [locale]);
+
+    const panels = useMemo(() => {
+        const build = (
+            cellZoom: CalendarZoom,
+            date: Date,
+            label: string,
+            description: string,
+            muted: boolean,
+        ): CellLayout => {
+            const period = periodRange(cellZoom, date);
+            return {
+                value: period.from,
+                label,
+                description,
+                bars: cellSeries(cellZoom, date, series),
+                muted,
+                today: today != null && today >= period.from && today <= period.to,
+                date,
+            };
+        };
+        if (zoom === 'day') {
+            return Array.from({ length: panelCount }, (_, index) => {
+                const monthStart = addMonths(anchorMonth, index);
+                return {
+                    key: dayKeyOf(monthStart),
+                    caption: formatters.month.format(monthStart),
+                    year: formatters.year.format(monthStart),
+                    cells: dayCells(monthStart).map((date) =>
+                        build(
+                            'day',
+                            date,
+                            formatters.day.format(date),
+                            formatters.full.format(date),
+                            date.getMonth() !== monthStart.getMonth(),
+                        ),
+                    ),
+                };
+            });
+        }
+        if (zoom === 'month') {
+            return [{
+                key: `m${anchorMonth.getFullYear()}`,
+                caption: '',
+                year: formatters.year.format(anchorMonth),
+                cells: monthCellsForYear(anchorMonth).map((date) =>
+                    build('month', date, formatters.monthShort.format(date), formatters.monthLong.format(date), false),
+                ),
+            }];
+        }
+        const pageStart = yearPageStart(anchorMonth);
+        return [{
+            key: `y${pageStart.getFullYear()}`,
+            caption: '',
+            year: `${pageStart.getFullYear()} - ${pageStart.getFullYear() + YEAR_PAGE_SIZE - 1}`,
+            cells: yearCellsForPage(anchorMonth).map((date) =>
+                build('year', date, formatters.year.format(date), formatters.year.format(date), false),
+            ),
+        }];
+    }, [anchorMonth, formatters, panelCount, series, today, zoom]);
+
+    const peak = useMemo(
+        () =>
+            panels.reduce(
+                (max, panel) =>
+                    panel.cells.reduce(
+                        (cellMax, cell) => cell.bars.reduce((barMax, bar) => Math.max(barMax, bar), cellMax),
+                        max,
+                    ),
+                0,
+            ),
+        [panels],
+    );
+
+    const weekdays = useMemo(() => {
+        const base = startOfWeek(new Date(2026, 0, 4), WEEK_STARTS_ON);
+        return Array.from({ length: DAY_COLUMNS }, (_, index) => {
+            const date = addDays(base, index);
+            return { short: formatters.weekday.format(date), full: formatters.weekdayFull.format(date) };
+        });
+    }, [formatters]);
+
+    return { panels, peak, weekdays };
+}
+
 /**
  * A range calendar that reads at three magnifications and plots the caller's daily series at each
  * one: a day cell carries its own bar, a month cell one bar per day, a year cell one bar per
@@ -238,88 +361,14 @@ export function RangeCalendar({
     const preview = useMemo(() => rangeOf(draft), [draft, rangeOf]);
     const spanAnchor = useMemo(() => (draft ? parseDayKey(draft.anchor) : null), [draft]);
 
-    const formatters = useMemo(() => ({
-        weekday: new Intl.DateTimeFormat(locale, { weekday: 'narrow' }),
-        weekdayFull: new Intl.DateTimeFormat(locale, { weekday: 'long' }),
-        month: new Intl.DateTimeFormat(locale, { month: 'long' }),
-        monthShort: new Intl.DateTimeFormat(locale, { month: 'short' }),
-        monthLong: new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long' }),
-        year: new Intl.DateTimeFormat(locale, { year: 'numeric' }),
-        day: new Intl.DateTimeFormat(locale, { day: 'numeric' }),
-        full: new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', day: 'numeric' }),
-    }), [locale]);
-
-    const layout = useMemo(() => {
-        const build = (
-            cellZoom: CalendarZoom,
-            date: Date,
-            label: string,
-            description: string,
-            muted: boolean,
-        ): CellLayout => {
-            const period = periodRange(cellZoom, date);
-            return {
-                value: period.from,
-                label,
-                description,
-                bars: cellSeries(cellZoom, date, series),
-                muted,
-                today: today != null && today >= period.from && today <= period.to,
-                date,
-            };
-        };
-        if (zoom === 'day') {
-            return Array.from({ length: panelCount }, (_, index) => {
-                const monthStart = addMonths(anchorMonth, index);
-                return {
-                    key: dayKeyOf(monthStart),
-                    caption: formatters.month.format(monthStart),
-                    year: formatters.year.format(monthStart),
-                    cells: dayCells(monthStart).map((date) =>
-                        build(
-                            'day',
-                            date,
-                            formatters.day.format(date),
-                            formatters.full.format(date),
-                            date.getMonth() !== monthStart.getMonth(),
-                        ),
-                    ),
-                };
-            });
-        }
-        if (zoom === 'month') {
-            return [{
-                key: `m${anchorMonth.getFullYear()}`,
-                caption: '',
-                year: formatters.year.format(anchorMonth),
-                cells: monthCellsForYear(anchorMonth).map((date) =>
-                    build('month', date, formatters.monthShort.format(date), formatters.monthLong.format(date), false),
-                ),
-            }];
-        }
-        const pageStart = yearPageStart(anchorMonth);
-        return [{
-            key: `y${pageStart.getFullYear()}`,
-            caption: '',
-            year: `${pageStart.getFullYear()} - ${pageStart.getFullYear() + YEAR_PAGE_SIZE - 1}`,
-            cells: yearCellsForPage(anchorMonth).map((date) =>
-                build('year', date, formatters.year.format(date), formatters.year.format(date), false),
-            ),
-        }];
-    }, [anchorMonth, formatters, panelCount, series, today, zoom]);
-
-    const peak = useMemo(
-        () =>
-            layout.reduce(
-                (max, panel) =>
-                    panel.cells.reduce(
-                        (cellMax, cell) => cell.bars.reduce((barMax, bar) => Math.max(barMax, bar), cellMax),
-                        max,
-                    ),
-                0,
-            ),
-        [layout],
-    );
+    const { panels: layout, peak, weekdays } = useCalendarLayout({
+        zoom,
+        anchorMonth,
+        panelCount,
+        locale,
+        series,
+        today,
+    });
 
     const panels = useMemo(
         () =>
@@ -344,32 +393,18 @@ export function RangeCalendar({
 
     const columns = zoom === 'day' ? DAY_COLUMNS : PERIOD_COLUMNS;
     const viewKey = `${zoom}:${panels.map((panel) => panel.key).join('|')}`;
-    const selectableCells = panels.flatMap((panel) => panel.cells).filter((cell) => !cell.muted);
-    const tabValue = selectableCells.some((cell) => cell.value === focusValue)
-        ? focusValue
-        : (selectableCells[0]?.value ?? focusValue);
-
-    const visibleFrom = layout[0]?.cells[0]?.value;
-    const visibleTo = useMemo(() => {
-        const last = layout.at(-1)?.cells.at(-1);
-        return last ? periodRange(zoom, last.date).to : undefined;
-    }, [layout, zoom]);
-
-    const visibleRangeRef = useRef(onVisibleRangeChange);
-    useEffect(() => {
-        visibleRangeRef.current = onVisibleRangeChange;
-    });
-    useEffect(() => {
-        if (visibleFrom && visibleTo) visibleRangeRef.current?.({ from: visibleFrom, to: visibleTo });
-    }, [visibleFrom, visibleTo]);
-
-    const weekdays = useMemo(() => {
-        const base = startOfWeek(new Date(2026, 0, 4), WEEK_STARTS_ON);
-        return Array.from({ length: DAY_COLUMNS }, (_, index) => {
-            const date = addDays(base, index);
-            return { short: formatters.weekday.format(date), full: formatters.weekdayFull.format(date) };
-        });
-    }, [formatters]);
+    const tabValue = useMemo(() => {
+        let fallback: string | null = null;
+        let focusOnScreen = false;
+        for (const panel of panels) {
+            for (const cell of panel.cells) {
+                if (cell.muted) continue;
+                if (fallback === null) fallback = cell.value;
+                if (cell.value === focusValue) focusOnScreen = true;
+            }
+        }
+        return focusOnScreen ? focusValue : (fallback ?? focusValue);
+    }, [focusValue, panels]);
 
     const pageBy = useCallback(
         (delta: number, current: Date): Date => {
@@ -380,6 +415,15 @@ export function RangeCalendar({
         [zoom],
     );
 
+    const applyView = useCallback(
+        (nextZoom: CalendarZoom, nextAnchor: Date) => {
+            setZoom(nextZoom);
+            setAnchorMonth(nextAnchor);
+            onVisibleRangeChange?.(visibleSpan(nextZoom, nextAnchor, panelCount));
+        },
+        [onVisibleRangeChange, panelCount],
+    );
+
     const step = useCallback(
         (delta: number, silent: boolean) => {
             setNav(
@@ -387,13 +431,13 @@ export function RangeCalendar({
                     ? STILL
                     : { offset: delta * 20, scaleIn: 1, scaleOut: 1, blur: 3, duration: 0.2 },
             );
-            setAnchorMonth((current) => pageBy(delta, current));
+            applyView(zoom, pageBy(delta, anchorMonth));
         },
-        [pageBy, reduce],
+        [anchorMonth, applyView, pageBy, reduce, zoom],
     );
 
     const changeZoom = useCallback(
-        (next: CalendarZoom, outward: boolean) => {
+        (next: CalendarZoom, anchor: Date, outward: boolean) => {
             setNav(
                 reduce
                     ? STILL
@@ -405,10 +449,10 @@ export function RangeCalendar({
                         duration: 0.28,
                     },
             );
-            setZoom(next);
             setDraft(null);
+            applyView(next, anchor);
         },
-        [reduce],
+        [applyView, reduce],
     );
 
     const commit = useCallback(
@@ -416,13 +460,10 @@ export function RangeCalendar({
             setDraft(null);
             onChange(range);
             setFocusValue(range.from);
-            if (zoom !== 'day') {
-                const start = parseDayKey(range.from);
-                if (start) setAnchorMonth(startOfMonth(start));
-                changeZoom('day', false);
-            }
+            if (zoom === 'day') return;
+            changeZoom('day', startOfMonth(parseDayKey(range.from) ?? anchorMonth), false);
         },
-        [changeZoom, onChange, zoom],
+        [anchorMonth, changeZoom, onChange, zoom],
     );
 
     const activate = useCallback(
@@ -521,7 +562,7 @@ export function RangeCalendar({
         );
         if (onScreen) return;
         setNav(STILL);
-        setAnchorMonth((current) => pageBy(delta > 0 ? 1 : -1, current));
+        applyView(zoom, pageBy(delta > 0 ? 1 : -1, anchorMonth));
     };
 
     const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -624,7 +665,7 @@ export function RangeCalendar({
                                             type="button"
                                             aria-label={labels.zoomMonths}
                                             className="-mx-1 rounded-md px-1 text-[0.9375rem] font-semibold tracking-tight text-foreground transition-colors duration-150 hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:text-brand"
-                                            onClick={() => changeZoom('month', true)}
+                                            onClick={() => changeZoom('month', anchorMonth, true)}
                                         >
                                             {panel.caption}
                                         </button>
@@ -634,7 +675,7 @@ export function RangeCalendar({
                                         aria-label={labels.zoomYears}
                                         disabled={zoom === 'year'}
                                         className="-mx-1 rounded-md px-1 text-[0.9375rem] tracking-tight text-muted-foreground tabular-nums transition-colors duration-150 hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none dark:hover:text-brand"
-                                        onClick={() => changeZoom('year', true)}
+                                        onClick={() => changeZoom('year', anchorMonth, true)}
                                     >
                                         {panel.year}
                                     </button>

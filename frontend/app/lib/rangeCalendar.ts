@@ -1,4 +1,4 @@
-import { addDays, dayKeyOf, startOfDay, startOfMonth } from '@/app/lib/calendar';
+import { addDays, dayKeyOf, startOfDay, startOfMonth, startOfWeek } from '@/app/lib/calendar';
 
 /**
  * The three magnifications a range calendar can be read at. Each zoom selects at its own
@@ -14,6 +14,12 @@ export interface DateRange {
 
 /** Number of year cells on one page of the year grid. */
 export const YEAR_PAGE_SIZE = 12;
+
+/** Day of the week a calendar row starts on; 0 is Sunday. */
+export const WEEK_STARTS_ON = 0;
+
+/** Cells in a month's fixed six-week grid, so panel height never changes between months. */
+export const DAY_GRID_CELLS = 42;
 
 const DAY_MS = 86_400_000;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -123,6 +129,28 @@ export function withinSpanLimit(
 export function periodOverlaps(zoom: CalendarZoom, date: Date, range: DateRange): boolean {
     const period = periodRange(zoom, date);
     return period.from <= range.to && period.to >= range.from;
+}
+
+/**
+ * The inclusive span a calendar view covers, so a caller can load exactly the data on screen.
+ * A day view runs from the first cell of its leading six-week grid to the last cell of its
+ * trailing one; a month view covers its whole year, a year view its whole page.
+ */
+export function visibleSpan(zoom: CalendarZoom, anchor: Date, panelCount: number): DateRange {
+    if (zoom === 'year') {
+        const start = yearPageStart(anchor);
+        return {
+            from: dayKeyOf(start),
+            to: dayKeyOf(endOfYear(new Date(start.getFullYear() + YEAR_PAGE_SIZE - 1, 0, 1))),
+        };
+    }
+    if (zoom === 'month') {
+        return { from: dayKeyOf(startOfYear(anchor)), to: dayKeyOf(endOfYear(anchor)) };
+    }
+    const first = startOfWeek(startOfMonth(anchor), WEEK_STARTS_ON);
+    const lastMonth = new Date(anchor.getFullYear(), anchor.getMonth() + Math.max(1, panelCount) - 1, 1);
+    const last = addDays(startOfWeek(lastMonth, WEEK_STARTS_ON), DAY_GRID_CELLS - 1);
+    return { from: dayKeyOf(first), to: dayKeyOf(last) };
 }
 
 /** Daily magnitudes keyed by `YYYY-MM-DD`. Days with no entry count as zero. */

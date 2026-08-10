@@ -149,7 +149,10 @@ export default function CustomRangePopover({
     );
 
     const setOpenWithDraft = (next: boolean) => {
-        if (next) setDraft(value);
+        if (next) {
+            setDraft(value);
+            loadSeries(value);
+        }
         setOpen(next);
     };
 
