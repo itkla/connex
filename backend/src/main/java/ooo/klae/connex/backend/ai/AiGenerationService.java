@@ -151,7 +151,8 @@ public class AiGenerationService {
             T unavailableResult,
             Supplier<AiGenerationTaskResult<T>> task) {
         return startInternal(
-                feature, identityMaterial, requiredPermissions, unavailableResult, task, null);
+                feature, identityMaterial, requiredPermissions, unavailableResult, task, null,
+                AiGenerationTerminalListener.NO_OP);
     }
 
     /**
@@ -171,7 +172,39 @@ public class AiGenerationService {
                 requiredPermissions,
                 unavailableResult,
                 task,
-                expectedRestrictionEpoch);
+                expectedRestrictionEpoch,
+                AiGenerationTerminalListener.NO_OP);
+    }
+
+    /**
+     * Starts a restriction-fenced generation and reports its winning terminal transition to a
+     * feature-owned durable-state listener.
+     * @param feature AI feature adapter
+     * @param identityMaterial bounded normalized material used only through its SHA-256 fingerprint
+     * @param requiredPermissions permissions that must remain present for execution and disclosure
+     * @param unavailableResult graceful feature result returned when initial permissions are absent
+     * @param task feature-owned generation work
+     * @param expectedRestrictionEpoch restriction epoch captured before durable preparation
+     * @param terminalListener listener for the winning resolved, failed, or timed-out transition
+     * @param <T> feature result type
+     * @return accepted status, an existing coalesced status, or a resolved unavailable status
+     */
+    public <T> AiGenerationStatusDto startAtRestrictionEpoch(
+            AiFeature feature,
+            Object identityMaterial,
+            Set<Permission> requiredPermissions,
+            T unavailableResult,
+            Supplier<AiGenerationTaskResult<T>> task,
+            long expectedRestrictionEpoch,
+            AiGenerationTerminalListener terminalListener) {
+        return startInternal(
+                feature,
+                identityMaterial,
+                requiredPermissions,
+                unavailableResult,
+                task,
+                expectedRestrictionEpoch,
+                terminalListener);
     }
 
     private <T> AiGenerationStatusDto startInternal(
@@ -180,12 +213,15 @@ public class AiGenerationService {
             Set<Permission> requiredPermissions,
             T unavailableResult,
             Supplier<AiGenerationTaskResult<T>> task,
-            Long expectedRestrictionEpoch) {
+            Long expectedRestrictionEpoch,
+            AiGenerationTerminalListener terminalListener) {
         AiFeature requestedFeature = Objects.requireNonNull(feature, "feature");
         Set<Permission> required = Set.copyOf(
                 Objects.requireNonNull(requiredPermissions, "requiredPermissions"));
         Objects.requireNonNull(unavailableResult, "unavailableResult");
         Objects.requireNonNull(task, "task");
+        AiGenerationTerminalListener listener = Objects.requireNonNull(
+                terminalListener, "terminalListener");
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Locale locale = LocaleContextHolder.getLocale();
@@ -232,7 +268,8 @@ public class AiGenerationService {
                     restrictionEpoch,
                     now.plus(pollWindow),
                     key,
-                    maxResultBytes);
+                    maxResultBytes,
+                    listener);
             ScheduledFuture<?> timeout;
             try {
                 timeout = scheduler.schedule(
@@ -273,7 +310,7 @@ public class AiGenerationService {
                 .containsAll(state.requiredPermissions);
         boolean epochCurrent = aiRestrictionEpoch.current(workspaceId) == state.restrictionEpoch;
         if (!authorized || !epochCurrent) {
-            invalidate(state);
+            invalidate(state, authorized ? "restrictions_changed" : "access_revoked");
             throw unavailableHandle();
         }
 
@@ -288,7 +325,7 @@ public class AiGenerationService {
                 }
             }
             if (!aiFeatureGate.isAiUsable(state.feature)) {
-                invalidate(state);
+                invalidate(state, "access_revoked");
                 throw unavailableHandle();
             }
             featureValidated = true;
@@ -320,10 +357,11 @@ public class AiGenerationService {
                         () -> outcomeReference.set(Objects.requireNonNull(task.get(), "task result")));
                 AiGenerationTaskResult<T> outcome = Objects.requireNonNull(
                         outcomeReference.get(), "task result");
-                if (outcome.outcome() == AiGenerationTaskResult.Outcome.FAILED) {
-                    fail(state, outcome.reason());
-                } else {
-                    resolve(state, serializeResult(outcome.result()), outcome.sensitive());
+                switch (outcome.outcome()) {
+                    case FAILED -> fail(state, outcome.reason());
+                    case TIMED_OUT -> timeOut(state, outcome.reason());
+                    case RESOLVED -> resolve(
+                            state, serializeResult(outcome.result()), outcome.sensitive());
                 }
             });
         } catch (RuntimeException exception) {
@@ -355,6 +393,7 @@ public class AiGenerationService {
             timeout = finishLocked(state);
         }
         cancelTimer(timeout);
+        notifyTerminal(state, AiGenerationTaskResult.Outcome.RESOLVED, null);
     }
 
     private void fail(GenerationState state, String reason) {
@@ -369,22 +408,39 @@ public class AiGenerationService {
             timeout = finishLocked(state);
         }
         cancelTimer(timeout);
+        notifyTerminal(state, AiGenerationTaskResult.Outcome.FAILED, state.reason);
     }
 
     private void timeOut(GenerationState state) {
+        timeOut(state, "generation_timeout");
+    }
+
+    private void timeOut(GenerationState state, String reason) {
         Future<?> future;
         synchronized (stateLock) {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
             state.status = Status.TIMED_OUT;
-            state.reason = "generation_timeout";
+            state.reason = stableReason(reason, "generation_timeout");
             releaseResultCapacityLocked(state);
             finishLocked(state);
             future = state.future;
         }
         if (future != null) {
             future.cancel(true);
+        }
+        notifyTerminal(state, AiGenerationTaskResult.Outcome.TIMED_OUT, state.reason);
+    }
+
+    private void notifyTerminal(
+            GenerationState state,
+            AiGenerationTaskResult.Outcome outcome,
+            String reason) {
+        try {
+            state.terminalListener.onTerminal(outcome, reason);
+        } catch (RuntimeException exception) {
+            return;
         }
     }
 
@@ -397,13 +453,15 @@ public class AiGenerationService {
         return timeout;
     }
 
-    private void invalidate(GenerationState state) {
+    private void invalidate(GenerationState state, String reason) {
         Future<?> future;
         ScheduledFuture<?> timeout;
+        boolean active;
         synchronized (stateLock) {
             if (!generations.remove(state.handle, state)) {
                 return;
             }
+            active = state.isActive();
             releaseResultCapacityLocked(state);
             if (state.key != null && state.handle.equals(activeHandles.get(state.key))) {
                 activeHandles.remove(state.key);
@@ -415,6 +473,11 @@ public class AiGenerationService {
             future.cancel(true);
         }
         cancelTimer(timeout);
+        if (active) {
+            notifyTerminal(
+                    state, AiGenerationTaskResult.Outcome.FAILED,
+                    stableReason(reason, "access_revoked"));
+        }
     }
 
     private void purgeExpired() {
@@ -627,6 +690,7 @@ public class AiGenerationService {
         private final long restrictionEpoch;
         private final Instant expiresAt;
         private final GenerationKey key;
+        private final AiGenerationTerminalListener terminalListener;
         private Status status;
         private JsonNode result;
         private String reason;
@@ -645,7 +709,8 @@ public class AiGenerationService {
                 GenerationKey key,
                 Status status,
                 JsonNode result,
-                int retainedResultBytes) {
+                int retainedResultBytes,
+                AiGenerationTerminalListener terminalListener) {
             handle = UUID.randomUUID().toString();
             this.feature = feature;
             this.workspaceId = workspaceId;
@@ -654,6 +719,7 @@ public class AiGenerationService {
             this.restrictionEpoch = restrictionEpoch;
             this.expiresAt = expiresAt;
             this.key = key;
+            this.terminalListener = terminalListener;
             this.status = status;
             this.result = result;
             this.retainedResultBytes = retainedResultBytes;
@@ -667,10 +733,11 @@ public class AiGenerationService {
                 long restrictionEpoch,
                 Instant expiresAt,
                 GenerationKey key,
-                int retainedResultBytes) {
+                int retainedResultBytes,
+                AiGenerationTerminalListener terminalListener) {
             return new GenerationState(
                     feature, workspaceId, userId, requiredPermissions, restrictionEpoch,
-                    expiresAt, key, Status.ACCEPTED, null, retainedResultBytes);
+                    expiresAt, key, Status.ACCEPTED, null, retainedResultBytes, terminalListener);
         }
 
         private static GenerationState resolvedUnavailable(
@@ -683,7 +750,8 @@ public class AiGenerationService {
                 JsonNode result) {
             return new GenerationState(
                     feature, workspaceId, userId, requiredPermissions, restrictionEpoch,
-                    expiresAt, null, Status.RESOLVED, result, 0);
+                    expiresAt, null, Status.RESOLVED, result, 0,
+                    AiGenerationTerminalListener.NO_OP);
         }
 
         private boolean isActive() {

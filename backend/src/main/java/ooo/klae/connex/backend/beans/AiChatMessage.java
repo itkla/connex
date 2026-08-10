@@ -14,5 +14,8 @@ public class AiChatMessage {
     private String authorKind;
     private Integer authorUserId;
     private String content;
+    private String structuredJson;
+    private Integer inputTokens;
+    private Integer outputTokens;
     private String createdAt;
 }

@@ -25,7 +25,36 @@
     <result property="authorKind" column="author_kind"/>
     <result property="authorUserId" column="author_user_id"/>
     <result property="content" column="content"/>
+    <result property="structuredJson" column="structured_json"/>
+    <result property="inputTokens" column="input_tokens"/>
+    <result property="outputTokens" column="output_tokens"/>
     <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <resultMap id="turnResult" type="AiChatTurn">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="sessionId" column="session_id"/>
+    <result property="requestedByUserId" column="requested_by_user_id"/>
+    <result property="status" column="status"/>
+    <result property="terminalReason" column="terminal_reason"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="toolCallResult" type="AiChatToolCall">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="messageId" column="message_id"/>
+    <result property="toolName" column="tool_name"/>
+    <result property="status" column="status"/>
+    <result property="argumentsJson" column="arguments_json"/>
+    <result property="resultJson" column="result_json"/>
+    <result property="executedByUserId" column="executed_by_user_id"/>
+    <result property="executedAt" column="executed_at"/>
+    <result property="idempotencyKey" column="idempotency_key"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
   <sql id="sessionColumns">
@@ -165,13 +194,17 @@
 
   <insert id="insertMessage" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_message
-      (workspace_id, session_id, seq, author_kind, author_user_id, content)
+      (workspace_id, session_id, seq, author_kind, author_user_id, content,
+       structured_json, input_tokens, output_tokens)
     VALUES
-      (#{workspaceId}, #{sessionId}, #{seq}, #{authorKind}, #{authorUserId}, #{content})
+      (#{workspaceId}, #{sessionId}, #{seq}, #{authorKind}, #{authorUserId}, #{content},
+       #{structuredJson,jdbcType=VARCHAR}, #{inputTokens,jdbcType=INTEGER},
+       #{outputTokens,jdbcType=INTEGER})
   </insert>
 
   <select id="getMessageById" resultMap="messageResult">
-    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content, created_at
+    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
+           structured_json, input_tokens, output_tokens, created_at
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
@@ -179,12 +212,30 @@
   </select>
 
   <select id="listMessages" resultMap="messageResult">
-    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content, created_at
+    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
+           structured_json, input_tokens, output_tokens, created_at
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
     ORDER BY seq ASC
     LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="listRecentMessages" resultMap="messageResult">
+    SELECT recent.id, recent.workspace_id, recent.session_id, recent.seq,
+           recent.author_kind, recent.author_user_id, recent.content,
+           recent.structured_json, recent.input_tokens, recent.output_tokens,
+           recent.created_at
+    FROM (
+      SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
+             structured_json, input_tokens, output_tokens, created_at
+      FROM ai_chat_message
+      WHERE workspace_id = #{workspaceId}
+        AND session_id = #{sessionId}
+      ORDER BY seq DESC
+      LIMIT #{limit}
+    ) recent
+    ORDER BY recent.seq ASC
   </select>
 
   <select id="countMessages" resultType="long">
@@ -199,6 +250,109 @@
     SET last_message_at = CURRENT_TIMESTAMP(6)
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
+  </update>
+
+  <select id="countActiveTurns" resultType="int">
+    SELECT COUNT(*)
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND status IN ('queued', 'running')
+  </select>
+
+  <insert id="insertTurn" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO ai_chat_turn
+      (workspace_id, session_id, requested_by_user_id, status)
+    VALUES
+      (#{workspaceId}, #{sessionId}, #{requestedByUserId}, #{status})
+  </insert>
+
+  <select id="getTurnById" resultMap="turnResult">
+    SELECT id, workspace_id, session_id, requested_by_user_id, status,
+           terminal_reason, created_at, updated_at
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+  </select>
+
+  <select id="getTurnByIdForUpdate" resultMap="turnResult">
+    SELECT id, workspace_id, session_id, requested_by_user_id, status,
+           terminal_reason, created_at, updated_at
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="listActiveTurnsBySessionForUpdate" resultMap="turnResult">
+    SELECT id, workspace_id, session_id, requested_by_user_id, status,
+           terminal_reason, created_at, updated_at
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND status IN ('queued', 'running')
+    ORDER BY id ASC
+    FOR UPDATE
+  </select>
+
+  <update id="markTurnRunning">
+    UPDATE ai_chat_turn
+    SET status = 'running', terminal_reason = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status = 'queued'
+  </update>
+
+  <update id="updateTurnTerminal">
+    UPDATE ai_chat_turn
+    SET status = #{status}, terminal_reason = #{terminalReason,jdbcType=VARCHAR}
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+    <choose>
+      <when test="expectedStatus != null">
+        AND status = #{expectedStatus}
+      </when>
+      <otherwise>
+        AND status IN ('queued', 'running')
+      </otherwise>
+    </choose>
+    <if test="updatedBefore != null">
+      AND updated_at &lt;= #{updatedBefore}
+    </if>
+  </update>
+
+  <insert id="insertToolCall" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO ai_chat_tool_call
+      (workspace_id, message_id, tool_name, status, arguments_json, idempotency_key)
+    VALUES
+      (#{workspaceId}, #{messageId}, #{toolName}, #{status},
+       #{argumentsJson,jdbcType=VARCHAR}, #{idempotencyKey,jdbcType=VARCHAR})
+  </insert>
+
+  <select id="getToolCallById" resultMap="toolCallResult">
+    SELECT id, workspace_id, message_id, tool_name, status, arguments_json,
+           result_json, executed_by_user_id, executed_at, idempotency_key,
+           created_at, updated_at
+    FROM ai_chat_tool_call
+    WHERE workspace_id = #{workspaceId}
+      AND message_id = #{messageId}
+      AND id = #{id}
+  </select>
+
+  <update id="updateToolCall">
+    UPDATE ai_chat_tool_call
+    SET status = #{status},
+        result_json = #{resultJson,jdbcType=VARCHAR},
+        executed_by_user_id = #{executedByUserId},
+        executed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND message_id = #{messageId}
+      AND id = #{id}
+      AND status = 'proposed'
   </update>
 
 </mapper>

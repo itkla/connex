@@ -12,7 +12,8 @@ public record AiGenerationTaskResult<T>(
     /** Generation task terminal classification. */
     public enum Outcome {
         RESOLVED,
-        FAILED
+        FAILED,
+        TIMED_OUT
     }
 
     public AiGenerationTaskResult {
@@ -24,7 +25,7 @@ public record AiGenerationTaskResult<T>(
             }
         } else {
             if (result != null || reason == null || reason.isBlank()) {
-                throw new IllegalArgumentException("Failed AI generation requires only a stable reason");
+                throw new IllegalArgumentException("Unresolved AI generation requires only a stable reason");
             }
             sensitive = false;
         }
@@ -43,5 +44,10 @@ public record AiGenerationTaskResult<T>(
     /** Returns a failed generation with a stable reason. */
     public static <T> AiGenerationTaskResult<T> failed(String reason) {
         return new AiGenerationTaskResult<>(Outcome.FAILED, null, reason, false);
+    }
+
+    /** Returns a timed-out generation with a stable reason. */
+    public static <T> AiGenerationTaskResult<T> timedOut(String reason) {
+        return new AiGenerationTaskResult<>(Outcome.TIMED_OUT, null, reason, false);
     }
 }

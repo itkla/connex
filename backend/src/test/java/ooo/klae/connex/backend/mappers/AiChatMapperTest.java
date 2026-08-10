@@ -17,6 +17,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AiChatToolCall;
+import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 
@@ -115,6 +117,66 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(List.of(1, 2, 3), replay.stream().map(AiChatMessage::getSeq).toList());
         assertEquals(3, chatMapper.countMessages(workspace.getId(), session.getId()));
         assertTrue(chatMapper.listMessages(workspace.getId() + 1, session.getId(), 100, 0).isEmpty());
+    }
+
+    @Test
+    void durableTurnToolAndStructuredMessageStateRoundTripsWithinWorkspace() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Agent loop", "private");
+        AiChatMessage userMessage = message(session, owner, 1, "Investigate");
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(session.getId());
+        turn.setRequestedByUserId(owner.getId());
+        turn.setStatus("queued");
+        chatMapper.insertTurn(turn);
+        assertEquals(1, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
+        assertEquals(1, chatMapper.markTurnRunning(
+                workspace.getId(), session.getId(), turn.getId()));
+
+        AiChatToolCall toolCall = new AiChatToolCall();
+        toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setMessageId(userMessage.getId());
+        toolCall.setToolName("get_record");
+        toolCall.setStatus("proposed");
+        toolCall.setArgumentsJson("{\"handle\":\"r1\"}");
+        toolCall.setIdempotencyKey("turn-" + turn.getId() + "-step-1");
+        chatMapper.insertToolCall(toolCall);
+        assertEquals(1, chatMapper.updateToolCall(
+                workspace.getId(), userMessage.getId(), toolCall.getId(),
+                "executed", "{\"kind\":\"person\"}", owner.getId()));
+        AiChatToolCall storedTool = chatMapper.getToolCallById(
+                workspace.getId(), userMessage.getId(), toolCall.getId());
+        assertEquals("executed", storedTool.getStatus());
+        assertEquals(owner.getId(), storedTool.getExecutedByUserId());
+        assertEquals("turn-" + turn.getId() + "-step-1", storedTool.getIdempotencyKey());
+
+        AiChatMessage answer = new AiChatMessage();
+        answer.setWorkspaceId(workspace.getId());
+        answer.setSessionId(session.getId());
+        answer.setSeq(2);
+        answer.setAuthorKind("assistant");
+        answer.setContent("Resolved");
+        answer.setStructuredJson("{\"citations\":[]}");
+        answer.setInputTokens(21);
+        answer.setOutputTokens(8);
+        chatMapper.insertMessage(answer);
+        assertEquals(1, chatMapper.updateTurnTerminal(
+                workspace.getId(), session.getId(), turn.getId(),
+                "failed", "quota_exhausted", "running", null));
+
+        AiChatMessage storedAnswer = chatMapper.getMessageById(
+                workspace.getId(), session.getId(), answer.getId());
+        AiChatTurn storedTurn = chatMapper.getTurnById(
+                workspace.getId(), session.getId(), turn.getId());
+        assertEquals("{\"citations\":[]}", storedAnswer.getStructuredJson());
+        assertEquals(21, storedAnswer.getInputTokens());
+        assertEquals(8, storedAnswer.getOutputTokens());
+        assertEquals("failed", storedTurn.getStatus());
+        assertEquals("quota_exhausted", storedTurn.getTerminalReason());
+        assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
+        assertNull(chatMapper.getTurnById(
+                workspace.getId() + 1, session.getId(), turn.getId()));
     }
 
     @Test

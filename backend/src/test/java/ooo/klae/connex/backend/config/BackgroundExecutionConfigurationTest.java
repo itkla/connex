@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.scheduling.config.TaskManagementConfigUtils;
 
 import ooo.klae.connex.backend.notifications.NotificationPushListener;
+import ooo.klae.connex.backend.notifications.SimpAiChatRealtimePublisher;
 import ooo.klae.connex.backend.notifications.SimpNotificationRealtimePublisher;
 import ooo.klae.connex.backend.secrets.LegacySecretRewrapRunner;
 import ooo.klae.connex.backend.secrets.SecretStoreRewrapRunner;
@@ -52,6 +53,7 @@ class BackgroundExecutionConfigurationTest {
                 WebSocketConfig.class,
                 WebSocketSecurityConfig.class,
                 NotificationPushListener.class,
+                SimpAiChatRealtimePublisher.class,
                 SimpNotificationRealtimePublisher.class)
             .withPropertyValues("connex.maintenance.mode=legacy-upload-migration")
             .run(context -> {
@@ -59,6 +61,7 @@ class BackgroundExecutionConfigurationTest {
                 assertFalse(context.containsBean("webSocketSecurityConfig"));
                 assertFalse(context.containsBean("webSocketHeartbeatScheduler"));
                 assertFalse(context.containsBean("notificationPushListener"));
+                assertFalse(context.containsBean("simpAiChatRealtimePublisher"));
                 assertFalse(context.containsBean("simpNotificationRealtimePublisher"));
             });
     }
@@ -70,6 +73,7 @@ class BackgroundExecutionConfigurationTest {
                 LegacySecretRewrapRunner.class,
                 SecretStoreRewrapRunner.class,
                 NotificationPushListener.class,
+                SimpAiChatRealtimePublisher.class,
                 SimpNotificationRealtimePublisher.class,
                 WebSocketConfig.class,
                 WebSocketSecurityConfig.class)) {
