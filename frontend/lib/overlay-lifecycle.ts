@@ -3,8 +3,8 @@ export type OverlayLifecycleCapabilities = {
   reportsCloseCompletion: boolean
 }
 
-/** Longest supported overlay exit before retention must terminate defensively. */
-export const OVERLAY_MAX_EXIT_DURATION_MS = 200
+/** Defensive retention after the post-close frame exceeds the longest supported overlay exit. */
+export const OVERLAY_MAX_EXIT_DURATION_MS = 250
 
 export type RetainedOverlay<T> = {
   generation: number

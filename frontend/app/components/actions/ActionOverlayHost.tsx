@@ -213,13 +213,19 @@ export default function ActionOverlayHost({
         : null;
     useEffect(() => {
         if (closingGeneration === null) return;
-        const timeout = globalThis.setTimeout(() => {
-            dispatchRetention({
-                type: "retention-expired",
-                generation: closingGeneration,
-            });
-        }, OVERLAY_MAX_EXIT_DURATION_MS);
-        return () => globalThis.clearTimeout(timeout);
+        let timeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+        const frame = globalThis.requestAnimationFrame(() => {
+            timeout = globalThis.setTimeout(() => {
+                dispatchRetention({
+                    type: "retention-expired",
+                    generation: closingGeneration,
+                });
+            }, OVERLAY_MAX_EXIT_DURATION_MS);
+        });
+        return () => {
+            globalThis.cancelAnimationFrame(frame);
+            if (timeout !== null) globalThis.clearTimeout(timeout);
+        };
     }, [closingGeneration]);
     const requestInit = useMemo<RequestInit>(() => ({
         ...(rendered?.signal ? { signal: rendered.signal } : {}),

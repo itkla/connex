@@ -19,6 +19,8 @@ import {
 type CapturedProps = Record<string, unknown>;
 type DynamicModule = { default: ComponentType<CapturedProps> };
 
+const MOBILE_DRAWER_EXIT_DURATION_MS = 200;
+
 type CaptureState = {
     nextDynamicIndex: number;
     dynamicProps: Map<number, CapturedProps>;
@@ -333,6 +335,7 @@ function installMinimalDocument() {
         callback(0);
         return 1;
     }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     return {
         container: document.createElement('div'),
@@ -1118,7 +1121,7 @@ describe('Radar action integration', () => {
         await host.unmount();
     });
 
-    it('forwards real TaskDialog closure through ResponsiveDialog completion', async () => {
+    it('wires TaskDialog closure through ResponsiveDialog desktop completion', async () => {
         const taskModule = await vi.importActual<
             typeof import('@/app/components/activity/tasks/TaskDialog')
         >('@/app/components/activity/tasks/TaskDialog');
@@ -1158,6 +1161,82 @@ describe('Radar action integration', () => {
 
         expect(onCloseComplete).toHaveBeenCalledOnce();
         await act(async () => root.unmount());
+    });
+
+    it('arms the terminal fallback after a frame and retains the full mobile exit', async () => {
+        vi.useFakeTimers();
+        const host = await renderOverlayHost();
+        await host.show({ kind: 'create-task' }, 20);
+        const task = requiredProps(captures.dynamicProps.get(0), 'Task dialog');
+        await act(async () => {
+            invoke(task, 'onDraftMounted');
+        });
+        const before = captures.dynamicUnmounts.get(0) ?? 0;
+        let pendingFrame: FrameRequestCallback | null = null;
+        const cancelFrame = vi.fn();
+        vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+            pendingFrame = callback;
+            return 41;
+        }));
+        vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+
+        await host.show(null, null);
+        expect(vi.getTimerCount()).toBe(0);
+        await act(async () => {
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS + MOBILE_DRAWER_EXIT_DURATION_MS);
+        });
+        expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
+        if (pendingFrame === null) throw new Error('Terminal fallback frame was not scheduled');
+
+        await act(async () => {
+            pendingFrame?.(16);
+        });
+        expect(vi.getTimerCount()).toBe(1);
+        await act(async () => {
+            vi.advanceTimersByTime(MOBILE_DRAWER_EXIT_DURATION_MS);
+        });
+        expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
+        await act(async () => {
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS - MOBILE_DRAWER_EXIT_DURATION_MS);
+        });
+        expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before + 1);
+        expect(cancelFrame).toHaveBeenCalledWith(41);
+        await host.unmount();
+    });
+
+    it('cancels pending fallback frames on completion, replacement, and unmount', async () => {
+        vi.useFakeTimers();
+        const host = await renderOverlayHost();
+        let nextFrame = 50;
+        const cancelFrame = vi.fn();
+        vi.stubGlobal('requestAnimationFrame', vi.fn(() => nextFrame++));
+        vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+
+        await host.show({ kind: 'create-task' }, 25);
+        await act(async () => {
+            invoke(requiredProps(captures.dynamicProps.get(0), 'First task dialog'), 'onDraftMounted');
+        });
+        await host.show(null, null);
+        await host.show({ kind: 'create-task' }, 26);
+        expect(cancelFrame).toHaveBeenCalledWith(50);
+
+        await act(async () => {
+            invoke(requiredProps(captures.dynamicProps.get(0), 'Second task dialog'), 'onDraftMounted');
+        });
+        await host.show(null, null);
+        await act(async () => {
+            invoke(requiredProps(captures.dynamicProps.get(0), 'Closing second task dialog'), 'onCloseComplete');
+        });
+        expect(cancelFrame).toHaveBeenCalledWith(51);
+
+        await host.show({ kind: 'create-task' }, 27);
+        await act(async () => {
+            invoke(requiredProps(captures.dynamicProps.get(0), 'Third task dialog'), 'onDraftMounted');
+        });
+        await host.show(null, null);
+        await host.unmount();
+        expect(cancelFrame).toHaveBeenCalledWith(52);
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('expires lost task completion without releasing a replacement generation', async () => {
