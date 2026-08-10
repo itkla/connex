@@ -1,5 +1,6 @@
 "use client";
 
+import { QuestionMarkCircleIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -20,22 +21,23 @@ const TABS = [
 
 export default function OrgTabs({
     isOrgAdmin,
-    ssoEnabled = false,
+    ssoAvailability,
 }: {
     isOrgAdmin: boolean;
-    ssoEnabled?: boolean;
+    ssoAvailability: "enabled" | "disabled" | "unavailable";
 }) {
     const pathname = usePathname() ?? "";
     const t = useTranslations("Organization");
     const reduce = useReducedMotion() ?? false;
     if (!isOrgAdmin) return null;
-    const tabs = TABS.filter((tab) => tab.key !== "tabSso" || ssoEnabled);
+    const tabs = TABS.filter((tab) => tab.key !== "tabSso" || ssoAvailability !== "disabled");
 
     return (
         <nav className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label={t("title")}>
             <div className="flex w-max min-w-full gap-1 border-b border-border">
                 {tabs.map((tab) => {
                     const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+                    const availabilityUnavailable = tab.key === "tabSso" && ssoAvailability === "unavailable";
                     return (
                         <Link
                             key={tab.href}
@@ -46,7 +48,18 @@ export default function OrgTabs({
                                 active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                             )}
                         >
-                            {t(tab.key)}
+                            <span className="inline-flex items-center gap-1.5">
+                                {t(tab.key)}
+                                {availabilityUnavailable ? (
+                                    <span
+                                        className="inline-flex text-muted-foreground"
+                                        title={t("tabSsoAvailabilityUnknown")}
+                                    >
+                                        <QuestionMarkCircleIcon aria-hidden className="size-4" />
+                                        <span className="sr-only">{t("tabSsoAvailabilityUnknown")}</span>
+                                    </span>
+                                ) : null}
+                            </span>
                             {active && (
                                 <motion.span
                                     layoutId="org-tab-underline"

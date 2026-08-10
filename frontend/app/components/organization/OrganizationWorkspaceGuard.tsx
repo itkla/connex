@@ -1,7 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-
 import WorkspaceSelectionUnavailable from "@/app/components/WorkspaceSelectionUnavailable";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 
@@ -13,11 +11,10 @@ export default function OrganizationWorkspaceGuard({
     workspaceId: number;
     children?: React.ReactNode;
 }) {
-    const router = useRouter();
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, retrySelectionRecovery } = useWorkspace();
 
     if (activeWorkspaceId !== workspaceId) {
-        return <WorkspaceSelectionUnavailable onRetry={async () => router.refresh()} />;
+        return <WorkspaceSelectionUnavailable onRetry={retrySelectionRecovery} />;
     }
 
     return children;

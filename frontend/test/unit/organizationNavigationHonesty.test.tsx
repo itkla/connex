@@ -1,4 +1,5 @@
 import {
+    act,
     createElement,
     isValidElement,
     type AnchorHTMLAttributes,
@@ -8,7 +9,7 @@ import {
     type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import OrganizationLayout from "@/app/(app)/organization/layout";
 import OrgSsoPage from "@/app/(app)/organization/sso/page";
@@ -16,14 +17,28 @@ import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePag
 import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
 import OrgTabs from "@/app/components/organization/OrgTabs";
 import OrganizationWorkspaceGuard from "@/app/components/organization/OrganizationWorkspaceGuard";
+import SsoPanel from "@/app/components/settings/SsoPanel";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { MyWorkspaces, Workspace } from "@/app/lib/types";
 
-const { activeWorkspaceState, capabilityResultMock, redirectMock, workspaceResultMock } = vi.hoisted(() => ({
+const {
+    activeWorkspaceState,
+    buttonActionState,
+    capabilityResultMock,
+    redirectMock,
+    retrySelectionRecoveryMock,
+    routerRefreshMock,
+    workspaceResultMock,
+    workspaceUnavailableState,
+} = vi.hoisted(() => ({
     activeWorkspaceState: { id: 7 as number | null },
+    buttonActionState: { onClick: (): void => {} },
     capabilityResultMock: vi.fn(),
     redirectMock: vi.fn(),
+    retrySelectionRecoveryMock: vi.fn(async () => {}),
+    routerRefreshMock: vi.fn(),
     workspaceResultMock: vi.fn(),
+    workspaceUnavailableState: { onRetry: async (): Promise<void> => {} },
 }));
 
 vi.mock("next/headers", () => ({
@@ -43,7 +58,7 @@ vi.mock("next/link", async () => {
 vi.mock("next/navigation", () => ({
     redirect: redirectMock,
     usePathname: () => "/organization/members",
-    useRouter: () => ({ refresh: vi.fn() }),
+    useRouter: () => ({ refresh: routerRefreshMock }),
 }));
 
 vi.mock("next-intl", () => ({
@@ -69,19 +84,54 @@ vi.mock("motion/react", async () => {
     };
 });
 
+vi.mock("@/components/ui/button", async () => {
+    const React = await import("react");
+    type ButtonProps = PropsWithChildren<{
+        disabled?: boolean;
+        onClick?: () => void;
+    }>;
+    return {
+        Button: ({ children, disabled, onClick }: ButtonProps) => {
+            buttonActionState.onClick = onClick ?? (() => undefined);
+            const content = React.Children.toArray(children);
+            return React.createElement("button", { disabled }, content.at(-1));
+        },
+    };
+});
+
+vi.mock("@/app/components/PermissionsUnavailable", async () => {
+    const React = await import("react");
+    return {
+        default: ({ action, body, title }: { action?: ReactNode; body: string; title: string }) =>
+            React.createElement(
+                "section",
+                null,
+                React.createElement("h2", null, title),
+                React.createElement("p", null, body),
+                action,
+            ),
+    };
+});
+
 vi.mock("@/app/lib/api", () => ({
     getCapabilitiesResultFromCookie: capabilityResultMock,
     getMyWorkspacesResultFromCookie: workspaceResultMock,
 }));
 
 vi.mock("@/app/hooks/useWorkspace", () => ({
-    useWorkspace: () => ({ activeWorkspaceId: activeWorkspaceState.id }),
+    useWorkspace: () => ({
+        activeWorkspaceId: activeWorkspaceState.id,
+        retrySelectionRecovery: retrySelectionRecoveryMock,
+    }),
 }));
 
 vi.mock("@/app/components/WorkspaceSelectionUnavailable", async () => {
     const React = await import("react");
     return {
-        default: () => React.createElement("p", null, "workspace selection unavailable"),
+        default: ({ onRetry }: { onRetry: () => Promise<void> }) => {
+            workspaceUnavailableState.onRetry = onRetry;
+            return React.createElement("p", null, "workspace selection unavailable");
+        },
     };
 });
 
@@ -123,6 +173,53 @@ function workspaceSnapshot(workspace: Workspace): MyWorkspaces {
     return { workspaces: [workspace], activeWorkspaceId: workspace.id };
 }
 
+function installMinimalDocument(): HTMLElement {
+    class HtmlIFrameElement {}
+
+    const documentTarget = {
+        nodeType: 9,
+        activeElement: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        createElement: vi.fn(() => containerTarget),
+    };
+    const windowTarget = {
+        document: documentTarget,
+        event: undefined,
+        HTMLIFrameElement: HtmlIFrameElement,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+    };
+    const containerTarget = {
+        nodeType: 1,
+        tagName: "DIV",
+        nodeName: "DIV",
+        namespaceURI: "http://www.w3.org/1999/xhtml",
+        ownerDocument: documentTarget,
+        firstChild: null,
+        lastChild: null,
+        parentNode: null,
+        textContent: "",
+        style: {},
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        appendChild: vi.fn(),
+        insertBefore: vi.fn(),
+        removeChild: vi.fn(),
+        setAttribute: vi.fn(),
+        removeAttribute: vi.fn(),
+    };
+    Object.assign(documentTarget, {
+        defaultView: windowTarget,
+        documentElement: containerTarget,
+        body: containerTarget,
+    });
+    vi.stubGlobal("window", windowTarget);
+    vi.stubGlobal("document", documentTarget);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    return document.createElement("div");
+}
+
 function hasChildren(value: unknown): value is { children?: ReactNode } {
     return typeof value === "object" && value !== null && "children" in value;
 }
@@ -147,25 +244,42 @@ function containsText(node: ReactNode, text: string): boolean {
     return containsText(node.props.children, text);
 }
 
-function isOrgTabsProps(value: unknown): value is { isOrgAdmin: boolean } {
+function isOrgTabsProps(value: unknown): value is {
+    isOrgAdmin: boolean;
+    ssoAvailability: "enabled" | "disabled" | "unavailable";
+} {
     return typeof value === "object"
         && value !== null
         && "isOrgAdmin" in value
-        && typeof value.isOrgAdmin === "boolean";
+        && typeof value.isOrgAdmin === "boolean"
+        && "ssoAvailability" in value
+        && (value.ssoAvailability === "enabled"
+            || value.ssoAvailability === "disabled"
+            || value.ssoAvailability === "unavailable");
 }
 
 beforeEach(() => {
     activeWorkspaceState.id = MEMBER_WORKSPACE.id;
+    buttonActionState.onClick = () => undefined;
     capabilityResultMock.mockReset().mockResolvedValue({ ok: true, data: { sso: true } });
     redirectMock.mockReset();
+    retrySelectionRecoveryMock.mockReset().mockImplementation(async () => {
+        activeWorkspaceState.id = MEMBER_WORKSPACE.id;
+    });
+    routerRefreshMock.mockReset();
     workspaceResultMock.mockReset();
+    workspaceUnavailableState.onRetry = async () => {};
+});
+
+afterEach(() => {
+    vi.unstubAllGlobals();
 });
 
 describe("organization navigation authority", () => {
     it("renders no organization admin tab for a non-admin", () => {
         const html = renderToStaticMarkup(createElement(OrgTabs, {
             isOrgAdmin: false,
-            ssoEnabled: true,
+            ssoAvailability: "enabled",
         }));
 
         for (const route of ORG_ADMIN_ROUTES) expect(html).not.toContain(route);
@@ -174,10 +288,20 @@ describe("organization navigation authority", () => {
     it("keeps organization navigation available to an administrator", () => {
         const html = renderToStaticMarkup(createElement(OrgTabs, {
             isOrgAdmin: true,
-            ssoEnabled: true,
+            ssoAvailability: "enabled",
         }));
 
         for (const route of ORG_ADMIN_ROUTES) expect(html).toContain(route);
+    });
+
+    it("hides the SSO tab only after availability resolves as disabled", () => {
+        const html = renderToStaticMarkup(createElement(OrgTabs, {
+            isOrgAdmin: true,
+            ssoAvailability: "disabled",
+        }));
+
+        expect(html).not.toContain("/organization/sso");
+        expect(html).not.toContain("tabSsoAvailabilityUnknown");
     });
 
     it("gates the section on the server-provided active-workspace organization role", async () => {
@@ -251,7 +375,7 @@ describe("organization navigation authority", () => {
         },
     );
 
-    it("renders retryable unavailability instead of treating a failed capability read as disabled", async () => {
+    it("keeps organization routes available while marking unresolved SSO availability", async () => {
         workspaceResultMock.mockResolvedValue({
             ok: true,
             data: workspaceSnapshot({ ...MEMBER_WORKSPACE, orgRole: "owner" }),
@@ -260,10 +384,34 @@ describe("organization navigation authority", () => {
 
         const layout = await OrganizationLayout({ children: createElement("p", null, "admin content") });
         const ssoPage = await OrgSsoPage();
+        const tabs = findByType(layout, OrgTabs);
 
-        expect(isValidElement(layout) ? layout.type : null).toBe(CapabilityUnavailablePage);
+        expect(isValidElement(layout) ? layout.type : null).toBe(OrganizationWorkspaceGuard);
+        expect(containsText(layout, "admin content")).toBe(true);
+        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.ssoAvailability : null)
+            .toBe("unavailable");
+        if (tabs === null) throw new Error("Organization navigation did not render");
+        const tabHtml = renderToStaticMarkup(tabs);
+        expect(tabHtml).toContain("/organization/sso");
+        expect(tabHtml).toContain("tabSsoAvailabilityUnknown");
         expect(isValidElement(ssoPage) ? ssoPage.type : null).toBe(CapabilityUnavailablePage);
         expect(redirectMock).not.toHaveBeenCalled();
+
+        const unavailable = await CapabilityUnavailablePage();
+        const unavailableHtml = renderToStaticMarkup(unavailable);
+        expect(unavailableHtml).toContain(">title</h2>");
+        expect(unavailableHtml).toContain(">retry</button>");
+        const container = installMinimalDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(container);
+        await act(async () => {
+            root.render(unavailable);
+        });
+        await act(async () => {
+            buttonActionState.onClick();
+        });
+        expect(routerRefreshMock).toHaveBeenCalledOnce();
+        await act(async () => root.unmount());
     });
 
     it("redirects the SSO route only after a successful disabled-capability result", async () => {
@@ -272,6 +420,15 @@ describe("organization navigation authority", () => {
         await OrgSsoPage();
 
         expect(redirectMock).toHaveBeenCalledWith("/organization/members");
+    });
+
+    it("renders SSO after a successful enabled-capability result without redirecting", async () => {
+        capabilityResultMock.mockResolvedValue({ ok: true, data: { sso: true } });
+
+        const rendered = await OrgSsoPage();
+
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(SsoPanel);
+        expect(redirectMock).not.toHaveBeenCalled();
     });
 
     it("renders the section for a server-resolved organization administrator", async () => {
@@ -302,16 +459,27 @@ describe("organization navigation authority", () => {
         expect(containsText(rendered, "owner content")).toBe(true);
     });
 
-    it("withholds a retained organization payload after the active workspace changes", () => {
+    it("withholds a retained organization payload and reconciles it through provider recovery", async () => {
         activeWorkspaceState.id = OTHER_ORG_ADMIN_WORKSPACE.id;
 
-        const html = renderToStaticMarkup(createElement(
+        const withheldHtml = renderToStaticMarkup(createElement(
             OrganizationWorkspaceGuard,
             { workspaceId: MEMBER_WORKSPACE.id },
             createElement("p", null, "stale admin content"),
         ));
 
-        expect(html).toContain("workspace selection unavailable");
-        expect(html).not.toContain("stale admin content");
+        expect(withheldHtml).toContain("workspace selection unavailable");
+        expect(withheldHtml).not.toContain("stale admin content");
+
+        await workspaceUnavailableState.onRetry();
+
+        const reconciledHtml = renderToStaticMarkup(createElement(
+            OrganizationWorkspaceGuard,
+            { workspaceId: MEMBER_WORKSPACE.id },
+            createElement("p", null, "reconciled admin content"),
+        ));
+        expect(retrySelectionRecoveryMock).toHaveBeenCalledOnce();
+        expect(reconciledHtml).toContain("reconciled admin content");
+        expect(reconciledHtml).not.toContain("workspace selection unavailable");
     });
 });

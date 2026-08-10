@@ -39,6 +39,7 @@ type WorkspaceContextValue = {
     switching: boolean;
     runInWorkspace: (id: number, operation: (switched: boolean) => Promise<void>) => Promise<boolean>;
     runSelectionChange: SelectionChangeRunner;
+    retrySelectionRecovery: () => Promise<void>;
     switchTo: (id: number) => Promise<void>;
     create: (name: string) => Promise<Workspace>;
     publishWorkspaceIdentity: (identity: PublishedWorkspaceIdentity) => void;
@@ -381,6 +382,7 @@ export function WorkspaceProvider({
             switching,
             runInWorkspace,
             runSelectionChange,
+            retrySelectionRecovery,
             switchTo,
             create,
             publishWorkspaceIdentity,
@@ -395,6 +397,7 @@ export function WorkspaceProvider({
             switching,
             runInWorkspace,
             runSelectionChange,
+            retrySelectionRecovery,
             switchTo,
             create,
             publishWorkspaceIdentity,

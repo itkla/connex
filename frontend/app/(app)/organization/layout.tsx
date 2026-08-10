@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
-import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
 import { PageHeader } from "@/app/components/PageHeader";
@@ -39,17 +38,17 @@ export default async function OrganizationLayout({ children }: { children: React
     if (!activeWorkspace) {
         return <WorkspaceUnavailablePage />;
     }
-    if (!capabilitiesResult.ok) {
-        return <CapabilityUnavailablePage />;
-    }
     const isOrgAdmin = activeWorkspace.orgRole !== null;
+    const ssoAvailability = capabilitiesResult.ok
+        ? capabilitiesResult.data.sso ? "enabled" : "disabled"
+        : "unavailable";
     return (
         <OrganizationWorkspaceGuard workspaceId={activeWorkspace.id}>
             <PageShell tier="wide">
                 <Rise>
                     <PageHeader title={t("title")} description={t("subtitle")} />
                 </Rise>
-                <OrgTabs isOrgAdmin={isOrgAdmin} ssoEnabled={capabilitiesResult.data.sso} />
+                <OrgTabs isOrgAdmin={isOrgAdmin} ssoAvailability={ssoAvailability} />
                 <div>{isOrgAdmin ? children : <NoAccessCard />}</div>
             </PageShell>
         </OrganizationWorkspaceGuard>
