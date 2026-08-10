@@ -2,6 +2,7 @@
 
 import {
     ArrowRightStartOnRectangleIcon,
+    ArrowPathIcon,
     BellIcon,
     BriefcaseIcon,
     BuildingOffice2Icon,
@@ -23,6 +24,7 @@ import {
     UserGroupIcon,
     UsersIcon,
     EllipsisVerticalIcon,
+    ExclamationTriangleIcon,
     CalendarIcon,
     MapIcon,
     ArrowsRightLeftIcon,
@@ -364,6 +366,56 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
     );
 }
 
+function PinnedViewsUnavailable({
+    rail,
+    label,
+    retryLabel,
+    onRetry,
+}: {
+    rail: boolean;
+    label: string;
+    retryLabel: string;
+    onRetry: () => void;
+}) {
+    if (rail) {
+        return (
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <button
+                        type="button"
+                        onClick={onRetry}
+                        aria-label={`${label} ${retryLabel}`}
+                        className="mx-auto flex size-9 items-center justify-center rounded-lg text-warning outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-brand"
+                    >
+                        <ExclamationTriangleIcon className="size-4" aria-hidden />
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+            </Tooltip>
+        );
+    }
+
+    return (
+        <div
+            role="status"
+            className="rounded-md border border-sidebar-border bg-sidebar-accent/40 px-3 py-2 text-xs text-muted-foreground"
+        >
+            <div className="flex items-start gap-2">
+                <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+                <span>{label}</span>
+            </div>
+            <button
+                type="button"
+                onClick={onRetry}
+                className="mt-2 inline-flex items-center gap-1.5 font-medium text-sidebar-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+                <ArrowPathIcon className="size-3.5" aria-hidden />
+                {retryLabel}
+            </button>
+        </div>
+    );
+}
+
 function ThemeSubmenu() {
     const t = useTranslations("CommonSidebar");
     const { theme, setTheme } = useTheme();
@@ -570,7 +622,7 @@ export default function Sidebar({
     const sections = useSections(navAccess);
     const { activeWorkspaceId } = useWorkspace();
     const { isCollapsed, setCollapsed } = useSidebarSections(user.id, activeWorkspaceId);
-    const { pins } = usePinnedViews();
+    const { pins, status: pinnedViewsStatus, reload: reloadPinnedViews } = usePinnedViews();
     const { recents } = useRecentRecords();
     const searchParams = useSearchParams();
     const svParam = searchParams.get("sv");
@@ -665,6 +717,14 @@ export default function Sidebar({
                             onCollapsedChange={setCollapsed}
                         />
                     )}
+                    {pinnedViewsStatus === "unavailable" ? (
+                        <PinnedViewsUnavailable
+                            rail={rail}
+                            label={t("pinnedViewsUnavailable")}
+                            retryLabel={t("retryPinnedViews")}
+                            onRetry={() => { void reloadPinnedViews(); }}
+                        />
+                    ) : null}
                     {recentSection && (
                         <NavGroup
                             key={recentSection.id}

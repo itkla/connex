@@ -97,6 +97,8 @@
     "ariaPrimarySidebar": "Primary sidebar",
     "brand": "CONNEX",
     "sectionPinnedViews": "Pinned views",
+    "pinnedViewsUnavailable": "Pinned views couldn't be loaded.",
+    "retryPinnedViews": "Retry",
     "sectionRecent": "Recent",
     "sectionOverview": "Overview",
     "sectionRecords": "Records",

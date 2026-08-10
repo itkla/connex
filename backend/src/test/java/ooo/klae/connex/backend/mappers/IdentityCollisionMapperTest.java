@@ -245,7 +245,7 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         Workspace other = newWorkspace("collision-fk");
 
         assertThrows(
-            DataAccessException.class,
+            DataIntegrityViolationException.class,
             () -> jdbcTemplate.update(
                 """
                 INSERT INTO identity_collision (

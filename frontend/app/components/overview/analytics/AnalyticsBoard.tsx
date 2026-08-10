@@ -73,6 +73,7 @@ import TaskStatusDonut from '@/app/components/overview/analytics/TaskStatusDonut
 import IntroActivity from '@/app/components/overview/analytics/IntroActivity';
 import RecentMovesList from '@/app/components/overview/analytics/RecentMovesList';
 import FirstRun from '@/app/components/overview/analytics/FirstRun';
+import SectionUnavailable from '@/app/components/SectionUnavailable';
 import {
     clampGranularity,
     DEFAULT_GRANULARITY,
@@ -172,6 +173,7 @@ export default function AnalyticsBoard({
     introSuggestions,
     introLineage,
     recentMoves,
+    recentMovesAvailable,
     taskSummary,
     warmth,
 }: {
@@ -184,6 +186,7 @@ export default function AnalyticsBoard({
     introSuggestions: IntroSuggestion[];
     introLineage: IntroductionRecord[];
     recentMoves: JobMove[];
+    recentMovesAvailable: boolean;
     taskSummary: TaskSummary;
     warmth: WarmthSummary;
 }) {
@@ -446,6 +449,7 @@ export default function AnalyticsBoard({
         introSuggestions.length > 0 ||
         introLineage.length > 0 ||
         recentMoves.length > 0 ||
+        !recentMovesAvailable ||
         tasksTracked > 0;
     const activityTotal = useMemo(
         () => activityBuckets.reduce(
@@ -756,14 +760,20 @@ export default function AnalyticsBoard({
                                         granularity={granularity}
                                     />
                                 </Panel>
-                                <Panel
-                                    title={t('movesTitle')}
-                                    info={t('movesInfo')}
-                                    infoLabel={t('infoAria')}
-                                    className="lg:col-span-2"
-                                >
-                                    <RecentMovesList moves={recentMoves} />
-                                </Panel>
+                                {recentMovesAvailable ? (
+                                    <Panel
+                                        title={t('movesTitle')}
+                                        info={t('movesInfo')}
+                                        infoLabel={t('infoAria')}
+                                        className="lg:col-span-2"
+                                    >
+                                        <RecentMovesList moves={recentMoves} />
+                                    </Panel>
+                                ) : (
+                                    <div className="lg:col-span-2">
+                                        <SectionUnavailable />
+                                    </div>
+                                )}
                             </Reveal>
                         </>
                     )}
