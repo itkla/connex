@@ -43,13 +43,15 @@ class AiFeatureGateTest {
     }
 
     @Test
-    void disabledInstanceFlag_deniesEvenWithPermissionAndReadiness() {
+    void disabledInstanceFlagDeniesAssistantEvenWithPermissionAndReadiness() {
         lenient().when(workspaceService.permissionsFor(7, 42)).thenReturn(EnumSet.of(Permission.AI_USE));
         lenient().when(providerReadiness.getIfAvailable()).thenReturn(readiness);
         lenient().when(readiness.isReadyForOrg(3)).thenReturn(true);
 
-        assertFalse(gate.isAiUsable(AiFeature.DEAL_BRIEF));
-        assertThrows(ForbiddenException.class, () -> gate.requireAiUsable(AiFeature.DEAL_BRIEF));
+        assertFalse(gate.isAiUsable(AiFeature.ASSISTANT_CHAT));
+        assertThrows(
+                ForbiddenException.class,
+                () -> gate.requireAiUsable(AiFeature.ASSISTANT_CHAT));
     }
 
     @Test
@@ -112,11 +114,14 @@ class AiFeatureGateTest {
     }
 
     @Test
-    void disabledFeatureDeniesWithoutCheckingPermissionOrReadiness() {
+    void disabledAssistantFeatureDeniesWithoutCheckingPermissionOrReadiness() {
         properties.setEnabled(true);
-        properties.getFeatures().put(AiFeature.DEAL_BRIEF, false);
+        properties.getFeatures().put(AiFeature.ASSISTANT_CHAT, false);
 
-        assertFalse(gate.isAiUsable(AiFeature.DEAL_BRIEF));
+        assertFalse(gate.isAiUsable(AiFeature.ASSISTANT_CHAT));
+        assertThrows(
+                ForbiddenException.class,
+                () -> gate.requireAiUsable(AiFeature.ASSISTANT_CHAT));
         org.mockito.Mockito.verifyNoInteractions(workspaceService, providerReadiness, readiness);
     }
 

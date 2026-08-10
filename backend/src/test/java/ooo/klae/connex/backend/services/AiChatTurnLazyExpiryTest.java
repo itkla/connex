@@ -17,6 +17,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -35,6 +36,7 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
     @Autowired private AiAssistantTurnService turnService;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @MockitoBean private AiFeatureGate featureGate;
     @MockitoBean private AiGenerationService generationService;
 
     @Test
@@ -64,6 +66,22 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
         AiChatSession session = session(workspace, currentUser);
         AiChatTurn stale = turn(session, currentUser, "running");
         makeStale(stale);
+
+        AiChatTurnDto result = turnService.get(session.getId(), stale.getId());
+
+        assertEquals("timed_out", result.status());
+        assertEquals("generation_timeout", result.terminalReason());
+    }
+
+    @Test
+    void queuedToRunningRefreshDoesNotExtendTheCreationBasedDeadline() {
+        AiChatSession session = session(workspace, currentUser);
+        AiChatTurn stale = turn(session, currentUser, "queued");
+        makeStale(stale);
+
+        assertEquals(1, chatMapper.markTurnRunning(
+                workspace.getId(), session.getId(), stale.getId()));
+        assertNotEquals(STALE_TIMESTAMP, stored(session, stale).getUpdatedAt());
 
         AiChatTurnDto result = turnService.get(session.getId(), stale.getId());
 
@@ -150,8 +168,9 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
 
     private void makeStale(AiChatTurn turn) {
         jdbcTemplate.update(
-                "UPDATE ai_chat_turn SET updated_at = ? WHERE workspace_id = ? AND id = ?",
-                STALE_TIMESTAMP, turn.getWorkspaceId(), turn.getId());
+                "UPDATE ai_chat_turn SET created_at = ?, updated_at = ? "
+                        + "WHERE workspace_id = ? AND id = ?",
+                STALE_TIMESTAMP, STALE_TIMESTAMP, turn.getWorkspaceId(), turn.getId());
     }
 
     private AiChatTurn stored(AiChatSession session, AiChatTurn turn) {

@@ -136,7 +136,7 @@ public interface AiChatMapper {
         @Param("status") String status,
         @Param("terminalReason") String terminalReason,
         @Param("expectedStatus") String expectedStatus,
-        @Param("updatedBefore") LocalDateTime updatedBefore);
+        @Param("createdBefore") LocalDateTime createdBefore);
 
     int insertToolCall(AiChatToolCall toolCall);
 

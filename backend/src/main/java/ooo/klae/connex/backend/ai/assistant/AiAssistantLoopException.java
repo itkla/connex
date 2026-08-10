@@ -25,4 +25,9 @@ public class AiAssistantLoopException extends RuntimeException {
     public static AiAssistantLoopException malformed(String detailReason) {
         return new AiAssistantLoopException("malformed_output", detailReason);
     }
+
+    /** Returns an access-revoked failure with a stable internal detail. */
+    public static AiAssistantLoopException accessRevoked(String detailReason) {
+        return new AiAssistantLoopException("access_revoked", detailReason);
+    }
 }

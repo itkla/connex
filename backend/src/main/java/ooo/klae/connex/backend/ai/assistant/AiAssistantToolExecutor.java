@@ -69,7 +69,7 @@ public class AiAssistantToolExecutor {
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
             };
         } catch (ResourceNotFoundException exception) {
-            throw AiAssistantLoopException.malformed("inaccessible_resource");
+            throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
         }
     }
 
@@ -361,7 +361,7 @@ public class AiAssistantToolExecutor {
     private static void requireProcessable(Person person) {
         if (person == null || person.getSuspendedAt() != null
                 || person.getProvisionCeasedAt() != null || person.getArchivedAt() != null) {
-            throw AiAssistantLoopException.malformed("inaccessible_resource");
+            throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
         }
     }
 

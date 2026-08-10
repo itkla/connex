@@ -34,6 +34,7 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
     static final int MAX_STEPS = 6;
+    private static final String INTERNAL_ERROR = "internal_error";
     private static final int MAX_HISTORY_MESSAGES = 50;
     private static final int MAX_OUTPUT_TOKENS = 1200;
     private static final int MAX_FINAL_CHARS = 16_000;
@@ -59,7 +60,7 @@ public class AiChatAgentLoopService {
                 return AiGenerationTaskResult.failed("access_revoked");
             }
             if (!running) {
-                return AiGenerationTaskResult.failed("malformed_output");
+                return AiGenerationTaskResult.failed(INTERNAL_ERROR);
             }
             publish(turn.userId(), new AiChatStepFrameDto(
                     turn.turnId(), 0, "state", null, "running", null));
@@ -109,14 +110,14 @@ public class AiChatAgentLoopService {
                             turn.turnId(), stepNumber, "step", step.tool().name(),
                             "proposed", null));
                     try {
-                        requireCurrentAccess(turn);
+                        requireCurrentToolExecution(turn);
                         AiAssistantToolResult toolResult = toolExecutor.execute(
                                 step.tool().name(), step.tool().args(), resources);
                         String resultJson = promptAssembler.durableToolResult(toolResult);
                         if (!persistenceService.finishTool(
                                 turn, toolCallId, "executed", resultJson)) {
                             failTool(turn, toolCallId, "turn_not_active");
-                            return AiGenerationTaskResult.failed("malformed_output");
+                            return AiGenerationTaskResult.failed(INTERNAL_ERROR);
                         }
                         publish(turn.userId(), new AiChatStepFrameDto(
                                 turn.turnId(), stepNumber, "step", step.tool().name(),
@@ -169,13 +170,7 @@ public class AiChatAgentLoopService {
             if (restrictionsChanged(turn)) {
                 return AiGenerationTaskResult.failed("restrictions_changed");
             }
-            try {
-                workspaceService.requirePermission(
-                        turn.workspaceId(), turn.userId(), Permission.AI_USE);
-            } catch (ForbiddenException revoked) {
-                return AiGenerationTaskResult.failed("access_revoked");
-            }
-            return AiGenerationTaskResult.failed("provider_error");
+            return AiGenerationTaskResult.failed("access_revoked");
         } catch (RuntimeException exception) {
             if (restrictionsChanged(turn)) {
                 return AiGenerationTaskResult.failed("restrictions_changed");
@@ -183,7 +178,7 @@ public class AiChatAgentLoopService {
             if (Thread.currentThread().isInterrupted()) {
                 return AiGenerationTaskResult.timedOut("generation_timeout");
             }
-            return AiGenerationTaskResult.failed("malformed_output");
+            return AiGenerationTaskResult.failed(INTERNAL_ERROR);
         }
     }
 
@@ -201,6 +196,11 @@ public class AiChatAgentLoopService {
         } catch (ForbiddenException exception) {
             throw new AiAssistantLoopException("access_revoked", "access_revoked");
         }
+    }
+
+    private void requireCurrentToolExecution(AiChatQueuedTurn turn) {
+        requireCurrentAccess(turn);
+        persistenceService.requireRunning(turn);
     }
 
     private String serialize(Object value) {
@@ -234,7 +234,7 @@ public class AiChatAgentLoopService {
         if (exception instanceof ForbiddenException) {
             return "access_revoked";
         }
-        return "malformed_output";
+        return INTERNAL_ERROR;
     }
 
     private static int inputTokens(AiStructuredOutcome<?> outcome) {

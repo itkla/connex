@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -45,6 +46,7 @@ public class AiChatTurnPersistenceService {
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
     private final AiProperties aiProperties;
+    private final AiRestrictionEpoch restrictionEpoch;
     private final Clock clock;
 
     /** Commits the user message and queued turn under the session sequence mutex. */
@@ -148,6 +150,13 @@ public class AiChatTurnPersistenceService {
         return toolCall.getId();
     }
 
+    /** Requires the turn to remain running immediately before a proposed tool executes. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public void requireRunning(AiChatQueuedTurn turn) {
+        requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
+    }
+
     /** Persists one executed or failed read-tool terminal state. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public boolean finishTool(
@@ -200,6 +209,11 @@ public class AiChatTurnPersistenceService {
             throw new IllegalStateException("Assistant turn resolution lost its durable state");
         }
         chatMapper.updateLastMessageAt(turn.workspaceId(), turn.sessionId());
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            throw new AiAssistantLoopException(
+                    "restrictions_changed", "restrictions_changed");
+        }
         return true;
     }
 

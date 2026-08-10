@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @Component
 @RequiredArgsConstructor
 public class AiChatTurnTerminalCoordinator {
+    private static final String INTERNAL_ERROR = "internal_error";
     private static final Set<String> FAILED_REASONS = Set.of(
             "provider_error",
             "quota_exhausted",
@@ -23,7 +24,8 @@ public class AiChatTurnTerminalCoordinator {
             "step_cap_exceeded",
             "generation_capacity",
             "restrictions_changed",
-            "access_revoked");
+            "access_revoked",
+            INTERNAL_ERROR);
 
     private final TenantWorkScope tenantWorkScope;
     private final AiChatTurnPersistenceService persistenceService;
@@ -54,11 +56,7 @@ public class AiChatTurnTerminalCoordinator {
         String status = outcome == AiGenerationTaskResult.Outcome.TIMED_OUT
                 ? "timed_out"
                 : "failed";
-        String stableReason = outcome == AiGenerationTaskResult.Outcome.TIMED_OUT
-                ? "generation_timeout"
-                : reason != null && FAILED_REASONS.contains(reason)
-                        ? reason
-                        : "provider_error";
+        String stableReason = stableReason(outcome, reason);
         boolean changed = tenantWorkScope.inWorkspace(
                 turn.workspaceId(),
                 () -> persistenceService.markTerminal(
@@ -68,6 +66,19 @@ public class AiChatTurnTerminalCoordinator {
             publish(turn.userId(), new AiChatStepFrameDto(
                     turn.turnId(), 0, "terminal", null, status, stableReason));
         }
+    }
+
+    private static String stableReason(
+            AiGenerationTaskResult.Outcome outcome, String reason) {
+        if (outcome == AiGenerationTaskResult.Outcome.TIMED_OUT) {
+            return "generation_timeout";
+        }
+        if ("generation_failed".equals(reason)) {
+            return INTERNAL_ERROR;
+        }
+        return reason != null && FAILED_REASONS.contains(reason)
+                ? reason
+                : INTERNAL_ERROR;
     }
 
     private void publish(int userId, AiChatStepFrameDto frame) {

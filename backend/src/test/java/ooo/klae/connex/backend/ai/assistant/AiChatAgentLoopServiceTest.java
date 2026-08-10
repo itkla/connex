@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
@@ -155,6 +156,64 @@ class AiChatAgentLoopServiceTest {
 
         when(restrictionEpoch.current(TURN.workspaceId()))
                 .thenReturn(TURN.restrictionEpoch() + 1);
+        assertTerminal("restrictions_changed");
+    }
+
+    @Test
+    void terminalTurnStopsBeforeTheProposedToolServiceCall() throws Exception {
+        AiAssistantStep toolStep = new AiAssistantStep(
+                new AiAssistantStep.Tool(
+                        "search_records",
+                        objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
+                null);
+        when(invocationService.completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+                .thenReturn(parsed(toolStep));
+        doThrow(new ConflictException("Assistant turn is no longer active"))
+                .when(persistenceService).requireRunning(TURN);
+
+        assertTerminal("internal_error");
+
+        verify(toolExecutor, never()).execute(any(), any(), any());
+    }
+
+    @Test
+    void toolServiceAndFinalPersistenceFailuresAreInternal() throws Exception {
+        AiAssistantStep toolStep = new AiAssistantStep(
+                new AiAssistantStep.Tool(
+                        "search_records",
+                        objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
+                null);
+        when(invocationService.completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+                .thenReturn(parsed(toolStep));
+        when(toolExecutor.execute(any(), any(), any()))
+                .thenThrow(new IllegalStateException("database unavailable"));
+
+        assertTerminal("internal_error");
+
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
+        when(invocationService.completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+                .thenReturn(parsed(finalStep));
+        doThrow(new IllegalStateException("database unavailable")).when(persistenceService)
+                .resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+
+        assertTerminal("internal_error");
+    }
+
+    @Test
+    void finalCommitEpochChangeKeepsItsDistinctTerminalReason() {
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
+        when(invocationService.completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+                .thenReturn(parsed(finalStep));
+        doThrow(new AiAssistantLoopException(
+                "restrictions_changed", "restrictions_changed")).when(persistenceService)
+                .resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+
         assertTerminal("restrictions_changed");
     }
 

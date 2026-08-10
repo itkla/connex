@@ -75,7 +75,7 @@ class AiChatTurnTerminalCoordinatorTest {
     }
 
     @Test
-    void loopFailureReasonsRemainDistinctAndUnknownInfrastructureReasonsNormalize() {
+    void loopFailureReasonsRemainDistinctAndInfrastructureReasonsNormalizeInternally() {
         when(persistenceService.markTerminal(
                 eq(TURN.workspaceId()), eq(TURN.sessionId()), eq(TURN.turnId()),
                 eq("failed"), anyString())).thenReturn(true);
@@ -84,7 +84,8 @@ class AiChatTurnTerminalCoordinatorTest {
                 "provider_error",
                 "quota_exhausted",
                 "malformed_output",
-                "step_cap_exceeded")) {
+                "step_cap_exceeded",
+                "internal_error")) {
             coordinator.listener(TURN).onTerminal(
                     AiGenerationTaskResult.Outcome.FAILED, reason);
             verify(persistenceService).markTerminal(
@@ -94,6 +95,11 @@ class AiChatTurnTerminalCoordinatorTest {
                 AiGenerationTaskResult.Outcome.FAILED, "generation_failed");
         verify(persistenceService, times(2)).markTerminal(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
-                "failed", "provider_error");
+                "failed", "internal_error");
+        coordinator.listener(TURN).onTerminal(
+                AiGenerationTaskResult.Outcome.FAILED, "unexpected_failure");
+        verify(persistenceService, times(3)).markTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "failed", "internal_error");
     }
 }

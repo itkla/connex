@@ -143,6 +143,54 @@ class AiRestrictionEpochTest {
     }
 
     @Test
+    void transactionalReadFenceBlocksRestrictionBumpThroughCommit() throws Exception {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        long expectedEpoch = epoch.current(7);
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            assertTrue(epoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                    7, expectedEpoch));
+            CountDownLatch bumpStarted = new CountDownLatch(1);
+            CompletableFuture<Void> blockedBump = CompletableFuture.runAsync(() -> {
+                bumpStarted.countDown();
+                epoch.bump(7);
+            }, executor);
+
+            assertTrue(bumpStarted.await(1, TimeUnit.SECONDS));
+            assertFalse(blockedBump.isDone());
+            TransactionSynchronizationUtils.triggerAfterCompletion(
+                    TransactionSynchronization.STATUS_COMMITTED);
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+
+            blockedBump.get(1, TimeUnit.SECONDS);
+            assertNotEquals(expectedEpoch, epoch.current(7));
+        } finally {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.clearSynchronization();
+            }
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
+    void transactionalReadFenceRejectsAStaleEpoch() {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        long expectedEpoch = epoch.current(7);
+        epoch.bump(7);
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertFalse(epoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                    7, expectedEpoch));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
     void currentEpochActionBlocksAConcurrentRestrictionBump() throws Exception {
         AiRestrictionEpoch epoch = new AiRestrictionEpoch();
         long expectedEpoch = epoch.current(7);

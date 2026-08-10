@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -30,6 +31,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
     @Autowired private AiAssistantTurnService turnService;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private RoleMapper roleMapper;
+    @MockitoBean private AiFeatureGate featureGate;
     @MockitoBean private AiGenerationService generationService;
 
     @Test

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiGenerationTerminalListener;
@@ -29,6 +30,7 @@ public class AiAssistantTurnService {
     private static final Set<String> PAGE_CONTEXT_KINDS = Set.of("person", "company", "deal");
 
     private final WorkspaceService workspaceService;
+    private final AiFeatureGate featureGate;
     private final AiRestrictionEpoch restrictionEpoch;
     private final AiChatTurnPersistenceService persistenceService;
     private final AiGenerationService generationService;
@@ -46,6 +48,7 @@ public class AiAssistantTurnService {
                         || !PAGE_CONTEXT_KINDS.contains(context.kind()))) {
             throw new BadRequestException("Assistant turn request is invalid");
         }
+        featureGate.requireAiUsable(AiFeature.ASSISTANT_CHAT);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long expectedRestrictionEpoch = restrictionEpoch.current(workspaceId);
         AiChatQueuedTurn turn = persistenceService.queue(
@@ -70,7 +73,7 @@ public class AiAssistantTurnService {
         } catch (RuntimeException exception) {
             terminalListener.onTerminal(
                     AiGenerationTaskResult.Outcome.FAILED,
-                    "provider_error");
+                    "internal_error");
             throw exception;
         }
         if (!"accepted".equals(generation.status()) && !"running".equals(generation.status())) {
