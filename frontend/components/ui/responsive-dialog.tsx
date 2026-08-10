@@ -21,15 +21,20 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer"
 
-const ResponsiveDialogContext = React.createContext<boolean | null>(null)
+type ResponsiveDialogContextValue = {
+  isMobile: boolean
+  onCloseComplete?: () => void
+}
+
+const ResponsiveDialogContext = React.createContext<ResponsiveDialogContextValue | null>(null)
 
 /**
- * Reads the platform the surrounding {@link ResponsiveDialog} committed to. Every part derives
- * its primitive from this single value rather than reading the viewport independently, so the
- * root and its parts can never disagree mid-resize (which would render a Radix part inside a
- * Base UI drawer, or vice versa).
+ * Reads the platform and lifecycle callbacks the surrounding {@link ResponsiveDialog} committed
+ * to. Every part derives its primitive from this single value rather than reading the viewport
+ * independently, so the root and its parts can never disagree mid-resize (which would render a
+ * Radix part inside a Base UI drawer, or vice versa).
  */
-function useResponsiveIsMobile(): boolean {
+function useResponsiveDialogContext(): ResponsiveDialogContextValue {
   const context = React.useContext(ResponsiveDialogContext)
 
   if (context === null) {
@@ -44,6 +49,7 @@ function useResponsiveIsMobile(): boolean {
 type ResponsiveDialogProps = {
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  onCloseComplete?: () => void
   children?: React.ReactNode
 }
 
@@ -54,7 +60,7 @@ type ResponsiveDialogProps = {
  * swaps in a swipe-dismissable bottom sheet. Compose it with the matching `ResponsiveDialog*`
  * parts so the correct primitive context is provided on each platform.
  */
-function ResponsiveDialog({ open, onOpenChange, children }: ResponsiveDialogProps) {
+function ResponsiveDialog({ open, onOpenChange, onCloseComplete, children }: ResponsiveDialogProps) {
   const viewportIsMobile = useIsMobile()
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
   const resolvedOpen = open ?? uncontrolledOpen
@@ -71,16 +77,30 @@ function ResponsiveDialog({ open, onOpenChange, children }: ResponsiveDialogProp
   }
 
   const isMobile = presentation.isMobile
+  const contextValue = React.useMemo(
+    () => ({ isMobile, onCloseComplete }),
+    [isMobile, onCloseComplete]
+  )
 
   const handleOpenChange = (next: boolean) => {
     if (open === undefined) setUncontrolledOpen(next)
     onOpenChange?.(next)
   }
 
+  const handleOpenChangeComplete = (next: boolean) => {
+    if (!next) onCloseComplete?.()
+  }
+
   return (
-    <ResponsiveDialogContext.Provider value={isMobile}>
+    <ResponsiveDialogContext.Provider value={contextValue}>
       {isMobile ? (
-        <Drawer open={resolvedOpen} onOpenChange={handleOpenChange} swipeDirection="down" motionClassName="duration-200">
+        <Drawer
+          open={resolvedOpen}
+          onOpenChange={handleOpenChange}
+          onOpenChangeComplete={handleOpenChangeComplete}
+          swipeDirection="down"
+          motionClassName="duration-200"
+        >
           {children}
         </Drawer>
       ) : (
@@ -106,7 +126,7 @@ function ResponsiveDialogTrigger({
   asChild,
   children,
 }: ResponsiveDialogTriggerProps) {
-  const isMobile = useResponsiveIsMobile()
+  const { isMobile } = useResponsiveDialogContext()
 
   if (isMobile) {
     if (asChild && React.isValidElement(children)) {
@@ -137,7 +157,7 @@ function ResponsiveDialogContent({
   showCloseButton,
   scrollable = true,
 }: ResponsiveDialogContentProps) {
-  const isMobile = useResponsiveIsMobile()
+  const { isMobile, onCloseComplete } = useResponsiveDialogContext()
 
   if (isMobile) {
     return (
@@ -152,7 +172,11 @@ function ResponsiveDialogContent({
   }
 
   return (
-    <DialogContent className={className} showCloseButton={showCloseButton}>
+    <DialogContent
+      className={className}
+      showCloseButton={showCloseButton}
+      onCloseAutoFocus={onCloseComplete}
+    >
       {children}
     </DialogContent>
   )
@@ -199,7 +223,7 @@ function ResponsiveDialogTitle({
   className,
   children,
 }: ResponsiveDialogTextProps) {
-  const isMobile = useResponsiveIsMobile()
+  const { isMobile } = useResponsiveDialogContext()
   const Title = isMobile ? DrawerTitle : DialogTitle
   return <Title className={className}>{children}</Title>
 }
@@ -209,7 +233,7 @@ function ResponsiveDialogDescription({
   className,
   children,
 }: ResponsiveDialogTextProps) {
-  const isMobile = useResponsiveIsMobile()
+  const { isMobile } = useResponsiveDialogContext()
   const Description = isMobile ? DrawerDescription : DialogDescription
   return <Description className={className}>{children}</Description>
 }
@@ -225,7 +249,7 @@ type ResponsiveDialogCloseProps = {
  * the surface on both platforms.
  */
 function ResponsiveDialogClose({ asChild, children }: ResponsiveDialogCloseProps) {
-  const isMobile = useResponsiveIsMobile()
+  const { isMobile } = useResponsiveDialogContext()
 
   if (isMobile) {
     if (asChild && React.isValidElement(children)) {

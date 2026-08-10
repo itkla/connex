@@ -76,6 +76,7 @@ type Props = {
     submissionBlockedMessage?: string;
     onPersistDraft?: (data: TaskDraftData) => void;
     onClearDraft?: () => void;
+    onCloseComplete?: () => void;
 };
 
 export default function TaskDialog(props: Props) {
@@ -113,6 +114,7 @@ function ScopedTaskDialog({
     submissionBlockedMessage,
     onPersistDraft,
     onClearDraft,
+    onCloseComplete,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityTasksDialog');
@@ -154,7 +156,11 @@ function ScopedTaskDialog({
 
     return (
         <>
-            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialog
+                open={open}
+                onOpenChange={handleOpenChange}
+                onCloseComplete={onCloseComplete}
+            >
                 <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                     <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
                     <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>

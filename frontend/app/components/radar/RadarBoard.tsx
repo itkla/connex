@@ -77,6 +77,8 @@ function nextRadarRefreshDelay(payload: RadarPayload, requestDurationMs: number)
     return delays.length === 0 ? null : Math.min(...delays);
 }
 
+type RadarRefreshSession = { active: boolean };
+
 /** Stateful Radar work list with shareable filters and failure-aware per-signal actions. */
 export default function RadarBoard({ initialPayload }: { initialPayload: RadarPayload }) {
     const t = useTranslations('Radar');
@@ -98,19 +100,20 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const { run } = useActions();
     const refreshTimerRef = useRef<number | null>(null);
     const refreshRadarRef = useRef<() => void>(() => undefined);
+    const refreshSessionRef = useRef<RadarRefreshSession | null>(null);
     const radarTaskDraftsRef = useRef(new Map<number, TaskDraft>());
     const activeRadarTaskRef = useRef<{
         signalId: number;
         signalState: RadarTaskSignalStore;
     } | null>(null);
 
-    const requestRadar = useCallback(async () => {
+    const requestRadar = useCallback(async (session: RadarRefreshSession) => {
         while (true) {
             const startedAt = performance.now();
             const refreshed = await getRadar();
             const requestDurationMs = performance.now() - startedAt;
             const nextRefreshDelay = nextRadarRefreshDelay(refreshed, requestDurationMs);
-            if (nextRefreshDelay !== 0) {
+            if (!session.active || nextRefreshDelay !== 0) {
                 return { refreshed, nextRefreshDelay };
             }
         }
@@ -119,13 +122,15 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const applyRadarRefresh = useCallback((result: {
         refreshed: RadarPayload;
         nextRefreshDelay: number | null;
-    }) => {
+    }, session: RadarRefreshSession) => {
+        if (!session.active || refreshSessionRef.current !== session) return;
         if (refreshTimerRef.current !== null) {
             window.clearTimeout(refreshTimerRef.current);
             refreshTimerRef.current = null;
         }
         if (result.nextRefreshDelay !== null) {
             refreshTimerRef.current = window.setTimeout(() => {
+                if (!session.active || refreshSessionRef.current !== session) return;
                 refreshTimerRef.current = null;
                 refreshRadarRef.current();
             }, result.nextRefreshDelay);
@@ -134,17 +139,23 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
         setFreshnessStatus('current');
     }, []);
 
-    const markRadarUnavailable = useCallback(() => {
+    const markRadarUnavailable = useCallback((session: RadarRefreshSession) => {
+        if (!session.active || refreshSessionRef.current !== session) return;
         setFreshnessStatus('unavailable');
     }, []);
 
     const refreshRadar = useCallback(() => {
+        const session = refreshSessionRef.current;
+        if (session === null || !session.active) return;
         if (refreshTimerRef.current !== null) {
             window.clearTimeout(refreshTimerRef.current);
             refreshTimerRef.current = null;
         }
         setFreshnessStatus('checking');
-        void requestRadar().then(applyRadarRefresh, markRadarUnavailable);
+        void requestRadar(session).then(
+            (result) => applyRadarRefresh(result, session),
+            () => markRadarUnavailable(session),
+        );
     }, [applyRadarRefresh, markRadarUnavailable, requestRadar]);
 
     useLayoutEffect(() => {
@@ -152,17 +163,17 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     }, [refreshRadar]);
 
     useEffect(() => {
-        let active = true;
-        void requestRadar().then(
-            (result) => {
-                if (active) applyRadarRefresh(result);
-            },
-            () => {
-                if (active) markRadarUnavailable();
-            },
+        const session = { active: true };
+        refreshSessionRef.current = session;
+        void requestRadar(session).then(
+            (result) => applyRadarRefresh(result, session),
+            () => markRadarUnavailable(session),
         );
         return () => {
-            active = false;
+            session.active = false;
+            if (refreshSessionRef.current === session) {
+                refreshSessionRef.current = null;
+            }
             if (refreshTimerRef.current !== null) {
                 window.clearTimeout(refreshTimerRef.current);
                 refreshTimerRef.current = null;

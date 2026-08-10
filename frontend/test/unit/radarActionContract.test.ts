@@ -51,9 +51,32 @@ describe('Radar action integration', () => {
         expect(card).toContain("freshnessStatus !== 'current'");
         expect(board).toContain('radarEvidenceRefreshDelay(');
         expect(board).toContain('refreshRadarRef.current();');
-        expect(board).toContain('if (nextRefreshDelay !== 0)');
+        expect(board).toContain('nextRefreshDelay !== 0');
         expect(board).toContain("t('task.warmPathDescription'");
         expect(card).not.toContain("value.includes('_')");
         expect(card).not.toContain("if (key === 'subject') return signal.subject.label");
+    });
+
+    it('invalidates the mounted refresh session before teardown can be followed by more work', () => {
+        const board = source('app/components/radar/RadarBoard.tsx');
+
+        expect(board).toContain('if (!session.active || refreshSessionRef.current !== session) return;');
+        expect(board).toContain('if (!session.active || nextRefreshDelay !== 0)');
+        expect(board).toContain('session.active = false;');
+        expect(board).toContain('refreshSessionRef.current = null;');
+    });
+
+    it('releases the Radar task subscription on close and its retained request after exit', () => {
+        const overlay = source('app/components/actions/ActionOverlayHost.tsx');
+        const dialog = source('app/components/activity/tasks/TaskDialog.tsx');
+        const responsiveDialog = source('components/ui/responsive-dialog.tsx');
+
+        expect(overlay).toContain('const subscribedRadarTask = visible ? radarTask : undefined;');
+        expect(overlay).toContain('subscribedRadarTask?.signalState.subscribe');
+        expect(overlay).toContain('current?.generation === generation ? null : current');
+        expect(overlay).toContain('onCloseComplete={() => handleRenderedCloseComplete(rendered.generation)}');
+        expect(dialog).toContain('onCloseComplete={onCloseComplete}');
+        expect(responsiveDialog).toContain('onOpenChangeComplete={handleOpenChangeComplete}');
+        expect(responsiveDialog).toContain('onCloseAutoFocus={onCloseComplete}');
     });
 });

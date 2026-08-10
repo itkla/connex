@@ -122,6 +122,7 @@ async function loadReferences(
  * The requested overlay is kept mounted through its close animation: the `visible` flag drives each
  * dialog's `open` prop and flips to false when the request clears, while `rendered` (and its loaded
  * reference data) persist so the dialog can play its exit transition instead of unmounting instantly.
+ * Task composers report completion so their retained live request can be released afterward.
  */
 export default function ActionOverlayHost({
     overlay,
@@ -177,6 +178,7 @@ export default function ActionOverlayHost({
 
     const kind = rendered?.request.kind;
     const radarTask = rendered?.request.kind === "create-task" ? rendered.request.radarTask : undefined;
+    const subscribedRadarTask = visible ? radarTask : undefined;
     const needsReference = kind !== undefined && REFERENCE_KINDS.has(kind);
     const needsUsers = kind === "create-task";
     const defaults = rendered && "defaults" in rendered.request ? rendered.request.defaults : undefined;
@@ -237,8 +239,8 @@ export default function ActionOverlayHost({
         getServerDraftGeneration,
     );
     const radarTaskSnapshot = useSyncExternalStore(
-        radarTask?.signalState.subscribe ?? subscribeToInactiveRadarTask,
-        radarTask?.signalState.getSnapshot ?? getInactiveRadarTaskSnapshot,
+        subscribedRadarTask?.signalState.subscribe ?? subscribeToInactiveRadarTask,
+        subscribedRadarTask?.signalState.getSnapshot ?? getInactiveRadarTaskSnapshot,
         getInactiveRadarTaskSnapshot,
     );
     const restoredDraftCanMount = !rosterOnly ||
@@ -382,6 +384,9 @@ export default function ActionOverlayHost({
     const handleOpenChange = (open: boolean) => {
         if (!open) onClose();
     };
+    const handleRenderedCloseComplete = (generation: number) => {
+        setRendered((current) => current?.generation === generation ? null : current);
+    };
 
     const handleCompaniesImported = () => {
         publishRecordMutation("company");
@@ -481,6 +486,7 @@ export default function ActionOverlayHost({
                         submissionBlockedMessage={taskSubmissionBlockedMessage}
                         onPersistDraft={radarTask?.onDraftChange}
                         onClearDraft={radarTask?.onDraftClear}
+                        onCloseComplete={() => handleRenderedCloseComplete(rendered.generation)}
                     />
                 ) : null}
                 {rendered?.request.kind === "create-note" && references && restoredDraftCanMount ? (
