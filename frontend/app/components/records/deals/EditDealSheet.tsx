@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
+import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 import { getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
 import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
@@ -25,6 +26,24 @@ function toDraft(d: Deal): DealDraft {
         closedReason: d.closedReason ?? null,
         won: d.won ?? null,
     };
+}
+
+/** Persists one edit-sheet draft with outcome-canonicalized realized value. */
+export async function submitDealDraftUpdate(dealId: number, draft: DealDraft): Promise<void> {
+    const payload: UpdateDealPayload = {
+        name: draft.name.trim(),
+        value: draft.value,
+        actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+        currency: draft.currency.trim() || 'USD',
+        pipeline: draft.pipeline,
+        stage: draft.stage,
+        company: draft.company,
+        expectedCloseDate: draft.expectedCloseDate || null,
+        closedAt: draft.closedAt || null,
+        closedReason: draft.closedReason || null,
+        won: draft.won,
+    };
+    await updateDeal(dealId, payload);
 }
 
 export default function EditDealSheet({
@@ -114,20 +133,7 @@ export default function EditDealSheet({
 
         setIsSaving(true);
         try {
-            const payload: UpdateDealPayload = {
-                name: draft.name.trim(),
-                value: draft.value,
-                actualValue: draft.actualValue,
-                currency: draft.currency.trim() || 'USD',
-                pipeline: draft.pipeline,
-                stage: draft.stage,
-                company: draft.company,
-                expectedCloseDate: draft.expectedCloseDate || null,
-                closedAt: draft.closedAt || null,
-                closedReason: draft.closedReason || null,
-                won: draft.won,
-            };
-            await updateDeal(deal.id, payload);
+            await submitDealDraftUpdate(deal.id, draft);
             await cfRef.current?.save();
             toastSuccess(t('dealUpdated'));
             onOpenChange(false);

@@ -121,7 +121,7 @@ import {
     type Tag,
     type WorkspaceMember,
 } from '@/app/lib/types';
-import { isDealClosed } from './dealOutcome';
+import { actualValueForOutcome, isDealClosed } from './dealOutcome';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -167,6 +167,31 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
         original.closedReason !== draft.closedReason ||
         original.won !== draft.won
     );
+}
+
+type DealDraftUpdate = {
+    dealId: number;
+    draft: DealDraft;
+};
+
+/** Persists quick-edit drafts with outcome-canonicalized realized values. */
+export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>): Promise<void> {
+    await Promise.all(updates.map(({ dealId, draft }) => {
+        const payload: UpdateDealPayload = {
+            name: draft.name.trim(),
+            value: draft.value,
+            actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+            currency: draft.currency.trim(),
+            pipeline: draft.pipeline,
+            stage: draft.stage,
+            company: draft.company ?? null,
+            expectedCloseDate: draft.expectedCloseDate || undefined,
+            closedAt: draft.closedAt,
+            closedReason: draft.closedReason,
+            won: draft.won,
+        };
+        return updateDeal(dealId, payload);
+    }));
 }
 
 /**
@@ -813,25 +838,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
         setIsSaving(true);
         try {
-            await Promise.all(
-                changed.map((d) => {
-                    const draft = drafts[d.id];
-                    const payload: UpdateDealPayload = {
-                        name: draft.name.trim(),
-                        value: draft.value,
-                        actualValue: draft.actualValue,
-                        currency: draft.currency.trim(),
-                        pipeline: draft.pipeline,
-                        stage: draft.stage,
-                        company: draft.company ?? null,
-                        expectedCloseDate: draft.expectedCloseDate || undefined,
-                        closedAt: draft.closedAt,
-                        closedReason: draft.closedReason,
-                        won: draft.won,
-                    };
-                    return updateDeal(d.id, payload);
-                }),
-            );
+            const updates = changed.flatMap((deal) => {
+                const draft = drafts[deal.id];
+                return draft ? [{ dealId: deal.id, draft }] : [];
+            });
+            await submitDealDraftUpdates(updates);
             toastSuccess(
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
             );
