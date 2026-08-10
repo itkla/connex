@@ -70,6 +70,7 @@ function fingerprint(
     ]);
 }
 
+/** Produces the acknowledgement identity for one exact duplicate-review response. */
 export function duplicatePreflightResponseSignature(
     response: DuplicatePreflightResponse,
 ): string {
@@ -125,7 +126,7 @@ export function useDuplicatePreflight(
         setAcknowledgedResponse(null);
     }, [requestKey]);
 
-    const runCheck = useCallback(async () => {
+    const runCheck = useCallback(async (dealReviewToken?: string) => {
         if (!requestEligible) return null;
         const sequence = requestSequenceRef.current + 1;
         requestSequenceRef.current = sequence;
@@ -148,6 +149,7 @@ export function useDuplicatePreflight(
                 response = await preflightDealDuplicates({
                     name: values.name,
                     companyId: values.companyId,
+                    reviewToken: dealReviewToken,
                 }, requestInit);
             }
             if (requestSequenceRef.current === sequence
@@ -217,7 +219,9 @@ export function useDuplicatePreflight(
                 response: null,
             };
         }
-        const checked = await runCheck();
+        const checked = await runCheck(
+            kind === 'deal' ? response?.reviewToken : undefined,
+        );
         if (!checked || checked.truncated) {
             return {
                 allowed: false,
@@ -249,7 +253,7 @@ export function useDuplicatePreflight(
             reviewSignature,
             response: checked,
         };
-    }, [acknowledgedResponse, kind, requestEligible, requestKey, runCheck]);
+    }, [acknowledgedResponse, kind, requestEligible, requestKey, response?.reviewToken, runCheck]);
     const checkNow = useCallback(async () => {
         const decision = await reviewNow();
         return decision.allowed;

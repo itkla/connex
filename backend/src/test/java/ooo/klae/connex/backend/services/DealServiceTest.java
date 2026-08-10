@@ -10,6 +10,7 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -845,7 +846,8 @@ class DealServiceTest extends AbstractServiceTest {
         DuplicatePreflightResponse reviewed = duplicatePreflightService.preflightDeal(
             new DealDuplicatePreflightRequest(
                 reviewedDraft.getName(),
-                reviewedDraft.getCompanyId()));
+                reviewedDraft.getCompanyId(),
+                null));
         reviewedDraft.setName(reviewedDraft.getName() + " changed");
         MutationFootprint beforeMismatch = mutationFootprint();
         clearDealCreationInvocations();
@@ -858,18 +860,38 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void reviewedCreateRejectsAStaleCandidateSetWithoutAnyWriteOrPublication() {
+    void reviewedCreateRejectsCandidateSetChangedBetweenAcknowledgementAndSubmit() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal draft = dealDraft(pipeline, stage, company);
+        Deal firstCandidate = dealDraft(pipeline, stage, company);
+        firstCandidate.setWorkspaceId(workspace.getId());
+        firstCandidate.setOwnerId(currentUser.getId());
+        firstCandidate.setName(draft.getName());
+        dealMapper.insert(firstCandidate);
         DuplicatePreflightResponse reviewed = duplicatePreflightService.preflightDeal(
-            new DealDuplicatePreflightRequest(draft.getName(), draft.getCompanyId()));
-        Deal competing = dealDraft(pipeline, stage, company);
-        competing.setWorkspaceId(workspace.getId());
-        competing.setOwnerId(currentUser.getId());
-        competing.setName(draft.getName());
-        dealMapper.insert(competing);
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                null));
+        assertEquals(
+            List.of(firstCandidate.getId()),
+            reviewed.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        Deal secondCandidate = dealDraft(pipeline, stage, company);
+        secondCandidate.setWorkspaceId(workspace.getId());
+        secondCandidate.setOwnerId(currentUser.getId());
+        secondCandidate.setName(draft.getName());
+        dealMapper.insert(secondCandidate);
+        DuplicatePreflightResponse submitRecheck = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                reviewed.reviewToken()));
+        assertNotEquals(reviewed.reviewToken(), submitRecheck.reviewToken());
+        assertEquals(
+            List.of(firstCandidate.getId(), secondCandidate.getId()),
+            submitRecheck.candidates().stream().map(candidate -> candidate.recordId()).toList());
         MutationFootprint beforeCreate = mutationFootprint();
         clearDealCreationInvocations();
 
@@ -881,16 +903,33 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void reviewedCreatePreservesManualProvenanceAndConsumesItsTokenOnce() {
+    void reviewedCreateAcceptsAcknowledgedExactDuplicateAfterSubmitRecheck() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal draft = dealDraft(pipeline, stage, company);
         String expectedName = draft.getName();
+        Deal existingCandidate = dealDraft(pipeline, stage, company);
+        existingCandidate.setWorkspaceId(workspace.getId());
+        existingCandidate.setOwnerId(currentUser.getId());
+        existingCandidate.setName(expectedName);
+        dealMapper.insert(existingCandidate);
         DuplicatePreflightResponse reviewed = duplicatePreflightService.preflightDeal(
-            new DealDuplicatePreflightRequest(draft.getName(), draft.getCompanyId()));
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                null));
+        assertEquals(
+            List.of(existingCandidate.getId()),
+            reviewed.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        DuplicatePreflightResponse submitRecheck = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                reviewed.reviewToken()));
+        assertEquals(reviewed.reviewToken(), submitRecheck.reviewToken());
 
-        Deal created = dealService.createReviewed(draft, reviewed.reviewToken());
+        Deal created = dealService.createReviewed(draft, submitRecheck.reviewToken());
 
         Deal stored = dealMapper.getDealById(workspace.getId(), created.getId());
         assertEquals(expectedName, stored.getName());

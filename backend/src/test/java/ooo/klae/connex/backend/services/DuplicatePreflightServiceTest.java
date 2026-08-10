@@ -312,7 +312,8 @@ class DuplicatePreflightServiceTest {
     void dealPreflightReturnsEveryExactNameAndCompanyCandidate() {
         DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
             " Renewal ",
-            18);
+            18,
+            null);
         when(matchingService.normalizeName(" Renewal "))
             .thenReturn(Optional.of("renewal"));
         when(matchingService.normalizeName("RENEWAL"))
@@ -355,9 +356,38 @@ class DuplicatePreflightServiceTest {
     }
 
     @Test
+    void dealPreflightPreservesAStillConsumableAcknowledgedProof() {
+        String acknowledgedToken = "a".repeat(64);
+        DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
+            "Renewal",
+            null,
+            acknowledgedToken);
+        when(matchingService.normalizeName("Renewal"))
+            .thenReturn(Optional.of("renewal"));
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "renewal", null, 51)).thenReturn(List.of(
+            deal(12, "Renewal", null)));
+        when(dealReviewProofService.isConsumable(
+                eq(acknowledgedToken),
+                anyString(),
+                anyString()))
+            .thenReturn(true);
+
+        DuplicatePreflightResponse response = service.preflightDeal(request);
+
+        assertEquals(acknowledgedToken, response.reviewToken());
+        verify(dealReviewProofService).isConsumable(
+            eq(acknowledgedToken),
+            anyString(),
+            anyString());
+        verify(dealReviewProofService, never()).issue(anyString(), anyString());
+    }
+
+    @Test
     void dealPreflightTruncationCannotAuthorizeAnAmbiguousCreate() {
         DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
             "Renewal",
+            null,
             null);
         when(matchingService.normalizeName("Renewal"))
             .thenReturn(Optional.of("renewal"));
@@ -387,6 +417,7 @@ class DuplicatePreflightServiceTest {
     void reviewedDealCreationUsesRateLimitThenOrganizationLockThenRematch() {
         DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
             "Renewal",
+            null,
             null);
         when(matchingService.normalizeName("Renewal"))
             .thenReturn(Optional.of("renewal"));
@@ -424,7 +455,8 @@ class DuplicatePreflightServiceTest {
     void reviewedDealCreationRejectsMissingReusedOrChangedReview() {
         DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
             "Renewal",
-            18);
+            18,
+            null);
         when(matchingService.normalizeName("Renewal"))
             .thenReturn(Optional.of("renewal"));
         when(dealMapper.findDuplicatePreflightCandidates(

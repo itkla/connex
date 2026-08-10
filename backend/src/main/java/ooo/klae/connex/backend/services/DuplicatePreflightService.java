@@ -133,9 +133,15 @@ public class DuplicatePreflightService {
         rateLimiter.requireAllowed(1);
         duplicateDecisionLockService.lockCurrentOrganization();
         DealMatch match = matchDeal(workspaceId, normalized, workflowFingerprint);
-        String reviewToken = dealReviewProofService.issue(
-            workflowFingerprint,
-            match.resultFingerprint());
+        String acknowledgedReviewToken = request.reviewToken();
+        String reviewToken = dealReviewProofService.isConsumable(
+                acknowledgedReviewToken,
+                workflowFingerprint,
+                match.resultFingerprint())
+            ? Objects.requireNonNull(acknowledgedReviewToken)
+            : dealReviewProofService.issue(
+                workflowFingerprint,
+                match.resultFingerprint());
         return new DuplicatePreflightResponse(
             "deal",
             match.candidates(),

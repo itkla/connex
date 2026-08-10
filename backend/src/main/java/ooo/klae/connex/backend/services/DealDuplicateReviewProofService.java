@@ -51,9 +51,32 @@ public class DealDuplicateReviewProofService {
             String rawToken,
             String workflowFingerprint,
             String resultFingerprint) {
+        ConsumableProof proof = lockConsumable(
+            rawToken,
+            workflowFingerprint,
+            resultFingerprint);
+        return proof != null
+            && mapper.deleteClaimed(
+                proof.tokenHash(),
+                proof.principal().workspaceId()) == 1;
+    }
+
+    /** Validates an exact unexpired proof without consuming it. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean isConsumable(
+            String rawToken,
+            String workflowFingerprint,
+            String resultFingerprint) {
+        return lockConsumable(rawToken, workflowFingerprint, resultFingerprint) != null;
+    }
+
+    private ConsumableProof lockConsumable(
+            String rawToken,
+            String workflowFingerprint,
+            String resultFingerprint) {
         byte[] tokenHash = tokenHash(rawToken);
         if (tokenHash == null) {
-            return false;
+            return null;
         }
         Principal principal = principal();
         Integer claimed = mapper.lockConsumable(
@@ -62,8 +85,7 @@ public class DealDuplicateReviewProofService {
             principal.actorId(),
             fingerprintBytes(workflowFingerprint, "workflow fingerprint"),
             fingerprintBytes(resultFingerprint, "result fingerprint"));
-        return claimed != null
-            && mapper.deleteClaimed(tokenHash, principal.workspaceId()) == 1;
+        return claimed == null ? null : new ConsumableProof(tokenHash, principal);
     }
 
     private Principal principal() {
@@ -129,5 +151,8 @@ public class DealDuplicateReviewProofService {
     }
 
     private record Principal(int workspaceId, int actorId) {
+    }
+
+    private record ConsumableProof(byte[] tokenHash, Principal principal) {
     }
 }

@@ -938,7 +938,8 @@ public class DealService {
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
                 deal.getName(),
-                deal.getCompanyId()),
+                deal.getCompanyId(),
+                null),
             duplicateReviewToken);
         return createAfterDuplicateDecisionLock(deal);
     }

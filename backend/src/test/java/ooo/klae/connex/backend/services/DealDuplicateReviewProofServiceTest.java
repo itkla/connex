@@ -83,9 +83,32 @@ class DealDuplicateReviewProofServiceTest {
     }
 
     @Test
+    void validationChecksTheExactBindingWithoutConsumingTheProof() {
+        when(mapper.lockConsumable(any(), eq(5), eq(9), any(), any()))
+            .thenReturn(1);
+
+        assertTrue(service.isConsumable(
+            "c".repeat(64),
+            "a".repeat(64),
+            "b".repeat(64)));
+
+        verify(mapper).lockConsumable(
+            any(),
+            eq(5),
+            eq(9),
+            aryEq(HexFormat.of().parseHex("a".repeat(64))),
+            aryEq(HexFormat.of().parseHex("b".repeat(64))));
+        verify(mapper, never()).deleteClaimed(any(), anyInt());
+    }
+
+    @Test
     void malformedTokenFailsBeforePersistenceAccess() {
         assertFalse(service.consume("not-a-token", "a".repeat(64), "b".repeat(64)));
         assertFalse(service.consume("C".repeat(64), "a".repeat(64), "b".repeat(64)));
+        assertFalse(service.isConsumable(
+            "not-a-token",
+            "a".repeat(64),
+            "b".repeat(64)));
 
         verify(mapper, never())
             .lockConsumable(any(), anyInt(), anyInt(), any(), any());

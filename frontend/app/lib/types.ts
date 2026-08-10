@@ -130,6 +130,7 @@ export type CompanyDuplicatePreflightRequest = {
 export type DealDuplicatePreflightRequest = {
     name: string;
     companyId?: number | null;
+    reviewToken?: string;
 };
 
 export type ImportRowAnalysis = {

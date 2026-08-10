@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
@@ -97,6 +97,16 @@ export default function CompanyActionsMenu({
     const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(
         () => emptyDealPayload(company.id),
     );
+    const setContextualDealPayload = useCallback((
+        nextPayload: SetStateAction<CreateDealPayload>,
+    ) => {
+        setNewDealPayload((currentPayload) => ({
+            ...(typeof nextPayload === 'function'
+                ? nextPayload(currentPayload)
+                : nextPayload),
+            company: company.id,
+        }));
+    }, [company.id]);
 
     useEffect(() => {
         getPipelines().then(async (ps) => {
@@ -236,6 +246,7 @@ export default function CompanyActionsMenu({
                 currency: newDealPayload.currency.trim() || 'USD',
                 pipeline: newDealPayload.pipeline || null,
                 stage: newDealPayload.stage || null,
+                company: company.id,
                 duplicateReviewToken,
                 expectedCloseDate: newDealPayload.expectedCloseDate || undefined,
             });
@@ -419,7 +430,7 @@ export default function CompanyActionsMenu({
                 open={newDealDialogOpen}
                 onOpenChange={closeNewDealDialog}
                 payload={newDealPayload}
-                setPayload={setNewDealPayload}
+                setPayload={setContextualDealPayload}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
                 isCreating={isCreatingDeal}

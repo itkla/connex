@@ -295,6 +295,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/BusinessCardContactRequest.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/BusinessCardPersonAction.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/ConnectorConfigRequest.java#apiKey",
+        "ooo/klae/connex/backend/dto/DealDuplicatePreflightRequest.java#reviewToken",
         "ooo/klae/connex/backend/dto/DeliveryProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/EmailChangeRequestDto.java#currentPassword",
         "ooo/klae/connex/backend/dto/EmailChangeConfirmDto.java#token",

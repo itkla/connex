@@ -254,7 +254,10 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
             workspace.getId(), secondMatch.getId(), "RENEWAL OPPORTUNITY", "renewal opportunity");
 
         DuplicatePreflightResponse bounded = duplicatePreflightService.preflightDeal(
-            new DealDuplicatePreflightRequest("renewal opportunity", company.getId()));
+            new DealDuplicatePreflightRequest(
+                "renewal opportunity",
+                company.getId(),
+                null));
 
         assertEquals(
             List.of(firstMatch.getId(), secondMatch.getId()),
@@ -271,7 +274,10 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
         }
 
         DuplicatePreflightResponse truncated = duplicatePreflightService.preflightDeal(
-            new DealDuplicatePreflightRequest("renewal opportunity", company.getId()));
+            new DealDuplicatePreflightRequest(
+                "renewal opportunity",
+                company.getId(),
+                null));
 
         assertEquals(50, truncated.candidates().size());
         assertTrue(truncated.truncated());
@@ -295,7 +301,10 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
                 canonical.getId()));
 
         DuplicatePreflightResponse indexed = duplicatePreflightService.preflightDeal(
-            new DealDuplicatePreflightRequest("renewal opportunity", company.getId()));
+            new DealDuplicatePreflightRequest(
+                "renewal opportunity",
+                company.getId(),
+                null));
 
         assertEquals(
             List.of(canonical.getId()),
@@ -316,7 +325,10 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
             canonical.getId()));
 
         DuplicatePreflightResponse legacy = duplicatePreflightService.preflightDeal(
-            new DealDuplicatePreflightRequest("legacy renewal", company.getId()));
+            new DealDuplicatePreflightRequest(
+                "legacy renewal",
+                company.getId(),
+                null));
 
         assertEquals(
             List.of(canonical.getId()),

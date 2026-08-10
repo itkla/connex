@@ -15,11 +15,13 @@ describe('manual deal duplicate preflight', () => {
         expect(api).toContain('/api/duplicate-preflight/deals');
         expect(hook).toContain("preflightDealDuplicates({");
         expect(hook).toContain('companyId: values.companyId');
+        expect(hook).toContain('reviewToken: dealReviewToken');
         expect(hook).toContain("kind === 'deal' ? checked.reviewToken : null");
     });
 
-    it('requires review and acknowledgement in the shared deal composer', () => {
+    it('preserves the acknowledged proof through the submit-time recheck', () => {
         const composer = source('app/components/records/deals/NewDealDialog.tsx');
+        const hook = source('app/hooks/useDuplicatePreflight.ts');
 
         expect(composer).toContain("useDuplicatePreflight('deal'");
         expect(composer).toContain('name: payload.name.trim()');
@@ -27,6 +29,7 @@ describe('manual deal duplicate preflight', () => {
         expect(composer).toContain('!duplicateDecision.duplicateReviewToken');
         expect(composer).toContain('kind="deal"');
         expect(composer).toContain('onAcknowledgedChange={duplicatePreflight.setAcknowledged}');
+        expect(hook).toContain("kind === 'deal' ? response?.reviewToken : undefined");
     });
 
     it.each([
@@ -39,6 +42,21 @@ describe('manual deal duplicate preflight', () => {
 
         expect(caller).toContain('duplicateReviewToken: string');
         expect(caller).toContain('duplicateReviewToken,');
+    });
+
+    it('forces a company-page deal back to its contextual company', () => {
+        const companyAction = source(
+            'app/components/records/companies/CompanyActionsMenu.tsx',
+        );
+
+        expect(companyAction).toContain('company: company.id,');
+        expect(companyAction).toContain(
+            'company: company.id,\n                duplicateReviewToken,',
+        );
+        expect(companyAction).toContain('setPayload={setContextualDealPayload}');
+        expect(companyAction).toContain(
+            'setNewDealPayload((currentPayload) => ({',
+        );
     });
 
     it('ships distinct English and Japanese deal-match evidence', () => {
