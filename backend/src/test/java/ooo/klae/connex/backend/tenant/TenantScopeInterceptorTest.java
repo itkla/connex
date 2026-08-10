@@ -91,6 +91,16 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientMemberships"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.findRecipientIdsByActor"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientIdsByActor"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "AiChatMapper.deleteParticipantsForUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "AiChatMapper.clearSessionCreatorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "AiChatMapper.clearMessageAuthorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "AiChatMapper.clearToolCallExecutorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "AiChatMapper.clearTurnRequestersAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearOwnershipAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "PersonMapper.clearOwnershipAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearDefinitionCreatorsAnywhere"));
@@ -139,7 +149,6 @@ class TenantScopeInterceptorTest {
             NS + "ProviderCaptureMapper.countUserProviderResiduals",
             NS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
             NS + "AiChatMapper.deleteParticipantsForUser",
-            NS + "AiChatMapper.deleteOwnedSessionsForUser",
             NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
             NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
             NS + "SavedViewMapper.deleteForFreshMembership",

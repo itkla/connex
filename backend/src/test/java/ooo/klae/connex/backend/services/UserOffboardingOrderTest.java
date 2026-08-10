@@ -90,7 +90,6 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deleteDefaultsForFreshMembership(7, 9);
         order.verify(savedViewMapper).deleteForFreshMembership(7, 9);
         order.verify(aiChatMapper).deleteParticipantsForUser(7, 9);
-        order.verify(aiChatMapper).deleteOwnedSessionsForUser(7, 9);
         order.verify(notificationMapper)
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
@@ -112,7 +111,6 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUser(7, 9);
         order.verify(savedViewMapper).deleteForUser(7, 9);
         order.verify(aiChatMapper).deleteParticipantsForUser(7, 9);
-        order.verify(aiChatMapper).deleteOwnedSessionsForUser(7, 9);
         order.verify(taskMapper).unassignMemberTasks(7, 9);
         order.verify(companyMapper).clearMemberOwnership(7, 9);
         order.verify(personMapper).clearMemberOwnership(7, 9);
@@ -138,7 +136,7 @@ class UserOffboardingOrderTest {
 
         InOrder order = inOrder(
             userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
-            stateVersionService, companyMapper, personMapper, dealMapper,
+            aiChatMapper, stateVersionService, companyMapper, personMapper, dealMapper,
             workflowOffboardingService);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
@@ -152,6 +150,7 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deletePinsForUserAnywhere(9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUserAnywhere(9);
         order.verify(savedViewMapper).deleteForUserAnywhere(9);
+        order.verify(aiChatMapper).deleteParticipantsForUserAnywhere(9);
         order.verify(notificationMapper)
             .deleteHistoricalNotificationBaselinesForRecipientAnywhere(9);
         order.verify(notificationMapper).deleteAllForRecipientAnywhere(9);
@@ -162,6 +161,10 @@ class UserOffboardingOrderTest {
         order.verify(companyMapper).clearOwnershipAnywhere(9);
         order.verify(personMapper).clearOwnershipAnywhere(9);
         order.verify(dealMapper).clearOwnershipAnywhere(9);
+        order.verify(aiChatMapper).clearSessionCreatorsAnywhere(9);
+        order.verify(aiChatMapper).clearMessageAuthorsAnywhere(9);
+        order.verify(aiChatMapper).clearToolCallExecutorsAnywhere(9);
+        order.verify(aiChatMapper).clearTurnRequestersAnywhere(9);
     }
 
     @Test

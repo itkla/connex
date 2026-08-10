@@ -18,6 +18,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -45,6 +46,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     @Autowired private AiAssistantService service;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private RoleMapper roleMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoSpyBean private WorkspaceService workspaceService;
 
     @Test
@@ -126,6 +128,25 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
         assertEquals(INACCESSIBLE, rename.getMessage());
         assertEquals(INACCESSIBLE, archive.getMessage());
+    }
+
+    @Test
+    void permanentlyErasedCreatorFailsClosedOnOwnerAndAppendPaths() {
+        AiChatSessionDto created = service.create(createRequest("Erased creator"));
+        jdbcTemplate.update(
+            "UPDATE ai_chat_session SET created_by_user_id = NULL WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), created.getId());
+
+        ForbiddenException update = assertThrows(
+            ForbiddenException.class,
+            () -> service.update(created.getId(), updateRequest("Rejected", null)));
+        ForbiddenException append = assertThrows(
+            ForbiddenException.class,
+            () -> service.appendMessage(created.getId(), messageRequest("Rejected")));
+
+        assertEquals(INACCESSIBLE, update.getMessage());
+        assertEquals(INACCESSIBLE, append.getMessage());
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), created.getId()));
     }
 
     @Test
