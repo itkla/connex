@@ -203,7 +203,6 @@ export default function QuickEditDealSheet({
                                         if (stage?.success || stage?.failure) {
                                             patch.won = !!stage.success;
                                             patch.closedAt = draft.closedAt ?? toMysqlDateTime(new Date());
-                                            if (stage.failure) patch.actualValue = 0;
                                         }
                                         updateDraft(d.id, patch);
                                     }}
@@ -274,7 +273,6 @@ export default function QuickEditDealSheet({
                                                     : {
                                                         won: opt.won,
                                                         closedAt: draft.closedAt ?? toMysqlDateTime(new Date()),
-                                                        ...(opt.won === false ? { actualValue: 0 } : {}),
                                                     },
                                             )
                                         }

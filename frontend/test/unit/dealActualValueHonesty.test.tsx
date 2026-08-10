@@ -1,5 +1,6 @@
 import {
     createElement,
+    isValidElement,
     type ComponentProps,
     type PropsWithChildren,
     type ReactNode,
@@ -9,7 +10,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import QuickEditDealSheet, { type DealDraft } from "@/app/components/records/deals/QuickEditDealSheet";
 import { actualValueForOutcome } from "@/app/components/records/deals/dealOutcome";
-import type { Deal } from "@/app/lib/types";
+import type { Deal, Pipeline, Stage } from "@/app/lib/types";
+
+vi.mock("react", async () => {
+    const React = await vi.importActual<typeof import("react")>("react");
+    return {
+        ...React,
+        useEffect: () => undefined,
+    };
+});
 
 vi.mock("next-intl", () => ({
     useTranslations: () => (key: string) => key,
@@ -104,6 +113,147 @@ const LOST_DRAFT = {
     won: false,
 } satisfies DealDraft;
 
+const WON_LINE_ITEM_DEAL = {
+    ...LOST_DEAL,
+    name: "Won renewal",
+    valueSource: "line_items",
+    pipeline: 3,
+    stage: 11,
+    won: true,
+} satisfies Deal;
+
+const WON_LINE_ITEM_DRAFT = {
+    ...LOST_DRAFT,
+    name: WON_LINE_ITEM_DEAL.name,
+    pipeline: 3,
+    stage: 11,
+    won: true,
+} satisfies DealDraft;
+
+const PIPELINE = {
+    id: 3,
+    name: "Sales",
+    createdAt: "2026-08-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:00:00Z",
+} satisfies Pipeline;
+
+const WON_STAGE = {
+    id: 11,
+    name: "Closed won",
+    pipeline: PIPELINE.id,
+    position: 0,
+    success: true,
+    failure: false,
+} satisfies Stage;
+
+const LOST_STAGE = {
+    id: 12,
+    name: "Closed lost",
+    pipeline: PIPELINE.id,
+    position: 1,
+    success: false,
+    failure: true,
+} satisfies Stage;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function isUnknownFunction(value: unknown): value is (...args: unknown[]) => unknown {
+    return typeof value === "function";
+}
+
+function findElementFunction(
+    root: unknown,
+    matches: (type: unknown, props: Record<string, unknown>) => boolean,
+    propName: string,
+    missingMessage: string,
+): (...args: unknown[]) => unknown {
+    let callback: ((...args: unknown[]) => unknown) | undefined;
+    const visit = (node: unknown) => {
+        if (Array.isArray(node)) {
+            for (const child of node) visit(child);
+            return;
+        }
+        if (!isRecord(node) || !isValidElement(node) || !isRecord(node.props)) return;
+        const children = node.props.children;
+        const candidate = node.props[propName];
+        if (matches(node.type, node.props) && isUnknownFunction(candidate)) {
+            callback = candidate;
+        }
+        visit(children);
+    };
+    visit(root);
+    if (!callback) throw new Error(missingMessage);
+    return callback;
+}
+
+function findOutcomeButton(root: unknown, label: string): () => unknown {
+    const onClick = findElementFunction(
+        root,
+        (type, props) => type === "button" && props.children === label,
+        "onClick",
+        `Outcome button ${label} was not rendered`,
+    );
+    return () => onClick();
+}
+
+function findFailureStageSelector(root: unknown): (stage: Stage) => unknown {
+    const onValueChange = findElementFunction(
+        root,
+        (_type, props) => {
+            const items = props.items;
+            return Array.isArray(items) && items.some((item) => isRecord(item) && item.failure === true);
+        },
+        "onValueChange",
+        "Failure-stage selector was not rendered",
+    );
+    return (stage) => onValueChange(stage);
+}
+
+function createOutcomeDraftHarness() {
+    let draft: DealDraft = { ...WON_LINE_ITEM_DRAFT };
+    let submittedActualValue: number | undefined;
+    const props = {
+        open: true,
+        onOpenChange: () => undefined,
+        selectedIds: new Set([WON_LINE_ITEM_DEAL.id]),
+        selectedDeals: [WON_LINE_ITEM_DEAL],
+        drafts: { [WON_LINE_ITEM_DEAL.id]: draft },
+        updateDraft: (_id: number, patch: Partial<DealDraft>) => {
+            draft = { ...draft, ...patch };
+        },
+        pipelines: [PIPELINE],
+        stagesByPipeline: { [PIPELINE.id]: [WON_STAGE, LOST_STAGE] },
+        isSaving: false,
+        saveEdits: () => {
+            submittedActualValue = actualValueForOutcome(draft.won, draft.actualValue);
+        },
+    } satisfies ComponentProps<typeof QuickEditDealSheet>;
+
+    return {
+        getDraft: () => draft,
+        selectOutcome: (outcome: "Open" | "Won" | "Lost") => {
+            const tree = QuickEditDealSheet({
+                ...props,
+                drafts: { [WON_LINE_ITEM_DEAL.id]: draft },
+            });
+            findOutcomeButton(tree, `outcome${outcome}`)();
+        },
+        selectFailureStage: () => {
+            const tree = QuickEditDealSheet({
+                ...props,
+                drafts: { [WON_LINE_ITEM_DEAL.id]: draft },
+            });
+            findFailureStageSelector(tree)(LOST_STAGE);
+        },
+        submit: () => {
+            props.saveEdits();
+            return submittedActualValue;
+        },
+    };
+}
+
 describe("lost-deal actual value", () => {
     function renderActualValueInput(won: boolean, actualValue: number) {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
@@ -146,5 +296,43 @@ describe("lost-deal actual value", () => {
         expect(actualValueForOutcome(false, 275)).toBe(0);
         expect(actualValueForOutcome(true, 275)).toBe(275);
         expect(actualValueForOutcome(null, 275)).toBe(275);
+    });
+
+    it("preserves realized value when a won deal is toggled through lost back to won before submit", () => {
+        const form = createOutcomeDraftHarness();
+
+        form.selectOutcome("Lost");
+        expect(form.getDraft().actualValue).toBe(WON_LINE_ITEM_DEAL.actualValue);
+        form.selectOutcome("Won");
+
+        expect(form.submit()).toBe(WON_LINE_ITEM_DEAL.actualValue);
+    });
+
+    it("preserves realized value when a won deal is toggled through lost to open before submit", () => {
+        const form = createOutcomeDraftHarness();
+
+        form.selectOutcome("Lost");
+        expect(form.getDraft().actualValue).toBe(WON_LINE_ITEM_DEAL.actualValue);
+        form.selectOutcome("Open");
+
+        expect(form.submit()).toBe(WON_LINE_ITEM_DEAL.actualValue);
+    });
+
+    it("submits zero for a committed loss while retaining the provisional draft value", () => {
+        const form = createOutcomeDraftHarness();
+
+        form.selectOutcome("Lost");
+
+        expect(form.getDraft().actualValue).toBe(WON_LINE_ITEM_DEAL.actualValue);
+        expect(form.submit()).toBe(0);
+    });
+
+    it("preserves realized value while a failure-stage selection remains provisional", () => {
+        const form = createOutcomeDraftHarness();
+
+        form.selectFailureStage();
+
+        expect(form.getDraft().won).toBe(false);
+        expect(form.getDraft().actualValue).toBe(WON_LINE_ITEM_DEAL.actualValue);
     });
 });
