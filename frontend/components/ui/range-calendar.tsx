@@ -293,6 +293,224 @@ function useCalendarLayout({
     return { panels, peak, weekdays };
 }
 
+/** The open selection plus the range it currently previews. Split out so panels can be built from
+ * the preview before the input layer, which needs those panels, is wired up. */
+function useRangeDraft(value: DateRange) {
+    const [draft, setDraft] = useState<Draft | null>(null);
+    const [focusValue, setFocusValue] = useState<string>(value.from);
+
+    const rangeOf = useCallback(
+        (candidate: Draft | null): DateRange => {
+            if (!candidate) return value;
+            const anchor = parseDayKey(candidate.anchor);
+            const cursor = parseDayKey(candidate.cursor);
+            if (!anchor || !cursor) return value;
+            return spanPeriods(candidate.zoom, anchor, cursor);
+        },
+        [value],
+    );
+
+    const preview = useMemo(() => rangeOf(draft), [draft, rangeOf]);
+    const spanAnchor = useMemo(() => (draft ? parseDayKey(draft.anchor) : null), [draft]);
+
+    return { draft, setDraft, focusValue, setFocusValue, preview, spanAnchor, rangeOf };
+}
+
+/**
+ * Turns pointer and keyboard input into a range. Owns the press-sweep-release gesture, the
+ * click-then-click fallback at day zoom, roving focus, and the suppression that stops a gesture and
+ * the click it synthesises from both firing. Committing and paging are delegated, so this layer
+ * never has to know how the view is animated or zoomed.
+ */
+function useRangeInput({
+    zoom,
+    columns,
+    panels,
+    tabValue,
+    gridRef,
+    draft,
+    setDraft,
+    setFocusValue,
+    rangeOf,
+    onCommit,
+    onPage,
+}: {
+    zoom: CalendarZoom;
+    columns: number;
+    panels: { cells: CalendarCell[] }[];
+    tabValue: string;
+    gridRef: React.RefObject<HTMLDivElement | null>;
+    draft: Draft | null;
+    setDraft: React.Dispatch<React.SetStateAction<Draft | null>>;
+    setFocusValue: (value: string) => void;
+    rangeOf: (candidate: Draft | null) => DateRange;
+    onCommit: (range: DateRange) => void;
+    onPage: (delta: number) => void;
+}) {
+    const gestureRef = useRef<(Draft & { id: number; committing: boolean; moved: boolean }) | null>(null);
+    const suppressClickRef = useRef(false);
+    const keyboardRef = useRef(false);
+
+    const activate = useCallback(
+        (cellValue: string) => {
+            const date = parseDayKey(cellValue);
+            if (!date) return;
+            if (draft && draft.zoom === zoom) {
+                const anchor = parseDayKey(draft.anchor);
+                if (anchor) {
+                    setDraft(null);
+                    onCommit(spanPeriods(zoom, anchor, date));
+                }
+                return;
+            }
+            if (zoom === 'day') {
+                setDraft({ zoom, anchor: cellValue, cursor: cellValue });
+                setFocusValue(cellValue);
+                return;
+            }
+            setDraft(null);
+            onCommit(periodRange(zoom, date));
+        },
+        [draft, onCommit, setDraft, setFocusValue, zoom],
+    );
+
+    const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        suppressClickRef.current = false;
+        if (gestureRef.current || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        const cellValue = cellValueAt(event.clientX, event.clientY);
+        if (!cellValue) return;
+        keyboardRef.current = false;
+        const extending = draft != null && draft.zoom === zoom;
+        const next: Draft = extending && draft
+            ? { ...draft, cursor: cellValue }
+            : { zoom, anchor: cellValue, cursor: cellValue };
+        gestureRef.current = { ...next, id: event.pointerId, committing: extending, moved: false };
+        gridRef.current?.setPointerCapture(event.pointerId);
+        setDraft(next);
+        setFocusValue(cellValue);
+        if (event.pointerType === 'touch') {
+            gridRef.current
+                ?.querySelector<HTMLElement>(`[data-cell-value="${cellValue}"][data-cell-selectable="true"]`)
+                ?.focus({ preventScroll: true });
+        }
+    };
+
+    const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+        const gesture = gestureRef.current;
+        if (gesture && gesture.id !== event.pointerId) return;
+        if (!gesture && (!draft || event.pointerType !== 'mouse')) return;
+        const cellValue = cellValueAt(event.clientX, event.clientY);
+        if (!cellValue) return;
+        if (gesture) {
+            if (gesture.cursor === cellValue) return;
+            gesture.cursor = cellValue;
+            gesture.moved = true;
+        }
+        setDraft((current) =>
+            current && current.cursor !== cellValue ? { ...current, cursor: cellValue } : current,
+        );
+    };
+
+    const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+        const gesture = gestureRef.current;
+        if (!gesture || gesture.id !== event.pointerId) return;
+        gestureRef.current = null;
+        suppressClickRef.current = true;
+        if (gridRef.current?.hasPointerCapture(event.pointerId)) {
+            gridRef.current.releasePointerCapture(event.pointerId);
+        }
+        if (gesture.committing || gesture.moved || gesture.zoom !== 'day') {
+            setDraft(null);
+            onCommit(rangeOf({ zoom: gesture.zoom, anchor: gesture.anchor, cursor: gesture.cursor }));
+        }
+    };
+
+    const onCellClick = (cellValue: string) => {
+        if (suppressClickRef.current) {
+            suppressClickRef.current = false;
+            return;
+        }
+        activate(cellValue);
+    };
+
+    const moveFocus = (delta: number) => {
+        const source = parseDayKey(tabValue);
+        if (!source) return;
+        const next =
+            zoom === 'day'
+                ? addDays(source, delta)
+                : zoom === 'month'
+                    ? new Date(source.getFullYear(), source.getMonth() + delta, 1)
+                    : new Date(source.getFullYear() + delta, 0, 1);
+        const nextValue = dayKeyOf(next);
+        setFocusValue(nextValue);
+        setDraft((current) =>
+            current && current.zoom === zoom ? { ...current, cursor: nextValue } : current,
+        );
+        const onScreen = panels.some((panel) =>
+            panel.cells.some((cell) => cell.value === nextValue && !cell.muted),
+        );
+        if (onScreen) return;
+        onPage(delta > 0 ? 1 : -1);
+    };
+
+    const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === 'Escape' && draft) {
+            event.stopPropagation();
+            setDraft(null);
+            return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            keyboardRef.current = true;
+            activate(tabValue);
+            return;
+        }
+        const moves: Record<string, number> = {
+            ArrowLeft: -1,
+            ArrowRight: 1,
+            ArrowUp: -columns,
+            ArrowDown: columns,
+        };
+        const delta = moves[event.key];
+        if (delta != null) {
+            event.preventDefault();
+            keyboardRef.current = true;
+            moveFocus(delta);
+            return;
+        }
+        if (event.key === 'PageUp' || event.key === 'PageDown') {
+            event.preventDefault();
+            keyboardRef.current = true;
+            onPage(event.key === 'PageUp' ? -1 : 1);
+        }
+    };
+
+    useEffect(() => {
+        if (!keyboardRef.current) return;
+        gridRef.current?.querySelector<HTMLElement>('[data-cell-value][tabindex="0"]')?.focus();
+    }, [gridRef, panels, tabValue]);
+
+    return {
+        onCellClick,
+        gridHandlers: {
+            onPointerDown,
+            onPointerMove,
+            onPointerUp,
+            onPointerCancel: onPointerUp,
+            onKeyDown,
+            onPointerLeave: () => {
+                if (gestureRef.current) return;
+                setDraft((current) =>
+                    current && current.cursor !== current.anchor
+                        ? { ...current, cursor: current.anchor }
+                        : current,
+                );
+            },
+        },
+    };
+}
+
 /**
  * A range calendar that reads at three magnifications and plots the caller's daily series at each
  * one: a day cell carries its own bar, a month cell one bar per day, a year cell one bar per
@@ -338,28 +556,11 @@ export function RangeCalendar({
     const [anchorMonth, setAnchorMonth] = useState<Date>(
         () => startOfMonth(parseDayKey(value.from) ?? new Date()),
     );
-    const [draft, setDraft] = useState<Draft | null>(null);
-    const [focusValue, setFocusValue] = useState<string>(value.from);
     const [nav, setNav] = useState<ViewMotion>(STILL);
 
     const gridRef = useRef<HTMLDivElement>(null);
-    const gestureRef = useRef<(Draft & { id: number; committing: boolean; moved: boolean }) | null>(null);
-    const suppressClickRef = useRef(false);
-    const keyboardRef = useRef(false);
-
-    const rangeOf = useCallback(
-        (candidate: Draft | null): DateRange => {
-            if (!candidate) return value;
-            const anchor = parseDayKey(candidate.anchor);
-            const cursor = parseDayKey(candidate.cursor);
-            if (!anchor || !cursor) return value;
-            return spanPeriods(candidate.zoom, anchor, cursor);
-        },
-        [value],
-    );
-
-    const preview = useMemo(() => rangeOf(draft), [draft, rangeOf]);
-    const spanAnchor = useMemo(() => (draft ? parseDayKey(draft.anchor) : null), [draft]);
+    const { draft, setDraft, focusValue, setFocusValue, preview, spanAnchor, rangeOf } =
+        useRangeDraft(value);
 
     const { panels: layout, peak, weekdays } = useCalendarLayout({
         zoom,
@@ -452,155 +653,40 @@ export function RangeCalendar({
             setDraft(null);
             applyView(next, anchor);
         },
-        [applyView, reduce],
+        [applyView, reduce, setDraft],
     );
 
-    const commit = useCallback(
+    const commitRange = useCallback(
         (range: DateRange) => {
-            setDraft(null);
             onChange(range);
             setFocusValue(range.from);
             if (zoom === 'day') return;
             changeZoom('day', startOfMonth(parseDayKey(range.from) ?? anchorMonth), false);
         },
-        [anchorMonth, changeZoom, onChange, zoom],
+        [anchorMonth, changeZoom, onChange, setFocusValue, zoom],
     );
 
-    const activate = useCallback(
-        (cellValue: string) => {
-            const date = parseDayKey(cellValue);
-            if (!date) return;
-            if (draft && draft.zoom === zoom) {
-                const anchor = parseDayKey(draft.anchor);
-                if (anchor) commit(spanPeriods(zoom, anchor, date));
-                return;
-            }
-            if (zoom === 'day') {
-                setDraft({ zoom, anchor: cellValue, cursor: cellValue });
-                setFocusValue(cellValue);
-                return;
-            }
-            commit(periodRange(zoom, date));
+    const pageFocus = useCallback(
+        (delta: number) => {
+            setNav(STILL);
+            applyView(zoom, pageBy(delta, anchorMonth));
         },
-        [commit, draft, zoom],
+        [anchorMonth, applyView, pageBy, zoom],
     );
 
-    const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-        suppressClickRef.current = false;
-        if (gestureRef.current || (event.pointerType === 'mouse' && event.button !== 0)) return;
-        const cellValue = cellValueAt(event.clientX, event.clientY);
-        if (!cellValue) return;
-        keyboardRef.current = false;
-        const extending = draft != null && draft.zoom === zoom;
-        const next: Draft = extending && draft
-            ? { ...draft, cursor: cellValue }
-            : { zoom, anchor: cellValue, cursor: cellValue };
-        gestureRef.current = { ...next, id: event.pointerId, committing: extending, moved: false };
-        gridRef.current?.setPointerCapture(event.pointerId);
-        setDraft(next);
-        setFocusValue(cellValue);
-        if (event.pointerType === 'touch') {
-            gridRef.current
-                ?.querySelector<HTMLElement>(`[data-cell-value="${cellValue}"][data-cell-selectable="true"]`)
-                ?.focus({ preventScroll: true });
-        }
-    };
-
-    const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-        const gesture = gestureRef.current;
-        if (gesture && gesture.id !== event.pointerId) return;
-        if (!gesture && (!draft || event.pointerType !== 'mouse')) return;
-        const cellValue = cellValueAt(event.clientX, event.clientY);
-        if (!cellValue) return;
-        if (gesture) {
-            if (gesture.cursor === cellValue) return;
-            gesture.cursor = cellValue;
-            gesture.moved = true;
-        }
-        setDraft((current) =>
-            current && current.cursor !== cellValue ? { ...current, cursor: cellValue } : current,
-        );
-    };
-
-    const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-        const gesture = gestureRef.current;
-        if (!gesture || gesture.id !== event.pointerId) return;
-        gestureRef.current = null;
-        suppressClickRef.current = true;
-        if (gridRef.current?.hasPointerCapture(event.pointerId)) {
-            gridRef.current.releasePointerCapture(event.pointerId);
-        }
-        if (gesture.committing || gesture.moved || gesture.zoom !== 'day') {
-            commit(rangeOf({ zoom: gesture.zoom, anchor: gesture.anchor, cursor: gesture.cursor }));
-        }
-    };
-
-    const onCellClick = (cellValue: string) => {
-        if (suppressClickRef.current) {
-            suppressClickRef.current = false;
-            return;
-        }
-        activate(cellValue);
-    };
-
-    const moveFocus = (delta: number) => {
-        const source = parseDayKey(tabValue);
-        if (!source) return;
-        const next =
-            zoom === 'day'
-                ? addDays(source, delta)
-                : zoom === 'month'
-                    ? new Date(source.getFullYear(), source.getMonth() + delta, 1)
-                    : new Date(source.getFullYear() + delta, 0, 1);
-        const nextValue = dayKeyOf(next);
-        setFocusValue(nextValue);
-        setDraft((current) =>
-            current && current.zoom === zoom ? { ...current, cursor: nextValue } : current,
-        );
-        const onScreen = panels.some((panel) =>
-            panel.cells.some((cell) => cell.value === nextValue && !cell.muted),
-        );
-        if (onScreen) return;
-        setNav(STILL);
-        applyView(zoom, pageBy(delta > 0 ? 1 : -1, anchorMonth));
-    };
-
-    const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (event.key === 'Escape' && draft) {
-            event.stopPropagation();
-            setDraft(null);
-            return;
-        }
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            keyboardRef.current = true;
-            activate(tabValue);
-            return;
-        }
-        const moves: Record<string, number> = {
-            ArrowLeft: -1,
-            ArrowRight: 1,
-            ArrowUp: -columns,
-            ArrowDown: columns,
-        };
-        const delta = moves[event.key];
-        if (delta != null) {
-            event.preventDefault();
-            keyboardRef.current = true;
-            moveFocus(delta);
-            return;
-        }
-        if (event.key === 'PageUp' || event.key === 'PageDown') {
-            event.preventDefault();
-            keyboardRef.current = true;
-            step(event.key === 'PageUp' ? -1 : 1, true);
-        }
-    };
-
-    useEffect(() => {
-        if (!keyboardRef.current) return;
-        gridRef.current?.querySelector<HTMLElement>('[data-cell-value][tabindex="0"]')?.focus();
-    }, [tabValue, panels]);
+    const { onCellClick, gridHandlers } = useRangeInput({
+        zoom,
+        columns,
+        panels,
+        tabValue,
+        gridRef,
+        draft,
+        setDraft,
+        setFocusValue,
+        rangeOf,
+        onCommit: commitRange,
+        onPage: pageFocus,
+    });
 
     const transition = reduce ? instant : { duration: nav.duration, ease: easeOut };
 
@@ -629,19 +715,7 @@ export function RangeCalendar({
             <div
                 ref={gridRef}
                 className="relative h-80 touch-none overflow-hidden"
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={onPointerUp}
-                onKeyDown={onKeyDown}
-                onPointerLeave={() => {
-                    if (gestureRef.current) return;
-                    setDraft((current) =>
-                        current && current.cursor !== current.anchor
-                            ? { ...current, cursor: current.anchor }
-                            : current,
-                    );
-                }}
+                {...gridHandlers}
             >
                 <AnimatePresence custom={nav} initial={false} mode="popLayout">
                     <motion.div
