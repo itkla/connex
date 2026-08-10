@@ -1,11 +1,17 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import SsoPanel from "@/app/components/settings/SsoPanel";
-import { DEFAULT_CAPABILITIES, getCapabilities } from "@/app/lib/api";
+import { getCapabilitiesResultFromCookie } from "@/app/lib/api";
 
 export default async function OrgSsoPage() {
-    const capabilities = await getCapabilities().catch(() => DEFAULT_CAPABILITIES);
-    if (!capabilities.sso) {
+    const cookie = (await headers()).get("cookie");
+    const capabilitiesResult = await getCapabilitiesResultFromCookie(cookie);
+    if (!capabilitiesResult.ok) {
+        return <CapabilityUnavailablePage />;
+    }
+    if (!capabilitiesResult.data.sso) {
         redirect("/organization/members");
     }
     return <SsoPanel />;

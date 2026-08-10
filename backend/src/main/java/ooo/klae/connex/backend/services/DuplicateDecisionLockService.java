@@ -13,7 +13,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /**
- * Serializes candidate-affecting person and company mutations across one organization.
+ * Serializes candidate-affecting person, company, and deal mutations across one organization.
  */
 @Service
 @RequiredArgsConstructor

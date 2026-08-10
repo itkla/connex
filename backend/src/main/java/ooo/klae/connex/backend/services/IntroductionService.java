@@ -161,6 +161,7 @@ public class IntroductionService {
             employment,
             pathDismissals,
             warmth,
+            null,
             WarmPathService.resolveLimit(pathLimit));
         String timestamp = asOf.toString();
         suggestions.forEach(suggestion -> suggestion.setAsOf(timestamp));

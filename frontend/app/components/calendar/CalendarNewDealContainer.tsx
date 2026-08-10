@@ -84,7 +84,7 @@ export default function CalendarNewDealContainer({
     const seededBaseline: CreateDealPayload = { ...EMPTY_DRAFT, expectedCloseDate: defaultExpectedCloseDate || undefined };
     const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
 
-    const createNewDeal = async () => {
+    const createNewDeal = async (duplicateReviewToken: string) => {
         setSucceeded(false);
         setCreating(true);
         try {
@@ -96,6 +96,7 @@ export default function CalendarNewDealContainer({
                 currency: payload.currency.trim() || 'USD',
                 pipeline: payload.pipeline || null,
                 stage: payload.stage || null,
+                duplicateReviewToken,
                 expectedCloseDate: payload.expectedCloseDate || undefined,
             });
             toastSuccess(t('dealCreated'));

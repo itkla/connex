@@ -16,6 +16,7 @@ import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
 
 /**
  * Pure canonical normalization for identity matching.
@@ -24,7 +25,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MatchingService {
 
-    private static final int MAX_NAME_CODE_POINTS = 255;
     private static final int MAX_PHONE_INPUT_LENGTH = 256;
     private static final int MAX_ADDRESS_INPUT_LENGTH = 2_048;
     private static final int MAX_EMAIL_LENGTH = 254;
@@ -60,36 +60,7 @@ public class MatchingService {
      * @return the canonical name, or empty when the input is invalid
      */
     public Optional<String> normalizeName(String raw) {
-        Optional<String> normalizedInput = normalizeUnicode(raw, MAX_ADDRESS_INPUT_LENGTH);
-        if (normalizedInput.isEmpty()) {
-            return Optional.empty();
-        }
-        StringBuilder folded = new StringBuilder(normalizedInput.orElseThrow().length());
-        boolean pendingSpace = false;
-        for (int offset = 0; offset < normalizedInput.orElseThrow().length();) {
-            int codePoint = normalizedInput.orElseThrow().codePointAt(offset);
-            offset += Character.charCount(codePoint);
-            if (isUnicodeSpace(codePoint)) {
-                pendingSpace = folded.length() > 0;
-                continue;
-            }
-            if (isForbiddenCodePoint(codePoint)) {
-                return Optional.empty();
-            }
-            if (pendingSpace) {
-                folded.append(' ');
-                pendingSpace = false;
-            }
-            appendHiraganaFold(folded, codePoint);
-        }
-        String result = Normalizer.normalize(
-            folded.toString().toLowerCase(Locale.ROOT),
-            Normalizer.Form.NFC);
-        if (result.isEmpty()
-                || result.codePointCount(0, result.length()) > MAX_NAME_CODE_POINTS) {
-            return Optional.empty();
-        }
-        return Optional.of(result);
+        return CanonicalNameNormalizer.normalize(raw);
     }
 
     /**
@@ -350,20 +321,6 @@ public class MatchingService {
             end -= Character.charCount(codePoint);
         }
         return value.substring(start, end);
-    }
-
-    private void appendHiraganaFold(StringBuilder target, int codePoint) {
-        if (codePoint >= 0x30a1 && codePoint <= 0x30f6) {
-            target.appendCodePoint(codePoint - 0x60);
-        } else if (codePoint == 0x30fd || codePoint == 0x30fe) {
-            target.appendCodePoint(codePoint - 0x60);
-        } else if (codePoint >= 0x30f7 && codePoint <= 0x30fa) {
-            int[] bases = {0x308f, 0x3090, 0x3091, 0x3092};
-            target.appendCodePoint(bases[codePoint - 0x30f7]);
-            target.appendCodePoint(0x3099);
-        } else {
-            target.appendCodePoint(codePoint);
-        }
     }
 
     private boolean isEmailLocalPart(String local) {

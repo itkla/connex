@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
+import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.services.DuplicatePreflightService;
@@ -15,7 +16,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
- * Bounded duplicate checks for person and company intake.
+ * Bounded duplicate checks for person, company, and deal intake.
  */
 @RestController
 @RequestMapping("/api/duplicate-preflight")
@@ -48,5 +49,18 @@ public class DuplicatePreflightController {
     public DuplicatePreflightResponse companies(
             @Valid @RequestBody CompanyDuplicatePreflightRequest request) {
         return duplicatePreflightService.preflightCompany(request);
+    }
+
+    /**
+     * Returns ranked owned deal candidates for the exact canonical name and company key.
+     *
+     * @param request candidate deal identity
+     * @return ranked candidates and an opaque one-use review token
+     */
+    @PostMapping("/deals")
+    @RequirePermission(Permission.DEAL_CREATE)
+    public DuplicatePreflightResponse deals(
+            @Valid @RequestBody DealDuplicatePreflightRequest request) {
+        return duplicatePreflightService.preflightDeal(request);
     }
 }

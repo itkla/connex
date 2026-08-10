@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -121,7 +121,7 @@ import {
     type Tag,
     type WorkspaceMember,
 } from '@/app/lib/types';
-import { isDealClosed } from './dealOutcome';
+import { actualValueForOutcome, isDealClosed } from './dealOutcome';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -169,6 +169,31 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
+type DealDraftUpdate = {
+    dealId: number;
+    draft: DealDraft;
+};
+
+/** Persists quick-edit drafts with outcome-canonicalized realized values. */
+export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>): Promise<void> {
+    await Promise.all(updates.map(({ dealId, draft }) => {
+        const payload: UpdateDealPayload = {
+            name: draft.name.trim(),
+            value: draft.value,
+            actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+            currency: draft.currency.trim(),
+            pipeline: draft.pipeline,
+            stage: draft.stage,
+            company: draft.company ?? null,
+            expectedCloseDate: draft.expectedCloseDate || undefined,
+            closedAt: draft.closedAt,
+            closedReason: draft.closedReason,
+            won: draft.won,
+        };
+        return updateDeal(dealId, payload);
+    }));
+}
+
 /**
  * Maps a table column key to the backend {@code sort} token accepted by
  * {@code GET /api/deals/page}. Columns absent here are not server-sortable.
@@ -198,6 +223,70 @@ const EMPTY_DEAL_DRAFT: CreateDealPayload = {
 };
 
 const DEAL_FILTER_KEYS = ['status', 'company', 'pipeline', 'stage', 'risk', 'owner'] as const;
+
+type DealsViewState = {
+    definition: SegmentDefinition;
+    segmentEvaluationRevision: number;
+    page: number;
+    size: number;
+    sortKey: string | null;
+    sortDir: 'asc' | 'desc';
+};
+
+type DealsViewAction =
+    | { type: 'pageChanged'; page: number }
+    | { type: 'pageSizeChanged'; size: number }
+    | { type: 'resetPage' }
+    | { type: 'sortChanged'; sortKey: string; sortDir: 'asc' | 'desc' }
+    | { type: 'definitionChanged'; definition: SegmentDefinition }
+    | { type: 'segmentsCleared' }
+    | { type: 'workspaceChanged' }
+    | {
+        type: 'savedViewApplied';
+        sortKey: string | null;
+        sortDir: 'asc' | 'desc';
+        definition: SegmentDefinition;
+    };
+
+function dealsViewReducer(state: DealsViewState, action: DealsViewAction): DealsViewState {
+    switch (action.type) {
+        case 'pageChanged':
+            return { ...state, page: action.page };
+        case 'pageSizeChanged':
+            return { ...state, page: 1, size: action.size };
+        case 'resetPage':
+            return { ...state, page: 1 };
+        case 'sortChanged':
+            return { ...state, page: 1, sortKey: action.sortKey, sortDir: action.sortDir };
+        case 'definitionChanged':
+            return {
+                ...state,
+                definition: action.definition,
+                segmentEvaluationRevision: state.segmentEvaluationRevision + 1,
+                page: 1,
+            };
+        case 'segmentsCleared':
+            return { ...state, definition: EMPTY_DEFINITION, page: 1 };
+        case 'workspaceChanged':
+            return {
+                ...state,
+                definition: EMPTY_DEFINITION,
+                page: 1,
+                size: 25,
+                sortKey: null,
+                sortDir: 'asc',
+            };
+        case 'savedViewApplied':
+            return {
+                ...state,
+                definition: action.definition,
+                segmentEvaluationRevision: state.segmentEvaluationRevision + 1,
+                page: 1,
+                sortKey: action.sortKey,
+                sortDir: action.sortDir,
+            };
+    }
+}
 
 function resolveNamedFacetIds<T extends { id: number; name: string }>(values: string[] | undefined, items: T[]): number[] | undefined {
     if (!values?.length) return undefined;
@@ -264,8 +353,15 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
-    const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
-    const [segmentEvaluationRevision, setSegmentEvaluationRevision] = useState(0);
+    const [viewState, dispatchViewState] = useReducer(dealsViewReducer, {
+        definition: EMPTY_DEFINITION,
+        segmentEvaluationRevision: 0,
+        page: parseListInt(searchParams.get('page'), 1),
+        size: parseListInt(searchParams.get('size'), 25, MAX_URL_PAGE_SIZE),
+        sortKey: searchParams.get('sort') || null,
+        sortDir: searchParams.get('dir') === 'desc' ? 'desc' : 'asc',
+    });
+    const { definition, segmentEvaluationRevision, page, size, sortKey, sortDir } = viewState;
     const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
     const evaluable = useMemo(() => evaluableSegmentDefinition(definition), [definition]);
     const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
@@ -293,11 +389,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, []);
     const inlineEdit = useInlineEdit<Deal>(patchDeal);
     const [total, setTotal] = useState(initialTotal);
-    const [page, setPage] = useState(() => parseListInt(searchParams.get('page'), 1));
-    const [size, setSize] = useState(() => parseListInt(searchParams.get('size'), 25, MAX_URL_PAGE_SIZE));
     const [loadingPage, setLoadingPage] = useState(false);
-    const [sortKey, setSortKey] = useState<string | null>(() => searchParams.get('sort') || null);
-    const [sortDir, setSortDir] = useState<'asc' | 'desc'>(() => (searchParams.get('dir') === 'desc' ? 'desc' : 'asc'));
     const [dealMetrics, setDealMetrics] = useState(initialMetrics);
     const [dealFacets, setDealFacets] = useState(initialFacets);
     const [dataRevision, setDataRevision] = useState(0);
@@ -323,7 +415,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setPageRequestError(null);
             if (hasSegments) clearSegmentFailure(segmentsKey);
             const maxPage = Math.max(1, Math.ceil(response.total / (params.size ?? 25)));
-            if ((params.page ?? 1) > maxPage) setPage(maxPage);
+            if ((params.page ?? 1) > maxPage) {
+                dispatchViewState({ type: 'pageChanged', page: maxPage });
+            }
         } catch (error: unknown) {
             if (requestId !== requestIdRef.current) return;
             const message = loadErrorMessage(error, (params.risk?.length ?? 0) > 0);
@@ -680,47 +774,41 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         if (workspaceRef.current === activeWorkspaceId) return;
         workspaceRef.current = activeWorkspaceId;
         clearSelection();
-        setPage(1); setSize(25); setSortKey(null); setSortDir('asc');
-        setDefinition(EMPTY_DEFINITION);
+        dispatchViewState({ type: 'workspaceChanged' });
     }, [activeWorkspaceId, clearSelection]);
 
     const changePage = useCallback((nextPage: number) => {
-        setPage(nextPage);
+        dispatchViewState({ type: 'pageChanged', page: nextPage });
     }, []);
     const changePageSize = useCallback((nextSize: number) => {
-        setSize(nextSize);
-        setPage(1);
+        dispatchViewState({ type: 'pageSizeChanged', size: nextSize });
     }, []);
     const changeQuery = useCallback((nextQuery: string) => {
         clearSelection();
         setQuery(nextQuery);
-        setPage(1);
+        dispatchViewState({ type: 'resetPage' });
     }, [clearSelection, setQuery]);
     const changeFilters = useCallback((nextFilters: FilterState) => {
         resetSelectionState();
         setFilterState(normalizeDealFilters(nextFilters));
-        setPage(1);
+        dispatchViewState({ type: 'resetPage' });
     }, [resetSelectionState, setFilterState]);
     const handleSortChange = useCallback((columnKey: string) => {
         if (!DEAL_SORT_TOKENS[columnKey]) return;
         const nextDir: 'asc' | 'desc' = sortKey === columnKey && sortDir === 'asc' ? 'desc' : 'asc';
         if (!allMatchingActive) clearSelection();
-        setSortKey(columnKey);
-        setSortDir(nextDir);
-        setPage(1);
+        dispatchViewState({ type: 'sortChanged', sortKey: columnKey, sortDir: nextDir });
     }, [allMatchingActive, clearSelection, sortKey, sortDir]);
     const changeCurrency = useCallback((currency: string) => {
         clearSelection();
         setRevenueSeries({ closed: [], projected: [] });
         setStageDistribution([]);
         setSelectedCurrency(currency);
-        setPage(1);
+        dispatchViewState({ type: 'resetPage' });
     }, [clearSelection]);
     const changeDefinition = useCallback((nextDefinition: SegmentDefinition) => {
         clearSelection();
-        setDefinition(nextDefinition);
-        setSegmentEvaluationRevision((revision) => revision + 1);
-        setPage(1);
+        dispatchViewState({ type: 'definitionChanged', definition: nextDefinition });
     }, [clearSelection]);
     const refreshRecords = useCallback(() => {
         clearSelection();
@@ -748,7 +836,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         }
     };
 
-    const createNewDeal = async () => {
+    const createNewDeal = async (duplicateReviewToken: string) => {
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
@@ -760,6 +848,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 currency: newPayload.currency.trim() || 'USD',
                 pipeline: newPayload.pipeline || null,
                 stage: newPayload.stage || null,
+                duplicateReviewToken,
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('dealCreated'));
@@ -813,25 +902,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
         setIsSaving(true);
         try {
-            await Promise.all(
-                changed.map((d) => {
-                    const draft = drafts[d.id];
-                    const payload: UpdateDealPayload = {
-                        name: draft.name.trim(),
-                        value: draft.value,
-                        actualValue: draft.actualValue,
-                        currency: draft.currency.trim(),
-                        pipeline: draft.pipeline,
-                        stage: draft.stage,
-                        company: draft.company ?? null,
-                        expectedCloseDate: draft.expectedCloseDate || undefined,
-                        closedAt: draft.closedAt,
-                        closedReason: draft.closedReason,
-                        won: draft.won,
-                    };
-                    return updateDeal(d.id, payload);
-                }),
-            );
+            const updates = changed.flatMap((deal) => {
+                const draft = drafts[deal.id];
+                return draft ? [{ dealId: deal.id, draft }] : [];
+            });
+            await submitDealDraftUpdates(updates);
             toastSuccess(
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
             );
@@ -1154,8 +1229,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         clearSelection();
         setQuery('');
         setFilterState({});
-        setDefinition(EMPTY_DEFINITION);
-        setPage(1);
+        dispatchViewState({ type: 'segmentsCleared' });
     }, [clearSelection, setFilterState, setQuery]);
     const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
     const ownerCounts = useMemo(
@@ -1271,11 +1345,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setFilterState(normalizeDealFilters(config.filters ?? {}));
             setQuery(config.query ?? '');
             const nextSortKey = config.sortKey && DEAL_SORT_TOKENS[config.sortKey] ? config.sortKey : null;
-            setSortKey(nextSortKey);
-            setSortDir(config.sortDirection ?? 'asc');
-            setDefinition(normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
-            setSegmentEvaluationRevision((revision) => revision + 1);
-            setPage(1);
+            dispatchViewState({
+                type: 'savedViewApplied',
+                sortKey: nextSortKey,
+                sortDir: config.sortDirection ?? 'asc',
+                definition: normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION,
+            });
             setActiveSavedView(config, savedViewId);
         },
         [clearSelection, setFilterState, setQuery, setActiveSavedView],

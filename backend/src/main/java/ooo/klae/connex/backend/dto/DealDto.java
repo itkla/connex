@@ -66,6 +66,10 @@ public class DealDto {
 
     private Integer company;
 
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Pattern(regexp = "^[0-9a-f]{64}$")
+    private String duplicateReviewToken;
+
     @Size(max = 10)
     @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$", message = "Expected close date must use YYYY-MM-DD")
     private String expectedCloseDate;

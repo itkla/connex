@@ -38,6 +38,7 @@ import {
     Cog6ToothIcon,
     BuildingLibraryIcon,
     BoltIcon,
+    SignalIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -132,9 +133,10 @@ function useSections(navAccess: NavAccess): NavSection[] {
         {
             id: "overview",
             label: t("sectionOverview"),
-            activePaths: ["/dashboard", "/overview"],
+            activePaths: ["/dashboard", "/radar", "/overview"],
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
+                { label: t("navRadar"), href: "/radar", icon: SignalIcon },
                 { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon },
                 { label: t("navMap"), href: "/overview/map", icon: MapIcon },
                 { label: t("navIntroductions"), href: "/overview/introductions", icon: ArrowsRightLeftIcon },

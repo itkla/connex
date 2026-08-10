@@ -982,7 +982,8 @@ class DealMapperTest extends AbstractMapperTest {
         dealMapper.updateActualValue(workspace.getId(), deal.getId(), deal.getActualValue());
         Deal before = dealMapper.getDealById(workspace.getId(), deal.getId());
 
-        assertEquals(1, dealMapper.updateName(workspace.getId(), deal.getId(), "FY27 Renewal"));
+        assertEquals(1, dealMapper.updateName(
+            workspace.getId(), deal.getId(), "FY27 Renewal", "fy27 renewal"));
 
         Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals("FY27 Renewal", after.getName());
@@ -1051,7 +1052,8 @@ class DealMapperTest extends AbstractMapperTest {
 
         assertNotNull(dealMapper.getDealByIdForUpdate(workspace.getId(), deal.getId()));
         assertNull(dealMapper.getDealByIdForUpdate(other.getId(), deal.getId()));
-        assertEquals(0, dealMapper.updateName(other.getId(), deal.getId(), "Foreign rename"));
+        assertEquals(0, dealMapper.updateName(
+            other.getId(), deal.getId(), "Foreign rename", "foreign rename"));
         assertEquals(0, dealMapper.updateValueAndSource(
             other.getId(), deal.getId(), new BigDecimal("999.00"), "manual"));
         assertEquals(0, dealMapper.updateValueSource(
