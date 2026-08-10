@@ -122,9 +122,15 @@ class AiChatMessageConcurrencyIntegrationTest {
         }
     }
 
+    /**
+     * The leader is started alone and must hold the session row lock before any contender is
+     * submitted. Releasing every thread at once made the {@code lockAttempts} counter unreliable:
+     * it increments on method entry, not on lock acquisition, so a thread could claim attempt 1,
+     * be descheduled before its {@code SELECT ... FOR UPDATE}, and let attempt 2 acquire an
+     * unlocked row and signal that the contender was never blocked.
+     */
     @Test
     void concurrentAppendsSerializeOnSessionRootAndYieldExactlyOneThroughN() throws Exception {
-        CountDownLatch start = new CountDownLatch(1);
         CountDownLatch firstLockAcquired = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch contenderEntered = new CountDownLatch(1);
@@ -151,17 +157,18 @@ class AiChatMessageConcurrencyIntegrationTest {
         ExecutorService executor = Executors.newFixedThreadPool(APPEND_COUNT);
         List<Future<AiChatMessageDto>> futures = new ArrayList<>();
         try {
-            for (int index = 0; index < APPEND_COUNT; index++) {
+            User leader = actors.get(0);
+            futures.add(executor.submit(() -> inContext(leader, () ->
+                assistantService.appendMessage(session.getId(), request("message-1")))));
+            assertTrue(firstLockAcquired.await(10, TimeUnit.SECONDS));
+
+            for (int index = 1; index < APPEND_COUNT; index++) {
                 int messageNumber = index + 1;
                 User actor = actors.get(index);
-                futures.add(executor.submit(() -> {
-                    assertTrue(start.await(10, TimeUnit.SECONDS));
-                    return inContext(actor, () -> assistantService.appendMessage(
-                        session.getId(), request("message-" + messageNumber)));
-                }));
+                futures.add(executor.submit(() -> inContext(actor, () ->
+                    assistantService.appendMessage(
+                        session.getId(), request("message-" + messageNumber)))));
             }
-            start.countDown();
-            assertTrue(firstLockAcquired.await(10, TimeUnit.SECONDS));
             assertTrue(contenderEntered.await(10, TimeUnit.SECONDS));
             assertFalse(contenderAcquired.await(1, TimeUnit.SECONDS));
             releaseFirst.countDown();

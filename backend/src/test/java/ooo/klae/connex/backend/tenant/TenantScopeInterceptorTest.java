@@ -119,17 +119,34 @@ class TenantScopeInterceptorTest {
      * without a resolved context, because a first-time invitee and every SSO JIT provisioning
      * arrive on a request thread with no workspace to resolve. The provider-capture purge was
      * added to that flow after its exempt set was curated, so only the {@code *Anywhere} variants
-     * were listed and the workspace-scoped ones it actually calls threw (#1011).
+     * were listed and the workspace-scoped ones it actually calls threw (#1011). The assistant-chat
+     * cleanup repeated that mistake because this guard hardcoded a provider-capture prefix and so
+     * could not observe a new mapper joining the flow.
+     *
+     * <p>The list below is every scoped statement the flow reaches, not a sample. It is still
+     * hand-maintained rather than derived from the service call graph, so a newly added cleanup can
+     * drift out of it; coupling this guard structurally to that call graph is tracked separately.
      */
     @Test
-    void freshMembershipProviderCapturePurgeRunsWithoutAResolvedContext() {
+    void freshMembershipScopedCleanupRunsWithoutAResolvedContext() {
         bindRequest();
-        for (String statement : new String[] {
-            "deleteProviderActivities", "deleteInteractions", "deleteSyncStates",
-            "deleteUserPolicy", "deleteDecisions", "countUserProviderResiduals",
-            "clearWorkspacePolicyUpdater",
+        for (String id : new String[] {
+            NS + "ProviderCaptureMapper.deleteProviderActivities",
+            NS + "ProviderCaptureMapper.deleteInteractions",
+            NS + "ProviderCaptureMapper.deleteSyncStates",
+            NS + "ProviderCaptureMapper.deleteUserPolicy",
+            NS + "ProviderCaptureMapper.deleteDecisions",
+            NS + "ProviderCaptureMapper.countUserProviderResiduals",
+            NS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
+            NS + "AiChatMapper.deleteParticipantsForUser",
+            NS + "AiChatMapper.deleteOwnedSessionsForUser",
+            NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
+            NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
+            NS + "SavedViewMapper.deleteForFreshMembership",
+            NS + "NotificationMapper.deleteHistoricalNotificationBaselinesForRecipient",
+            NS + "NotificationMapper.deleteAllForRecipient",
+            NS + "DealMapper.removeCollaboratorFromWorkspace",
         }) {
-            String id = NS + "ProviderCaptureMapper." + statement;
             assertFalse(interceptor.requiresResolvedContext(id), id);
             assertDoesNotThrow(() -> interceptor.enforce(id), id);
         }
