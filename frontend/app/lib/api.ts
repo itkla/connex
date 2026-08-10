@@ -3795,12 +3795,14 @@ function workspaceSelectionForBrowserCookie(snapshot: Types.MyWorkspaces): Types
  * abandon their prior workspace. Callers must publish the returned snapshot explicitly; refreshed
  * provider props remain unordered.
  * @param notifyTransition - whether this read owns the workspace-transition notification
+ * @param init - request options for the authoritative workspace read
  */
 export async function readAuthoritativeWorkspaceSelection(
     notifyTransition = true,
+    init: RequestInit = {},
 ): Promise<Types.MyWorkspaces> {
     try {
-        const selection = workspaceSelectionForBrowserCookie(await getMyWorkspaces());
+        const selection = workspaceSelectionForBrowserCookie(await getMyWorkspaces(init));
         if (selection) return selection;
         throw new Error("Authoritative workspace selection did not match the browser cookie");
     } finally {
