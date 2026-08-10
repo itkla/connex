@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealRiskService;
@@ -89,6 +90,7 @@ class DealControllerTest {
     @MockitoBean private SessionSecurityService sessionSecurityService;
     @MockitoBean private BusinessCardRateLimiter businessCardRateLimiter;
     @MockitoBean private CapabilityEntitlement capabilityEntitlement;
+    @MockitoBean private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
     @MockitoBean private TenantCatalogResolver tenantCatalogResolver;
     @MockitoBean private TenantContext tenantContext;
     @MockitoBean private WorkspaceCookie workspaceCookie;
