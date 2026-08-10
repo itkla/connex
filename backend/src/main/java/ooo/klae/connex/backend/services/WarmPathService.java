@@ -297,7 +297,7 @@ public class WarmPathService {
             return List.of();
         }
         Map<Integer, List<String>> sourceStateByTarget = sourceStateByTarget(
-            byId.keySet(), evidence, contactSourceStateHashes);
+            byId.keySet(), evidence, dismissals, contactSourceStateHashes);
 
         Set<Integer> dismissedTargets = new HashSet<>();
         Set<Long> dismissedPaths = new HashSet<>();
@@ -441,6 +441,7 @@ public class WarmPathService {
     private static Map<Integer, List<String>> sourceStateByTarget(
             Set<Integer> candidateIds,
             Map<Long, Evidence> evidence,
+            List<WarmPathDismissal> dismissals,
             Map<Integer, String> contactSourceStateHashes) {
         Map<Integer, List<String>> values = new HashMap<>();
         for (Integer candidateId : candidateIds) {
@@ -454,6 +455,20 @@ public class WarmPathService {
                 relationshipSourceState(personY, entry.getValue(), contactSourceStateHashes));
             values.computeIfAbsent(personY, key -> new ArrayList<>()).add(
                 relationshipSourceState(personX, entry.getValue(), contactSourceStateHashes));
+        }
+        for (WarmPathDismissal dismissal : dismissals) {
+            Integer bridgePersonId = dismissal.getBridgePersonId();
+            int targetPersonId = dismissal.getTargetPersonId();
+            if (bridgePersonId != null
+                    && candidateIds.contains(targetPersonId)
+                    && candidateIds.contains(bridgePersonId)
+                    && evidence.containsKey(pairKey(targetPersonId, bridgePersonId))) {
+                values.computeIfAbsent(targetPersonId, key -> new ArrayList<>()).add(
+                    sourceState(
+                        "dismissal",
+                        Integer.toString(targetPersonId),
+                        Integer.toString(bridgePersonId)));
+            }
         }
         values.values().forEach(list -> list.sort(Comparator.naturalOrder()));
         return values;

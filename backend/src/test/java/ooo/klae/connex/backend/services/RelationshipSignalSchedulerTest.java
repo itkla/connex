@@ -1,15 +1,16 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -35,11 +36,13 @@ class RelationshipSignalSchedulerTest {
     @Mock private JobRunRecorder jobRunRecorder;
 
     private RelationshipSignalScheduler scheduler;
+    private AtomicBoolean insideWorkspace;
 
     @BeforeEach
     void setUp() {
         scheduler = new RelationshipSignalScheduler(
             workspaceMapper, tenantWorkScope, reconciliationService, jobRunRecorder);
+        insideWorkspace = new AtomicBoolean();
         when(workspaceMapper.findWorkspaceIds()).thenReturn(List.of(WORKSPACE_ID));
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<Supplier<List<Integer>>>any()))
@@ -49,9 +52,22 @@ class RelationshipSignalSchedulerTest {
             });
         doAnswer(invocation -> {
             Runnable work = invocation.getArgument(1);
-            work.run();
+            insideWorkspace.set(true);
+            try {
+                work.run();
+            } finally {
+                insideWorkspace.set(false);
+            }
             return null;
         }).when(tenantWorkScope).inWorkspace(eq(WORKSPACE_ID), any(Runnable.class));
+        doAnswer(invocation -> {
+            assertTrue(insideWorkspace.get(), "job outcomes must be recorded inside tenant routing");
+            return null;
+        }).when(jobRunRecorder).record(
+            eq(JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION),
+            eq(WORKSPACE_ID),
+            any(JobRunStatus.class),
+            any(JobRunDetail.class));
     }
 
     @Test
@@ -71,27 +87,23 @@ class RelationshipSignalSchedulerTest {
     }
 
     @Test
-    void recordsFailureWhenRecordingTheSuccessfulOutcomeThrows() {
+    void recordsFailedOutcomeWhenAReconciliationFamilyFails() {
         when(reconciliationService.reconcileWorkspace(WORKSPACE_ID))
             .thenReturn(new RelationshipSignalReconciliationService.Result(
                 Set.of(
                     RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
                     RelationshipSignalDetectorService.DEAL_RISK,
                     RelationshipSignalDetectorService.WARM_PATH),
-                0));
-        doThrow(new IllegalStateException("recording failed"))
-            .when(jobRunRecorder).record(
-                eq(JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION),
-                eq(WORKSPACE_ID),
-                eq(JobRunStatus.SUCCEEDED),
-                any(JobRunDetail.class));
+                2));
 
         scheduler.reconcile();
 
+        ArgumentCaptor<JobRunDetail> detail = ArgumentCaptor.forClass(JobRunDetail.class);
         verify(jobRunRecorder).record(
             eq(JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION),
             eq(WORKSPACE_ID),
             eq(JobRunStatus.FAILED),
-            any(JobRunDetail.class));
+            detail.capture());
+        assertEquals(2, detail.getValue().metadata().get("failedCount"));
     }
 }

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -22,18 +24,25 @@ import org.junit.jupiter.api.Test;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
+import ooo.klae.connex.backend.beans.WarmPathDismissal;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
+import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.WarmPathBridgeDto;
 import ooo.klae.connex.backend.dto.WarmPathDto;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.IntroductionMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 
 class RelationshipSignalDetectorServiceTest {
     private static final int WORKSPACE_ID = 7;
@@ -340,65 +349,112 @@ class RelationshipSignalDetectorServiceTest {
     }
 
     @Test
-    void clockOnlyDecayChangesKeepThePersistedSourceFingerprint() {
-        RelationshipTemperatureDto before = temperature(12, 9);
-        RelationshipTemperatureDto later = new RelationshipTemperatureDto(
-            12,
-            47,
-            "cool",
-            "cooling",
-            before.getLastTouchAt(),
-            before.getDaysSinceTouch() + 1,
-            before.getTouchCount(),
-            "2026-08-19",
-            before.getDaysUntilCold() - 1,
-            before.getModelVersion(),
-            AS_OF.plusSeconds(86_400));
-        when(scoringService.scoreWorkspace(WORKSPACE_ID))
-            .thenReturn(
-                new ScoringService.WorkspaceScores(List.of(before), List.of()),
-                new ScoringService.WorkspaceScores(List.of(later), List.of()));
-        when(scoringService.contactSourceStateHashes(
-                WORKSPACE_ID, java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
-            .thenReturn(Map.of(12, "c".repeat(64)));
+    void identicalPersistedDecayFactsAtDifferentInstantsKeepTheFinalFingerprint() {
+        Instant laterInstant = AS_OF.plusSeconds(14L * 86_400L);
+        Person subject = person(12);
+        Activity touch = activity(71, subject, "meeting", "2026-07-09 12:00:00");
+        SourceScoringFixture fixture = sourceScoringFixture(List.of(subject), List.of(touch));
+        when(fixture.personMapper().getRelationshipScoreAggregates(
+                eq(WORKSPACE_ID), any(), any()))
+            .thenReturn(List.of(new RelationshipScoreAggregateDto(
+                subject.getId(), 0.5, 0.0, 1.0, touch.getTimestamp(), 0)));
+        ScoringService beforeScoring = fixture.serviceAt(AS_OF);
+        ScoringService laterScoring = fixture.serviceAt(laterInstant);
+        RelationshipTemperatureDto beforeTemperature =
+            beforeScoring.scoreWorkspace(WORKSPACE_ID).contacts().getFirst();
+        RelationshipTemperatureDto laterTemperature =
+            laterScoring.scoreWorkspace(WORKSPACE_ID).contacts().getFirst();
 
-        var first = detector.detectDecay(WORKSPACE_ID, "before").candidates().getFirst();
-        var second = detector.detectDecay(WORKSPACE_ID, "later").candidates().getFirst();
+        var first = detectorFor(beforeScoring, warmPathService, fixture, AS_OF)
+            .detectDecay(WORKSPACE_ID, "before").candidates().getFirst();
+        var second = detectorFor(laterScoring, warmPathService, fixture, laterInstant)
+            .detectDecay(WORKSPACE_ID, "later").candidates().getFirst();
 
-        assertEquals(first.getSourceStateHash(), second.getSourceStateHash());
+        assertNotEquals(beforeTemperature.getAsOf(), laterTemperature.getAsOf());
+        assertNotEquals(beforeTemperature.getDaysSinceTouch(), laterTemperature.getDaysSinceTouch());
+        assertNotEquals(beforeTemperature.getGoesColdAt(), laterTemperature.getGoesColdAt());
         assertNotEquals(first.getEvidenceJson(), second.getEvidenceJson());
-        assertNotEquals(first.getRankValue(), second.getRankValue());
+        assertEquals(first.getSourceStateHash(), second.getSourceStateHash());
     }
 
     @Test
-    void clockOnlyWarmPathChangesKeepThePersistedSourceFingerprint() {
-        WarmPathBridgeDto bridge = new WarmPathBridgeDto();
-        bridge.setPersonId(22);
-        bridge.setName("Bridge");
-        bridge.setEvidenceType("connection");
-        bridge.setScore(70);
-        bridge.setSupportingPersonIds(List.of(22, 23));
-        bridge.setSupportingEdgeIds(List.of(31));
-        WarmPathDto path = new WarmPathDto();
-        path.setTargetId(23);
-        path.setTargetName("Target");
-        path.setReachType("reach");
-        path.setScore(70);
-        path.setBridges(List.of(bridge));
-        path.setSourceState(List.of("target-touch-state", "bridge-touch-and-edge-state"));
-        when(warmPathService.computePaths(eq(WORKSPACE_ID), eq(10), anyMap(), anyMap()))
-            .thenReturn(List.of(path));
+    void identicalPersistedWarmPathFactsAtDifferentInstantsKeepTheFinalFingerprint() {
+        Instant laterInstant = AS_OF.plusSeconds(14L * 86_400L);
+        Person bridgePerson = person(22);
+        Person targetPerson = person(23);
+        Activity touch = activity(72, bridgePerson, "meeting", "2026-08-07 12:00:00");
+        SourceScoringFixture fixture = sourceScoringFixture(
+            List.of(bridgePerson, targetPerson), List.of(touch));
+        IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
+        PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
+        when(introductionMapper.findWarmPathCandidates(WORKSPACE_ID)).thenReturn(List.of(
+            introCandidate(bridgePerson.getId(), "Bridge"),
+            introCandidate(targetPerson.getId(), "Target")));
+        when(introductionMapper.findIntroExcludedPersonIds(WORKSPACE_ID)).thenReturn(List.of());
+        when(introductionMapper.findWorkspaceEmployment(WORKSPACE_ID)).thenReturn(List.of());
+        when(introductionMapper.findWarmPathDismissals(WORKSPACE_ID)).thenReturn(List.of());
+        when(edgeReader.getAllEdges(WORKSPACE_ID)).thenReturn(List.of(
+            edge(31, bridgePerson.getId(), targetPerson.getId(), 2)));
+        ScoringService beforeScoring = fixture.serviceAt(AS_OF);
+        ScoringService laterScoring = fixture.serviceAt(laterInstant);
+        WarmPathService beforeWarmPaths = warmPathService(
+            introductionMapper, edgeReader, fixture.personMapper(), beforeScoring, AS_OF);
+        WarmPathService laterWarmPaths = warmPathService(
+            introductionMapper, edgeReader, fixture.personMapper(), laterScoring, laterInstant);
+        RelationshipTemperatureDto beforeTemperature = beforeScoring.scoreContacts(WORKSPACE_ID)
+            .stream().filter(value -> value.getId() == bridgePerson.getId()).findFirst().orElseThrow();
+        RelationshipTemperatureDto laterTemperature = laterScoring.scoreContacts(WORKSPACE_ID)
+            .stream().filter(value -> value.getId() == bridgePerson.getId()).findFirst().orElseThrow();
 
-        var first = detector.detectWarmPaths(WORKSPACE_ID, "before", AS_OF)
-            .candidates().getFirst();
-        bridge.setScore(62);
-        path.setScore(62);
-        var second = detector.detectWarmPaths(
-            WORKSPACE_ID, "later", AS_OF.plusSeconds(86_400)).candidates().getFirst();
+        var first = detectorFor(beforeScoring, beforeWarmPaths, fixture, AS_OF)
+            .detectWarmPaths(WORKSPACE_ID, "before", AS_OF).candidates().getFirst();
+        var second = detectorFor(laterScoring, laterWarmPaths, fixture, laterInstant)
+            .detectWarmPaths(WORKSPACE_ID, "later", laterInstant).candidates().getFirst();
 
-        assertEquals(first.getSourceStateHash(), second.getSourceStateHash());
+        assertNotEquals(beforeTemperature.getAsOf(), laterTemperature.getAsOf());
+        assertNotEquals(beforeTemperature.getDaysSinceTouch(), laterTemperature.getDaysSinceTouch());
+        assertNotEquals(beforeTemperature.getScore(), laterTemperature.getScore());
         assertNotEquals(first.getEvidenceJson(), second.getEvidenceJson());
-        assertNotEquals(first.getRankValue(), second.getRankValue());
+        assertEquals(first.getSourceStateHash(), second.getSourceStateHash());
+    }
+
+    @Test
+    void dismissingTheLeadingBridgeChangesTheFinalWarmPathFingerprint() {
+        IntroCandidatePerson leadingBridge = introCandidate(21, "Leading bridge");
+        IntroCandidatePerson remainingBridge = introCandidate(22, "Remaining bridge");
+        IntroCandidatePerson target = introCandidate(23, "Target");
+        List<IntroCandidatePerson> candidates = List.of(leadingBridge, remainingBridge, target);
+        List<PersonEdge> edges = List.of(
+            edge(31, leadingBridge.getId(), target.getId(), 2),
+            edge(32, remainingBridge.getId(), target.getId(), 2));
+        Map<Integer, RelationshipTemperatureDto> temperatures = Map.of(
+            leadingBridge.getId(), warmTemperature(leadingBridge.getId(), 80),
+            remainingBridge.getId(), warmTemperature(remainingBridge.getId(), 60));
+        Map<Integer, String> sourceHashes = Map.of(
+            leadingBridge.getId(), "a".repeat(64),
+            remainingBridge.getId(), "b".repeat(64),
+            target.getId(), "c".repeat(64));
+        WarmPathDto before = WarmPathService.rankPaths(
+            candidates, edges, List.of(), List.of(), temperatures, sourceHashes, 10).getFirst();
+        WarmPathDto after = WarmPathService.rankPaths(
+            candidates,
+            edges,
+            List.of(),
+            List.of(dismissal(target.getId(), leadingBridge.getId())),
+            temperatures,
+            sourceHashes,
+            10).getFirst();
+        when(warmPathService.computePaths(eq(WORKSPACE_ID), eq(10), anyMap(), anyMap()))
+            .thenReturn(List.of(before), List.of(after));
+
+        var beforeSignal = detector.detectWarmPaths(WORKSPACE_ID, "before", AS_OF)
+            .candidates().getFirst();
+        var afterSignal = detector.detectWarmPaths(WORKSPACE_ID, "after", AS_OF)
+            .candidates().getFirst();
+
+        assertEquals(leadingBridge.getId(), before.getBridges().getFirst().getPersonId());
+        assertEquals(remainingBridge.getId(), after.getBridges().getFirst().getPersonId());
+        assertNotEquals(beforeSignal.getSourceStateHash(), afterSignal.getSourceStateHash());
     }
 
     @Test
@@ -485,6 +541,101 @@ class RelationshipSignalDetectorServiceTest {
         edge.setType("knows");
         edge.setStrength(strength);
         return edge;
+    }
+
+    private static WarmPathDismissal dismissal(int targetPersonId, int bridgePersonId) {
+        WarmPathDismissal dismissal = new WarmPathDismissal();
+        dismissal.setTargetPersonId(targetPersonId);
+        dismissal.setBridgePersonId(bridgePersonId);
+        return dismissal;
+    }
+
+    private static Activity activity(
+            int id, Person person, String type, String timestamp) {
+        Activity activity = new Activity();
+        activity.setId(id);
+        activity.setPerson(person);
+        activity.setType(type);
+        activity.setTimestamp(timestamp);
+        return activity;
+    }
+
+    private static SourceScoringFixture sourceScoringFixture(
+            List<Person> people, List<Activity> activities) {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        when(personMapper.getProcessablePersons(WORKSPACE_ID)).thenReturn(people);
+        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(people);
+        when(companyMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), any(), any()))
+            .thenReturn(List.of());
+        when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of());
+        when(activityMapper.getAllActivities(WORKSPACE_ID)).thenReturn(activities);
+        when(noteMapper.getAllNotes(WORKSPACE_ID)).thenReturn(List.of());
+        when(taskMapper.getAllTasks(WORKSPACE_ID)).thenReturn(List.of());
+        return new SourceScoringFixture(
+            personMapper,
+            companyMapper,
+            dealMapper,
+            activityMapper,
+            noteMapper,
+            taskMapper);
+    }
+
+    private RelationshipSignalDetectorService detectorFor(
+            ScoringService sourceScoringService,
+            WarmPathService sourceWarmPathService,
+            SourceScoringFixture fixture,
+            Instant evaluationInstant) {
+        return new RelationshipSignalDetectorService(
+            sourceScoringService,
+            dealRiskService,
+            sourceWarmPathService,
+            fixture.personMapper(),
+            fixture.companyMapper(),
+            fixture.dealMapper(),
+            new ObjectMapper(),
+            Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+    }
+
+    private static WarmPathService warmPathService(
+            IntroductionMapper introductionMapper,
+            PersonEdgeReadService edgeReader,
+            PersonMapper personMapper,
+            ScoringService sourceScoringService,
+            Instant evaluationInstant) {
+        return new WarmPathService(
+            introductionMapper,
+            edgeReader,
+            personMapper,
+            sourceScoringService,
+            mock(WorkspaceService.class),
+            mock(AuthService.class),
+            mock(TaskService.class),
+            Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+    }
+
+    private record SourceScoringFixture(
+        PersonMapper personMapper,
+        CompanyMapper companyMapper,
+        DealMapper dealMapper,
+        ActivityMapper activityMapper,
+        NoteMapper noteMapper,
+        TaskMapper taskMapper
+    ) {
+        private ScoringService serviceAt(Instant evaluationInstant) {
+            return new ScoringService(
+                personMapper,
+                companyMapper,
+                dealMapper,
+                activityMapper,
+                noteMapper,
+                taskMapper,
+                Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+        }
     }
 
     private static Person person(int id) {

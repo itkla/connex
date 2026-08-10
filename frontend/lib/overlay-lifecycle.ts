@@ -3,6 +3,9 @@ export type OverlayLifecycleCapabilities = {
   reportsCloseCompletion: boolean
 }
 
+/** Longest supported overlay exit before retention must terminate defensively. */
+export const OVERLAY_MAX_EXIT_DURATION_MS = 200
+
 export type RetainedOverlay<T> = {
   generation: number
   value: T
@@ -21,6 +24,7 @@ export type OverlayRetentionEvent<T> =
   | { type: "mounted"; generation: number }
   | { type: "cancelled"; generation: number }
   | { type: "close-completed"; generation: number }
+  | { type: "retention-expired"; generation: number }
   | { type: "load-failed"; generation: number }
 
 /** Retains mounted overlays for their exit while releasing requests cancelled before they mount. */
@@ -47,6 +51,8 @@ export function reduceOverlayRetention<T>(
       if (state.capabilities.reportsMount && !state.mounted) return null
       return { ...state, open: false }
     case "close-completed":
+      return state?.generation === event.generation ? null : state
+    case "retention-expired":
       return state?.generation === event.generation ? null : state
     case "load-failed":
       return state?.generation === event.generation ? null : state

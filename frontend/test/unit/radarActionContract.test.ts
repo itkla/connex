@@ -1,4 +1,4 @@
-import { act, createElement, useState, type ReactNode } from 'react';
+import { act, createElement, useCallback, useState, type ComponentType, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ActionOverlayHost from '@/app/components/actions/ActionOverlayHost';
@@ -12,31 +12,37 @@ import {
 import type { CreateTaskPayload, RadarPayload, RadarSignal, User } from '@/app/lib/types';
 import {
     createCloseCompletionGate,
+    OVERLAY_MAX_EXIT_DURATION_MS,
     reduceOverlayRetention,
 } from '@/lib/overlay-lifecycle';
 
 type CapturedProps = Record<string, unknown>;
+type DynamicModule = { default: ComponentType<CapturedProps> };
 
 type CaptureState = {
     nextDynamicIndex: number;
     dynamicProps: Map<number, CapturedProps>;
     dynamicUnmounts: Map<number, number>;
-    failedDynamicIndices: Set<number>;
+    realDynamicIndices: Set<number>;
+    dynamicLoaderPromises: Map<number, Promise<DynamicModule>>;
     importProps: Map<string, CapturedProps>;
     importUnmounts: Map<string, number>;
     radarCardProps: Map<number, CapturedProps>;
     radarCardRenders: number;
+    renderRealRadarCards: boolean;
 };
 
 const captures = vi.hoisted<CaptureState>(() => ({
     nextDynamicIndex: 0,
     dynamicProps: new Map(),
     dynamicUnmounts: new Map(),
-    failedDynamicIndices: new Set(),
+    realDynamicIndices: new Set(),
+    dynamicLoaderPromises: new Map(),
     importProps: new Map(),
     importUnmounts: new Map(),
     radarCardProps: new Map(),
     radarCardRenders: 0,
+    renderRealRadarCards: false,
 }));
 
 const api = vi.hoisted(() => ({
@@ -68,9 +74,12 @@ const translate = vi.hoisted(() => (
 vi.mock('next/dynamic', async () => {
     const React = await import('react');
     return {
-        default: () => {
+        default: (loader: () => Promise<DynamicModule>) => {
             const index = captures.nextDynamicIndex;
             captures.nextDynamicIndex += 1;
+            const Loaded = React.lazy(
+                () => captures.dynamicLoaderPromises.get(index) ?? loader(),
+            );
             return function CapturedDynamic(props: CapturedProps) {
                 captures.dynamicProps.set(index, props);
                 React.useEffect(() => () => {
@@ -79,8 +88,12 @@ vi.mock('next/dynamic', async () => {
                         (captures.dynamicUnmounts.get(index) ?? 0) + 1,
                     );
                 }, []);
-                if (captures.failedDynamicIndices.has(index)) {
-                    throw new Error(`chunk ${index} failed`);
+                if (captures.realDynamicIndices.has(index)) {
+                    return React.createElement(
+                        React.Suspense,
+                        { fallback: null },
+                        React.createElement(Loaded, props),
+                    );
                 }
                 return null;
             };
@@ -117,6 +130,10 @@ vi.mock('@/app/hooks/useActions', () => ({
 
 vi.mock('@/app/hooks/useWorkspace', () => ({
     useWorkspace: () => ({ activeWorkspaceId: 17 }),
+}));
+
+vi.mock('@/app/hooks/useIsMobile', () => ({
+    useIsMobile: () => false,
 }));
 
 vi.mock('@/app/hooks/useFormDraft', () => ({
@@ -170,11 +187,47 @@ vi.mock('@/components/ui/dialog-status-cover', () => ({
     fieldInputClass: '',
     fieldLeadIconClass: '',
 }));
-vi.mock('@/components/ui/responsive-dialog', () => ({
-    ResponsiveDialog: ({ children }: { children: ReactNode }) => children,
-    ResponsiveDialogContent: ({ children }: { children: ReactNode }) => children,
-    ResponsiveDialogTitle: ({ children }: { children: ReactNode }) => children,
-    ResponsiveDialogDescription: ({ children }: { children: ReactNode }) => children,
+vi.mock('@/components/ui/dialog', async () => {
+    const React = await import('react');
+    const OpenContext = React.createContext(false);
+    const passthrough = ({ children }: { children?: ReactNode }) => children;
+    function Dialog({ open = false, children }: { open?: boolean; children?: ReactNode }) {
+        return React.createElement(OpenContext.Provider, { value: open }, children);
+    }
+    function DialogContent({
+        children,
+        onCloseAutoFocus,
+    }: {
+        children?: ReactNode;
+        onCloseAutoFocus?: () => void;
+    }) {
+        const open = React.useContext(OpenContext);
+        const wasOpen = React.useRef(open);
+        React.useEffect(() => {
+            if (wasOpen.current && !open) {
+                queueMicrotask(() => onCloseAutoFocus?.());
+            }
+            wasOpen.current = open;
+        }, [onCloseAutoFocus, open]);
+        return children;
+    }
+    return {
+        Dialog,
+        DialogClose: passthrough,
+        DialogContent,
+        DialogDescription: passthrough,
+        DialogTitle: passthrough,
+        DialogTrigger: passthrough,
+    };
+});
+
+vi.mock('@/components/ui/drawer', () => ({
+    Drawer: ({ children }: { children?: ReactNode }) => children,
+    DrawerClose: ({ children }: { children?: ReactNode }) => children,
+    DrawerContent: ({ children }: { children?: ReactNode }) => children,
+    DrawerDescription: ({ children }: { children?: ReactNode }) => children,
+    DrawerTitle: ({ children }: { children?: ReactNode }) => children,
+    DrawerTrigger: ({ children }: { children?: ReactNode }) => children,
 }));
 vi.mock('@/components/ui/input', () => ({ Input: () => null }));
 vi.mock('@/components/ui/select', () => ({
@@ -185,21 +238,22 @@ vi.mock('@/components/ui/select', () => ({
     SelectValue: () => null,
 }));
 
-vi.mock('@/app/components/radar/RadarSignalCard', () => ({
-    default: (props: CapturedProps) => {
-        const signal = props.signal;
-        if (
-            typeof signal === 'object'
-            && signal !== null
-            && 'id' in signal
-            && typeof signal.id === 'number'
-        ) {
-            captures.radarCardProps.set(signal.id, props);
-        }
-        captures.radarCardRenders += 1;
-        return null;
-    },
-}));
+vi.mock('@/app/components/radar/RadarSignalCard', async () => {
+    const React = await import('react');
+    const actual = await vi.importActual<
+        typeof import('@/app/components/radar/RadarSignalCard')
+    >('@/app/components/radar/RadarSignalCard');
+    return {
+        default: (props: React.ComponentProps<typeof actual.default>) => {
+            const signal = props.signal;
+            captures.radarCardProps.set(signal.id, { ...props });
+            captures.radarCardRenders += 1;
+            return captures.renderRealRadarCards
+                ? React.createElement(actual.default, props)
+                : null;
+        },
+    };
+});
 
 vi.mock('@/app/components/import/LazyImportDialog', async () => {
     const React = await import('react');
@@ -640,14 +694,20 @@ function invoke(props: CapturedProps, name: string, ...args: unknown[]): unknown
 
 function deferred<T>() {
     let resolvePromise: ((value: T) => void) | undefined;
-    const promise = new Promise<T>((resolve) => {
+    let rejectPromise: ((reason?: unknown) => void) | undefined;
+    const promise = new Promise<T>((resolve, reject) => {
         resolvePromise = resolve;
+        rejectPromise = reject;
     });
     return {
         promise,
         resolve: (value: T) => {
             if (!resolvePromise) throw new Error('Deferred promise is unavailable');
             resolvePromise(value);
+        },
+        reject: (reason?: unknown) => {
+            if (!rejectPromise) throw new Error('Deferred promise is unavailable');
+            rejectPromise(reason);
         },
     };
 }
@@ -672,16 +732,17 @@ async function renderOverlayHost() {
             generation: number | null;
         }>({ overlay: null, generation: null });
         update = setInput;
+        const handleClose = useCallback(() => {
+            onClose();
+            setInput({ overlay: null, generation: null });
+        }, []);
         return createElement(ActionOverlayHost, {
             overlay: input.overlay,
             overlayGeneration: input.generation,
             originWorkspaceId: 17,
             requestSignal: null,
             user: user(),
-            onClose: () => {
-                onClose();
-                setInput({ overlay: null, generation: null });
-            },
+            onClose: handleClose,
         });
     }
 
@@ -718,14 +779,31 @@ async function renderRadarBoard(initialPayload: RadarPayload) {
     };
 }
 
+async function renderInteractiveRadarBoard(initialPayload: RadarPayload) {
+    const installed = installInteractiveDocument();
+    const { createRoot } = await import('react-dom/client');
+    const root = createRoot(installed.container, { onCaughtError: vi.fn() });
+    await act(async () => {
+        root.render(createElement(RadarBoard, { initialPayload }));
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+    return {
+        ...installed,
+        unmount: async () => act(async () => root.unmount()),
+    };
+}
+
 beforeEach(() => {
     captures.dynamicProps.clear();
     captures.dynamicUnmounts.clear();
-    captures.failedDynamicIndices.clear();
+    captures.realDynamicIndices.clear();
+    captures.dynamicLoaderPromises.clear();
     captures.importProps.clear();
     captures.importUnmounts.clear();
     captures.radarCardProps.clear();
     captures.radarCardRenders = 0;
+    captures.renderRealRadarCards = false;
     vi.clearAllMocks();
     api.getContacts.mockResolvedValue([]);
     api.getDeals.mockResolvedValue([]);
@@ -733,11 +811,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
 });
 
 describe('Radar action integration', () => {
-    it('dispatches task creation and record opening from rendered Radar cards', async () => {
+    it('opens task and record contexts from the production Radar card controls', async () => {
         const currentPayload = payload([warmPathSignal()]);
         api.getRadar.mockResolvedValue(currentPayload);
         api.getRadarContext.mockResolvedValue({
@@ -747,11 +826,24 @@ describe('Radar action integration', () => {
             href: '/records/people/10',
         });
         actions.run.mockResolvedValue({ status: 'completed' });
-        const board = await renderRadarBoard(currentPayload);
-        const card = requiredProps(captures.radarCardProps.get(1), 'Radar card');
+        captures.renderRealRadarCards = true;
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const createTaskButton = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.parentNode !== null
+            && element.getAttribute('aria-label') === 'actions.createTaskNamed:Ada Lovelace'
+        ));
+        const openContextButton = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.parentNode !== null
+            && element.getAttribute('aria-label') === 'actions.openContextNamed:Ada Lovelace'
+        ));
+        if (!createTaskButton || !openContextButton) {
+            throw new Error('Production Radar card actions did not render');
+        }
 
         await act(async () => {
-            invoke(card, 'onCreateTask');
+            board.dispatch('click', createTaskButton);
             await Promise.resolve();
         });
         expect(actions.run).toHaveBeenCalledWith('create.task', expect.objectContaining({
@@ -765,7 +857,7 @@ describe('Radar action integration', () => {
         }));
 
         await act(async () => {
-            invoke(card, 'onOpenContext');
+            board.dispatch('click', openContextButton);
             await Promise.resolve();
             await Promise.resolve();
         });
@@ -1026,9 +1118,104 @@ describe('Radar action integration', () => {
         await host.unmount();
     });
 
-    it('retains a mounted task through cancellation and releases it on close completion', async () => {
+    it('forwards real TaskDialog closure through ResponsiveDialog completion', async () => {
+        const taskModule = await vi.importActual<
+            typeof import('@/app/components/activity/tasks/TaskDialog')
+        >('@/app/components/activity/tasks/TaskDialog');
+        const installed = installInteractiveDocument();
+        const { createRoot } = await import('react-dom/client');
+        const root = createRoot(installed.container, { onCaughtError: vi.fn() });
+        const onCloseComplete = vi.fn();
+        let setOpen: ((open: boolean) => void) | undefined;
+
+        function Controller() {
+            const [open, updateOpen] = useState(true);
+            setOpen = updateOpen;
+            return createElement(taskModule.default, {
+                open,
+                onOpenChange: updateOpen,
+                persons: [],
+                deals: [],
+                users: [user()],
+                currentUserId: 7,
+                compact: true,
+                hideLinks: true,
+                draftPersistence: false,
+                onCloseComplete,
+            });
+        }
+
+        await act(async () => {
+            root.render(createElement(Controller));
+        });
+        await act(async () => {
+            setOpen?.(false);
+            await Promise.resolve();
+        });
+        await act(async () => {
+            await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+        });
+
+        expect(onCloseComplete).toHaveBeenCalledOnce();
+        await act(async () => root.unmount());
+    });
+
+    it('expires lost task completion without releasing a replacement generation', async () => {
+        vi.useFakeTimers();
         const host = await renderOverlayHost();
-        await host.show({ kind: 'create-task' }, 11);
+        await host.show({ kind: 'create-task' }, 21);
+        const firstTask = requiredProps(captures.dynamicProps.get(0), 'First task dialog');
+        await act(async () => {
+            invoke(firstTask, 'onDraftMounted');
+        });
+        const before = captures.dynamicUnmounts.get(0) ?? 0;
+
+        await host.show(null, null);
+        expect(requiredProps(captures.dynamicProps.get(0), 'Closing task dialog').open).toBe(false);
+        await act(async () => {
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS - 1);
+        });
+        expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
+
+        await host.show({ kind: 'create-task', defaults: { personId: 11 } }, 22);
+        expect(vi.getTimerCount()).toBe(0);
+        const replacement = requiredProps(captures.dynamicProps.get(0), 'Replacement task dialog');
+        expect(replacement.open).toBe(true);
+        await act(async () => {
+            invoke(replacement, 'onDraftMounted');
+        });
+
+        await act(async () => {
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS);
+        });
+        expect(requiredProps(captures.dynamicProps.get(0), 'Replacement task dialog').open).toBe(true);
+
+        const replacementBefore = captures.dynamicUnmounts.get(0) ?? 0;
+        await host.show(null, null);
+        await act(async () => {
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS - 1);
+        });
+        expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(replacementBefore);
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+        });
+        expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(replacementBefore + 1);
+
+        await host.show({ kind: 'create-task' }, 23);
+        const finalTask = requiredProps(captures.dynamicProps.get(0), 'Final task dialog');
+        await act(async () => {
+            invoke(finalTask, 'onDraftMounted');
+        });
+        await host.show(null, null);
+        expect(vi.getTimerCount()).toBe(1);
+        await host.unmount();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('cancels the terminal fallback after normal host close completion', async () => {
+        vi.useFakeTimers();
+        const host = await renderOverlayHost();
+        await host.show({ kind: 'create-task' }, 24);
         const task = requiredProps(captures.dynamicProps.get(0), 'Task dialog');
         await act(async () => {
             invoke(task, 'onDraftMounted');
@@ -1037,49 +1224,39 @@ describe('Radar action integration', () => {
 
         await host.show(null, null);
         const closingTask = requiredProps(captures.dynamicProps.get(0), 'Closing task dialog');
-        expect(closingTask.open).toBe(false);
-        expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
-
+        expect(vi.getTimerCount()).toBe(1);
         await act(async () => {
             invoke(closingTask, 'onCloseComplete');
         });
+
         expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before + 1);
+        expect(vi.getTimerCount()).toBe(0);
         await host.unmount();
     });
 
-    it('ignores stale close completion after replacing an overlay generation', async () => {
-        const host = await renderOverlayHost();
-        await host.show({ kind: 'create-task' }, 21);
-        const firstTask = requiredProps(captures.dynamicProps.get(0), 'First task dialog');
-        await act(async () => {
-            invoke(firstTask, 'onDraftMounted');
-        });
-        const staleCloseComplete = firstTask.onCloseComplete;
-        if (typeof staleCloseComplete !== 'function') throw new Error('Close completion is not callable');
-
-        await host.show({ kind: 'create-task', defaults: { personId: 11 } }, 22);
-        const replacement = requiredProps(captures.dynamicProps.get(0), 'Replacement task dialog');
-        expect(replacement.open).toBe(true);
-
-        await act(async () => {
-            staleCloseComplete();
-        });
-        expect(requiredProps(captures.dynamicProps.get(0), 'Replacement task dialog').open).toBe(true);
-        await host.show(null, null);
-        await host.unmount();
-    });
-
-    it('closes and releases an overlay when its dynamic chunk fails', async () => {
-        captures.failedDynamicIndices.add(3);
+    it('handles active loader rejection and ignores an older rejection after replacement', async () => {
+        const activeFailure = deferred<DynamicModule>();
+        const staleFailure = deferred<DynamicModule>();
+        captures.realDynamicIndices.add(3);
+        captures.dynamicLoaderPromises.set(3, activeFailure.promise);
         const host = await renderOverlayHost();
 
         await host.show({ kind: 'create-company' }, 31);
+        activeFailure.reject(new Error('company chunk failed'));
         await flushUpdates();
 
         expect(host.onClose).toHaveBeenCalledOnce();
-        captures.failedDynamicIndices.delete(3);
+        captures.realDynamicIndices.add(4);
+        captures.dynamicLoaderPromises.set(4, staleFailure.promise);
         await host.show({ kind: 'create-person' }, 32);
-        expect(requiredProps(captures.dynamicProps.get(4), 'Replacement overlay').open).toBe(true);
+        await host.show({ kind: 'create-deal' }, 33);
+        expect(requiredProps(captures.dynamicProps.get(5), 'Replacement overlay').open).toBe(true);
+
+        staleFailure.reject(new Error('superseded person chunk failed'));
+        await flushUpdates();
+
+        expect(host.onClose).toHaveBeenCalledOnce();
+        expect(requiredProps(captures.dynamicProps.get(5), 'Replacement overlay').open).toBe(true);
         await host.unmount();
     });
 
@@ -1123,6 +1300,20 @@ describe('Radar action integration', () => {
             type: 'close-completed',
             generation: 8,
         })).toBeNull();
+    });
+
+    it('ignores stale retention expiry for a newer overlay generation', () => {
+        const newer = reduceOverlayRetention(null, {
+            type: 'opened',
+            generation: 42,
+            value: { kind: 'create-task' },
+            capabilities: { reportsMount: true, reportsCloseCompletion: true },
+        });
+
+        expect(reduceOverlayRetention(newer, {
+            type: 'retention-expired',
+            generation: 41,
+        })).toBe(newer);
     });
 
     it('completes close once only after an observed open-to-closed transition', () => {

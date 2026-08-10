@@ -16,6 +16,7 @@ import { draftKey, getDraftKeyGeneration, subscribeDraftChanges } from "@/app/li
 import ImportDialog from "@/app/components/import/LazyImportDialog";
 import { OverlayChunkFailureBoundary } from "@/app/components/actions/OverlayChunkFailureBoundary";
 import {
+    OVERLAY_MAX_EXIT_DURATION_MS,
     reduceOverlayRetention,
     type OverlayLifecycleCapabilities,
 } from "@/lib/overlay-lifecycle";
@@ -204,6 +205,22 @@ export default function ActionOverlayHost({
     }
     const rendered = retainedOverlay?.value ?? null;
     const visible = retainedOverlay?.open ?? false;
+    const closingGeneration = retainedOverlay !== null
+        && !retainedOverlay.open
+        && retainedOverlay.mounted
+        && retainedOverlay.capabilities.reportsCloseCompletion
+        ? retainedOverlay.generation
+        : null;
+    useEffect(() => {
+        if (closingGeneration === null) return;
+        const timeout = globalThis.setTimeout(() => {
+            dispatchRetention({
+                type: "retention-expired",
+                generation: closingGeneration,
+            });
+        }, OVERLAY_MAX_EXIT_DURATION_MS);
+        return () => globalThis.clearTimeout(timeout);
+    }, [closingGeneration]);
     const requestInit = useMemo<RequestInit>(() => ({
         ...(rendered?.signal ? { signal: rendered.signal } : {}),
         ...(rendered?.originWorkspaceId !== null && rendered?.originWorkspaceId !== undefined
