@@ -143,10 +143,63 @@ frontend_marker_absent() {
     [ ! -e "$FRONTEND_RELEASE_MARKER" ] && [ ! -L "$FRONTEND_RELEASE_MARKER" ]
 }
 
+# Prints one entry from a zip archive, or nothing when the archive has no such entry. Staging
+# hosts do not all carry unzip, so the JDK's jar tool and python3 are accepted as equals; a host
+# with none of the three fails rather than reporting every archive as empty.
+read_archive_entry() {
+    local archive="$1" entry="$2" available=0 output extracted
+    if command -v unzip >/dev/null 2>&1; then
+        available=1
+        if output="$(unzip -p "$archive" "$entry" 2>/dev/null)" && [ -n "$output" ]; then
+            printf '%s\n' "$output"
+            return 0
+        fi
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        available=1
+        if output="$(python3 -c 'import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as archive:
+        sys.stdout.write(archive.read(sys.argv[2]).decode("utf-8", "replace"))
+except (KeyError, OSError, zipfile.BadZipFile):
+    pass' "$archive" "$entry" 2>/dev/null)" && [ -n "$output" ]; then
+            printf '%s\n' "$output"
+            return 0
+        fi
+    fi
+    if command -v jar >/dev/null 2>&1; then
+        available=1
+        if extracted="$(mktemp -d)"; then
+            if ( cd "$extracted" && jar --extract --file "$archive" "$entry" ) >/dev/null 2>&1 \
+                && [ -f "$extracted/$entry" ]; then
+                output="$(cat "$extracted/$entry")"
+                rm -rf "$extracted"
+                printf '%s\n' "$output"
+                return 0
+            fi
+            rm -rf "$extracted"
+        fi
+    fi
+    [ "$available" -eq 1 ] && return 0
+    return 1
+}
+
+# The git sha a backend JAR was built from. Spring Boot 4 writes build-info to the archive root
+# while earlier layouts nest it under BOOT-INF/classes, so both are read before concluding the
+# JAR carries no identity — a wrong guess here reads as a release-identity mismatch and refuses
+# every deploy.
 jar_git_sha() {
-    local jar="$1"
-    unzip -p "$jar" BOOT-INF/classes/META-INF/build-info.properties 2>/dev/null \
-        | sed -n 's/^build\.gitSha=\([0-9a-f]\{40\}\)$/\1/p'
+    local jar="$1" entry text sha
+    [ -f "$jar" ] || return 1
+    for entry in META-INF/build-info.properties BOOT-INF/classes/META-INF/build-info.properties; do
+        text="$(read_archive_entry "$jar" "$entry")" || return 1
+        sha="$(printf '%s\n' "$text" | sed -n 's/^build\.gitSha=\([0-9a-f]\{40\}\)$/\1/p' | head -n 1)"
+        if [ -n "$sha" ]; then
+            printf '%s\n' "$sha"
+            return 0
+        fi
+    done
+    return 1
 }
 
 set_failure_context() {
