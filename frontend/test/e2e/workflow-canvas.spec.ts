@@ -38,7 +38,7 @@ function editableWorkflowDocument(name: string) {
         },
         canvas: {
             positions: { trigger: { x: 80, y: 40 }, end: { x: 80, y: 280 } },
-            viewport: { x: 0, y: 0, zoom: 1 },
+            viewport: { x: 120, y: 20, zoom: 0.75 },
         },
     };
 }
@@ -156,6 +156,24 @@ async function settleBrowserTasks(page: Page): Promise<void> {
     }));
 }
 
+async function workflowPanePoint(pane: Locator): Promise<{ x: number; y: number }> {
+    return pane.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const candidates = [
+            [0.85, 0.2],
+            [0.75, 0.75],
+            [0.5, 0.1],
+            [0.15, 0.8],
+        ];
+        for (const [horizontal, vertical] of candidates) {
+            const x = rect.left + rect.width * horizontal;
+            const y = rect.top + rect.height * vertical;
+            if (globalThis.document.elementFromPoint(x, y) === element) return { x, y };
+        }
+        throw new Error("Workflow pane has no unobstructed pan target");
+    });
+}
+
 test.describe("workflow canvas", () => {
     test("locks initial authoring until creation finishes", async ({ page }) => {
         let releaseCreate: () => void = () => undefined;
@@ -266,10 +284,7 @@ test.describe("workflow canvas", () => {
         const pane = page.locator(".react-flow__pane");
         const viewport = page.locator(".react-flow__viewport");
         const initialTransform = await viewport.evaluate((element) => getComputedStyle(element).transform);
-        const point = await pane.evaluate((element) => {
-            const rect = element.getBoundingClientRect();
-            return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-        });
+        const point = await workflowPanePoint(pane);
         await page.mouse.move(point.x, point.y);
         await page.mouse.down();
         await page.mouse.move(point.x - 120, point.y + 80, { steps: 4 });
@@ -408,6 +423,10 @@ test.describe("workflow canvas", () => {
         );
         const id = workflowId(created);
         await page.goto(`/workflows/${id}`);
+        const name = page.getByLabel("Workflow name");
+        const save = page.getByRole("button", { name: "Save draft" });
+        await expect(name).toHaveValue(document.name);
+        await expect(save).toBeDisabled();
 
         const olderServerResponse = await page.request.put(`/api/workflows/${id}/draft`, {
             headers: {
@@ -422,10 +441,9 @@ test.describe("workflow canvas", () => {
         });
         expect(olderServerResponse.status(), await olderServerResponse.text()).toBe(200);
         const olderServerWorkflow: unknown = await olderServerResponse.json();
-        const name = page.getByLabel("Workflow name");
         await name.fill("Local conflict name");
         await name.blur();
-        await page.getByRole("button", { name: "Save draft" }).click();
+        await save.click();
         await expect(page.getByText("Older server name", { exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Keep editing locally" }).click();
 
@@ -457,7 +475,6 @@ test.describe("workflow canvas", () => {
             if (recoveryIndex === 1) markOlderRecoveryCompleted();
         });
 
-        const save = page.getByRole("button", { name: "Save draft" });
         await save.click();
         await olderRecoveryPending;
         try {
@@ -575,14 +592,19 @@ test.describe("workflow canvas", () => {
             markSimulationCompleted();
         });
 
-        await page.getByRole("button", { name: "Preview" }).click();
+        const preview = page.getByRole("button", { name: "Preview" });
+        await expect(preview).toBeEnabled();
+        await preview.click();
         const record = page.getByLabel("Record to preview");
         await record.fill(fixture.deals.primary.name);
         await page.getByRole("option", { name: fixture.deals.primary.name, exact: true }).click();
         await page.getByRole("button", { name: "Preview path" }).click();
         await simulationPending;
         try {
-            await page.getByRole("button", { name: "Close" }).click();
+            await page.getByRole("dialog", { name: "Preview a workflow path" })
+                .getByRole("button", { name: "Close", exact: true })
+                .first()
+                .click();
             const name = page.getByLabel("Workflow name");
             await name.fill("Edited and saved after simulation started");
             await name.blur();
@@ -594,7 +616,7 @@ test.describe("workflow canvas", () => {
         await simulationCompleted;
         await settleBrowserTasks(page);
 
-        await page.getByRole("button", { name: "Preview" }).click();
+        await preview.click();
         const dialog = page.getByRole("dialog", { name: "Preview a workflow path" });
         for (const result of ["Would complete", "Would not enroll", "Would wait here", "Blocked"]) {
             await expect(dialog.getByText(result, { exact: true })).toHaveCount(0);
@@ -732,8 +754,10 @@ test.describe("workflow canvas", () => {
         if (!minimumZoomHandleBox) {
             throw new Error("Workflow source handle must remain visible at minimum zoom");
         }
-        expect(minimumZoomHandleBox.width).toBeGreaterThanOrEqual(24);
-        expect(minimumZoomHandleBox.height).toBeGreaterThanOrEqual(24);
+        const minimumHandleSize = 24;
+        const subpixelTolerance = 0.001;
+        expect(minimumZoomHandleBox.width).toBeGreaterThanOrEqual(minimumHandleSize - subpixelTolerance);
+        expect(minimumZoomHandleBox.height).toBeGreaterThanOrEqual(minimumHandleSize - subpixelTolerance);
         await page.getByRole("button", { name: "Outline" }).click();
         await expect(page.getByRole("list", { name: "Workflow steps" })).toBeVisible();
         await expect(page.getByRole("button", { name: "Insert" }).first()).toBeVisible();
