@@ -1300,10 +1300,6 @@ main() {
         set_failure_context preflight release "Deploy refused: mv lacks atomic no-copy quarantine support"
         return 1
     fi
-    if ! staging_disk_headroom_sufficient; then
-        set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom"
-        return 1
-    fi
 
     if [ -e "$TRANSACTION_FILE" ]; then
         if transaction_record="$(read_transaction 2>/dev/null)"; then
@@ -1341,6 +1337,13 @@ main() {
         fi
         recover_transaction
         return $?
+    fi
+
+    # Disk headroom gates only new deploy work. Existing transactions must recover
+    # first because activation may already have stopped or replaced live components.
+    if ! staging_disk_headroom_sufficient; then
+        set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom"
+        return 1
     fi
 
     if ! DEPLOY_PREVIOUS="$(read_sha_file "$MARKER" 2>/dev/null)"; then DEPLOY_PREVIOUS=; fi
@@ -1388,6 +1391,13 @@ main() {
 
     set_failure_context bundle release "Deploy FAILED while verifying the target release pair"
     verify_release_bundle "$DEPLOY_PREVIOUS" && verify_release_bundle "$DEPLOY_TARGET" || return 1
+
+    # Sealing can consume the initial reserve, so re-check before recording the
+    # transaction and stopping the frontend for the first activation step.
+    if ! staging_disk_headroom_sufficient; then
+        set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom before activation"
+        return 1
+    fi
     write_transaction prepared || return 1
 
     set_failure_context frontend_quiesce frontend "Deploy FAILED while quiescing or switching the checkout; prior release remains committed"

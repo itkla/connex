@@ -1008,6 +1008,150 @@ case_main_refuses_low_staging_disk_headroom() (
         "$verification_log" || return 1
 )
 
+case_main_recovers_frontend_stopped_below_disk_headroom_gate() (
+    local root="$SANDBOX/frontend-stopped-low-headroom" previous target output status
+    local disk_probe rollback_log
+    previous=adadadadadadadadadadadadadadadadadadadad
+    target=aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae
+    disk_probe="$root/disk-probe.log"
+    rollback_log="$root/rollback.log"
+    load_deploy "$root"
+    make_bundle "$root" "$previous" rebuilt-from-marker-commit
+    make_bundle "$root" "$target"
+    cp "$RELEASES_DIR/$previous/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$previous" > "$MARKER"
+    printf '%s\n' "$previous" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$previous"
+    write_transaction frontend_stopped || return 1
+    guard_wrapper_contract() { return 0; }
+    git() { [ "$1" = "cat-file" ] && [ "$2" = "-e" ]; }
+    atomic_quarantine_move_supported() { return 0; }
+    df() { printf 'reached\n' > "$disk_probe"; printf 'Avail\n4095\n'; }
+    served_git_sha() { printf '%s\n' "$previous"; }
+    live_frontend_sha() { printf '%s\n' "$previous"; }
+    rollback_release() {
+        printf '%s\n' "$1" > "$rollback_log"
+        rm -f "$TRANSACTION_FILE"
+        ROLLBACK_ARMED=0
+        ROLLBACK_STATE=complete
+    }
+
+    output="$(
+        CONNEX_DEPLOY_TARGET="$target" \
+            CONNEX_DEPLOY_LOCK_HELD=1 \
+            main 2>&1
+    )"
+    status=$?
+    assert_status frontend_stopped_low_headroom_recovery_reports_retry 1 "$status" || {
+        printf '%s\n' "$output"
+        return 1
+    }
+    assert_equals frontend_stopped_low_headroom_restores_previous \
+        "$previous" "$(sed -n '1p' "$rollback_log")" || return 1
+    assert_file_missing frontend_stopped_low_headroom_consumes_transaction \
+        "$TRANSACTION_FILE" || return 1
+    assert_file_missing frontend_stopped_recovery_precedes_disk_gate "$disk_probe" || return 1
+)
+
+case_main_recovers_committed_below_disk_headroom_gate() (
+    local root="$SANDBOX/committed-low-headroom" previous target output status
+    local disk_probe prune_log
+    previous=afafafafafafafafafafafafafafafafafafafaf
+    target=b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0
+    disk_probe="$root/disk-probe.log"
+    prune_log="$root/prune.log"
+    load_deploy "$root"
+    make_bundle "$root" "$previous" rebuilt-from-marker-commit
+    make_bundle "$root" "$target"
+    cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$target" > "$MARKER"
+    printf '%s\n' "$previous" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$target" > "$FRONTEND_RELEASE_MARKER"
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$previous"
+    write_transaction committed || return 1
+    guard_wrapper_contract() { return 0; }
+    git() { [ "$1" = "cat-file" ] && [ "$2" = "-e" ]; }
+    atomic_quarantine_move_supported() { return 0; }
+    df() { printf 'reached\n' > "$disk_probe"; printf 'Avail\n4095\n'; }
+    served_git_sha() { printf '%s\n' "$target"; }
+    live_frontend_sha() { printf '%s\n' "$target"; }
+    frontend_runtime_matches() { [ "$1" = "$target" ]; }
+    ensure_prune_needed() { printf 'pending\n' > "$PRUNE_NEEDED_MARKER"; }
+    prune_releases() {
+        [ ! -e "$TRANSACTION_FILE" ] || return 1
+        printf 'pruned\n' > "$prune_log"
+        rm -f "$PRUNE_NEEDED_MARKER"
+    }
+
+    output="$(
+        CONNEX_DEPLOY_TARGET="$target" \
+            CONNEX_DEPLOY_LOCK_HELD=1 \
+            main 2>&1
+    )"
+    status=$?
+    assert_status committed_low_headroom_recovery_succeeds 0 "$status" || {
+        printf '%s\n' "$output"
+        return 1
+    }
+    assert_file_exists committed_low_headroom_reconciles_prune_backlog "$prune_log" || return 1
+    assert_file_missing committed_low_headroom_consumes_transaction "$TRANSACTION_FILE" || return 1
+    assert_file_missing committed_recovery_precedes_disk_gate "$disk_probe" || return 1
+)
+
+case_main_rechecks_staging_disk_before_initial_activation() (
+    local root="$SANDBOX/activation-disk-headroom" previous target output status
+    local disk_probe activation_log
+    previous=b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+    target=b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+    disk_probe="$root/disk-probe.log"
+    activation_log="$root/activation.log"
+    load_deploy "$root"
+    printf '%s\n' "$previous" > "$MARKER"
+    STAGING_MIN_FREE_BYTES=4096
+    guard_wrapper_contract() { return 0; }
+    git() { [ "$1" = "cat-file" ] && [ "$2" = "-e" ]; }
+    atomic_quarantine_move_supported() { return 0; }
+    df() {
+        local count=0
+        if [ -f "$disk_probe" ]; then count="$(sed -n '1p' "$disk_probe")"; fi
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$disk_probe"
+        printf 'Avail\n'
+        if [ "$count" -eq 1 ]; then printf '4096\n'; else printf '4095\n'; fi
+    }
+    validate_live_components() { return 0; }
+    validate_smoke_login_file() { return 0; }
+    prepare_retained_rollback() { DEPLOY_RETAINED="$1"; }
+    ensure_previous_release() { return 0; }
+    build_target_release() { return 0; }
+    verify_release_bundle() { return 0; }
+    quiesce_frontend_and_switch_checkout() { printf 'reached\n' > "$activation_log"; }
+
+    output="$(
+        CONNEX_DEPLOY_TARGET="$target" \
+            CONNEX_DEPLOY_LOCK_HELD=1 \
+            main 2>&1
+    )"
+    status=$?
+    assert_status activation_disk_headroom_recheck_fails_closed 1 "$status" || {
+        printf '%s\n' "$output"
+        return 1
+    }
+    assert_equals activation_disk_headroom_is_checked_twice 2 "$(sed -n '1p' "$disk_probe")" || return 1
+    assert_contains activation_disk_headroom_recheck_is_loud \
+        'Deploy refused: staging filesystem has insufficient free-space headroom before activation' \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_missing activation_disk_headroom_recheck_prevents_frontend_stop \
+        "$activation_log" || return 1
+    assert_file_missing activation_disk_headroom_recheck_precedes_transaction \
+        "$TRANSACTION_FILE" || return 1
+)
+
 case_isolated_frontend_build_preserves_working_directory() (
     local root="$SANDBOX/isolated-build" sha source_root runtime before after node_log
     local mock_pnpm mock_node_bin
@@ -1510,15 +1654,15 @@ case_transaction_target_reexecs_recorded_logic() (
     assert_file_missing prepared_transaction_consumed "$TRANSACTION_FILE" || return 1
 )
 
-case_exact_parent_committed_recovery_uses_current_terminal_quarantine() (
+case_legacy_deleting_committed_recovery_uses_current_terminal_quarantine() (
     local root="$SANDBOX/exact-parent-committed" selected recorded prior retained quarantine_sha
-    local fake_bin fetch_state selected_source exact_parent_source recorded_source output status
+    local fake_bin fetch_state selected_source legacy_source legacy_probe output status
     local fake_proc fake_cgroup control_group serving_pid unit_pid hidden_pid other_uid
     selected=6565656565656565656565656565656565656565
+    recorded=6969696969696969696969696969696969696969
     prior=6666666666666666666666666666666666666666
     retained=6767676767676767676767676767676767676767
     quarantine_sha=6868686868686868686868686868686868686868
-    recorded="$(git -C "$STAGING_DEPLOY_DIR/../.." rev-parse '1fcff7958^')" || return 1
     root="$root-$recorded"
     load_deploy "$root"
     make_bundle "$root" "$prior" rebuilt-from-marker-commit
@@ -1562,23 +1706,22 @@ case_exact_parent_committed_recovery_uses_current_terminal_quarantine() (
     fake_bin="$root/bin"
     fetch_state="$root/fetch-count"
     selected_source="$root/selected-deploy.sh"
-    exact_parent_source="$root/exact-parent-deploy.sh"
-    recorded_source="$root/recorded-deploy.sh"
-    command git -C "$STAGING_DEPLOY_DIR/../.." \
-        show "$recorded:deploy/staging/connex-staging-deploy.sh" > "$exact_parent_source" \
-        || return 1
-    assert_contains exact_parent_fixture_has_automatic_unlink \
-        'rm -rf -- "$path"' "$exact_parent_source" || return 1
+    legacy_source="$TESTS_DIR/fixtures/legacy-deleting-committed-recovery.sh"
+    assert_contains legacy_fixture_has_automatic_unlink \
+        'rm -rf -- "$path"' "$legacy_source" || return 1
+    legacy_probe="$root/legacy-probe"
+    mkdir -p "$legacy_probe/.staging/release-quarantine/$quarantine_sha"
+    printf 'phase\tcommitted\n' > "$legacy_probe/.staging/deploy-transaction"
+    printf 'eligible\n' \
+        > "$legacy_probe/.staging/release-quarantine/$quarantine_sha/.prune-eligible"
+    CONNEX_STAGING_DIR="$legacy_probe" bash "$legacy_source" || return 1
+    assert_file_missing legacy_fixture_deletes_eligible_quarantine \
+        "$legacy_probe/.staging/release-quarantine/$quarantine_sha" || return 1
     sed -n '1,$p' "$STAGING_DEPLOY_DIR/connex-staging-deploy.sh" \
         | awk '$0 == "main \"$@\"" {
             print "PROC_ROOT=\"$MOCK_PROC_ROOT\""
             print "CGROUP_ROOT=\"$MOCK_CGROUP_ROOT\""
-            print "STAGING_MIN_FREE_BYTES=0"
         } { print }' > "$selected_source"
-    awk '$0 == "main \"$@\"" {
-            print "PROC_ROOT=\"$MOCK_PROC_ROOT\""
-            print "CGROUP_ROOT=\"$MOCK_CGROUP_ROOT\""
-        } { print }' "$exact_parent_source" > "$recorded_source"
     make_wrapper_boundary_shims "$fake_bin"
     {
         printf '#!/bin/bash\n'
@@ -1597,7 +1740,7 @@ case_exact_parent_committed_recovery_uses_current_terminal_quarantine() (
         MOCK_SELECTED_SHA="$selected" \
         MOCK_ADVANCED_SHA="$recorded" \
         MOCK_SELECTED_DEPLOY_SOURCE="$selected_source" \
-        MOCK_ADVANCED_DEPLOY_SOURCE="$recorded_source" \
+        MOCK_ADVANCED_DEPLOY_SOURCE="$legacy_source" \
         MOCK_SHOW_LOG="$root/show.log" \
         MOCK_FRONTEND_PID="$unit_pid" \
         MOCK_FRONTEND_CONTROL_GROUP="$control_group" \
@@ -1611,18 +1754,18 @@ case_exact_parent_committed_recovery_uses_current_terminal_quarantine() (
         bash "$STAGING_DEPLOY_DIR/connex-staging-deploy-wrapper.sh" 2>&1
     )"
     status=$?
-    assert_status exact_parent_committed_recovery_succeeds 0 "$status" || {
+    assert_status legacy_deleting_committed_recovery_succeeds 0 "$status" || {
         printf '%s\n' "$output"
         return 1
     }
     assert_contains committed_recovery_uses_current_cleanup \
         "Recovering committed transaction for ${recorded:0:8} with current terminal-quarantine logic" \
         <(printf '%s\n' "$output") || return 1
-    assert_absent exact_parent_never_regains_cleanup_authority \
+    assert_absent legacy_deleting_fixture_never_regains_cleanup_authority \
         "$recorded:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
-    assert_file_exists hidden_consumer_survives_exact_parent_recovery \
+    assert_file_exists hidden_consumer_survives_legacy_deleting_recovery \
         "$RELEASE_QUARANTINE_DIR/$quarantine_sha/live-sentinel" || return 1
-    assert_file_missing exact_parent_committed_transaction_consumed "$TRANSACTION_FILE" || return 1
+    assert_file_missing legacy_deleting_committed_transaction_consumed "$TRANSACTION_FILE" || return 1
 )
 
 case_pair_rollback_restores_exact_artifacts() (
@@ -2170,6 +2313,9 @@ run_case case_no_change_run_retries_prune_backlog
 run_case case_quarantine_occupancy_alerts_above_threshold
 run_case case_quarantine_bytes_alert_independently_of_count
 run_case case_main_refuses_low_staging_disk_headroom
+run_case case_main_recovers_frontend_stopped_below_disk_headroom_gate
+run_case case_main_recovers_committed_below_disk_headroom_gate
+run_case case_main_rechecks_staging_disk_before_initial_activation
 run_case case_isolated_frontend_build_preserves_working_directory
 run_case case_first_transactional_run_preserves_live_legacy_trees
 run_case case_backend_activation_never_skips_target
@@ -2181,7 +2327,7 @@ run_case case_failed_committed_transaction_restores_release_markers
 run_case case_stale_installed_wrapper_restores_prior_checkout
 run_case case_wrapper_selected_commit_survives_remote_advance
 run_case case_transaction_target_reexecs_recorded_logic
-run_case case_exact_parent_committed_recovery_uses_current_terminal_quarantine
+run_case case_legacy_deleting_committed_recovery_uses_current_terminal_quarantine
 run_case case_pair_rollback_restores_exact_artifacts
 run_case case_smoke_credentials_require_safe_exact_schema
 run_case case_post_deploy_smoke_covers_all_gates
