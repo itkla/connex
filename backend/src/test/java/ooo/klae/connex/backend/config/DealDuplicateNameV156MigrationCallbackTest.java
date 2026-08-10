@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.config;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -16,12 +17,12 @@ import org.flywaydb.core.api.callback.Context;
 import org.flywaydb.core.api.callback.Event;
 import org.junit.jupiter.api.Test;
 
-class DealDuplicateNameV153MigrationCallbackTest {
+class DealDuplicateNameV156MigrationCallbackTest {
     @Test
-    void v153BackfillsNamesWithTheSharedJavaCanonicalizer() throws Exception {
+    void v156BackfillsNamesWithTheSharedJavaCanonicalizer() throws Exception {
         Fixture fixture = fixture("ＲＥＮＥＷＡＬ　ＯＰＰＯＲＴＵＮＩＴＹ", new int[] {1});
 
-        new DealDuplicateNameV153MigrationCallback().handle(
+        new DealDuplicateNameV156MigrationCallback().handle(
             Event.AFTER_EACH_MIGRATE, fixture.context());
 
         verify(fixture.update()).setString(1, "renewal opportunity");
@@ -32,25 +33,38 @@ class DealDuplicateNameV153MigrationCallbackTest {
     }
 
     @Test
-    void v153LeavesUncanonicalizableLegacyNamesOnTheSafeNullFallback() throws Exception {
+    void v156LeavesUncanonicalizableLegacyNamesOnTheSafeNullFallback() throws Exception {
         Fixture fixture = fixture("Legacy\u200DDeal", new int[0]);
 
-        new DealDuplicateNameV153MigrationCallback().handle(
+        new DealDuplicateNameV156MigrationCallback().handle(
             Event.AFTER_EACH_MIGRATE, fixture.context());
 
         verify(fixture.update(), never()).addBatch();
     }
 
     @Test
-    void v153BinaryCompareLeavesAConcurrentRenameOnTheSafeNullFallback() throws Exception {
+    void v156BinaryCompareLeavesAConcurrentRenameOnTheSafeNullFallback() throws Exception {
         Fixture fixture = fixture("Resume", new int[] {0});
 
-        new DealDuplicateNameV153MigrationCallback().handle(
+        new DealDuplicateNameV156MigrationCallback().handle(
             Event.AFTER_EACH_MIGRATE, fixture.context());
 
         verify(fixture.connection()).prepareStatement(
             contains("AND BINARY name = BINARY ?"));
         verify(fixture.update()).addBatch();
+    }
+
+    @Test
+    void anotherMigrationVersionIsLeftUntouched() throws Exception {
+        Fixture fixture = fixture("Renewal", new int[] {1});
+        when(fixture.context().getMigrationInfo().getVersion())
+            .thenReturn(MigrationVersion.fromVersion("153"));
+
+        new DealDuplicateNameV156MigrationCallback().handle(
+            Event.AFTER_EACH_MIGRATE, fixture.context());
+
+        verify(fixture.connection(), never()).prepareStatement(anyString());
+        verify(fixture.update(), never()).addBatch();
     }
 
     private static Fixture fixture(String name, int[] updateCounts) throws Exception {
@@ -61,7 +75,7 @@ class DealDuplicateNameV153MigrationCallbackTest {
         PreparedStatement update = mock(PreparedStatement.class);
         ResultSet result = mock(ResultSet.class);
         when(context.getMigrationInfo()).thenReturn(migration);
-        when(migration.getVersion()).thenReturn(MigrationVersion.fromVersion("153"));
+        when(migration.getVersion()).thenReturn(MigrationVersion.fromVersion("156"));
         when(context.getConnection()).thenReturn(connection);
         when(connection.prepareStatement(contains("SELECT id, workspace_id, name")))
             .thenReturn(select);

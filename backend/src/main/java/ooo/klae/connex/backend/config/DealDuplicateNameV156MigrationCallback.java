@@ -16,9 +16,9 @@ import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
 
-/** Backfills the indexed canonical deal-name key introduced by tenant migration V153. */
+/** Backfills the indexed canonical deal-name key introduced by tenant migration V156. */
 @Component
-public class DealDuplicateNameV153MigrationCallback implements Callback {
+public class DealDuplicateNameV156MigrationCallback implements Callback {
     private static final int PAGE_SIZE = 500;
 
     @Override
@@ -33,7 +33,7 @@ public class DealDuplicateNameV153MigrationCallback implements Callback {
 
     @Override
     public void handle(Event event, Context context) {
-        if (!supports(event, context) || !isV153(context)) {
+        if (!supports(event, context) || !isV156(context)) {
             return;
         }
         if (context == null || context.getConnection() == null) {
@@ -49,17 +49,17 @@ public class DealDuplicateNameV153MigrationCallback implements Callback {
 
     @Override
     public String getCallbackName() {
-        return "deal-duplicate-name-v153-backfill";
+        return "deal-duplicate-name-v156-backfill";
     }
 
-    private static boolean isV153(Context context) {
+    private static boolean isV156(Context context) {
         if (context == null) {
             return false;
         }
         MigrationInfo migration = context.getMigrationInfo();
         return migration != null
             && migration.getVersion() != null
-            && "153".equals(migration.getVersion().getVersion());
+            && "156".equals(migration.getVersion().getVersion());
     }
 
     private static void backfill(Connection connection) throws SQLException {
