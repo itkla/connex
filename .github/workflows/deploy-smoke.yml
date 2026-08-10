@@ -95,6 +95,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
       - name: Lint staging deploy shell tooling
         run: shellcheck -x deploy/staging/*.sh deploy/staging/tests/run-tests.sh
       - name: Release-unit, rollback, smoke, recovery, and alert regression tests

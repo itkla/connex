@@ -66,9 +66,12 @@ deployed by logic loaded from the older commit. The candidate
    reinstalls and health-gates both target artifacts before re-smoking them, or restores the exact
    prior pair. Recovery never trusts a running backend response without also reinstalling the
    target JAR, so an interrupted rollback cannot later boot a stale artifact. An invalid recovery
-   record fails closed by stopping the frontend and alerting. When the recorded transaction target
-   differs from the wrapper's newly selected commit, recovery is handed to the deploy script from
-   the recorded target; parsed logic from one commit never activates another commit.
+   record fails closed by stopping the frontend and alerting. When a nonterminal transaction target
+   differs from the wrapper's newly selected commit, activation or rollback is handed to the deploy
+   script from the recorded target; parsed logic from one commit never activates another commit.
+   A schema-2 `committed` transaction needs no activation, so the newly selected script consumes it
+   and runs its current terminal-quarantine cleanup instead of granting older logic authority to
+   prune or unlink.
 5. **Quiesces before activation.** After both bundles verify, the deploy stops the frontend, then
    and only then resets the checkout. It always installs and restarts the target backend, waits up
    to 900 seconds for the exact `/api/version` sha plus readiness, and rechecks the same PID after
@@ -108,11 +111,13 @@ deployed by logic loaded from the older commit. The candidate
    Quarantine is the script's terminal state. There is no eligibility marker or automatic unlink
    sweep because a second advisory process scan cannot prove that no unobserved consumer started
    using the tree. The scan remains only as operator-facing reporting and never authorizes
-   deletion. Every timer run logs quarantine occupancy; more than eight entries emits a sanitized
-   warning `ALERT` so reclamation is scheduled before disk pressure is urgent. `.staging/prune-needed`
-   persists only when a candidate could not be moved safely, while a non-empty quarantine still
-   causes no-change runs to repeat the advisory usage report. This is application rollback only;
-   Flyway schema migrations remain forward-only.
+   deletion. Every timer run logs quarantine entry and byte occupancy; more than eight entries or
+   more than 8 GiB emits a sanitized warning `ALERT`. Before recovery or build work, the script also
+   requires at least 5 GiB free on the filesystem containing `.staging`, failing closed before
+   transaction, marker, rollback, or release writes begin under insufficient headroom.
+   `.staging/prune-needed` persists only when a candidate could not be moved safely, while a
+   non-empty quarantine still causes no-change runs to repeat the advisory usage report. This is
+   application rollback only; Flyway schema migrations remain forward-only.
 8. **Emits sanitized alerts.** The stderr failure `ALERT` record includes only allow-listed gate,
    component and rollback state values plus validated target, marker, backend, frontend, and
    rollback shas. The quarantine warning `ALERT` contains only fixed labels and numeric occupancy
@@ -186,9 +191,13 @@ A `release-quarantine/<sha>` entry means the deploy script retired that release 
 release set with an atomic rename. It does **not** mean the release is unused. The journal's
 `advisory scan detected no matching consumer` message covers the frontend cgroup and deploy-UID
 processes the timer can inspect; it is useful evidence, but never proof that another UID, service,
-cwd, or open file does not use the tree. The timer will report the entry forever and will never
-unlink it. More than eight entries produces a warning `ALERT`; schedule deliberate reclamation at
-or before that threshold.
+cwd, or open file does not use the tree. Once this terminal-quarantine version is selected by the
+wrapper, its timer path never unlinks the entry: committed cross-version recovery stays in current
+logic, while recorded logic is used only to interpret nonterminal transactions. A timer invocation
+already running an older script is outside that guarantee, so complete the rollout before relying
+on it. More than eight entries or more than 8 GiB produces a warning `ALERT`; schedule deliberate
+reclamation at or before either threshold. A deploy also refuses to begin recovery or build work
+with less than 5 GiB free on the `.staging` filesystem.
 
 To reclaim one entry, first identify its owning release and prove that neither Connex nor an
 out-of-band process serves it. Run the following on staging in an interactive maintenance window,

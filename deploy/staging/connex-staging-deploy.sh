@@ -42,6 +42,8 @@ FRONTEND_HEALTH_TIMEOUT=90
 STABILITY_INTERVAL=15
 POLL_INTERVAL=5
 QUARANTINE_ALERT_THRESHOLD=8
+QUARANTINE_BYTES_ALERT_THRESHOLD=8589934592
+STAGING_MIN_FREE_BYTES=5368709120
 
 SMOKE_COOKIE_JAR=
 SMOKE_SESSION_ACTIVE=0
@@ -996,16 +998,28 @@ quarantine_has_entries() {
 }
 
 report_quarantine_occupancy() {
-    local count
+    local count bytes
     count="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -printf 'entry\n' \
         | awk 'END { print NR + 0 }')" || return 1
-    log "Release quarantine occupancy: $count entries; alert threshold is more than $QUARANTINE_ALERT_THRESHOLD"
-    if [ "$count" -gt "$QUARANTINE_ALERT_THRESHOLD" ] \
+    bytes="$(du -s -B1 -- "$RELEASE_QUARANTINE_DIR" | awk 'NR == 1 { print $1 }')" || return 1
+    [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
+    log "Release quarantine occupancy: $count entries, $bytes bytes; alert thresholds are more than $QUARANTINE_ALERT_THRESHOLD entries or more than $QUARANTINE_BYTES_ALERT_THRESHOLD bytes"
+    if { [ "$count" -gt "$QUARANTINE_ALERT_THRESHOLD" ] \
+        || [ "$bytes" -gt "$QUARANTINE_BYTES_ALERT_THRESHOLD" ]; } \
         && [ "$QUARANTINE_ALERT_EMITTED" -eq 0 ]; then
-        printf '[%s] ALERT status=warning gate=recovery component=release quarantine_entries=%s threshold=%s\n' \
-            "$LOG_TAG" "$count" "$QUARANTINE_ALERT_THRESHOLD" >&2
+        printf '[%s] ALERT status=warning gate=recovery component=release quarantine_entries=%s threshold=%s quarantine_bytes=%s byte_threshold=%s\n' \
+            "$LOG_TAG" "$count" "$QUARANTINE_ALERT_THRESHOLD" \
+            "$bytes" "$QUARANTINE_BYTES_ALERT_THRESHOLD" >&2
         QUARANTINE_ALERT_EMITTED=1
     fi
+}
+
+staging_disk_headroom_sufficient() {
+    local available
+    available="$(df --output=avail -B1 "$STATE_DIR" | awk 'NR == 2 { print $1 }')" || return 1
+    [[ "$available" =~ ^[0-9]+$ ]] || return 1
+    log "Staging filesystem headroom: $available bytes available; preflight requires at least $STAGING_MIN_FREE_BYTES bytes"
+    [ "$available" -ge "$STAGING_MIN_FREE_BYTES" ]
 }
 
 prune_backlog_present() {
@@ -1254,7 +1268,7 @@ recover_transaction() {
 }
 
 main() {
-    local pinned_target="${CONNEX_DEPLOY_TARGET:-}" transaction_record transaction_target
+    local pinned_target="${CONNEX_DEPLOY_TARGET:-}" transaction_record transaction_target transaction_phase
     local recovery_script recovery_status
     arm_global_cleanup
     set_failure_context bootstrap release "Deploy FAILED during bootstrap"
@@ -1286,32 +1300,43 @@ main() {
         set_failure_context preflight release "Deploy refused: mv lacks atomic no-copy quarantine support"
         return 1
     fi
+    if ! staging_disk_headroom_sufficient; then
+        set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom"
+        return 1
+    fi
 
     if [ -e "$TRANSACTION_FILE" ]; then
         if transaction_record="$(read_transaction 2>/dev/null)"; then
-            IFS=$'\t' read -r _ transaction_target _ <<< "$transaction_record"
+            IFS=$'\t' read -r _ transaction_target _ transaction_phase <<< "$transaction_record"
             if [ "$transaction_target" != "$pinned_target" ]; then
-                # Recovery must run under the deployment logic from the commit that
-                # created the durable transaction. Otherwise script A can activate
-                # recorded target B after the wrapper selected A.
-                set_failure_context recovery release "Deploy recovery handoff FAILED"
-                recovery_script="$(mktemp /tmp/connex-staging-recovery.XXXXXX)" || return 1
-                if ! git show "$transaction_target:deploy/staging/connex-staging-deploy.sh" \
-                    > "$recovery_script"; then
-                    rm -f "$recovery_script" || log "Recovery script cleanup FAILED"
-                    return 1
+                if [ "$transaction_phase" = "committed" ]; then
+                    # A committed schema-2 transaction needs no version-specific activation.
+                    # Cleanup safety belongs to the current script, so older recorded logic
+                    # must never regain authority to prune or unlink quarantine entries.
+                    log "Recovering committed transaction for ${transaction_target:0:8} with current terminal-quarantine logic"
+                else
+                    # Nonterminal recovery must run under the deployment logic from the
+                    # commit that created the durable transaction. Otherwise script A can
+                    # activate recorded target B after the wrapper selected A.
+                    set_failure_context recovery release "Deploy recovery handoff FAILED"
+                    recovery_script="$(mktemp /tmp/connex-staging-recovery.XXXXXX)" || return 1
+                    if ! git show "$transaction_target:deploy/staging/connex-staging-deploy.sh" \
+                        > "$recovery_script"; then
+                        rm -f "$recovery_script" || log "Recovery script cleanup FAILED"
+                        return 1
+                    fi
+                    log "Handing recovery for ${transaction_target:0:8} to its pinned deployment logic"
+                    trap - EXIT INT TERM
+                    recovery_status=0
+                    CONNEX_DEPLOY_TARGET="$transaction_target" bash "$recovery_script" "$@" \
+                        || recovery_status=$?
+                    if ! rm -f "$recovery_script"; then
+                        arm_global_cleanup
+                        set_failure_context recovery release "Recovery script cleanup FAILED"
+                        return 1
+                    fi
+                    exit "$recovery_status"
                 fi
-                log "Handing recovery for ${transaction_target:0:8} to its pinned deployment logic"
-                trap - EXIT INT TERM
-                recovery_status=0
-                CONNEX_DEPLOY_TARGET="$transaction_target" bash "$recovery_script" "$@" \
-                    || recovery_status=$?
-                if ! rm -f "$recovery_script"; then
-                    arm_global_cleanup
-                    set_failure_context recovery release "Recovery script cleanup FAILED"
-                    return 1
-                fi
-                exit "$recovery_status"
             fi
         fi
         recover_transaction

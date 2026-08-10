@@ -833,6 +833,31 @@ case_cross_device_quarantine_move_fails_closed() (
     assert_file_missing cross_device_destination_was_not_copied "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
 )
 
+case_main_refuses_missing_atomic_quarantine_support() (
+    local root="$SANDBOX/main-atomic-move-preflight" deployed output status verification_log
+    deployed=abababababababababababababababababababab
+    verification_log="$root/verification.log"
+    load_deploy "$root"
+    printf '%s\n' "$deployed" > "$MARKER"
+    guard_wrapper_contract() { return 0; }
+    git() { [ "$1" = "cat-file" ] && [ "$2" = "-e" ]; }
+    atomic_quarantine_move_supported() { return 1; }
+    verify_no_change_release() { printf 'reached\n' > "$verification_log"; return 0; }
+
+    output="$(
+        CONNEX_DEPLOY_TARGET="$deployed" \
+            CONNEX_DEPLOY_LOCK_HELD=1 \
+            main 2>&1
+    )"
+    status=$?
+    assert_status main_atomic_move_preflight_fails_closed 1 "$status" || return 1
+    assert_contains main_atomic_move_preflight_is_loud \
+        'Deploy refused: mv lacks atomic no-copy quarantine support' \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_missing main_atomic_move_preflight_stops_before_no_change_validation \
+        "$verification_log" || return 1
+)
+
 case_process_appearing_after_scan_survives_quarantine() (
     local root="$SANDBOX/prune-scan-race" deployed rollback candidate late_pid=0 status attempt
     local ready="$SANDBOX/prune-scan-race/consumer-ready"
@@ -899,7 +924,7 @@ case_no_change_run_retries_prune_backlog() (
     assert_status no_change_prune_failure_stays_nonzero 1 "$status" || return 1
     assert_file_exists no_change_path_retries_prune "$retry_log" || return 1
     assert_contains no_change_run_reports_quarantine_occupancy \
-        'Release quarantine occupancy: 0 entries; alert threshold is more than 8' \
+        'Release quarantine occupancy: 0 entries,' \
         "$main_log" || return 1
     assert_contains no_change_prune_failure_realerts_from_exit_trap \
         'ALERT status=failure gate=recovery component=release' \
@@ -907,26 +932,80 @@ case_no_change_run_retries_prune_backlog() (
 )
 
 case_quarantine_occupancy_alerts_above_threshold() (
-    local root="$SANDBOX/quarantine-occupancy" sha output
-    load_deploy "$root"
+    local root="$SANDBOX/quarantine-occupancy" deployed rollback candidate sha output status
+    deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    rollback=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    candidate=cccccccccccccccccccccccccccccccccccccccc
+    setup_prune_fixture "$root" "$deployed" "$rollback" "$candidate" \
+        dddddddddddddddddddddddddddddddddddddddd \
+        eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+        ffffffffffffffffffffffffffffffffffffffff
     for sha in 1 2 3 4 5 6 7 8; do
         mkdir -p "$RELEASE_QUARANTINE_DIR/$(printf '%040d' "$sha")"
     done
     output="$(report_quarantine_occupancy 2>&1)"
     assert_contains quarantine_threshold_is_reported \
-        'Release quarantine occupancy: 8 entries; alert threshold is more than 8' \
+        'Release quarantine occupancy: 8 entries,' \
         <(printf '%s\n' "$output") || return 1
     assert_absent quarantine_at_threshold_does_not_alert 'ALERT status=warning' \
         <(printf '%s\n' "$output") || return 1
 
-    mkdir -p "$RELEASE_QUARANTINE_DIR/$(printf '%040d' 9)"
-    output="$(report_quarantine_occupancy 2>&1)"
+    output="$(prune_releases 2>&1)"
+    status=$?
+    assert_status quarantine_transition_prunes_successfully 0 "$status" || return 1
+    assert_file_exists quarantine_transition_moves_ninth_entry \
+        "$RELEASE_QUARANTINE_DIR/$candidate/live-sentinel" || return 1
     assert_contains quarantine_over_threshold_reports_count \
-        'Release quarantine occupancy: 9 entries; alert threshold is more than 8' \
+        'Release quarantine occupancy: 9 entries,' \
         <(printf '%s\n' "$output") || return 1
     assert_contains quarantine_over_threshold_alerts \
         'ALERT status=warning gate=recovery component=release quarantine_entries=9 threshold=8' \
         <(printf '%s\n' "$output") || return 1
+)
+
+case_quarantine_bytes_alert_independently_of_count() (
+    local root="$SANDBOX/quarantine-byte-occupancy" output
+    load_deploy "$root"
+    QUARANTINE_BYTES_ALERT_THRESHOLD=100
+    du() { printf '101\t%s\n' "$RELEASE_QUARANTINE_DIR"; }
+
+    output="$(report_quarantine_occupancy 2>&1)"
+    assert_contains quarantine_bytes_are_reported \
+        'Release quarantine occupancy: 0 entries, 101 bytes;' \
+        <(printf '%s\n' "$output") || return 1
+    assert_contains quarantine_bytes_trigger_warning_below_count_threshold \
+        'ALERT status=warning gate=recovery component=release quarantine_entries=0 threshold=8 quarantine_bytes=101 byte_threshold=100' \
+        <(printf '%s\n' "$output") || return 1
+)
+
+case_main_refuses_low_staging_disk_headroom() (
+    local root="$SANDBOX/main-disk-headroom" deployed output status verification_log
+    deployed=acacacacacacacacacacacacacacacacacacacac
+    verification_log="$root/verification.log"
+    load_deploy "$root"
+    printf '%s\n' "$deployed" > "$MARKER"
+    STAGING_MIN_FREE_BYTES=4096
+    guard_wrapper_contract() { return 0; }
+    git() { [ "$1" = "cat-file" ] && [ "$2" = "-e" ]; }
+    atomic_quarantine_move_supported() { return 0; }
+    df() { printf 'Avail\n4095\n'; }
+    verify_no_change_release() { printf 'reached\n' > "$verification_log"; return 0; }
+
+    output="$(
+        CONNEX_DEPLOY_TARGET="$deployed" \
+            CONNEX_DEPLOY_LOCK_HELD=1 \
+            main 2>&1
+    )"
+    status=$?
+    assert_status main_disk_headroom_preflight_fails_closed 1 "$status" || return 1
+    assert_contains main_disk_headroom_preflight_reports_available_bytes \
+        'Staging filesystem headroom: 4095 bytes available; preflight requires at least 4096 bytes' \
+        <(printf '%s\n' "$output") || return 1
+    assert_contains main_disk_headroom_preflight_is_loud \
+        'Deploy refused: staging filesystem has insufficient free-space headroom' \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_missing main_disk_headroom_preflight_stops_before_no_change_validation \
+        "$verification_log" || return 1
 )
 
 case_isolated_frontend_build_preserves_working_directory() (
@@ -1429,6 +1508,121 @@ case_transaction_target_reexecs_recorded_logic() (
     assert_equals recorded_script_owned_recovery recorded "$(sed -n '1p' "$recovery_owner")" || return 1
     assert_equals interrupted_recovery_keeps_prior_marker "$prior" "$(read_sha_file "$MARKER")" || return 1
     assert_file_missing prepared_transaction_consumed "$TRANSACTION_FILE" || return 1
+)
+
+case_exact_parent_committed_recovery_uses_current_terminal_quarantine() (
+    local root="$SANDBOX/exact-parent-committed" selected recorded prior retained quarantine_sha
+    local fake_bin fetch_state selected_source exact_parent_source recorded_source output status
+    local fake_proc fake_cgroup control_group serving_pid unit_pid hidden_pid other_uid
+    selected=6565656565656565656565656565656565656565
+    prior=6666666666666666666666666666666666666666
+    retained=6767676767676767676767676767676767676767
+    quarantine_sha=6868686868686868686868686868686868686868
+    recorded="$(git -C "$STAGING_DEPLOY_DIR/../.." rev-parse '1fcff7958^')" || return 1
+    root="$root-$recorded"
+    load_deploy "$root"
+    make_bundle "$root" "$prior" rebuilt-from-marker-commit
+    make_bundle "$root" "$retained" rebuilt-from-marker-commit
+    make_bundle "$root" "$recorded"
+    cp "$RELEASES_DIR/$recorded/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$recorded" > "$MARKER"
+    printf '%s\n' "$prior" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$recorded" > "$FRONTEND_RELEASE_MARKER"
+    mkdir -p "$RELEASE_QUARANTINE_DIR/$quarantine_sha"
+    printf 'live-hidden-consumer\n' > "$RELEASE_QUARANTINE_DIR/$quarantine_sha/live-sentinel"
+    printf 'eligible\n' > "$RELEASE_QUARANTINE_DIR/$quarantine_sha/.prune-eligible"
+
+    (
+        cd "$RELEASES_DIR/$recorded/frontend" || exit 1
+        exec sleep 300
+    ) &
+    serving_pid=$!
+    trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
+    unit_pid=$$
+    hidden_pid=71004
+    other_uid=$(( $(id -u) + 1 ))
+    control_group=/fixture-frontend
+    fake_proc="$root/proc"
+    fake_cgroup="$root/cgroup"
+    mkdir -p "$fake_proc/$serving_pid" "$fake_proc/$hidden_pid" \
+        "$fake_cgroup$control_group"
+    ln -s "$RELEASES_DIR/$recorded/frontend" "$fake_proc/$serving_pid/cwd"
+    printf '0::%s\n' "$control_group" > "$fake_proc/$serving_pid/cgroup"
+    printf 'Name:\ttest\nState:\tS (sleeping)\nPPid:\t%s\n' "$unit_pid" \
+        > "$fake_proc/$serving_pid/status"
+    ln -s "$RELEASE_QUARANTINE_DIR/$quarantine_sha" "$fake_proc/$hidden_pid/cwd"
+    printf 'Name:\thidden\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/$hidden_pid/status"
+    printf '%s\n' "$serving_pid" > "$fake_cgroup$control_group/cgroup.procs"
+    printf '%s\t%s\n' "$recorded" "$serving_pid" > "$FRONTEND_RUNNING_MARKER"
+    DEPLOY_PREVIOUS="$prior"
+    DEPLOY_TARGET="$recorded"
+    DEPLOY_RETAINED="$retained"
+    write_transaction committed || return 1
+
+    fake_bin="$root/bin"
+    fetch_state="$root/fetch-count"
+    selected_source="$root/selected-deploy.sh"
+    exact_parent_source="$root/exact-parent-deploy.sh"
+    recorded_source="$root/recorded-deploy.sh"
+    command git -C "$STAGING_DEPLOY_DIR/../.." \
+        show "$recorded:deploy/staging/connex-staging-deploy.sh" > "$exact_parent_source" \
+        || return 1
+    assert_contains exact_parent_fixture_has_automatic_unlink \
+        'rm -rf -- "$path"' "$exact_parent_source" || return 1
+    sed -n '1,$p' "$STAGING_DEPLOY_DIR/connex-staging-deploy.sh" \
+        | awk '$0 == "main \"$@\"" {
+            print "PROC_ROOT=\"$MOCK_PROC_ROOT\""
+            print "CGROUP_ROOT=\"$MOCK_CGROUP_ROOT\""
+            print "STAGING_MIN_FREE_BYTES=0"
+        } { print }' > "$selected_source"
+    awk '$0 == "main \"$@\"" {
+            print "PROC_ROOT=\"$MOCK_PROC_ROOT\""
+            print "CGROUP_ROOT=\"$MOCK_CGROUP_ROOT\""
+        } { print }' "$exact_parent_source" > "$recorded_source"
+    make_wrapper_boundary_shims "$fake_bin"
+    {
+        printf '#!/bin/bash\n'
+        printf 'if [ "${1:-}" = "-c" ] && [ "${2:-}" = "%%u" ] && [ "${3:-}" = "$MOCK_HIDDEN_PROCESS_DIR" ]; then\n'
+        printf '    printf "%%s\\n" "$MOCK_OTHER_UID"\n'
+        printf '    exit 0\n'
+        printf 'fi\n'
+        printf 'exec /usr/bin/stat "$@"\n'
+    } > "$fake_bin/stat"
+    chmod 0755 "$fake_bin/stat"
+
+    unset CONNEX_DEPLOY_TARGET
+    output="$(
+        PATH="$fake_bin:$PATH" \
+        MOCK_FETCH_STATE="$fetch_state" \
+        MOCK_SELECTED_SHA="$selected" \
+        MOCK_ADVANCED_SHA="$recorded" \
+        MOCK_SELECTED_DEPLOY_SOURCE="$selected_source" \
+        MOCK_ADVANCED_DEPLOY_SOURCE="$recorded_source" \
+        MOCK_SHOW_LOG="$root/show.log" \
+        MOCK_FRONTEND_PID="$unit_pid" \
+        MOCK_FRONTEND_CONTROL_GROUP="$control_group" \
+        MOCK_SERVED_SHA="$recorded" \
+        MOCK_PROC_ROOT="$fake_proc" \
+        MOCK_CGROUP_ROOT="$fake_cgroup" \
+        MOCK_HIDDEN_PROCESS_DIR="$fake_proc/$hidden_pid" \
+        MOCK_OTHER_UID="$other_uid" \
+        CONNEX_STAGING_DIR="$STAGING_DIR" \
+        CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+        bash "$STAGING_DEPLOY_DIR/connex-staging-deploy-wrapper.sh" 2>&1
+    )"
+    status=$?
+    assert_status exact_parent_committed_recovery_succeeds 0 "$status" || {
+        printf '%s\n' "$output"
+        return 1
+    }
+    assert_contains committed_recovery_uses_current_cleanup \
+        "Recovering committed transaction for ${recorded:0:8} with current terminal-quarantine logic" \
+        <(printf '%s\n' "$output") || return 1
+    assert_absent exact_parent_never_regains_cleanup_authority \
+        "$recorded:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
+    assert_file_exists hidden_consumer_survives_exact_parent_recovery \
+        "$RELEASE_QUARANTINE_DIR/$quarantine_sha/live-sentinel" || return 1
+    assert_file_missing exact_parent_committed_transaction_consumed "$TRANSACTION_FILE" || return 1
 )
 
 case_pair_rollback_restores_exact_artifacts() (
@@ -1970,9 +2164,12 @@ run_case case_cgroup_only_consumer_is_quarantined
 run_case case_same_uid_different_unit_consumer_is_quarantined
 run_case case_different_uid_consumer_survives_quarantine
 run_case case_cross_device_quarantine_move_fails_closed
+run_case case_main_refuses_missing_atomic_quarantine_support
 run_case case_process_appearing_after_scan_survives_quarantine
 run_case case_no_change_run_retries_prune_backlog
 run_case case_quarantine_occupancy_alerts_above_threshold
+run_case case_quarantine_bytes_alert_independently_of_count
+run_case case_main_refuses_low_staging_disk_headroom
 run_case case_isolated_frontend_build_preserves_working_directory
 run_case case_first_transactional_run_preserves_live_legacy_trees
 run_case case_backend_activation_never_skips_target
@@ -1984,6 +2181,7 @@ run_case case_failed_committed_transaction_restores_release_markers
 run_case case_stale_installed_wrapper_restores_prior_checkout
 run_case case_wrapper_selected_commit_survives_remote_advance
 run_case case_transaction_target_reexecs_recorded_logic
+run_case case_exact_parent_committed_recovery_uses_current_terminal_quarantine
 run_case case_pair_rollback_restores_exact_artifacts
 run_case case_smoke_credentials_require_safe_exact_schema
 run_case case_post_deploy_smoke_covers_all_gates
