@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.util.Collection;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -69,7 +70,7 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
     }
 
     private static boolean exactFields(JsonNode node, Set<String> expected) {
-        Set<String> actual = node.propertyNames();
+        Collection<String> actual = node.propertyNames();
         return actual.size() == expected.size() && actual.containsAll(expected);
     }
 }
