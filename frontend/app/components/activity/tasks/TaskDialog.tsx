@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
@@ -32,6 +32,7 @@ import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { InputGroupAddon } from '@/components/ui/input-group';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
 import { ApiError, createTask, isFieldError } from '@/app/lib/api';
@@ -71,6 +72,10 @@ type Props = {
     hideLinks?: boolean;
     failureMessage?: string;
     draftPersistence?: boolean;
+    preserveDraftOnClose?: boolean;
+    submissionBlockedMessage?: string;
+    onPersistDraft?: (data: TaskDraftData) => void;
+    onClearDraft?: () => void;
 };
 
 export default function TaskDialog(props: Props) {
@@ -104,12 +109,19 @@ function ScopedTaskDialog({
     hideLinks = false,
     failureMessage,
     draftPersistence = true,
+    preserveDraftOnClose = false,
+    submissionBlockedMessage,
+    onPersistDraft,
+    onClearDraft,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityTasksDialog');
     const submittingRef = useRef(false);
     const [isDirty, setIsDirty] = useState(false);
-    const guard = useUnsavedChangesGuard({ isDirty, onClose: () => onOpenChange(false) });
+    const guard = useUnsavedChangesGuard({
+        isDirty: isDirty && !preserveDraftOnClose,
+        onClose: () => onOpenChange(false),
+    });
     const draft = useFormDraft<TaskDraftData>({
         keyParts: {
             userId: currentUserId,
@@ -120,6 +132,8 @@ function ScopedTaskDialog({
         version: DRAFT_VERSIONS.task,
         initialKeyGeneration: initialDraftGeneration,
     });
+    const persistDraft = onPersistDraft ?? (draftPersistence ? draft.persist : undefined);
+    const clearDraft = onClearDraft ?? (draftPersistence ? draft.clear : undefined);
 
     useLayoutEffect(() => {
         onDraftMounted?.();
@@ -161,12 +175,13 @@ function ScopedTaskDialog({
                         compact={compact}
                         hideLinks={hideLinks}
                         failureMessage={failureMessage}
+                        submissionBlockedMessage={submissionBlockedMessage}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
                         onDirtyChange={setIsDirty}
-                        onPersistDraft={draftPersistence ? draft.persist : undefined}
-                        onClearDraft={draftPersistence ? draft.clear : undefined}
+                        onPersistDraft={persistDraft}
+                        onClearDraft={clearDraft}
                         onCancel={guard.requestClose}
                         onClose={() => onOpenChange(false)}
                     />
@@ -176,7 +191,7 @@ function ScopedTaskDialog({
                 open={guard.confirm.open}
                 onKeepEditing={guard.confirm.onKeepEditing}
                 onDiscard={() => {
-                    if (draftPersistence) draft.clear();
+                    clearDraft?.();
                     guard.confirm.onDiscard();
                 }}
             />
@@ -200,6 +215,7 @@ type TaskDialogFormProps = {
     compact?: boolean;
     hideLinks?: boolean;
     failureMessage?: string;
+    submissionBlockedMessage?: string;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -234,6 +250,7 @@ export function TaskDialogForm({
     compact = false,
     hideLinks = false,
     failureMessage,
+    submissionBlockedMessage,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -316,6 +333,7 @@ export function TaskDialogForm({
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
+        if (submissionBlockedMessage) return;
         resetFieldErrors();
         const assignedToId = assignee?.id ?? currentUserId;
         setSubmitting(true);
@@ -386,7 +404,7 @@ export function TaskDialogForm({
                 <form
                     onSubmit={handleSubmit}
                     onKeyDown={(e) => {
-                        if (isSubmitShortcut(e) && !submitting && !succeeded && description.trim()) {
+                        if (isSubmitShortcut(e) && !submitting && !succeeded && !submissionBlockedMessage && description.trim()) {
                             e.preventDefault();
                             e.currentTarget.requestSubmit();
                         }
@@ -523,6 +541,19 @@ export function TaskDialogForm({
                         </div>
                     </div> : null}
 
+                    {submissionBlockedMessage ? (
+                        <Alert
+                            id="task-submission-blocked"
+                            role="status"
+                            className="border-warning/30 bg-warning/10 text-warning-foreground"
+                        >
+                            <ExclamationTriangleIcon aria-hidden />
+                            <AlertDescription className="text-warning-foreground">
+                                {submissionBlockedMessage}
+                            </AlertDescription>
+                        </Alert>
+                    ) : null}
+
                     <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '240ms' }}>
                         <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
                             {t('cancel')}
@@ -530,7 +561,8 @@ export function TaskDialogForm({
                         <Button
                             type="submit"
                             variant="brand"
-                            disabled={submitting || succeeded || !description.trim()}
+                            disabled={submitting || succeeded || Boolean(submissionBlockedMessage) || !description.trim()}
+                            aria-describedby={submissionBlockedMessage ? 'task-submission-blocked' : undefined}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {submitting ? (

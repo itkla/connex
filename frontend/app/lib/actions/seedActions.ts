@@ -188,7 +188,7 @@ export const SEED_ACTIONS: readonly AppAction[] = [
             helpers.openOverlay({
                 kind: "create-task",
                 defaults: deriveCreateDefaults(context, "task"),
-                draft: helpers.radarTask ? { description: helpers.radarTask.description } : undefined,
+                draft: helpers.radarTask?.draft,
                 radarTask: helpers.radarTask,
             });
         },

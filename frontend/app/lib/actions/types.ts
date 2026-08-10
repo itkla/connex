@@ -11,6 +11,7 @@ import type {
     Workspace,
 } from "@/app/lib/types";
 import type { SelectionId } from "@/app/components/records/types";
+import type { RadarTaskSignalStore } from "@/app/lib/radar";
 
 /**
  * Canonical, ordered set of action groups. The array order is the primary sort rank when actions
@@ -123,10 +124,13 @@ export type ActivityDraft = { type?: string; subject?: string; notes?: string };
 /** Invocation metadata that routes the shared task composer through a canonical Radar signal. */
 export type RadarTaskInvocation = {
     signalId: number;
-    version: string;
-    description: string;
+    draft: TaskDraft;
     mode: 'standard' | 'warm_path';
     bridgePersonId?: number;
+    signalState: RadarTaskSignalStore;
+    onRefresh: () => void;
+    onDraftChange: (draft: TaskDraft) => void;
+    onDraftClear: () => void;
     onCreated: (signal: RadarSignal) => void;
 };
 

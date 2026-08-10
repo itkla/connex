@@ -16,16 +16,26 @@ describe('Radar action integration', () => {
     });
 
     it('routes the shared task composer submission through the Radar endpoint', () => {
+        const board = source('app/components/radar/RadarBoard.tsx');
         const overlay = source('app/components/actions/ActionOverlayHost.tsx');
         const dialog = source('app/components/activity/tasks/TaskDialog.tsx');
+        const actions = source('app/lib/actions/seedActions.ts');
 
         expect(overlay).toContain('createRadarTask(');
+        expect(overlay).toContain('submitRadarTaskWithCurrentSignal(');
         expect(overlay).toContain("compact={radarTask?.mode === 'warm_path'}");
         expect(overlay).toContain('hideLinks={radarTask !== undefined}');
         expect(overlay).toContain('draftPersistence={radarTask === undefined}');
+        expect(overlay).toContain('preserveDraftOnClose={radarTask !== undefined}');
+        expect(overlay).toContain('submissionBlockedMessage={taskSubmissionBlockedMessage}');
+        expect(overlay).toContain('radarTask.signalState.refresh(undefined, "checking")');
+        expect(overlay).toContain('radarTask.onRefresh();');
         expect(dialog).toContain('createRequest = createTask');
-        expect(dialog).toContain('onPersistDraft={draftPersistence ? draft.persist : undefined}');
+        expect(dialog).toContain('Boolean(submissionBlockedMessage)');
         expect(dialog).toContain('!compact ?');
+        expect(board).toContain('activeRadarTask.signalState.refresh(');
+        expect(board).toContain('radarTaskDraftsRef.current.set(signal.id, nextDraft)');
+        expect(actions).toContain('draft: helpers.radarTask?.draft');
     });
 
     it('disables every enabled-looking card while a global action gate is occupied', () => {

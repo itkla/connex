@@ -5,11 +5,12 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import { createRadarTask, getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
+import { ApiError, createRadarTask, getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
 import type { Contact, CreateTaskPayload, Deal, User } from "@/app/lib/types";
 import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
 import { publishRecordMutation } from "@/app/lib/record-mutation-events";
+import { submitRadarTaskWithCurrentSignal, type RadarTaskSignalSnapshot } from "@/app/lib/radar";
 import { toastError, toastWarn } from "@/app/lib/toast";
 import { draftKey, getDraftKeyGeneration, subscribeDraftChanges } from "@/app/lib/formDrafts";
 import ImportDialog from "@/app/components/import/LazyImportDialog";
@@ -29,6 +30,16 @@ const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
     "create-note",
     "create-activity",
 ]);
+
+const INACTIVE_RADAR_TASK_SNAPSHOT: RadarTaskSignalSnapshot = { status: "changed" };
+
+function subscribeToInactiveRadarTask(): () => void {
+    return () => undefined;
+}
+
+function getInactiveRadarTaskSnapshot(): RadarTaskSignalSnapshot {
+    return INACTIVE_RADAR_TASK_SNAPSHOT;
+}
 
 type RestoredDraftMount = {
     accept: (overlayGeneration: number) => void;
@@ -165,6 +176,7 @@ export default function ActionOverlayHost({
     } | null>(null);
 
     const kind = rendered?.request.kind;
+    const radarTask = rendered?.request.kind === "create-task" ? rendered.request.radarTask : undefined;
     const needsReference = kind !== undefined && REFERENCE_KINDS.has(kind);
     const needsUsers = kind === "create-task";
     const defaults = rendered && "defaults" in rendered.request ? rendered.request.defaults : undefined;
@@ -223,6 +235,11 @@ export default function ActionOverlayHost({
         subscribeToDraftGeneration,
         getRestoredDraftGeneration,
         getServerDraftGeneration,
+    );
+    const radarTaskSnapshot = useSyncExternalStore(
+        radarTask?.signalState.subscribe ?? subscribeToInactiveRadarTask,
+        radarTask?.signalState.getSnapshot ?? getInactiveRadarTaskSnapshot,
+        getInactiveRadarTaskSnapshot,
     );
     const restoredDraftCanMount = !rosterOnly ||
         observedRestoredDraftGeneration === restoredDraftGeneration;
@@ -382,24 +399,41 @@ export default function ActionOverlayHost({
     const defaultPerson = resolvePerson(persons, defaults);
     const defaultDeal = resolveDeal(deals, defaults);
     const taskDraft = rendered?.request.kind === "create-task" ? rendered.request.draft : undefined;
-    const radarTask = rendered?.request.kind === "create-task" ? rendered.request.radarTask : undefined;
     const taskCreateRequest = radarTask
-        ? async (payload: CreateTaskPayload, init?: RequestInit) => {
-            const signal = await createRadarTask(
-                radarTask.signalId,
-                radarTask.version,
-                {
-                    ...payload,
-                    ...(radarTask.bridgePersonId === undefined
-                        ? {}
-                        : { bridgePersonId: radarTask.bridgePersonId }),
-                },
-                init,
-            );
-            radarTask.onCreated(signal);
-            return signal;
-        }
+        ? (payload: CreateTaskPayload, init?: RequestInit) => submitRadarTaskWithCurrentSignal(
+            radarTask.signalState,
+            async (version) => {
+                try {
+                    const signal = await createRadarTask(
+                        radarTask.signalId,
+                        version,
+                        {
+                            ...payload,
+                            ...(radarTask.bridgePersonId === undefined
+                                ? {}
+                                : { bridgePersonId: radarTask.bridgePersonId }),
+                        },
+                        init,
+                    );
+                    radarTask.onCreated(signal);
+                    return signal;
+                } catch (error) {
+                    if (error instanceof ApiError && error.status === 409) {
+                        radarTask.signalState.refresh(undefined, "checking");
+                        radarTask.onRefresh();
+                    }
+                    throw error;
+                }
+            },
+        )
         : undefined;
+    const taskSubmissionBlockedMessage = radarTask === undefined || radarTaskSnapshot.status === "current"
+        ? undefined
+        : t(radarTaskSnapshot.status === "checking"
+            ? "feedback.radarTaskRefreshing"
+            : radarTaskSnapshot.status === "unavailable"
+                ? "feedback.radarTaskUnavailable"
+                : "feedback.radarTaskChanged");
     const taskDefaultAssignee = taskDraft?.assigneeId == null
         ? null
         : users?.find((candidate) => candidate.id === taskDraft.assigneeId) ?? null;
@@ -443,6 +477,10 @@ export default function ActionOverlayHost({
                         hideLinks={radarTask !== undefined}
                         failureMessage={radarTask ? t('feedback.createFailed') : undefined}
                         draftPersistence={radarTask === undefined}
+                        preserveDraftOnClose={radarTask !== undefined}
+                        submissionBlockedMessage={taskSubmissionBlockedMessage}
+                        onPersistDraft={radarTask?.onDraftChange}
+                        onClearDraft={radarTask?.onDraftClear}
                     />
                 ) : null}
                 {rendered?.request.kind === "create-note" && references && restoredDraftCanMount ? (

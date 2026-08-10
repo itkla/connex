@@ -22,6 +22,102 @@ export type RadarFilters = {
 
 export type RadarSurfaceState = 'ready' | 'empty' | 'no_results' | 'partial' | 'unavailable';
 export type RadarReadFailureState = 'unauthenticated' | 'denied' | 'unavailable';
+export type RadarFreshnessStatus = 'checking' | 'current' | 'unavailable';
+export type RadarTaskSignalSnapshot =
+    | { status: 'checking' }
+    | { status: 'current'; version: string }
+    | { status: 'changed' }
+    | { status: 'unavailable' };
+
+export type RadarTaskSignalStore = {
+    getSnapshot: () => RadarTaskSignalSnapshot;
+    subscribe: (listener: () => void) => () => void;
+    refresh: (signal: RadarSignal | undefined, freshnessStatus: RadarFreshnessStatus) => void;
+};
+
+function warmPathBridgePersonId(signal: RadarSignal): number | undefined {
+    for (const evidence of signal.evidence) {
+        if (evidence.type !== 'warm_path') continue;
+        const bridgePersonId = evidence.parameters.bridgePersonId;
+        if (typeof bridgePersonId === 'number' && Number.isInteger(bridgePersonId)) {
+            return bridgePersonId;
+        }
+    }
+    return undefined;
+}
+
+function sameRadarTaskContract(initial: RadarSignal, current: RadarSignal): boolean {
+    if (
+        initial.id !== current.id
+        || initial.family !== current.family
+        || initial.subject.type !== current.subject.type
+        || initial.subject.id !== current.subject.id
+    ) {
+        return false;
+    }
+    if (initial.family !== 'warm_path') return true;
+    const initialBridgePersonId = warmPathBridgePersonId(initial);
+    return initialBridgePersonId !== undefined
+        && initialBridgePersonId === warmPathBridgePersonId(current);
+}
+
+function refreshedRadarTaskSnapshot(
+    initial: RadarSignal,
+    signal: RadarSignal | undefined,
+    freshnessStatus: RadarFreshnessStatus,
+): RadarTaskSignalSnapshot {
+    if (freshnessStatus === 'checking') return { status: 'checking' };
+    if (freshnessStatus === 'unavailable') return { status: 'unavailable' };
+    if (
+        signal === undefined
+        || signal.stale
+        || signal.taskId != null
+        || !sameRadarTaskContract(initial, signal)
+    ) {
+        return { status: 'changed' };
+    }
+    return { status: 'current', version: signal.version };
+}
+
+function sameRadarTaskSnapshot(
+    current: RadarTaskSignalSnapshot,
+    next: RadarTaskSignalSnapshot,
+): boolean {
+    return current.status === next.status
+        && (current.status !== 'current'
+            || (next.status === 'current' && current.version === next.version));
+}
+
+/** Tracks the current actionable version of one signal while its task dialog remains open. */
+export function createRadarTaskSignalStore(initial: RadarSignal): RadarTaskSignalStore {
+    let snapshot = refreshedRadarTaskSnapshot(initial, initial, 'current');
+    const listeners = new Set<() => void>();
+    return {
+        getSnapshot: () => snapshot,
+        subscribe: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        refresh: (signal, freshnessStatus) => {
+            const next = refreshedRadarTaskSnapshot(initial, signal, freshnessStatus);
+            if (sameRadarTaskSnapshot(snapshot, next)) return;
+            snapshot = next;
+            listeners.forEach((listener) => listener());
+        },
+    };
+}
+
+/** Submits against the latest current signal version or refuses before issuing the request. */
+export async function submitRadarTaskWithCurrentSignal<T>(
+    signalState: RadarTaskSignalStore,
+    submit: (version: string) => Promise<T>,
+): Promise<T> {
+    const snapshot = signalState.getSnapshot();
+    if (snapshot.status !== 'current') {
+        throw new Error('Radar task signal is not current');
+    }
+    return submit(snapshot.version);
+}
 
 export function classifyRadarReadFailure(status: number): RadarReadFailureState {
     if (status === 401) return 'unauthenticated';

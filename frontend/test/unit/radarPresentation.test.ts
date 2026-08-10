@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
     classifyRadarSurface,
     classifyRadarReadFailure,
+    createRadarTaskSignalStore,
     filterRadarSignals,
     isRadarEvidenceStale,
     radarEvidenceRefreshDelay,
     replaceRadarSignal,
+    submitRadarTaskWithCurrentSignal,
 } from '@/app/lib/radar';
 import type { RadarFamilyState, RadarPayload, RadarSignal } from '@/app/lib/types';
 
@@ -74,6 +76,25 @@ describe('Radar presentation state', () => {
         expect(radarEvidenceRefreshDelay(asOf, asOf, 750)).toBe(15 * 60 * 1000 - 749);
         expect(radarEvidenceRefreshDelay(asOf, asOf, -10)).toBe(15 * 60 * 1000 + 1);
         expect(radarEvidenceRefreshDelay('not-a-date', asOf, 750)).toBeNaN();
+    });
+
+    it('submits with the refreshed version after an open dialog signal changes', async () => {
+        const signalState = createRadarTaskSignalStore(signal());
+        const submittedVersions: string[] = [];
+        signalState.refresh(signal({ version: '2:0' }), 'current');
+
+        await expect(submitRadarTaskWithCurrentSignal(signalState, async (version) => {
+            submittedVersions.push(version);
+            return version;
+        })).resolves.toBe('2:0');
+        expect(submittedVersions).toEqual(['2:0']);
+
+        signalState.refresh(signal({ version: '3:0', stale: true }), 'current');
+        await expect(submitRadarTaskWithCurrentSignal(signalState, async (version) => {
+            submittedVersions.push(version);
+            return version;
+        })).rejects.toThrow('Radar task signal is not current');
+        expect(submittedVersions).toEqual(['2:0']);
     });
 
     it('keeps backend rank order while applying family, state, and query filters', () => {

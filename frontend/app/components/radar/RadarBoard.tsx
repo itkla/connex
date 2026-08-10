@@ -19,17 +19,21 @@ import {
 } from '@/app/lib/api';
 import {
     classifyRadarSurface,
+    createRadarTaskSignalStore,
     filterRadarSignals,
     isRadarFamilyFilter,
     isRadarStateFilter,
     radarEvidenceRefreshDelay,
     replaceRadarSignal,
     unavailableRadarFamilies,
+    type RadarFreshnessStatus,
     type RadarFamilyFilter,
     type RadarStateFilter,
+    type RadarTaskSignalStore,
 } from '@/app/lib/radar';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { RadarPayload, RadarSignal } from '@/app/lib/types';
+import type { TaskDraft } from '@/app/lib/actions/types';
 import { Input } from '@/components/ui/input';
 import {
     Select,
@@ -90,12 +94,15 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const [busyId, setBusyId] = useState<number | null>(null);
     const [snoozeId, setSnoozeId] = useState<number | null>(null);
     const [announcement, setAnnouncement] = useState('');
-    const [freshnessStatus, setFreshnessStatus] = useState<
-        'checking' | 'current' | 'unavailable'
-    >('checking');
+    const [freshnessStatus, setFreshnessStatus] = useState<RadarFreshnessStatus>('checking');
     const { run } = useActions();
     const refreshTimerRef = useRef<number | null>(null);
     const refreshRadarRef = useRef<() => void>(() => undefined);
+    const radarTaskDraftsRef = useRef(new Map<number, TaskDraft>());
+    const activeRadarTaskRef = useRef<{
+        signalId: number;
+        signalState: RadarTaskSignalStore;
+    } | null>(null);
 
     const requestRadar = useCallback(async () => {
         while (true) {
@@ -160,8 +167,19 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                 window.clearTimeout(refreshTimerRef.current);
                 refreshTimerRef.current = null;
             }
+            activeRadarTaskRef.current?.signalState.refresh(undefined, 'unavailable');
+            activeRadarTaskRef.current = null;
         };
     }, [applyRadarRefresh, markRadarUnavailable, requestRadar]);
+
+    useEffect(() => {
+        const activeRadarTask = activeRadarTaskRef.current;
+        if (activeRadarTask === null) return;
+        activeRadarTask.signalState.refresh(
+            payload.items.find((signal) => signal.id === activeRadarTask.signalId),
+            freshnessStatus,
+        );
+    }, [freshnessStatus, payload.items]);
 
     useOwnedUrlParams({
         family: family === 'all' ? undefined : family,
@@ -244,6 +262,15 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
 
     const openTask = async (signal: RadarSignal) => {
         const bridge = signal.family === 'warm_path' ? warmPathBridge(signal) : undefined;
+        const initialDescription = bridge
+            ? t('task.warmPathDescription', {
+                bridge: bridge.label,
+                subject: signal.subject.label,
+            })
+            : t('task.defaultDescription', { subject: signal.subject.label });
+        const draft = radarTaskDraftsRef.current.get(signal.id) ?? { description: initialDescription };
+        const signalState = createRadarTaskSignalStore(signal);
+        activeRadarTaskRef.current = { signalId: signal.id, signalState };
         const result = await run('create.task', {
             source: 'menu',
             record: {
@@ -253,16 +280,22 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
             },
             radarTask: {
                 signalId: signal.id,
-                version: signal.version,
-                description: bridge
-                    ? t('task.warmPathDescription', {
-                        bridge: bridge.label,
-                        subject: signal.subject.label,
-                    })
-                    : t('task.defaultDescription', { subject: signal.subject.label }),
+                draft,
                 mode: signal.family === 'warm_path' ? 'warm_path' : 'standard',
                 bridgePersonId: bridge?.id,
+                signalState,
+                onRefresh: refreshRadar,
+                onDraftChange: (nextDraft) => {
+                    radarTaskDraftsRef.current.set(signal.id, nextDraft);
+                },
+                onDraftClear: () => {
+                    radarTaskDraftsRef.current.delete(signal.id);
+                },
                 onCreated: (updated) => {
+                    radarTaskDraftsRef.current.delete(signal.id);
+                    if (activeRadarTaskRef.current?.signalState === signalState) {
+                        activeRadarTaskRef.current = null;
+                    }
                     const message = t('feedback.taskCreated', { subject: signal.subject.label });
                     if (signal.family === 'warm_path') resolveWarmPathSignal(updated, message);
                     else updateSignal(updated, message, undefined, false);
@@ -270,6 +303,9 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
             },
         });
         if (result.status !== 'completed') {
+            if (activeRadarTaskRef.current?.signalState === signalState) {
+                activeRadarTaskRef.current = null;
+            }
             const message = t('feedback.actionFailed', { subject: signal.subject.label });
             setAnnouncement(message);
             if (result.status !== 'failed') toastError(message);
