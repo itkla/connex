@@ -122,6 +122,38 @@ public class AiRestrictionEpoch {
         }
     }
 
+    /**
+     * Retains a current-epoch read fence through completion of the active transaction. Callers
+     * acquire this only after preparing their transactional output so a concurrent restriction
+     * cannot commit between the final epoch check and the output commit.
+     * @param workspaceId workspace whose restriction epoch is checked
+     * @param expectedEpoch epoch captured before content assembly
+     * @return true when the epoch is current and the fence is retained through transaction completion
+     */
+    public boolean retainReadFenceUntilTransactionCompletionIfCurrent(
+            int workspaceId, long expectedEpoch) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("AI restriction commit fence requires an active transaction");
+        }
+        int stripe = stripe(workspaceId);
+        ReentrantReadWriteLock lock = workspaceLocks[stripe];
+        lock.readLock().lock();
+        boolean retainedForTransaction = false;
+        try {
+            if (workspaceEpochs[stripe].get() != expectedEpoch) {
+                return false;
+            }
+            TransactionSynchronizationManager.registerSynchronization(new ReadFenceRelease(lock));
+            retainedForTransaction = true;
+            return true;
+        } finally {
+            if (!retainedForTransaction) {
+                lock.readLock().unlock();
+            }
+        }
+    }
+
     void runWithExpectedEgressEpoch(
             int workspaceId, long expectedEpoch, Runnable action) {
         Objects.requireNonNull(action, "action");
@@ -213,6 +245,19 @@ public class AiRestrictionEpoch {
         @Override
         public void afterCompletion(int status) {
             lock.writeLock().unlock();
+        }
+    }
+
+    private static final class ReadFenceRelease implements TransactionSynchronization {
+        private final ReentrantReadWriteLock lock;
+
+        private ReadFenceRelease(ReentrantReadWriteLock lock) {
+            this.lock = lock;
+        }
+
+        @Override
+        public void afterCompletion(int status) {
+            lock.readLock().unlock();
         }
     }
 

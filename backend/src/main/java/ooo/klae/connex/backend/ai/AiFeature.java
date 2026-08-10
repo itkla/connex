@@ -9,6 +9,7 @@ public enum AiFeature {
     INTRO_RATIONALE("intro.rationale", false),
     REPORT_COMPOSER("report.composer", false),
     REPORT_NARRATIVE("report.narrative", false),
+    ASSISTANT_CHAT("assistant.chat", false),
     BUSINESS_CARD_EXTRACTION("business_card.scan", true);
 
     private final String wireKey;

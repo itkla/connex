@@ -309,6 +309,10 @@ public interface DealMapper {
     /** Deals are owned-only already; mirrors the person/company method so bulk write-scoping is uniform. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Deal> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<String> findMentionedNames(
+            @Param("workspaceId") int workspaceId,
+            @Param("text") String text,
+            @Param("limit") int limit);
     /** Bounded candidates for interactive canonical-name and company duplicate rechecking. */
     List<Deal> findDuplicatePreflightCandidates(
         @Param("workspaceId") int workspaceId,

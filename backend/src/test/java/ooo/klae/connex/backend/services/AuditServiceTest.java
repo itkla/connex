@@ -31,6 +31,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -238,7 +239,7 @@ class AuditServiceTest {
         entry.setSummary("private model output");
         entry.setChanges("""
                 {"provider":"vertex","region":"secret region value","model":"claude-sonnet-4@20250514",
-                "feature":"deal.brief","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
+                "feature":"assistant.chat","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
                 "inputTokens":80,"prompt":"private CRM content","response":"private model output"}
                 """);
         entry.setContext("{\"error\":\"ProviderException\",\"detail\":\"secret token value\"}");
@@ -250,7 +251,7 @@ class AuditServiceTest {
         assertEquals("blocked", result.getOutcome());
         assertEquals("AI call blocked", result.getSummary());
         assertTrue(result.getChanges().contains("claude-sonnet-4@20250514"));
-        assertTrue(result.getChanges().contains("deal.brief"));
+        assertTrue(result.getChanges().contains(AiFeature.ASSISTANT_CHAT.wireKey()));
         assertFalse(result.getChanges().contains("prompt"));
         assertFalse(result.getChanges().contains("response"));
         assertFalse(result.getChanges().contains("secret region value"));

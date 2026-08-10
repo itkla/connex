@@ -7,6 +7,7 @@ package ooo.klae.connex.backend.ai.masking;
 public enum EntityKind {
     PERSON("P"),
     COMPANY("C"),
+    DEAL("D"),
     EMAIL("E"),
     PHONE("H");
 

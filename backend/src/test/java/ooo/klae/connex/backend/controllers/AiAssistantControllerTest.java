@@ -25,17 +25,22 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
+import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
+import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -44,15 +49,50 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 class AiAssistantControllerTest {
 
     @Mock private AiAssistantService service;
+    @Mock private AiAssistantTurnService turnService;
     @Mock private ErrorReporter errorReporter;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new AiAssistantController(service))
+        mockMvc = MockMvcBuilders.standaloneSetup(new AiAssistantController(service, turnService))
             .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
             .build();
+    }
+
+    @Test
+    void turnPostReturnsAcceptedHandleWithoutUsingTheAppendEndpoint() throws Exception {
+        when(turnService.start(
+                org.mockito.ArgumentMatchers.eq(42), any(AiChatTurnCreateRequest.class)))
+            .thenReturn(new AiChatTurnAcceptedDto(
+                    19, 42, "be5775f1-3ee0-40cb-922f-6d419b78fa52", "accepted"));
+
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/turns")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"What is new?\",\"pageContext\":[{\"kind\":\"person\",\"id\":7}]}"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.turnId").value(19))
+            .andExpect(jsonPath("$.sessionId").value(42))
+            .andExpect(jsonPath("$.status").value("accepted"));
+
+        verify(turnService).start(
+                org.mockito.ArgumentMatchers.eq(42), any(AiChatTurnCreateRequest.class));
+    }
+
+    @Test
+    void turnGetReturnsTheDurableTerminalState() throws Exception {
+        when(turnService.get(42, 19)).thenReturn(
+                new AiChatTurnDto(19, 42, "timed_out", "generation_timeout"));
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/turns/19"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.turnId").value(19))
+            .andExpect(jsonPath("$.sessionId").value(42))
+            .andExpect(jsonPath("$.status").value("timed_out"))
+            .andExpect(jsonPath("$.terminalReason").value("generation_timeout"));
+
+        verify(turnService).get(42, 19);
     }
 
     @Test
@@ -143,6 +183,10 @@ class AiAssistantControllerTest {
                 .content("{\"content\":\"\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.content").exists());
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/turns")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"Question\",\"pageContext\":[{\"kind\":\"contact\",\"id\":0}]}"))
+            .andExpect(status().isBadRequest());
         mockMvc.perform(get("/api/ai/assistant/sessions?page=0"))
             .andExpect(status().isBadRequest());
         mockMvc.perform(get("/api/ai/assistant/sessions/42?size=101"))
@@ -171,6 +215,19 @@ class AiAssistantControllerTest {
             .andExpect(jsonPath("$.message").value("Archived sessions cannot accept messages"));
         mockMvc.perform(delete("/api/ai/assistant/sessions/44"))
             .andExpect(status().isForbidden())
+            .andExpect(content().string("AI assistant session is not accessible"));
+    }
+
+    @Test
+    void inaccessibleTurnTargetUsesTheGenericNotFoundResponse() throws Exception {
+        when(turnService.start(
+                org.mockito.ArgumentMatchers.eq(42), any(AiChatTurnCreateRequest.class)))
+            .thenThrow(new ResourceNotFoundException("AI assistant session is not accessible"));
+
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/turns")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"Question\"}"))
+            .andExpect(status().isNotFound())
             .andExpect(content().string("AI assistant session is not accessible"));
     }
 

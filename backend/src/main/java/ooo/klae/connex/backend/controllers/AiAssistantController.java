@@ -17,12 +17,16 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
+import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
+import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.services.AiAssistantService;
 
@@ -32,6 +36,7 @@ import ooo.klae.connex.backend.services.AiAssistantService;
 @RequiredArgsConstructor
 public class AiAssistantController {
     private final AiAssistantService assistantService;
+    private final AiAssistantTurnService turnService;
 
     /** Returns a bounded page of caller-owned and shared-participant sessions. */
     @GetMapping
@@ -81,5 +86,21 @@ public class AiAssistantController {
             @Valid @RequestBody AiChatMessageCreateRequest request) {
         AiChatMessageDto created = assistantService.appendMessage(id, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    /** Starts one bounded asynchronous agent turn without changing the message-append contract. */
+    @PostMapping("/{id:\\d+}/turns")
+    public ResponseEntity<AiChatTurnAcceptedDto> startTurn(
+            @PathVariable int id,
+            @Valid @RequestBody AiChatTurnCreateRequest request) {
+        return ResponseEntity.accepted().body(turnService.start(id, request));
+    }
+
+    /** Returns one durable turn state after current authorization and lazy expiry. */
+    @GetMapping("/{sessionId:\\d+}/turns/{turnId:\\d+}")
+    public AiChatTurnDto getTurn(
+            @PathVariable int sessionId,
+            @PathVariable int turnId) {
+        return turnService.get(sessionId, turnId);
     }
 }

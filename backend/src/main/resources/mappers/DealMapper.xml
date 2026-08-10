@@ -1311,4 +1311,15 @@
     DELETE FROM deal_collaborator WHERE user_id = #{userId}
   </delete>
 
+  <select id="findMentionedNames" resultType="string">
+    SELECT name
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
+      AND name IS NOT NULL
+      AND name != ''
+      AND LOCATE(name, #{text}) &gt; 0
+    ORDER BY CHAR_LENGTH(name) DESC, id
+    LIMIT #{limit}
+  </select>
+
 </mapper>
