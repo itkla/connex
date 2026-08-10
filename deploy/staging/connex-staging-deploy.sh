@@ -15,14 +15,18 @@ NODE_BIN=/home/dev/.nvm/versions/node/v24.18.0/bin
 PNPM="$NODE_BIN/pnpm"
 LOG_TAG="connex-staging-deploy"
 LOCK_FILE=/tmp/connex-staging-deploy.lock
+PROC_ROOT=/proc
+CGROUP_ROOT=/sys/fs/cgroup
 
 STATE_DIR="$STAGING_DIR/.staging"
 RELEASES_DIR="$STATE_DIR/releases"
+RELEASE_QUARANTINE_DIR="$STATE_DIR/release-quarantine"
 MARKER="$STATE_DIR/deployed-sha"
 ROLLBACK_MARKER="$STATE_DIR/rollback-sha"
 FRONTEND_RELEASE_MARKER="$STATE_DIR/frontend-release"
 FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
 TRANSACTION_FILE="$STATE_DIR/deploy-transaction"
+PRUNE_NEEDED_MARKER="$STATE_DIR/prune-needed"
 LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
 FRONTEND_ENV=/etc/connex-staging/frontend.env
 SMOKE_LOGIN_FILE=/etc/connex-staging/smoke-login.json
@@ -37,6 +41,9 @@ ROLLBACK_HEALTH_TIMEOUT=600
 FRONTEND_HEALTH_TIMEOUT=90
 STABILITY_INTERVAL=15
 POLL_INTERVAL=5
+QUARANTINE_ALERT_THRESHOLD=8
+QUARANTINE_BYTES_ALERT_THRESHOLD=8589934592
+STAGING_MIN_FREE_BYTES=5368709120
 
 SMOKE_COOKIE_JAR=
 SMOKE_SESSION_ACTIVE=0
@@ -51,6 +58,7 @@ FAILURE_MESSAGE=
 DEPLOY_TARGET=unknown
 DEPLOY_PREVIOUS=unknown
 DEPLOY_RETAINED=unknown
+QUARANTINE_ALERT_EMITTED=0
 
 export PATH="$NODE_BIN:$PATH"
 export NODE_OPTIONS="--max-old-space-size=2048"
@@ -116,6 +124,10 @@ backend_pid() {
 
 frontend_pid() {
     systemctl show -p MainPID --value connex-staging-frontend
+}
+
+frontend_control_group() {
+    systemctl show -p ControlGroup --value connex-staging-frontend
 }
 
 served_git_sha() {
@@ -591,15 +603,58 @@ ensure_frontend_launcher() {
             frontend/package.json deploy/staging/connex-frontend-start.sh
 }
 
-frontend_runtime_matches() {
-    local sha="$1" running_sha pid extra expected actual
+pid_in_control_group() {
+    local pid="$1" wanted="$2" hierarchy controllers member
+    [ -n "$wanted" ] && [ -r "$PROC_ROOT/$pid/cgroup" ] || return 1
+    while IFS=: read -r hierarchy controllers member; do
+        if [ "$member" != "$wanted" ] && [[ "$member" != "$wanted/"* ]]; then
+            continue
+        fi
+        if { [ "$hierarchy" = "0" ] && [ -z "$controllers" ]; } \
+            || [[ ",$controllers," = *,name=systemd,* ]]; then
+            return 0
+        fi
+    done < "$PROC_ROOT/$pid/cgroup"
+    return 1
+}
+
+pid_descends_from() {
+    local pid="$1" ancestor="$2" parent depth=0
+    while [ "$pid" != "$ancestor" ]; do
+        [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ "$pid" != "1" ] || return 1
+        parent="$(sed -n 's/^PPid:[[:space:]]*//p' "$PROC_ROOT/$pid/status" 2>/dev/null)" \
+            || return 1
+        [[ "$parent" =~ ^[1-9][0-9]*$ ]] || return 1
+        pid="$parent"
+        depth=$((depth + 1))
+        [ "$depth" -le 64 ] || return 1
+    done
+}
+
+read_frontend_running() {
+    local running_sha pid extra unit_pid control_group expected actual
     [ -f "$FRONTEND_RUNNING_MARKER" ] && [ ! -L "$FRONTEND_RUNNING_MARKER" ] || return 1
     IFS=$'\t' read -r running_sha pid extra < "$FRONTEND_RUNNING_MARKER" || return 1
-    [ "$running_sha" = "$sha" ] && [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -z "$extra" ] || return 1
+    is_git_sha "$running_sha" && [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -z "$extra" ] || return 1
+    unit_pid="$(frontend_pid)" || return 1
+    [[ "$unit_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    kill -0 "$unit_pid" 2>/dev/null || return 1
+    control_group="$(frontend_control_group)" || return 1
+    [[ "$control_group" = /* ]] || return 1
+    pid_in_control_group "$pid" "$control_group" || return 1
+    pid_descends_from "$pid" "$unit_pid" || return 1
     kill -0 "$pid" 2>/dev/null || return 1
-    expected="$(readlink -f "$RELEASES_DIR/$sha/frontend")" || return 1
-    actual="$(readlink -f "/proc/$pid/cwd")" || return 1
-    [ "$actual" = "$expected" ]
+    expected="$(readlink -f "$RELEASES_DIR/$running_sha/frontend")" || return 1
+    actual="$(readlink -f "$PROC_ROOT/$pid/cwd")" || return 1
+    [ "$actual" = "$expected" ] || return 1
+    printf '%s\t%s\n' "$running_sha" "$pid"
+}
+
+frontend_runtime_matches() {
+    local sha="$1" running running_sha pid extra
+    running="$(read_frontend_running)" || return 1
+    IFS=$'\t' read -r running_sha pid extra <<< "$running"
+    [ "$running_sha" = "$sha" ] && [ -n "$pid" ] && [ -z "$extra" ]
 }
 
 activate_frontend() {
@@ -839,10 +894,199 @@ post_deploy_smoke() {
     cleanup_smoke_work || return 1
 }
 
+process_uses_release_tree() {
+    local pid="$1" resolved="$2" raw_cwd cwd state stripped_cwd stripped_resolved
+    if ! raw_cwd="$(readlink "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
+        [ ! -d "$PROC_ROOT/$pid" ] && return 1
+        state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' \
+            "$PROC_ROOT/$pid/status" 2>/dev/null)" || {
+            [ ! -d "$PROC_ROOT/$pid" ] && return 1
+            return 2
+        }
+        [ "$state" = "Z" ] && return 1
+        return 2
+    fi
+    if cwd="$(readlink -f "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
+        if [ "$cwd" = "$resolved" ] || [[ "$cwd" = "$resolved/"* ]]; then
+            return 0
+        fi
+        return 1
+    fi
+    [ ! -d "$PROC_ROOT/$pid" ] && return 1
+    state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' \
+        "$PROC_ROOT/$pid/status" 2>/dev/null)" || {
+        [ ! -d "$PROC_ROOT/$pid" ] && return 1
+        return 2
+    }
+    [ "$state" = "Z" ] && return 1
+    if [[ "$raw_cwd" = *" (deleted)" ]]; then
+        stripped_cwd="${raw_cwd% (deleted)}"
+        if [[ "$stripped_cwd" = /* ]] \
+            && stripped_resolved="$(readlink -f -- "$stripped_cwd" 2>/dev/null)" \
+            && [ "$stripped_resolved" != "$resolved" ] \
+            && [[ "$stripped_resolved" != "$resolved/"* ]]; then
+            return 1
+        fi
+    fi
+    return 2
+}
+
+list_process_directories() {
+    local process_dir
+    for process_dir in "$PROC_ROOT"/[0-9]*; do
+        [ -d "$process_dir" ] || continue
+        printf '%s\n' "$process_dir" || return 1
+    done
+}
+
+release_tree_in_use() {
+    local release="$1" control_group="$2" deploy_uid resolved cgroup_procs pid usage process_dirs
+    local process_dir process_uid
+    deploy_uid="$(id -u)" || return 2
+    resolved="$(readlink -f "$release")" || return 2
+    cgroup_procs="$CGROUP_ROOT$control_group/cgroup.procs"
+    [ -r "$cgroup_procs" ] || return 2
+    while IFS= read -r pid; do
+        [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+        usage=0
+        process_uses_release_tree "$pid" "$resolved" || usage=$?
+        [ "$usage" -ne 0 ] || return 0
+        [ "$usage" -eq 1 ] || return 2
+    done < "$cgroup_procs"
+    process_dirs="$(list_process_directories)" || return 2
+    while IFS= read -r process_dir; do
+        [ -n "$process_dir" ] || continue
+        if ! process_uid="$(stat -c '%u' "$process_dir" 2>/dev/null)"; then
+            [ ! -d "$process_dir" ] || return 2
+            continue
+        fi
+        [ "$process_uid" = "$deploy_uid" ] || continue
+        pid="${process_dir##*/}"
+        usage=0
+        process_uses_release_tree "$pid" "$resolved" || usage=$?
+        [ "$usage" -ne 0 ] || return 0
+        [ "$usage" -eq 1 ] || return 2
+    done <<< "$process_dirs"
+    return 1
+}
+
+prune_needed_state_valid() {
+    [ -f "$PRUNE_NEEDED_MARKER" ] && [ ! -L "$PRUNE_NEEDED_MARKER" ] || return 1
+    awk 'NR == 1 { valid = ($0 == "pending"); next } { valid = 0 } END { exit !valid }' \
+        "$PRUNE_NEEDED_MARKER"
+}
+
+ensure_prune_needed() {
+    local temporary
+    if [ -e "$PRUNE_NEEDED_MARKER" ] || [ -L "$PRUNE_NEEDED_MARKER" ]; then
+        prune_needed_state_valid
+        return $?
+    fi
+    temporary="$(mktemp "$STATE_DIR/.prune-needed.XXXXXX")" || return 1
+    if ! printf 'pending\n' > "$temporary" || ! mv -f "$temporary" "$PRUNE_NEEDED_MARKER"; then
+        rm -f "$temporary" || true
+        return 1
+    fi
+}
+
+atomic_quarantine_move_supported() {
+    LC_ALL=C command mv --help 2>&1 | grep -q -- '--no-copy'
+}
+
+quarantine_has_entries() {
+    find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
+}
+
+report_quarantine_occupancy() {
+    local count bytes
+    count="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -printf 'entry\n' \
+        | awk 'END { print NR + 0 }')" || return 1
+    bytes="$(du -s -B1 -- "$RELEASE_QUARANTINE_DIR" | awk 'NR == 1 { print $1 }')" || return 1
+    [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
+    log "Release quarantine occupancy: $count entries, $bytes bytes; alert thresholds are more than $QUARANTINE_ALERT_THRESHOLD entries or more than $QUARANTINE_BYTES_ALERT_THRESHOLD bytes"
+    if { [ "$count" -gt "$QUARANTINE_ALERT_THRESHOLD" ] \
+        || [ "$bytes" -gt "$QUARANTINE_BYTES_ALERT_THRESHOLD" ]; } \
+        && [ "$QUARANTINE_ALERT_EMITTED" -eq 0 ]; then
+        printf '[%s] ALERT status=warning gate=recovery component=release quarantine_entries=%s threshold=%s quarantine_bytes=%s byte_threshold=%s\n' \
+            "$LOG_TAG" "$count" "$QUARANTINE_ALERT_THRESHOLD" \
+            "$bytes" "$QUARANTINE_BYTES_ALERT_THRESHOLD" >&2
+        QUARANTINE_ALERT_EMITTED=1
+    fi
+}
+
+staging_disk_headroom_sufficient() {
+    local available
+    available="$(df --output=avail -B1 "$STATE_DIR" | awk 'NR == 2 { print $1 }')" || return 1
+    [[ "$available" =~ ^[0-9]+$ ]] || return 1
+    log "Staging filesystem headroom: $available bytes available; preflight requires at least $STAGING_MIN_FREE_BYTES bytes"
+    [ "$available" -ge "$STAGING_MIN_FREE_BYTES" ]
+}
+
+prune_backlog_present() {
+    [ -e "$PRUNE_NEEDED_MARKER" ] || [ -L "$PRUNE_NEEDED_MARKER" ] \
+        || quarantine_has_entries
+}
+
 prune_releases() {
-    local deployed rollback paths path sha kept=0
+    local deployed rollback running running_sha running_pid extra control_group paths path sha usage kept=0
+    local quarantine_paths quarantine blocked=0 quarantined=0
+    if ! atomic_quarantine_move_supported; then
+        log "Release pruning refused: mv does not support atomic no-copy quarantine moves"
+        return 1
+    fi
+    if ! ensure_prune_needed; then
+        log "Release pruning refused: prune-needed state is invalid or unwritable"
+        return 1
+    fi
     deployed="$(read_sha_file "$MARKER" 2>/dev/null)" || return 1
     rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)" || return 1
+    # Serving-state attestation protects the committed and rollback trees from even
+    # entering quarantine. Process inspection is advisory operator reporting only;
+    # the script never unlinks a quarantined tree.
+    if ! running="$(read_frontend_running)"; then
+        log "Release pruning refused: frontend serving state is missing or inconsistent"
+        return 1
+    fi
+    IFS=$'\t' read -r running_sha running_pid extra <<< "$running"
+    if [ "$running_sha" != "$deployed" ] || [ -z "$running_pid" ] || [ -n "$extra" ]; then
+        log "Release pruning refused: attested frontend does not match the committed release"
+        return 1
+    fi
+    if ! control_group="$(frontend_control_group 2>/dev/null)" \
+        || [[ "$control_group" != /* ]]; then
+        control_group=
+    fi
+    quarantine_paths="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -print)" \
+        || return 1
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        sha="$(basename "$path")" || return 1
+        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ] \
+            || [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] \
+            || [ "$sha" = "$running_sha" ]; then
+            log "Release pruning refused: quarantine contains an invalid or protected entry"
+            return 1
+        fi
+    done <<< "$quarantine_paths"
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        sha="$(basename "$path")" || return 1
+        usage=0
+        if [ -n "$control_group" ]; then
+            release_tree_in_use "$path" "$control_group" || usage=$?
+        else
+            usage=2
+        fi
+        if [ "$usage" -eq 0 ]; then
+            log "Release quarantine report: advisory scan observed a matching consumer for $sha"
+            continue
+        fi
+        if [ "$usage" -eq 1 ]; then
+            log "Release quarantine report: advisory scan detected no matching consumer for $sha"
+            continue
+        fi
+        log "Release quarantine report: advisory scan was indeterminate for $sha"
+    done <<< "$quarantine_paths"
     paths="$(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -printf '%T@ %p\n' \
         | sort -rn | cut -d' ' -f2-)" || return 1
     while IFS= read -r path; do
@@ -851,14 +1095,50 @@ prune_releases() {
         if ! is_git_sha "$sha"; then
             continue
         fi
-        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ]; then
+        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] || [ "$sha" = "$running_sha" ]; then
             continue
         fi
         kept=$((kept + 1))
         if [ "$kept" -gt 3 ]; then
-            rm -rf "$path" || return 1
+            usage=0
+            if [ -n "$control_group" ]; then
+                release_tree_in_use "$path" "$control_group" || usage=$?
+            else
+                usage=2
+            fi
+            quarantine="$RELEASE_QUARANTINE_DIR/$sha"
+            if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
+                log "Release pruning refused: quarantine destination already exists for $sha"
+                blocked=1
+                continue
+            fi
+            # rename(2) within .staging is atomic. Existing cwd and open handles
+            # follow the inode, so even a consumer that entered after the scan keeps
+            # a complete runtime while the old public release path disappears.
+            # --no-copy refuses cross-device copy-then-unlink, which would destroy
+            # that safety property if either child directory were separately mounted.
+            if ! command mv --no-copy -T -- "$path" "$quarantine"; then
+                log "Release pruning refused: could not quarantine $sha"
+                blocked=1
+                continue
+            fi
+            quarantined=1
+            if [ "$usage" -eq 1 ]; then
+                log "Quarantined release $sha; advisory scan detected no matching consumer"
+            elif [ "$usage" -eq 0 ]; then
+                log "Quarantined release $sha; advisory scan observed a matching consumer"
+            else
+                log "Quarantined release $sha; advisory scan was indeterminate"
+            fi
         fi
     done <<< "$paths"
+    if [ "$blocked" -eq 0 ]; then
+        rm -f -- "$PRUNE_NEEDED_MARKER" || return 1
+    fi
+    if [ "$quarantined" -eq 1 ]; then
+        report_quarantine_occupancy || return 1
+    fi
+    [ "$blocked" -eq 0 ]
 }
 
 deployment_exit() {
@@ -939,7 +1219,10 @@ recover_transaction() {
         && [ "$backend" = "$target" ] && [ "$frontend" = "$target" ] \
         && [ "$live_jar" = "$target" ] \
         && frontend_runtime_matches "$target"; then
-        rm -f "$TRANSACTION_FILE"
+        set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
+        ensure_prune_needed || return 1
+        rm -f "$TRANSACTION_FILE" || return 1
+        prune_releases || return 1
         FAILURE_ACTIVE=0
         return 0
     fi
@@ -969,7 +1252,10 @@ recover_transaction() {
         post_deploy_smoke "$target" || return 1
         set_failure_context marker release "Recovery completed components but could not commit release markers"
         commit_release_markers "$prior" "$target" || return 1
-        rm -f "$TRANSACTION_FILE"
+        set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
+        ensure_prune_needed || return 1
+        rm -f "$TRANSACTION_FILE" || return 1
+        prune_releases || return 1
         FAILURE_ACTIVE=0
         log "Recovered and committed release ${target:0:8}"
         return 0
@@ -982,7 +1268,8 @@ recover_transaction() {
 }
 
 main() {
-    local pinned_target="${CONNEX_DEPLOY_TARGET:-}"
+    local pinned_target="${CONNEX_DEPLOY_TARGET:-}" transaction_record transaction_target transaction_phase
+    local recovery_script recovery_status
     arm_global_cleanup
     set_failure_context bootstrap release "Deploy FAILED during bootstrap"
     if [ "${CONNEX_DEPLOY_LOCK_HELD:-0}" != "1" ]; then
@@ -990,6 +1277,11 @@ main() {
         flock -n 9 || { log "Deploy already in progress, skipping"; FAILURE_ACTIVE=0; return 0; }
     fi
     if ! cd "$STAGING_DIR"; then
+        return 1
+    fi
+    mkdir -p "$STATE_DIR" "$RELEASES_DIR" "$RELEASE_QUARANTINE_DIR"
+    if ! report_quarantine_occupancy; then
+        set_failure_context recovery release "Deploy refused: release quarantine occupancy could not be measured"
         return 1
     fi
     guard_wrapper_contract "$pinned_target" || return 1
@@ -1003,14 +1295,57 @@ main() {
     else
         pinned_target="$(git rev-parse origin/main)"
     fi
-    mkdir -p "$STATE_DIR" "$RELEASES_DIR"
+    DEPLOY_TARGET="$pinned_target"
+    if ! atomic_quarantine_move_supported; then
+        set_failure_context preflight release "Deploy refused: mv lacks atomic no-copy quarantine support"
+        return 1
+    fi
 
     if [ -e "$TRANSACTION_FILE" ]; then
+        if transaction_record="$(read_transaction 2>/dev/null)"; then
+            IFS=$'\t' read -r _ transaction_target _ transaction_phase <<< "$transaction_record"
+            if [ "$transaction_target" != "$pinned_target" ]; then
+                if [ "$transaction_phase" = "committed" ]; then
+                    # A committed schema-2 transaction needs no version-specific activation.
+                    # Cleanup safety belongs to the current script, so older recorded logic
+                    # must never regain authority to prune or unlink quarantine entries.
+                    log "Recovering committed transaction for ${transaction_target:0:8} with current terminal-quarantine logic"
+                else
+                    # Nonterminal recovery must run under the deployment logic from the
+                    # commit that created the durable transaction. Otherwise script A can
+                    # activate recorded target B after the wrapper selected A.
+                    set_failure_context recovery release "Deploy recovery handoff FAILED"
+                    recovery_script="$(mktemp /tmp/connex-staging-recovery.XXXXXX)" || return 1
+                    if ! git show "$transaction_target:deploy/staging/connex-staging-deploy.sh" \
+                        > "$recovery_script"; then
+                        rm -f "$recovery_script" || log "Recovery script cleanup FAILED"
+                        return 1
+                    fi
+                    log "Handing recovery for ${transaction_target:0:8} to its pinned deployment logic"
+                    trap - EXIT INT TERM
+                    recovery_status=0
+                    CONNEX_DEPLOY_TARGET="$transaction_target" bash "$recovery_script" "$@" \
+                        || recovery_status=$?
+                    if ! rm -f "$recovery_script"; then
+                        arm_global_cleanup
+                        set_failure_context recovery release "Recovery script cleanup FAILED"
+                        return 1
+                    fi
+                    exit "$recovery_status"
+                fi
+            fi
+        fi
         recover_transaction
         return $?
     fi
 
-    DEPLOY_TARGET="$pinned_target"
+    # Disk headroom gates only new deploy work. Existing transactions must recover
+    # first because activation may already have stopped or replaced live components.
+    if ! staging_disk_headroom_sufficient; then
+        set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom"
+        return 1
+    fi
+
     if ! DEPLOY_PREVIOUS="$(read_sha_file "$MARKER" 2>/dev/null)"; then DEPLOY_PREVIOUS=; fi
     if ! is_git_sha "$DEPLOY_TARGET" || ! is_git_sha "$DEPLOY_PREVIOUS"; then
         set_failure_context preflight release "Deploy refused: target or deployed marker is not a full git sha"
@@ -1021,6 +1356,10 @@ main() {
         if ! verify_no_change_release "$DEPLOY_PREVIOUS"; then
             set_failure_context preflight release "Deploy refused: live components or retained rollback pair are missing or invalid"
             return 1
+        fi
+        if prune_backlog_present; then
+            set_failure_context recovery release "Release prune backlog remains unresolved"
+            prune_releases || return 1
         fi
         FAILURE_ACTIVE=0
         return 0
@@ -1052,6 +1391,13 @@ main() {
 
     set_failure_context bundle release "Deploy FAILED while verifying the target release pair"
     verify_release_bundle "$DEPLOY_PREVIOUS" && verify_release_bundle "$DEPLOY_TARGET" || return 1
+
+    # Sealing can consume the initial reserve, so re-check before recording the
+    # transaction and stopping the frontend for the first activation step.
+    if ! staging_disk_headroom_sufficient; then
+        set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom before activation"
+        return 1
+    fi
     write_transaction prepared || return 1
 
     set_failure_context frontend_quiesce frontend "Deploy FAILED while quiescing or switching the checkout; prior release remains committed"
@@ -1070,8 +1416,10 @@ main() {
 
     set_failure_context marker release "Deploy components passed smoke but release markers could not be committed"
     commit_release_markers "$DEPLOY_PREVIOUS" "$DEPLOY_TARGET" || return 1
-    rm -f "$TRANSACTION_FILE"
-    prune_releases
+    set_failure_context recovery release "Release committed but transaction cleanup or safe release pruning FAILED"
+    ensure_prune_needed || return 1
+    rm -f "$TRANSACTION_FILE" || return 1
+    prune_releases || return 1
     FAILURE_ACTIVE=0
     log "Done — release ${DEPLOY_TARGET:0:8} live as one verified frontend/backend unit"
 }

@@ -13,10 +13,13 @@
 
 set -euo pipefail
 
-STAGING_DIR=/opt/connex-staging
+# Overrides are test seams for the offline harness; the installed systemd unit
+# relies on the fixed staging and lock defaults.
+STAGING_DIR="${CONNEX_STAGING_DIR:-/opt/connex-staging}"
+LOCK_FILE="${CONNEX_DEPLOY_LOCK_FILE:-/tmp/connex-staging-deploy.lock}"
 LOG_TAG="connex-staging-deploy"
 
-exec 9>/tmp/connex-staging-deploy.lock
+exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "[$LOG_TAG] Deploy already in progress, skipping"; exit 0; }
 
 cd "$STAGING_DIR"
@@ -27,6 +30,9 @@ trap 'rm -f "$DEPLOY_SCRIPT"' EXIT
 CANDIDATE_SHA="$(git rev-parse origin/main)"
 git show "$CANDIDATE_SHA:deploy/staging/connex-staging-deploy.sh" > "$DEPLOY_SCRIPT"
 
+# The candidate commit and the deployment logic are one snapshot. If origin/main
+# advances now, that newer commit waits for the next timer run instead of being
+# deployed by the already-parsed candidate script.
 export CONNEX_DEPLOY_LOCK_HELD=1
 export CONNEX_DEPLOY_TARGET="$CANDIDATE_SHA"
 bash "$DEPLOY_SCRIPT"
