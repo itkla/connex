@@ -33,7 +33,10 @@ public class SqlExceptionTranslationConfig {
     private static final Set<String> REQUEST_OWNED_CHECK_CONSTRAINTS = Set.of(
         "chk_stage_terminal");
 
-    /** Supplies Boot-managed JDBC clients with request-owned CHECK translation. */
+    /**
+     * Supplies the unique translator bean that Spring Boot associates with its auto-configured
+     * JDBC clients.
+     */
     @Bean
     SQLExceptionTranslator sqlExceptionTranslator() {
         return withMySqlCheckConstraintTranslation(new SQLExceptionSubclassTranslator());
