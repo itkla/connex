@@ -4,22 +4,44 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.ClientErrorMapper">
 
   <insert id="insert">
-    INSERT INTO client_error (workspace_id, correlation_id, digest, page_path)
-    VALUES (#{workspaceId}, #{correlationId}, #{digest}, #{pagePath})
+    INSERT INTO client_error (workspace_id, correlation_id, page_path)
+    VALUES (#{workspaceId}, #{untrustedClientAssertedCorrelationHmac}, #{pagePath})
   </insert>
 
+  <sql id="supportColumns">
+    ce.id, ce.workspace_id, w.org_id,
+    ce.correlation_id AS stored_correlation_value,
+    ce.page_path, ce.reported_at
+  </sql>
+
   <select id="findOrgSupportSlice"
-          resultType="ooo.klae.connex.backend.dto.ClientErrorSupportRowDto" timeout="20">
-    SELECT ce.id, ce.workspace_id, ce.correlation_id, ce.digest, ce.page_path, ce.reported_at
+          resultType="ooo.klae.connex.backend.beans.ClientErrorMetadataRow" timeout="20">
+    SELECT <include refid="supportColumns"/>
     FROM client_error ce
     JOIN workspace w ON w.id = ce.workspace_id
     WHERE w.org_id = #{orgId}
       AND ce.reported_at &gt;= #{since}
       AND ce.reported_at &lt;= #{until}
-      <if test="correlationId != null">
-        AND ce.correlation_id = CONVERT(#{correlationId} USING ascii) COLLATE ascii_bin
+      <if test="untrustedClientAssertedCorrelationHmac != null">
+        AND (
+          ce.correlation_id =
+            CONVERT(#{untrustedClientAssertedCorrelationHmac} USING ascii) COLLATE ascii_bin
+          OR ce.correlation_id =
+            CONVERT(#{legacyRawCorrelationId} USING ascii) COLLATE ascii_bin
+        )
       </if>
     ORDER BY ce.reported_at ASC, ce.id ASC
+    LIMIT #{limit}
+  </select>
+
+  <select id="findWorkspaceExportPage"
+          resultType="ooo.klae.connex.backend.beans.ClientErrorMetadataRow" timeout="20">
+    SELECT <include refid="supportColumns"/>
+    FROM client_error ce
+    JOIN workspace w ON w.id = ce.workspace_id
+    WHERE ce.workspace_id = #{workspaceId}
+      AND ce.id &gt; #{afterId}
+    ORDER BY ce.id
     LIMIT #{limit}
   </select>
 

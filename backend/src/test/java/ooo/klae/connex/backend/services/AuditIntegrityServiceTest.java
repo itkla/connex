@@ -112,7 +112,8 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     void untrustedClientCorrelationStaysOutsideTheRollingCompatibleIntegrityPayload() {
         AuditLog withoutClientCorrelation = new AuditLog();
         AuditLog withClientCorrelation = new AuditLog();
-        withClientCorrelation.setUntrustedClientAssertedCorrelationId("client-correlation-123");
+        withClientCorrelation.setUntrustedClientAssertedCorrelationHmac(
+            "client-correlation-hmac");
 
         assertEquals(
             auditIntegrityService.integrityPayload(withoutClientCorrelation),

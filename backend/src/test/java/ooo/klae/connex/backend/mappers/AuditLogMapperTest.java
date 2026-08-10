@@ -83,12 +83,23 @@ class AuditLogMapperTest extends AbstractMapperTest {
     @Test
     void clientAssertedCorrelationFilterCannotPullAnotherTenantsAuditRows() {
         Workspace mine = newWorkspace();
+        int mineOrgId = workspaceMapper.getOrgId(mine.getId());
+        Workspace sameOrgOtherWorkspace = newWorkspace(mineOrgId);
         Organization foreignOrg = newOrganization();
         Workspace foreign = newWorkspace(foreignOrg.getId());
-        String correlationId = "client-correlation-123";
-        int mineId = insertAudit(
-            mine.getId(), "person", 412, "mine", correlationId);
-        insertAudit(foreign.getId(), "person", 412, "foreign", correlationId);
+        String rawCorrelationId = "client-correlation-123";
+        String correlationHmac = "pseudonymized-client-correlation";
+        int mineCurrentId = insertAudit(
+            mine.getId(), "person", 412, "mine-current", correlationHmac);
+        int mineLegacyId = insertAudit(
+            mine.getId(), "person", 412, "mine-legacy", rawCorrelationId);
+        insertAudit(
+            sameOrgOtherWorkspace.getId(), "person", 412, "same-org-other-workspace",
+            correlationHmac);
+        insertAudit(
+            mine.getId(), "person", 412, "same-workspace-other-correlation",
+            "different-correlation-456");
+        insertAudit(foreign.getId(), "person", 412, "foreign", correlationHmac);
         Instant now = Instant.now();
 
         List<AuditSupportRowDto> rows = auditLogMapper.findEntitySupportSlice(
@@ -98,10 +109,41 @@ class AuditLogMapperTest extends AbstractMapperTest {
             412,
             now.minus(1, ChronoUnit.DAYS),
             now.plus(1, ChronoUnit.DAYS),
-            correlationId,
+            correlationHmac,
+            rawCorrelationId,
             10);
 
-        assertEquals(List.of((long) mineId), rows.stream().map(AuditSupportRowDto::auditId).toList());
+        assertEquals(
+            List.of((long) mineCurrentId, (long) mineLegacyId),
+            rows.stream().map(AuditSupportRowDto::auditId).toList());
+    }
+
+    @Test
+    void organizationCorrelationFilterCannotPullUnrelatedOrForeignAuditRows() {
+        Organization mine = newOrganization();
+        Organization foreign = newOrganization();
+        String rawCorrelationId = "client-correlation-123";
+        String correlationHmac = "pseudonymized-client-correlation";
+        int mineCurrentId = insertOrgAudit(
+            mine.getId(), "mine-current", correlationHmac);
+        int mineLegacyId = insertOrgAudit(
+            mine.getId(), "mine-legacy", rawCorrelationId);
+        insertOrgAudit(
+            mine.getId(), "same-org-other-correlation", "different-correlation-456");
+        insertOrgAudit(foreign.getId(), "foreign", correlationHmac);
+        Instant now = Instant.now();
+
+        List<AuditSupportRowDto> rows = auditLogMapper.findOrgSupportSlice(
+            mine.getId(),
+            now.minus(1, ChronoUnit.DAYS),
+            now.plus(1, ChronoUnit.DAYS),
+            correlationHmac,
+            rawCorrelationId,
+            10);
+
+        assertEquals(
+            List.of((long) mineCurrentId, (long) mineLegacyId),
+            rows.stream().map(AuditSupportRowDto::auditId).toList());
     }
 
     private Workspace newWorkspace() {
@@ -139,7 +181,7 @@ class AuditLogMapperTest extends AbstractMapperTest {
             String entityType,
             Integer entityId,
             String summary,
-            String untrustedClientAssertedCorrelationId) {
+            String untrustedClientAssertedCorrelationHmac) {
         AuditLog entry = new AuditLog();
         entry.setWorkspaceId(workspaceId);
         entry.setAction("company.update");
@@ -147,7 +189,8 @@ class AuditLogMapperTest extends AbstractMapperTest {
         entry.setEntityId(entityId);
         entry.setOutcome("success");
         entry.setSummary(summary);
-        entry.setUntrustedClientAssertedCorrelationId(untrustedClientAssertedCorrelationId);
+        entry.setUntrustedClientAssertedCorrelationHmac(
+            untrustedClientAssertedCorrelationHmac);
         entry.setOrgId(workspaceMapper.getOrgId(workspaceId));
         entry.setChainScopeType("workspace");
         entry.setChainScopeId(workspaceId);
@@ -173,6 +216,25 @@ class AuditLogMapperTest extends AbstractMapperTest {
         entry.setChainIndex(chainIndex);
         entry.setPrevHash(hash(chainIndex - 1));
         entry.setRowHash(hash(chainIndex));
+        auditLogMapper.insert(entry);
+        return entry.getId();
+    }
+
+    private int insertOrgAudit(int orgId, String summary, String correlationValue) {
+        AuditLog entry = new AuditLog();
+        entry.setOrgId(orgId);
+        entry.setAction("organization.update");
+        entry.setEntityType("organization");
+        entry.setEntityId(orgId);
+        entry.setOutcome("success");
+        entry.setSummary(summary);
+        entry.setUntrustedClientAssertedCorrelationHmac(correlationValue);
+        entry.setChainScopeType("organization");
+        entry.setChainScopeId(orgId);
+        entry.setChainIndex(nextChainIndex);
+        entry.setPrevHash(hash(nextChainIndex - 1));
+        entry.setRowHash(hash(nextChainIndex));
+        nextChainIndex++;
         auditLogMapper.insert(entry);
         return entry.getId();
     }

@@ -32,7 +32,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.AuditLog;
+import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -46,11 +48,22 @@ class AuditServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private AuditService service;
+    private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
 
     @BeforeEach
     void setUp() {
-        service = new AuditService(auditLogMapper, auditIntegrityService, objectMapper, tenantContext, new ClientIpResolver(""));
+        AuditIntegrityProperties properties = new AuditIntegrityProperties();
+        properties.setHmacSecret("test-correlation-hmac-secret-change-me");
+        correlationPseudonymizer = new ClientAssertedCorrelationPseudonymizer(properties);
+        service = new AuditService(
+            auditLogMapper,
+            auditIntegrityService,
+            objectMapper,
+            tenantContext,
+            new ClientIpResolver(""),
+            correlationPseudonymizer);
         lenient().when(tenantContext.getWorkspaceId()).thenReturn(7);
+        lenient().when(tenantContext.getOrgId()).thenReturn(8);
     }
 
     @Test
@@ -362,8 +375,8 @@ class AuditServiceTest {
             assertNotNull(recorded);
             assertNotEquals("abcd1234efgh", recorded);
             assertEquals(
-                "abcd1234efgh",
-                captor.getValue().getUntrustedClientAssertedCorrelationId());
+                correlationPseudonymizer.forStorage(8, "abcd1234efgh"),
+                captor.getValue().getUntrustedClientAssertedCorrelationHmac());
         } finally {
             MDC.remove(CorrelationIds.MDC_KEY);
             RequestContextHolder.resetRequestAttributes();
@@ -402,6 +415,6 @@ class AuditServiceTest {
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditIntegrityService).append(captor.capture());
         assertNull(captor.getValue().getRequestId());
-        assertNull(captor.getValue().getUntrustedClientAssertedCorrelationId());
+        assertNull(captor.getValue().getUntrustedClientAssertedCorrelationHmac());
     }
 }

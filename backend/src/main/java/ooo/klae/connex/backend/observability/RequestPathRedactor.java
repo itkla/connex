@@ -2,69 +2,199 @@ package ooo.klae.connex.backend.observability;
 
 import java.util.Set;
 
-/**
- * Removes query and fragment content and collapses credential-bearing segments of a reported
- * request path.
- *
- * <p>Two independent rules apply. A segment that directly follows one of the enumerable
- * token-bearing route prefixes — the {@code /invite}, {@code /invite-link} and {@code /unsubscribe}
- * client routes, their {@code /api/invites}, {@code /api/invite-links} and
- * {@code /api/delivery/unsubscribe} server counterparts, and the opaque managed-object routes — is
- * always replaced, unless that segment is a bare numeric row id. Any other segment shaped like a
- * generated credential is replaced as defence in depth for routes added later: base64url alphabet
- * of at least 22 characters with mixed case and a digit, or at least 32 lowercase hex characters
- * (the shape {@code HexFormat} produces for delivery webhook tokens). Numeric identifiers, UUIDs
- * and lowercase slugs are deliberately preserved so unmapped-path and page-level triage stays
- * legible.
- */
+/** Maps reported paths to a closed, server-owned frontend route-template vocabulary. */
 public final class RequestPathRedactor {
-    static final String REDACTED_SEGMENT = "{token}";
+    public static final String UNKNOWN_ROUTE = "unknown";
 
-    private static final int MIN_CREDENTIAL_LENGTH = 22;
-    private static final int MIN_HEX_CREDENTIAL_LENGTH = 32;
-    private static final Set<String> TOKEN_BEARING_PARENTS = Set.of(
-            "invite",
-            "invite-link",
-            "invites",
-            "invite-links",
-            "unsubscribe",
-            "content",
-            "logo",
-            "profile-picture");
+    private static final Set<String> LOCALES = Set.of("en", "ja");
+    private static final Set<String> ROUTE_TEMPLATES = Set.of(
+        "/",
+        "/account",
+        "/account/connections",
+        "/account/connections/reviews",
+        "/account/invites",
+        "/account/notifications",
+        "/account/profile",
+        "/account/security",
+        "/activity/activities/{id}",
+        "/activity/all",
+        "/activity/notes",
+        "/activity/notes/{id}",
+        "/activity/tasks",
+        "/activity/tasks/{id}",
+        "/admin/logs",
+        "/auth/{action}",
+        "/auth/confirm-email",
+        "/auth/forgot-password",
+        "/auth/login",
+        "/auth/logout",
+        "/auth/register",
+        "/auth/reset-password",
+        "/auth/verify-email",
+        "/dashboard",
+        "/design-system",
+        "/disclosure",
+        "/docs",
+        "/docs/{...slug}",
+        "/invite/{token}",
+        "/invite-link/{token}",
+        "/legal",
+        "/library/documents",
+        "/library/documents/{id}",
+        "/library/documents/new",
+        "/library/files",
+        "/library/tags",
+        "/marketing/campaigns",
+        "/marketing/campaigns/{id}",
+        "/me",
+        "/notifications",
+        "/onboarding",
+        "/organization",
+        "/organization/ai",
+        "/organization/allowed-domains",
+        "/organization/audit",
+        "/organization/data-requests",
+        "/organization/diagnostics",
+        "/organization/members",
+        "/organization/overview",
+        "/organization/sso",
+        "/overview/analytics",
+        "/overview/calendar",
+        "/overview/introductions",
+        "/overview/map",
+        "/overview/reports",
+        "/overview/reports/{id}",
+        "/overview/reports/{id}/edit",
+        "/overview/reports/{id}/snapshots",
+        "/overview/reports/{id}/snapshots/{snapshotId}",
+        "/overview/reports/goals",
+        "/overview/reports/new",
+        "/privacy",
+        "/records/approval-policies",
+        "/records/companies",
+        "/records/companies/{id}",
+        "/records/contacts",
+        "/records/contacts/{id}",
+        "/records/deals",
+        "/records/deals/{id}",
+        "/records/deals/{id}/documents/{docId}/print",
+        "/records/pipelines",
+        "/records/products",
+        "/search",
+        "/settings",
+        "/settings/custom-fields",
+        "/settings/data",
+        "/settings/delivery",
+        "/settings/diagnostics",
+        "/settings/email",
+        "/settings/general",
+        "/settings/members",
+        "/settings/membership",
+        "/settings/notifications",
+        "/settings/roles",
+        "/settings/rules",
+        "/settings/security",
+        "/settings/sso",
+        "/settings/workflows/{legacyRuleId}",
+        "/sso/link",
+        "/tokushoho",
+        "/unsubscribe/{token}",
+        "/users",
+        "/users/{id}",
+        "/workflows",
+        "/workflows/{workflowId}",
+        "/workflows/{workflowId}/runs/{runKey}",
+        "/workflows/new",
+        "/workflows/operations",
+        "/workflows/recipes",
+        "/workflows/recipes/{recipeKey}");
 
     private RequestPathRedactor() {
     }
 
     /**
-     * Returns the query-free path with credential-bearing segments replaced by a fixed
-     * placeholder.
+     * Returns a recognized route template, {@link #UNKNOWN_ROUTE}, or null when the input was null.
      *
-     * @param path the raw request path, or null
-     * @return the redacted path, or null when the path was null
+     * @param path the caller-controlled path
+     * @return the closed-vocabulary route template
      */
     public static String redact(String path) {
-        if (path == null || path.isEmpty()) {
-            return path;
+        if (path == null) {
+            return null;
         }
-        int suffixStart = suffixStart(path);
-        String pathname = path.substring(0, suffixStart);
-        String[] segments = pathname.split("/", -1);
-        StringBuilder redacted = new StringBuilder(pathname.length());
-        String previous = "";
-        for (int index = 0; index < segments.length; index++) {
-            String segment = segments[index];
-            if (index > 0) {
-                redacted.append('/');
-            }
-            boolean parentBearsToken = TOKEN_BEARING_PARENTS.contains(previous) && !isNumericId(segment);
-            if (!segment.isEmpty() && (parentBearsToken || credentialShaped(segment) || hexCredentialShaped(segment))) {
-                redacted.append(REDACTED_SEGMENT);
-            } else {
-                redacted.append(segment);
-            }
-            previous = segment;
+        String pathname = path.substring(0, suffixStart(path));
+        String template = recognizedTemplate(pathname);
+        if (template != null) {
+            return template;
         }
-        return redacted.toString();
+        String[] segments = segments(pathname);
+        if (segments.length > 1
+                && (LOCALES.contains(segments[0]) || "{locale}".equals(segments[0]))) {
+            String localizedPath = "/" + String.join("/", java.util.Arrays.copyOfRange(
+                segments, 1, segments.length));
+            String localizedTemplate = recognizedTemplate(localizedPath);
+            if (localizedTemplate != null) {
+                return "/{locale}" + localizedTemplate;
+            }
+        }
+        return UNKNOWN_ROUTE;
+    }
+
+    private static String recognizedTemplate(String pathname) {
+        String recognized = null;
+        int recognizedSpecificity = -1;
+        for (String template : ROUTE_TEMPLATES) {
+            int specificity = specificity(template);
+            if (specificity > recognizedSpecificity && matches(pathname, template)) {
+                recognized = template;
+                recognizedSpecificity = specificity;
+            }
+        }
+        return recognized;
+    }
+
+    private static int specificity(String template) {
+        int literalSegments = 0;
+        for (String segment : segments(template)) {
+            if (!segment.startsWith("{")) {
+                literalSegments++;
+            }
+        }
+        return literalSegments;
+    }
+
+    private static boolean matches(String pathname, String template) {
+        String[] actualSegments = segments(pathname);
+        String[] templateSegments = segments(template);
+        boolean catchAll = templateSegments.length > 0
+            && "{...slug}".equals(templateSegments[templateSegments.length - 1]);
+        if ((!catchAll && actualSegments.length != templateSegments.length)
+                || (catchAll && actualSegments.length < templateSegments.length)) {
+            return false;
+        }
+        int fixedSegments = catchAll ? templateSegments.length - 1 : templateSegments.length;
+        for (int index = 0; index < fixedSegments; index++) {
+            String expected = templateSegments[index];
+            String actual = actualSegments[index];
+            if (expected.startsWith("{") && expected.endsWith("}")) {
+                if (actual.isEmpty()) {
+                    return false;
+                }
+            } else if (!expected.equals(actual)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String[] segments(String pathname) {
+        if ("/".equals(pathname)) {
+            return new String[0];
+        }
+        if (!pathname.startsWith("/") || pathname.endsWith("/")) {
+            return new String[] { pathname };
+        }
+        return pathname.substring(1).split("/", -1);
     }
 
     private static int suffixStart(String path) {
@@ -77,51 +207,5 @@ public final class RequestPathRedactor {
             return query;
         }
         return Math.min(query, fragment);
-    }
-
-    private static boolean isNumericId(String segment) {
-        for (int index = 0; index < segment.length(); index++) {
-            char character = segment.charAt(index);
-            if (character < '0' || character > '9') {
-                return false;
-            }
-        }
-        return !segment.isEmpty();
-    }
-
-    private static boolean hexCredentialShaped(String segment) {
-        if (segment.length() < MIN_HEX_CREDENTIAL_LENGTH) {
-            return false;
-        }
-        for (int index = 0; index < segment.length(); index++) {
-            char character = segment.charAt(index);
-            boolean hex = (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
-            if (!hex) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean credentialShaped(String segment) {
-        if (segment.length() < MIN_CREDENTIAL_LENGTH) {
-            return false;
-        }
-        boolean digit = false;
-        boolean upper = false;
-        boolean lower = false;
-        for (int index = 0; index < segment.length(); index++) {
-            char character = segment.charAt(index);
-            if (character >= '0' && character <= '9') {
-                digit = true;
-            } else if (character >= 'A' && character <= 'Z') {
-                upper = true;
-            } else if (character >= 'a' && character <= 'z') {
-                lower = true;
-            } else if (character != '-' && character != '_') {
-                return false;
-            }
-        }
-        return digit && upper && lower;
     }
 }

@@ -41,7 +41,7 @@ declare -rx EXIT_API=66
 declare -rx EXIT_INTEGRITY=67
 declare -rx EXIT_READ=69
 
-declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=2
+declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=3
 
 # Mirrors the backend's own uncompressed ceiling.
 declare -rx SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES=67108864
@@ -156,14 +156,6 @@ support_bundle_validate_correlation_id() {
     local value="$1"
     if [[ ! "$value" =~ ^[A-Za-z0-9_-]{8,64}$ ]]; then
         support_bundle_log error config_error reason invalid_correlation_id
-        return "$EXIT_USAGE"
-    fi
-}
-
-support_bundle_validate_framework_digest() {
-    local value="$1"
-    if [[ ! "$value" =~ ^[0-9]{1,10}(@E[0-9]{1,6})?$ ]]; then
-        support_bundle_log error config_error reason invalid_framework_digest
         return "$EXIT_USAGE"
     fi
 }

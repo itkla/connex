@@ -79,20 +79,15 @@ Read a bundle:
 
 ```bash
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
-deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --correlation-id abcd1234efgh
-deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --digest 3819274061
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section audit
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section client-errors
 ```
 
-The correlation filter is a lookup aid, not an audit identity. It matches
-`client-errors.json.correlationId` and
-`audit-slice.csv.untrustedClientAssertedCorrelationId`. Use the separate
-`serverMintedRequestId` column for the non-spoofable within-audit pivot.
-The digest filter is the normal broken-page workflow: it finds the exact
-framework reference in `client-errors.json` and leaves the bundle's complete audit
-slice visible. The error report is a later request, so its correlation id is not
-treated as proof that an earlier audit event caused the page failure.
+Apply `--correlation-id` to `collect.sh`, not `read.sh`. The server transforms that lookup input and
+the archive contains only the organization-scoped `untrustedClientAssertedCorrelationHmac`; the raw client assertion never leaves
+the deployment. Use `serverMintedRequestId` for the non-spoofable within-audit pivot. Framework
+digests are omitted because their shape does not establish their provenance; use a quoted digest
+only with deployment-local structured logs.
 
 Nothing is rendered until the archive has passed verification in full: safe
 entry names, every inventory entry matched to its recorded byte length and

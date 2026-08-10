@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.services.ClientErrorService.ClientErrorSlice;
 import tools.jackson.databind.ObjectMapper;
@@ -62,7 +63,7 @@ public class SupportBundleService {
 
     private static final String AUDIT_ACTION = "org.support_bundle.download";
     private static final String AUDIT_OUTCOME_ACTION = "org.support_bundle.completed";
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
     private static final Duration DEFAULT_WINDOW = Duration.ofDays(7);
     private static final Duration MAXIMUM_WINDOW = Duration.ofDays(30);
     private static final String MANIFEST_ENTRY = "manifest.json";
@@ -98,6 +99,7 @@ public class SupportBundleService {
     private final ProductVersionService productVersionService;
     private final AuditService auditService;
     private final ClientErrorService clientErrorService;
+    private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Semaphore admission = new Semaphore(MAX_CONCURRENT_BUNDLES);
@@ -119,8 +121,13 @@ public class SupportBundleService {
         sessionSecurityService.requireRecentAuthentication(actorId);
 
         Instant generatedAt = clock.instant();
+        String untrustedClientAssertedCorrelationHmac = request.correlationId() == null
+            ? null
+            : correlationPseudonymizer.forDisclosure(
+                request.orgId(),
+                correlationPseudonymizer.forStorage(request.orgId(), request.correlationId()));
         SupportBundleFilters filters = new SupportBundleFilters(
-            request.correlationId(),
+            untrustedClientAssertedCorrelationHmac,
             request.entityType(),
             request.entityId(),
             request.workspaceId(),
@@ -134,7 +141,7 @@ public class SupportBundleService {
         }
         try {
             auditStart(request.orgId(), filters);
-            SupportBundle bundle = assemble(request.orgId(), filters);
+            SupportBundle bundle = assemble(request.orgId(), filters, request.correlationId());
             auditOutcome(request.orgId(), "success", bundle.content().length);
             return bundle;
         } catch (RuntimeException | Error failure) {
@@ -164,7 +171,7 @@ public class SupportBundleService {
                 "since", filters.since().toString(),
                 "until", filters.until().toString(),
                 "untrustedClientAssertedCorrelationFiltered",
-                    filters.untrustedClientAssertedCorrelationId() != null,
+                    filters.untrustedClientAssertedCorrelationHmac() != null,
                 "entityFiltered", filters.entityType() != null));
     }
 
@@ -213,7 +220,10 @@ public class SupportBundleService {
         return correlationId;
     }
 
-    private SupportBundle assemble(int orgId, SupportBundleFilters filters) {
+    private SupportBundle assemble(
+            int orgId,
+            SupportBundleFilters filters,
+            String clientAssertedCorrelationId) {
         Assembly assembly = new Assembly(filters, clock.instant().plus(ASSEMBLY_BUDGET));
         AtomicReference<AuditService.AuditSlice> slice = new AtomicReference<>();
         AtomicReference<ClientErrorSlice> clientErrors = new AtomicReference<>();
@@ -233,7 +243,8 @@ public class SupportBundleService {
             collect(assembly, zip, "migrations.json", "application/json",
                 () -> objectMapper.writeValueAsBytes(migrationHistoryService.history()));
             collect(assembly, zip, "audit-slice.csv", "text/csv", () -> {
-                AuditService.AuditSlice collected = auditSlice(orgId, filters);
+                AuditService.AuditSlice collected = auditSlice(
+                    orgId, filters, clientAssertedCorrelationId);
                 slice.set(collected);
                 return collected.csv().getBytes(StandardCharsets.UTF_8);
             });
@@ -242,7 +253,7 @@ public class SupportBundleService {
                     orgId,
                     filters.since(),
                     filters.until(),
-                    filters.untrustedClientAssertedCorrelationId(),
+                    clientAssertedCorrelationId,
                     CLIENT_ERROR_SLICE_LIMIT);
                 clientErrors.set(collected);
                 return objectMapper.writeValueAsBytes(collected.rows());
@@ -342,9 +353,10 @@ public class SupportBundleService {
         }
     }
 
-    private AuditService.AuditSlice auditSlice(int orgId, SupportBundleFilters filters) {
-        String untrustedClientAssertedCorrelationId =
-            filters.untrustedClientAssertedCorrelationId();
+    private AuditService.AuditSlice auditSlice(
+            int orgId,
+            SupportBundleFilters filters,
+            String clientAssertedCorrelationId) {
         if (filters.entityType() != null && filters.workspaceId() == null) {
             throw new IllegalStateException(
                 "An entity-filtered bundle requires a resolved workspace; refusing to widen to the "
@@ -358,14 +370,14 @@ public class SupportBundleService {
                 filters.entityId(),
                 filters.since(),
                 filters.until(),
-                untrustedClientAssertedCorrelationId,
+                clientAssertedCorrelationId,
                 AUDIT_SLICE_LIMIT);
         }
         return auditService.supportSliceForOrg(
             orgId,
             filters.since(),
             filters.until(),
-            untrustedClientAssertedCorrelationId,
+            clientAssertedCorrelationId,
             AUDIT_SLICE_LIMIT);
     }
 
@@ -407,9 +419,9 @@ public class SupportBundleService {
         manifest.put("auditSliceIdentifiers", auditSliceIdentifiers());
         manifest.put(
             "auditSliceCorrelationFilterField",
-            "untrustedClientAssertedCorrelationId");
+            "untrustedClientAssertedCorrelationHmac");
         manifest.put("auditSliceInconclusive",
-            filters.untrustedClientAssertedCorrelationId() != null
+            filters.untrustedClientAssertedCorrelationHmac() != null
                 && slice != null
                 && slice.rowCount() == 0);
         manifest.put(
@@ -430,8 +442,8 @@ public class SupportBundleService {
     private static Map<String, Object> manifestFilters(SupportBundleFilters filters) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put(
-            "untrustedClientAssertedCorrelationId",
-            filters.untrustedClientAssertedCorrelationId());
+            "untrustedClientAssertedCorrelationHmac",
+            filters.untrustedClientAssertedCorrelationHmac());
         values.put("entityType", filters.entityType());
         values.put("entityId", filters.entityId());
         values.put("resolvedWorkspaceId", filters.workspaceId());
@@ -444,8 +456,8 @@ public class SupportBundleService {
         Map<String, String> identifiers = new LinkedHashMap<>();
         identifiers.put("serverMintedRequestId", "server_minted_non_spoofable");
         identifiers.put(
-            "untrustedClientAssertedCorrelationId",
-            "client_asserted_untrusted");
+            "untrustedClientAssertedCorrelationHmac",
+            "organization_scoped_domain_separated_hmac_sha256_of_untrusted_client_assertion");
         return identifiers;
     }
 
@@ -481,8 +493,8 @@ public class SupportBundleService {
     /**
      * The effective filters recorded in the manifest.
      *
-     * @param untrustedClientAssertedCorrelationId the untrusted client-asserted correlation id
-     *        filter, or null
+     * @param untrustedClientAssertedCorrelationHmac the disclosure-domain HMAC of the untrusted
+     *        client assertion recorded in the bundle
      * @param entityType    the record type filter, or null
      * @param entityId      the record id filter, or null
      * @param workspaceId   the resolved workspace, or null
@@ -490,7 +502,7 @@ public class SupportBundleService {
      * @param until         the generation instant and inclusive window end
      */
     public record SupportBundleFilters(
-        String untrustedClientAssertedCorrelationId,
+        String untrustedClientAssertedCorrelationHmac,
         String entityType,
         Integer entityId,
         Integer workspaceId,

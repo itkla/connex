@@ -2,19 +2,22 @@ package ooo.klae.connex.backend.services;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.regex.Pattern;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.ClientErrorMetadataRow;
 import ooo.klae.connex.backend.dto.ClientErrorRequest;
 import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.ClientErrorMapper;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.observability.ReportedError;
 import ooo.klae.connex.backend.observability.ReportedError.Source;
+import ooo.klae.connex.backend.observability.RequestPathRedactor;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
@@ -23,13 +26,11 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @Service
 @RequiredArgsConstructor
 public class ClientErrorService {
-    private static final Pattern SAFE_FRAMEWORK_DIGEST =
-        Pattern.compile("^[0-9]{1,10}(?:@E[0-9]{1,6})?$");
-
     private final ErrorReporter errorReporter;
     private final ClientErrorRateLimiter rateLimiter;
     private final TenantContext tenantContext;
     private final ClientErrorMapper clientErrorMapper;
+    private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
 
     /**
      * Reports one error for the resolved workspace member.
@@ -38,15 +39,19 @@ public class ClientErrorService {
      */
     public void report(ClientErrorRequest request) {
         Integer workspaceId = tenantContext.getWorkspaceId();
+        Integer orgId = tenantContext.getOrgId();
         Integer userId = tenantContext.getUserId();
         if (!tenantContext.isResolved()
                 || workspaceId == null
                 || workspaceId <= 0
+                || orgId == null
+                || orgId <= 0
                 || userId == null
                 || userId <= 0) {
             throw new ForbiddenException("A resolved workspace membership is required");
         }
         rateLimiter.acquire(userId);
+        String pagePath = RequestPathRedactor.redact(request.path());
         ReportedError reportedError = new ReportedError(
                 Source.CLIENT,
                 CorrelationIds.current(),
@@ -54,13 +59,12 @@ public class ClientErrorService {
                 userId,
                 request.message(),
                 detail(request),
-                request.path());
+                pagePath);
         errorReporter.report(reportedError);
         clientErrorMapper.insert(
             workspaceId,
-            reportedError.correlationId(),
-            safeFrameworkDigest(request.digest()),
-            reportedError.path());
+            correlationPseudonymizer.forStorage(orgId, reportedError.correlationId()),
+            pagePath);
     }
 
     /**
@@ -79,16 +83,36 @@ public class ClientErrorService {
             Instant until,
             String correlationId,
             int limit) {
-        List<ClientErrorSupportRowDto> rows = clientErrorMapper.findOrgSupportSlice(
-            orgId, since, until, correlationId, limit + 1);
+        String correlationHmac = correlationId == null
+            ? null
+            : correlationPseudonymizer.forStorage(orgId, correlationId);
+        List<ClientErrorMetadataRow> rows = clientErrorMapper.findOrgSupportSlice(
+            orgId, since, until, correlationHmac, correlationId, limit + 1);
         boolean truncated = rows.size() > limit;
-        List<ClientErrorSupportRowDto> bounded = truncated
+        List<ClientErrorMetadataRow> bounded = truncated
             ? List.copyOf(rows.subList(0, limit))
             : List.copyOf(rows);
         List<ClientErrorSupportRowDto> disclosed = bounded.stream()
-            .map(ClientErrorService::sanitizeSupportRow)
+            .map(row -> sanitizeSupportRow(row, orgId, correlationId, correlationHmac))
             .toList();
         return new ClientErrorSlice(disclosed, disclosed.size(), truncated);
+    }
+
+    /**
+     * Returns one safe keyset page for the complete workspace export.
+     *
+     * @param workspaceId the workspace being exported
+     * @param afterId the exclusive row-id cursor
+     * @param limit the maximum rows in the page
+     * @return the safe client-error projection
+     */
+    public List<ClientErrorSupportRowDto> workspaceExportPage(
+            int workspaceId,
+            long afterId,
+            int limit) {
+        return clientErrorMapper.findWorkspaceExportPage(workspaceId, afterId, limit).stream()
+            .map(row -> sanitizeSupportRow(row, requireOrgId(row), null, null))
+            .toList();
     }
 
     /** Removes metadata older than the maximum 30-day support window. */
@@ -110,18 +134,28 @@ public class ClientErrorService {
         return detail.toString();
     }
 
-    private static ClientErrorSupportRowDto sanitizeSupportRow(ClientErrorSupportRowDto row) {
+    private ClientErrorSupportRowDto sanitizeSupportRow(
+            ClientErrorMetadataRow row,
+            int orgId,
+            String legacyRawCorrelationId,
+            String normalizedStorageHmac) {
+        String disclosureSource = legacyRawCorrelationId != null
+                && Objects.equals(row.storedCorrelationValue(), legacyRawCorrelationId)
+            ? normalizedStorageHmac
+            : row.storedCorrelationValue();
         return new ClientErrorSupportRowDto(
             row.id(),
             row.workspaceId(),
-            row.correlationId(),
-            safeFrameworkDigest(row.digest()),
-            row.pagePath(),
+            correlationPseudonymizer.forDisclosure(orgId, disclosureSource),
+            RequestPathRedactor.redact(row.pagePath()),
             row.reportedAt());
     }
 
-    private static String safeFrameworkDigest(String digest) {
-        return digest != null && SAFE_FRAMEWORK_DIGEST.matcher(digest).matches() ? digest : null;
+    private static int requireOrgId(ClientErrorMetadataRow row) {
+        if (row.orgId() == null || row.orgId() <= 0) {
+            throw new IllegalStateException("Client-error export row has no organization scope");
+        }
+        return row.orgId();
     }
 
     /**

@@ -30,7 +30,7 @@ public class AuditLog {
     private String userAgent;
     private String sessionId;
     private String requestId;
-    private String untrustedClientAssertedCorrelationId;
+    private String untrustedClientAssertedCorrelationHmac;
     private String chainScopeType;
     private Integer chainScopeId;
     private Long chainIndex;
@@ -214,13 +214,14 @@ public class AuditLog {
         this.requestId = requestId;
     }
 
-    public String getUntrustedClientAssertedCorrelationId() {
-        return untrustedClientAssertedCorrelationId;
+    public String getUntrustedClientAssertedCorrelationHmac() {
+        return untrustedClientAssertedCorrelationHmac;
     }
 
-    public void setUntrustedClientAssertedCorrelationId(
-            String untrustedClientAssertedCorrelationId) {
-        this.untrustedClientAssertedCorrelationId = untrustedClientAssertedCorrelationId;
+    public void setUntrustedClientAssertedCorrelationHmac(
+            String untrustedClientAssertedCorrelationHmac) {
+        this.untrustedClientAssertedCorrelationHmac =
+            untrustedClientAssertedCorrelationHmac;
     }
 
     public String getChainScopeType() {

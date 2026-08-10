@@ -5,7 +5,7 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
-import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
+import ooo.klae.connex.backend.beans.ClientErrorMetadataRow;
 
 /**
  * Persists and reads the control-plane, metadata-only client-error projection.
@@ -13,15 +13,22 @@ import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
 public interface ClientErrorMapper {
     int insert(
         @Param("workspaceId") int workspaceId,
-        @Param("correlationId") String correlationId,
-        @Param("digest") String digest,
+        @Param("untrustedClientAssertedCorrelationHmac")
+            String untrustedClientAssertedCorrelationHmac,
         @Param("pagePath") String pagePath);
 
-    List<ClientErrorSupportRowDto> findOrgSupportSlice(
+    List<ClientErrorMetadataRow> findOrgSupportSlice(
         @Param("orgId") int orgId,
         @Param("since") Instant since,
         @Param("until") Instant until,
-        @Param("correlationId") String correlationId,
+        @Param("untrustedClientAssertedCorrelationHmac")
+            String untrustedClientAssertedCorrelationHmac,
+        @Param("legacyRawCorrelationId") String legacyRawCorrelationId,
+        @Param("limit") int limit);
+
+    List<ClientErrorMetadataRow> findWorkspaceExportPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("afterId") long afterId,
         @Param("limit") int limit);
 
     int deleteExpired();

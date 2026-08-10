@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -20,10 +20,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
 
+import ooo.klae.connex.backend.beans.ClientErrorMetadataRow;
+import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 import ooo.klae.connex.backend.dto.ClientErrorRequest;
 import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.ClientErrorMapper;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.observability.ReportedError;
@@ -38,12 +41,20 @@ class ClientErrorServiceTest {
 
     private TenantContext tenantContext;
     private ClientErrorService service;
+    private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
 
     @BeforeEach
     void setUp() {
         tenantContext = new TenantContext();
+        AuditIntegrityProperties properties = new AuditIntegrityProperties();
+        properties.setHmacSecret("test-correlation-hmac-secret-change-me");
+        correlationPseudonymizer = new ClientAssertedCorrelationPseudonymizer(properties);
         service = new ClientErrorService(
-            errorReporter, rateLimiter, tenantContext, clientErrorMapper);
+            errorReporter,
+            rateLimiter,
+            tenantContext,
+            clientErrorMapper,
+            correlationPseudonymizer);
     }
 
     @AfterEach
@@ -66,7 +77,7 @@ class ClientErrorServiceTest {
         verify(rateLimiter).acquire(9);
         verify(errorReporter).report(captor.capture());
         verify(clientErrorMapper).insert(
-            7, "request_id_123", "3819274061@E394", "/dashboard");
+            7, correlationPseudonymizer.forStorage(8, "request_id_123"), "/dashboard");
         assertEquals(new ReportedError(
                 Source.CLIENT,
                 "request_id_123",
@@ -88,7 +99,7 @@ class ClientErrorServiceTest {
         ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
         verify(errorReporter, times(2)).report(captor.capture());
         assertEquals("/invite/{token}", captor.getAllValues().getFirst().path());
-        assertEquals("/docs/using-connex/notifications-and-mentions",
+        assertEquals("/docs/{...slug}",
                 captor.getAllValues().getLast().path());
     }
 
@@ -130,13 +141,12 @@ class ClientErrorServiceTest {
 
         verify(clientErrorMapper).insert(
             7,
-            "request_id_123",
-            "3819274061",
-            "/records/people/42");
+            correlationPseudonymizer.forStorage(8, "request_id_123"),
+            "unknown");
     }
 
     @Test
-    void unsafeDigestNeverReachesTheMetadataMapper() {
+    void clientAssertedDigestNeverReachesTheMetadataMapper() {
         tenantContext.set(7, 8, 9, "member", null);
         MDC.put(CorrelationIds.MDC_KEY, "request_id_123");
         ClientErrorRequest request = new ClientErrorRequest(
@@ -147,24 +157,26 @@ class ClientErrorServiceTest {
 
         service.report(request);
 
-        verify(clientErrorMapper).insert(7, "request_id_123", null, "/dashboard");
+        verify(clientErrorMapper).insert(
+            7, correlationPseudonymizer.forStorage(8, "request_id_123"), "/dashboard");
     }
 
     @Test
-    void supportSliceOmitsAnUnsafeStoredDigest() {
+    void supportSliceReappliesPathVocabularyAndDisclosureHmacToLegacyRows() {
         Instant reportedAt = Instant.parse("2026-07-31T04:05:05Z");
         when(clientErrorMapper.findOrgSupportSlice(
                 3,
                 Instant.parse("2026-07-30T00:00:00Z"),
                 Instant.parse("2026-08-01T00:00:00Z"),
                 null,
+                null,
                 11))
-            .thenReturn(List.of(new ClientErrorSupportRowDto(
+            .thenReturn(List.of(new ClientErrorMetadataRow(
                 71L,
                 7,
-                "request_id_123",
-                "private@example.com",
-                "/records/people/42",
+                3,
+                "privateCRMRecordEncoded123",
+                "/records/private@example.com",
                 reportedAt)));
 
         ClientErrorService.ClientErrorSlice slice = service.supportSliceForOrg(
@@ -174,7 +186,72 @@ class ClientErrorServiceTest {
             null,
             10);
 
-        assertNull(slice.rows().getFirst().digest());
+        ClientErrorSupportRowDto row = slice.rows().getFirst();
+        assertEquals("unknown", row.pagePath());
+        assertEquals(
+            correlationPseudonymizer.forDisclosure(3, "privateCRMRecordEncoded123"),
+            row.untrustedClientAssertedCorrelationHmac());
+        assertNotEquals(
+            "privateCRMRecordEncoded123",
+            row.untrustedClientAssertedCorrelationHmac());
+    }
+
+    @Test
+    void correlationLookupMatchesCurrentHmacAndLegacyRawStorageWithoutDisclosingEither() {
+        String clientValue = "client-correlation-123";
+        String storageHmac = correlationPseudonymizer.forStorage(3, clientValue);
+        Instant since = Instant.parse("2026-07-30T00:00:00Z");
+        Instant until = Instant.parse("2026-08-01T00:00:00Z");
+        Instant reportedAt = Instant.parse("2026-07-31T04:05:05Z");
+        when(clientErrorMapper.findOrgSupportSlice(
+                3,
+                since,
+                until,
+                storageHmac,
+                clientValue,
+                11))
+            .thenReturn(List.of(
+                new ClientErrorMetadataRow(
+                    71L, 7, 3, storageHmac, "/dashboard", reportedAt),
+                new ClientErrorMetadataRow(
+                    72L, 7, 3, clientValue, "/dashboard", reportedAt)));
+
+        ClientErrorService.ClientErrorSlice slice =
+            service.supportSliceForOrg(3, since, until, clientValue, 10);
+
+        verify(clientErrorMapper).findOrgSupportSlice(
+            3,
+            since,
+            until,
+            storageHmac,
+            clientValue,
+            11);
+        String expectedDisclosure = correlationPseudonymizer.forDisclosure(3, storageHmac);
+        assertEquals(
+            List.of(expectedDisclosure, expectedDisclosure),
+            slice.rows().stream()
+                .map(ClientErrorSupportRowDto::untrustedClientAssertedCorrelationHmac)
+                .toList());
+    }
+
+    @Test
+    void workspaceExportReappliesTheSafeProjectionToLegacyRows() {
+        Instant reportedAt = Instant.parse("2026-07-31T04:05:05Z");
+        when(clientErrorMapper.findWorkspaceExportPage(7, 0, 500))
+            .thenReturn(List.of(new ClientErrorMetadataRow(
+                71L,
+                7,
+                3,
+                "privateCRMRecordEncoded123",
+                "/records/private@example.com",
+                reportedAt)));
+
+        ClientErrorSupportRowDto row = service.workspaceExportPage(7, 0, 500).getFirst();
+
+        assertEquals("unknown", row.pagePath());
+        assertEquals(
+            correlationPseudonymizer.forDisclosure(3, "privateCRMRecordEncoded123"),
+            row.untrustedClientAssertedCorrelationHmac());
     }
 
     @Test

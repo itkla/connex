@@ -514,12 +514,12 @@ deployment unless the operator explicitly configures a vendor integration.
 **Support flow (references and correlation ids):** every API response carries an
 `X-Correlation-Id` header, and unexpected `500` responses include the same id in the JSON body.
 For rendering failures the frontend error screen instead shows a `Reference:` digest. The app
-best-effort reports that digest to `/api/client-errors`, which stores only the digest, redacted page
-path, effective correlation id, workspace, and report time for 30 days. Start a broken-page ticket
-with `deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --digest <reference>`; the reader
-finds the exact metadata row while retaining the complete entity-scoped audit slice. The later
-client-error report's correlation id is not treated as a causal filter for earlier audit events.
-Local ECS logs still carry stack details for an operator with host access, but those
+best-effort reports that digest to `/api/client-errors`. Because its decimal shape does not prove
+framework provenance, the digest is retained only in the deployment-local error report and is not
+persisted or exported. Client-error metadata keeps only workspace, report time, a closed-vocabulary
+route template, and a domain-separated correlation HMAC; it is purged on startup and hourly at the
+fixed 30-day UTC cutoff. Local ECS logs still carry the digest and stack details for an operator
+with host access, but those
 user-data-bearing lines do not belong in an artefact sent to support.
 
 **Support bundle:** an organization administrator can download a redacted, manifest-bearing
@@ -527,8 +527,8 @@ support bundle from `GET /api/orgs/{orgId}/support-bundle` and hand it to a supp
 ticket can be diagnosed without database or SSH access. The bundle carries readiness, allowlisted
 configuration, migration history, redacted client-error metadata, and a windowed audit slice — and
 never carries secrets, hosts, record values, or personal names. The audit slice carries both a
-server-minted request id and an unmistakably labelled untrusted client-asserted correlation id;
-`SUPPORT_BUNDLE.md` explains the digest and correlation pivots. Collect and read it with
+server-minted request id and an unmistakably labelled HMAC of the client-asserted correlation id;
+`SUPPORT_BUNDLE.md` explains the correlation boundary. Collect and read it with
 [`deploy/support-bundle/`](../deploy/support-bundle/README.md); the full contents, redaction
 contract, and a worked "a contact vanished" investigation are in
 [`SUPPORT_BUNDLE.md`](SUPPORT_BUNDLE.md).

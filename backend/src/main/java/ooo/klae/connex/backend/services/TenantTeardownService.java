@@ -25,11 +25,12 @@ import ooo.klae.connex.backend.services.TenantLifecycleAccess.Route;
 import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.AcquiredWorkspace;
 import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.OperationLease;
 import ooo.klae.connex.backend.storage.ObjectDeletionRetryQueue;
-import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
+import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.DeleteStage;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
+import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
@@ -79,6 +80,7 @@ public class TenantTeardownService {
     private final TenantLifecycleControlOperations controlOperations;
     private final TenantLifecycleAccess lifecycleAccess;
     private final TenantTeardownTenantTransaction tenantTransaction;
+    private final ControlWorkspaceLifecycleTransaction controlWorkspaceTransaction;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
     private final AuditService auditService;
     private final TenantLifecycleProperties properties;
@@ -120,7 +122,7 @@ public class TenantTeardownService {
             orgId,
             "workspace:" + workspaceId,
             "Workspace teardown started",
-            Map.of("declaredTableCount", TenantLifecycleRegistry.declarations().size()));
+            Map.of("declaredTableCount", declaredTableCount()));
         AcquiredWorkspace acquired = controlOperations.acquireWorkspaceTeardown(
             orgId,
             workspaceId,
@@ -234,6 +236,7 @@ public class TenantTeardownService {
                 sweepTenant(workspace.id());
                 return null;
             });
+            sweepControlWorkspaceData(workspace.id());
             TenantResidualReport beforeRoot = lifecycleAccess.withRoute(
                 route,
                 actorId,
@@ -250,13 +253,13 @@ public class TenantTeardownService {
                 actorId,
                 () -> residualReport(workspace.id()));
             if (!afterRoot.clean()) {
+                lifecycleAccess.withRoute(route, actorId, () -> {
+                    sweepTenant(workspace.id());
+                    return null;
+                });
+                sweepControlWorkspaceData(workspace.id());
                 TenantResidualReport cleanup = lifecycleAccess.withRoute(
-                    route,
-                    actorId,
-                    () -> {
-                        sweepTenant(workspace.id());
-                        return residualReport(workspace.id());
-                    });
+                    route, actorId, () -> residualReport(workspace.id()));
                 if (cleanup.clean()) {
                     controlOperations.completeWorkspaceCleanup(
                         workspace.orgId(),
@@ -308,6 +311,20 @@ public class TenantTeardownService {
         }
         deleteStage(workspaceId, DeleteStage.CONTENT);
         deleteStage(workspaceId, DeleteStage.STORAGE_FINALIZATION);
+    }
+
+    private void sweepControlWorkspaceData(int workspaceId) {
+        tenantWorkScope.unrouted(() -> {
+            for (ControlWorkspaceLifecycleRegistry.TableLifecycle declaration
+                    : ControlWorkspaceLifecycleRegistry.declarations().values()) {
+                while (controlWorkspaceTransaction.deleteBatch(
+                        workspaceId,
+                        declaration,
+                        properties.getTableBatchSize()) > 0) {
+                }
+            }
+            return null;
+        });
     }
 
     private void enqueueAllObjects(int workspaceId) {
@@ -371,11 +388,31 @@ public class TenantTeardownService {
             tableRows.put(declaration.table(), rows);
             totalRows = Math.addExact(totalRows, rows);
         }
+        Map<String, Long> controlRows = tenantWorkScope.unrouted(() -> {
+            Map<String, Long> rows = new LinkedHashMap<>();
+            for (ControlWorkspaceLifecycleRegistry.TableLifecycle declaration
+                    : ControlWorkspaceLifecycleRegistry.declarations().values()) {
+                rows.put(
+                    declaration.table(),
+                    controlWorkspaceTransaction.count(workspaceId, declaration));
+            }
+            return rows;
+        });
+        for (Map.Entry<String, Long> entry : controlRows.entrySet()) {
+            tableRows.put(entry.getKey(), entry.getValue());
+            totalRows = Math.addExact(totalRows, entry.getValue());
+        }
         return new TenantResidualReport(
             workspaceId,
             tableRows,
             totalRows,
             tenantTransaction.storageResidual(workspaceId));
+    }
+
+    private static int declaredTableCount() {
+        return Math.addExact(
+            TenantLifecycleRegistry.declarations().size(),
+            ControlWorkspaceLifecycleRegistry.declarations().size());
     }
 
     private void waitFor(Duration duration) {

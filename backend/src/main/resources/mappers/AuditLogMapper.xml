@@ -25,7 +25,7 @@
     <result property="userAgent" column="user_agent"/>
     <result property="sessionId" column="session_id"/>
     <result property="requestId" column="request_id"/>
-    <result property="untrustedClientAssertedCorrelationId"
+    <result property="untrustedClientAssertedCorrelationHmac"
             column="untrusted_client_asserted_correlation_id"/>
     <result property="chainScopeType" column="chain_scope_type"/>
     <result property="chainScopeId" column="chain_scope_id"/>
@@ -60,7 +60,7 @@
        #{integrityWorkspaceId}, #{integrityOrgId}, #{integrityActorId}, #{actorLabel}, #{targetLabel},
        #{integrityReferenceState},
        #{outcome}, #{summary}, #{changes}, #{context}, #{ipAddress}, #{userAgent}, #{sessionId}, #{requestId},
-       #{untrustedClientAssertedCorrelationId},
+       #{untrustedClientAssertedCorrelationHmac},
        #{chainScopeType}, #{chainScopeId}, #{chainIndex}, #{prevHash}, #{rowHash}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP))
   </insert>
 
@@ -93,7 +93,8 @@
 
   <sql id="supportColumns">
     al.id, al.workspace_id, al.org_id, al.action, al.entity_type, al.entity_id,
-    al.actor_id, al.outcome, al.request_id, al.untrusted_client_asserted_correlation_id,
+    al.actor_id, al.outcome, al.request_id,
+    al.untrusted_client_asserted_correlation_id AS stored_correlation_value,
     al.created_at
   </sql>
 
@@ -109,9 +110,13 @@
       )
       AND al.created_at &gt;= #{since}
       AND al.created_at &lt;= #{until}
-      <if test="untrustedClientAssertedCorrelationId != null">
-        AND al.untrusted_client_asserted_correlation_id =
-          CONVERT(#{untrustedClientAssertedCorrelationId} USING ascii) COLLATE ascii_bin
+      <if test="untrustedClientAssertedCorrelationHmac != null">
+        AND (
+          al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{untrustedClientAssertedCorrelationHmac} USING ascii) COLLATE ascii_bin
+          OR al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{legacyRawCorrelationId} USING ascii) COLLATE ascii_bin
+        )
       </if>
     ORDER BY al.created_at ASC, al.id ASC
     LIMIT #{limit}
@@ -127,9 +132,13 @@
       AND al.entity_id = #{entityId}
       AND al.created_at &gt;= #{since}
       AND al.created_at &lt;= #{until}
-      <if test="untrustedClientAssertedCorrelationId != null">
-        AND al.untrusted_client_asserted_correlation_id =
-          CONVERT(#{untrustedClientAssertedCorrelationId} USING ascii) COLLATE ascii_bin
+      <if test="untrustedClientAssertedCorrelationHmac != null">
+        AND (
+          al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{untrustedClientAssertedCorrelationHmac} USING ascii) COLLATE ascii_bin
+          OR al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{legacyRawCorrelationId} USING ascii) COLLATE ascii_bin
+        )
       </if>
     ORDER BY al.created_at ASC, al.id ASC
     LIMIT #{limit}

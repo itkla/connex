@@ -23,7 +23,8 @@ import java.time.Instant;
  * @param actorId    the acting account id
  * @param outcome    the recorded outcome
  * @param serverMintedRequestId the non-spoofable server-minted request identifier
- * @param untrustedClientAssertedCorrelationId the untrusted client-asserted correlation identifier
+ * @param storedCorrelationValue the stored HMAC or legacy raw untrusted client assertion before
+ *        disclosure sanitization
  * @param createdAt  when the event was recorded
  */
 public record AuditSupportRowDto(
@@ -36,6 +37,6 @@ public record AuditSupportRowDto(
     Integer actorId,
     String outcome,
     String serverMintedRequestId,
-    String untrustedClientAssertedCorrelationId,
+    String storedCorrelationValue,
     Instant createdAt) {
 }

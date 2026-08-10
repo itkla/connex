@@ -17,7 +17,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleRequest;
 import tools.jackson.databind.ObjectMapper;
 
@@ -55,7 +57,7 @@ class SupportBundleArchiveDumpTest {
         when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
             .thenReturn(new AuditService.AuditSlice(
                 "auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,"
-                    + "outcome,serverMintedRequestId,untrustedClientAssertedCorrelationId,"
+                    + "outcome,serverMintedRequestId,untrustedClientAssertedCorrelationHmac,"
                     + "createdAt,contentFieldsOmitted\r\n"
                     + "9001,workspace,7,3,person.archive,person,412,55,success,server-request-1,"
                     + "abcd1234efgh,"
@@ -65,10 +67,12 @@ class SupportBundleArchiveDumpTest {
                 new ClientErrorSupportRowDto(
                     71L,
                     7,
-                    "client-report-123",
-                    "3819274061",
-                    "/records/people/412",
+                    "disclosure-hmac",
+                    "/records/contacts/{id}",
                     Instant.parse("2026-07-31T04:05:05Z"))), 1, false));
+
+        AuditIntegrityProperties integrityProperties = new AuditIntegrityProperties();
+        integrityProperties.setHmacSecret("archive-dump-test-secret-at-least-32-bytes");
 
         SupportBundleService service = new SupportBundleService(
             orgMemberService,
@@ -79,6 +83,7 @@ class SupportBundleArchiveDumpTest {
             productVersionService,
             auditService,
             clientErrorService,
+            new ClientAssertedCorrelationPseudonymizer(integrityProperties),
             new ObjectMapper(),
             Clock.fixed(Instant.parse("2026-07-31T05:00:00Z"), ZoneOffset.UTC));
 
