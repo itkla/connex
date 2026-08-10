@@ -134,6 +134,8 @@ export function useWorkflowEditor({
     const searchControllerRef = useRef<AbortController | null>(null);
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scopeRef = useRef({ activeWorkspaceId, switching });
+    const creationLockRef = useRef(false);
+    const creationContinuationRef = useRef(0);
 
     useLayoutEffect(() => {
         scopeRef.current = { activeWorkspaceId, switching };
@@ -277,10 +279,22 @@ export function useWorkflowEditor({
         ? null
         : versions.find((version) => version.id === workflow.activeVersionId)?.versionNumber ?? null;
 
+    useLayoutEffect(() => {
+        creationLockRef.current = creationLocked;
+    }, [creationLocked]);
+
+    const cancelCreationContinuation = useCallback(() => {
+        creationContinuationRef.current += 1;
+    }, []);
+
+    useEffect(() => cancelCreationContinuation, [cancelCreationContinuation]);
+
     const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit" | "untracked") => {
+        if (creationLockRef.current) return false;
         dispatch({ type: mode === "transient" ? "replace" : mode === "untracked" ? "untracked" : "commit", document });
         setValidation(null);
         setSimulation(null);
+        return true;
     }, [dispatch]);
 
     const changeNode = useCallback((node: WorkflowNode, mode: "transient" | "commit") => {
@@ -338,6 +352,7 @@ export function useWorkflowEditor({
         type: Exclude<WorkflowNodeType, "TRIGGER">,
         position?: { x: number; y: number },
     ) => {
+        if (creationLockRef.current) return;
         const inserted = insertWorkflowNode(
             history.present.definition,
             history.present.canvas,
@@ -351,14 +366,14 @@ export function useWorkflowEditor({
             toastError(t("graphLimitReached"));
             return;
         }
-        updateDocument({ ...history.present, definition: inserted.definition, canvas: inserted.canvas }, "commit");
+        if (!updateDocument({ ...history.present, definition: inserted.definition, canvas: inserted.canvas }, "commit")) return;
         setSelectedNodeId(inserted.insertedNodeId);
         setFocusRequestId((current) => current + 1);
     }, [history.present, t, updateDocument]);
 
     const deleteNode = useCallback((nodeId: string) => {
         const removed = removeWorkflowNode(history.present.definition, history.present.canvas, nodeId);
-        updateDocument({ ...history.present, definition: removed.definition, canvas: removed.canvas }, "commit");
+        if (!updateDocument({ ...history.present, definition: removed.definition, canvas: removed.canvas }, "commit")) return;
         if (selectedNodeId === nodeId) setSelectedNodeId(history.present.definition.entryNodeId);
     }, [history.present, selectedNodeId, updateDocument]);
 
@@ -417,6 +432,9 @@ export function useWorkflowEditor({
             await beginConflictRecovery();
             return;
         }
+        const creationContinuation = creationContinuationRef.current;
+        let creationCompleted = false;
+        if (!workflow) creationLockRef.current = true;
         setBusyAction("save");
         try {
             const submittedDocument = structuredClone(history.present);
@@ -428,7 +446,8 @@ export function useWorkflowEditor({
                 const created = await createWorkflow(requestDocument, {
                     headers: { "X-Workspace-Id": String(workspaceId) },
                 });
-                if (!isCurrentWorkspace(workspaceId)) return;
+                creationCompleted = true;
+                if (!isCurrentWorkspace(workspaceId) || creationContinuation !== creationContinuationRef.current) return;
                 const savedDocument = documentFromWorkflow(created);
                 setWorkflow(created);
                 dispatch({ type: "markSaved", submittedDocument, document: savedDocument });
@@ -446,11 +465,13 @@ export function useWorkflowEditor({
                 toastSuccess(t("updated"));
             }
         } catch (error) {
-            if (!isCurrentWorkspace(workspaceId)) return;
+            if (!isCurrentWorkspace(workspaceId) || (!workflow && creationContinuation !== creationContinuationRef.current)) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
             else toastError(t("saveFailed"));
         } finally {
-            if (isCurrentWorkspace(workspaceId)) setBusyAction(null);
+            const creationContinuationCurrent = creationContinuation === creationContinuationRef.current;
+            if (!workflow && !creationCompleted && creationContinuationCurrent) creationLockRef.current = false;
+            if (isCurrentWorkspace(workspaceId) && (workflow || creationContinuationCurrent)) setBusyAction(null);
         }
     }, [activeWorkspaceId, beginConflictRecovery, conflict, dispatch, history.present, isCurrentWorkspace, router, scopeReady, t, workflow]);
 
@@ -602,6 +623,18 @@ export function useWorkflowEditor({
         setSelectedNodeId(run.version.definition.entryNodeId);
     }, []);
 
+    const commitTransient = useCallback(() => {
+        if (!creationLockRef.current) dispatch({ type: "commitTransient" });
+    }, [dispatch]);
+
+    const undo = useCallback(() => {
+        if (!creationLockRef.current) dispatch({ type: "undo" });
+    }, [dispatch]);
+
+    const redo = useCallback(() => {
+        if (!creationLockRef.current) dispatch({ type: "redo" });
+    }, [dispatch]);
+
     return {
         workflow,
         history,
@@ -634,15 +667,16 @@ export function useWorkflowEditor({
         changeNode,
         changeMetadata,
         changeName,
-        commitTransient: () => dispatch({ type: "commitTransient" }),
-        undo: () => dispatch({ type: "undo" }),
-        redo: () => dispatch({ type: "redo" }),
+        commitTransient,
+        undo,
+        redo,
         connectBranch,
         disconnectBranch,
         insertNode,
         deleteNode,
         moveNode,
         moveViewport,
+        cancelCreationContinuation,
         save,
         validate,
         publish,

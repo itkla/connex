@@ -3,6 +3,7 @@
 import {
     useCallback,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
@@ -256,6 +257,7 @@ export default function WorkflowCanvasEditor({
     const { getNode, screenToFlowPosition, setCenter } = useReactFlow();
     const reduceMotion = useReducedMotion() ?? false;
     const handledFocusRequestIdRef = useRef(focusRequestId);
+    const interactionLockedRef = useRef(readOnly);
     const {
         open: contextMenuOpen,
         onOpenChange: onContextMenuOpenChange,
@@ -350,7 +352,11 @@ export default function WorkflowCanvasEditor({
         };
     }), [document.definition, readOnly, run?.path]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
+        interactionLockedRef.current = readOnly;
+    }, [readOnly]);
+
+    useLayoutEffect(() => {
         const shouldFocus = focusNodeId != null && handledFocusRequestIdRef.current !== focusRequestId;
         handledFocusRequestIdRef.current = focusRequestId;
         if (!shouldFocus || viewportLocked) return;
@@ -361,21 +367,24 @@ export default function WorkflowCanvasEditor({
             node.position.y + (node.measured?.height ?? 0) / 2,
             { zoom: Math.max(document.canvas.viewport.zoom, 0.8), duration: 0 },
         );
-        requestAnimationFrame(() => {
+        const focusFrame = requestAnimationFrame(() => {
+            if (interactionLockedRef.current) return;
             const element = globalThis.document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(focusNodeId)}"]`);
             element?.focus();
         });
+        return () => cancelAnimationFrame(focusFrame);
     }, [document.canvas.viewport.zoom, focusNodeId, focusRequestId, getNode, setCenter, viewportLocked]);
 
     const onConnect = useCallback((connection: Connection) => {
-        if (readOnly) return;
+        if (interactionLockedRef.current) return;
         if (connection.source && connection.target && isOutcome(connection.sourceHandle)) {
             onConnectBranch(connection.source, connection.sourceHandle, connection.target);
         }
-    }, [onConnectBranch, readOnly]);
+    }, [onConnectBranch]);
 
     const isValidConnection = useCallback<IsValidConnection>((connection) => (
-        connection.targetHandle === "in"
+        !interactionLockedRef.current
+        && connection.targetHandle === "in"
         && isOutcome(connection.sourceHandle)
         && canConnectWorkflowBranch(
             document.definition,
@@ -386,52 +395,54 @@ export default function WorkflowCanvasEditor({
     ), [document.definition]);
 
     const onConnectEnd = useCallback<OnConnectEnd>((_, connectionState) => {
-        if (readOnly) return;
+        if (interactionLockedRef.current) return;
         if (connectionState.isValid === false) {
             toastError(t("invalidConnection"));
         }
-    }, [readOnly, t]);
+    }, [t]);
 
     const insertAtContextPosition = useCallback((
         sourceNodeId: string,
         outcome: WorkflowEdgeOutcome,
         type: InsertNodeType,
     ) => {
+        if (interactionLockedRef.current) return;
         onInsertNode(sourceNodeId, outcome, type, contextPosition());
     }, [contextPosition, onInsertNode]);
 
     const onNodeContextMenu = useCallback((event: ReactMouseEvent, node: WorkflowFlowNode) => {
         event.preventDefault();
         event.stopPropagation();
+        if (interactionLockedRef.current) return;
         onSelectNode(node.id);
     }, [onSelectNode]);
 
     const onReconnect = useCallback<OnReconnect>((oldEdge, connection) => {
-        if (readOnly) return;
+        if (interactionLockedRef.current) return;
         const semantic = document.definition.edges.find((edge) => edge.id === oldEdge.id);
         if (!semantic || !connection.target) return;
         onConnectBranch(semantic.sourceNodeId, semantic.outcome, connection.target);
-    }, [document.definition.edges, onConnectBranch, readOnly]);
+    }, [document.definition.edges, onConnectBranch]);
 
     const onNodeDragStop = useCallback<OnNodeDrag<WorkflowFlowNode>>((_, node) => {
-        if (!readOnly) onMoveNode(node.id, node.position);
-    }, [onMoveNode, readOnly]);
+        if (!interactionLockedRef.current) onMoveNode(node.id, node.position);
+    }, [onMoveNode]);
 
     const onNodesDelete = useCallback<OnNodesDelete<WorkflowFlowNode>>((deleted) => {
-        if (!readOnly) deleted.forEach((node) => onDeleteNode(node.id));
-    }, [onDeleteNode, readOnly]);
+        if (!interactionLockedRef.current) deleted.forEach((node) => onDeleteNode(node.id));
+    }, [onDeleteNode]);
 
     const onEdgesDelete = useCallback<OnEdgesDelete>((deleted) => {
-        if (readOnly) return;
+        if (interactionLockedRef.current) return;
         deleted.forEach((edge) => {
             const semantic = document.definition.edges.find((candidate) => candidate.id === edge.id);
             if (semantic) onDisconnectBranch(semantic.sourceNodeId, semantic.outcome);
         });
-    }, [document.definition.edges, onDisconnectBranch, readOnly]);
+    }, [document.definition.edges, onDisconnectBranch]);
 
     const onMoveEnd = useCallback<OnMoveEnd>((_, viewport) => {
-        if (!readOnly) onMoveViewport(viewport);
-    }, [onMoveViewport, readOnly]);
+        if (!interactionLockedRef.current) onMoveViewport(viewport);
+    }, [onMoveViewport]);
 
     return (
         <div className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-2xl border border-border bg-muted/20">
@@ -471,7 +482,9 @@ export default function WorkflowCanvasEditor({
                             nodeTypes={NODE_TYPES}
                             defaultViewport={document.canvas.viewport}
                             colorMode={resolvedTheme === "dark" ? "dark" : "light"}
-                            onNodeClick={(_, node) => onSelectNode(node.id)}
+                            onNodeClick={(_, node) => {
+                                if (!interactionLockedRef.current) onSelectNode(node.id);
+                            }}
                             onNodeContextMenu={onNodeContextMenu}
                             onNodeDragStop={onNodeDragStop}
                             onNodesDelete={onNodesDelete}

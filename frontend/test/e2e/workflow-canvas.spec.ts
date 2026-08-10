@@ -110,6 +110,12 @@ async function expectCanvasViewportLocked(page: Page): Promise<void> {
     await expect.poll(() => viewport.evaluate((element) => getComputedStyle(element).transform)).toBe(transform);
 }
 
+async function settleBrowserTasks(page: Page): Promise<void> {
+    await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+}
+
 test.describe("workflow canvas", () => {
     test("locks initial authoring until creation finishes", async ({ page }) => {
         let releaseCreate: () => void = () => undefined;
@@ -174,6 +180,128 @@ test.describe("workflow canvas", () => {
 
         await expect(page).toHaveURL(/\/workflows\/\d+$/);
         await expect(page.getByLabel("Workflow name")).toHaveValue("Create without lost edits");
+    });
+
+    test("ignores a pan that ends after creation locks", async ({ page }) => {
+        let releaseCreate: () => void = () => undefined;
+        const createReleased = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        let markCreatePending: () => void = () => undefined;
+        const createPending = new Promise<void>((resolve) => {
+            markCreatePending = resolve;
+        });
+        let releaseNavigation: () => void = () => undefined;
+        const navigationReleased = new Promise<void>((resolve) => {
+            releaseNavigation = resolve;
+        });
+        let markNavigationPending: () => void = () => undefined;
+        const navigationPending = new Promise<void>((resolve) => {
+            markNavigationPending = resolve;
+        });
+
+        await page.goto("/workflows/new");
+        await page.getByLabel("Workflow name").fill("Create after an interrupted pan");
+        await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
+            const pathname = new URL(route.request().url()).pathname;
+            if (!/^\/workflows\/\d+$/.test(pathname)) {
+                await route.continue();
+                return;
+            }
+            markNavigationPending();
+            await navigationReleased;
+            await route.continue();
+        });
+        await page.route("**/api/workflows", async (route) => {
+            if (route.request().method() !== "POST") {
+                await route.continue();
+                return;
+            }
+            markCreatePending();
+            const response = await route.fetch();
+            await createReleased;
+            await route.fulfill({ response });
+        });
+
+        const pane = page.locator(".react-flow__pane");
+        const viewport = page.locator(".react-flow__viewport");
+        const initialTransform = await viewport.evaluate((element) => getComputedStyle(element).transform);
+        const point = await pane.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        });
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.down();
+        await page.mouse.move(point.x - 120, point.y + 80, { steps: 4 });
+        await expect.poll(() => viewport.evaluate((element) => getComputedStyle(element).transform)).not.toBe(initialTransform);
+
+        try {
+            await page.getByRole("button", { name: "Save draft" }).evaluate((button) => {
+                if (!(button instanceof HTMLElement)) throw new Error("Save draft must be an HTML button");
+                button.click();
+            });
+            await createPending;
+            await expect(page.getByRole("button", { name: "Saving draft…" })).toBeDisabled();
+            await page.mouse.up();
+        } finally {
+            releaseCreate();
+        }
+
+        try {
+            await navigationPending;
+            await expect(page.getByText("Draft saved", { exact: true })).toBeVisible();
+            await expect(page.getByText("Unpublished changes", { exact: true })).toHaveCount(0);
+        } finally {
+            releaseNavigation();
+        }
+
+        await expect(page).toHaveURL(/\/workflows\/\d+$/);
+    });
+
+    test("keeps Back navigation when creation finishes in the background", async ({ page }) => {
+        let releaseCreate: () => void = () => undefined;
+        const createReleased = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        let markCreatePending: () => void = () => undefined;
+        const createPending = new Promise<void>((resolve) => {
+            markCreatePending = resolve;
+        });
+        let createdNavigationRequested = false;
+
+        await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
+            const pathname = new URL(route.request().url()).pathname;
+            if (/^\/workflows\/\d+$/.test(pathname)) createdNavigationRequested = true;
+            await route.continue();
+        });
+        await page.route("**/api/workflows", async (route) => {
+            if (route.request().method() !== "POST") {
+                await route.continue();
+                return;
+            }
+            markCreatePending();
+            const response = await route.fetch();
+            await createReleased;
+            await route.fulfill({ response });
+        });
+
+        await page.goto("/workflows/new");
+        await page.getByLabel("Workflow name").fill("Leave during creation");
+        const createResponse = page.waitForResponse((response) => (
+            response.request().method() === "POST" && new URL(response.url()).pathname === "/api/workflows"
+        ));
+        await page.getByRole("button", { name: "Save draft" }).click();
+        await createPending;
+        await page.getByRole("button", { name: "Back to workflows" }).click();
+        await expect(page).toHaveURL(/\/workflows$/);
+
+        releaseCreate();
+        const response = await createResponse;
+        await response.finished();
+        await settleBrowserTasks(page);
+
+        expect(createdNavigationRequested).toBe(false);
+        await expect(page).toHaveURL(/\/workflows$/);
     });
 
     test("keeps edits made while recovering from a stale revision", async ({ page }, testInfo) => {

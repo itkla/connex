@@ -386,7 +386,10 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                 canRedo={editor.history.future.length > 0}
                 busyAction={editor.busyAction}
                 readOnly={editor.editingReadOnly}
-                onBack={() => router.push("/workflows")}
+                onBack={() => {
+                    editor.cancelCreationContinuation();
+                    router.push("/workflows");
+                }}
                 onNameChange={editor.changeName}
                 onNameCommit={editor.commitTransient}
                 onUndo={editor.undo}
