@@ -1748,7 +1748,7 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void dealImportReplayPreservesParticipantRoleWithoutAuditSideEffects() {
+    void dealImportNoOpPreservesParticipantRoleWithoutAuditSideEffects() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
