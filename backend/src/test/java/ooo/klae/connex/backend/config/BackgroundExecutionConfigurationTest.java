@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.notifications.NotificationPushListener;
 import ooo.klae.connex.backend.notifications.SimpNotificationRealtimePublisher;
 import ooo.klae.connex.backend.secrets.LegacySecretRewrapRunner;
 import ooo.klae.connex.backend.secrets.SecretStoreRewrapRunner;
+import ooo.klae.connex.backend.services.ClientErrorRetentionScheduler;
 
 class BackgroundExecutionConfigurationTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -67,6 +68,7 @@ class BackgroundExecutionConfigurationTest {
     void maintenanceModeExcludesMutatingStartupRunners() {
         for (Class<?> type : List.of(
                 BootstrapRunner.class,
+                ClientErrorRetentionScheduler.class,
                 LegacySecretRewrapRunner.class,
                 SecretStoreRewrapRunner.class,
                 NotificationPushListener.class,

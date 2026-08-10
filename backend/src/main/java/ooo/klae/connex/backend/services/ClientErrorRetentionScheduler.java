@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -12,6 +13,11 @@ import lombok.RequiredArgsConstructor;
 /** Periodically removes client-error metadata beyond the support window. */
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(
+    prefix = "connex.maintenance",
+    name = "mode",
+    havingValue = "off",
+    matchIfMissing = true)
 public class ClientErrorRetentionScheduler {
     private static final Logger log = LoggerFactory.getLogger(ClientErrorRetentionScheduler.class);
 
