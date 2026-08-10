@@ -95,11 +95,21 @@ deployed by logic loaded from the older commit. The candidate
    Before pruning older immutable releases, the script requires the durable frontend SHA/PID
    record to identify a live descendant of the frontend unit's `pnpm` MainPID in the same systemd
    control group, with the sealed runtime as its working directory and the same release as
-   `deployed-sha`. A missing, stale, orphaned, or cross-release record aborts pruning before any
-   tree is removed, so recovery state remains protective across timer and process restarts. It also
-   checks every deletion candidate against live deploy-user process working directories and treats
-   unreadable relevant process state as indeterminate rather than safe to delete. This is
-   application rollback only; Flyway schema migrations remain forward-only.
+   `deployed-sha`. A missing, stale, orphaned, or cross-release record prevents any release from
+   entering the pruning lifecycle.
+
+   An old candidate is never unlinked from `releases/`. It is atomically renamed on the same
+   filesystem into `.staging/release-quarantine/<sha>`, so an undetected consumer's cwd and open
+   handles continue to reference the complete runtime. Candidate inspection is only a promotion
+   signal: a clean scan records eligibility, but deletion waits for a later timer run and another
+   clean scan. An observed or unreadable live process revokes eligibility and keeps the run
+   nonzero. A candidate first quarantined under uncertainty needs a clean later run to become
+   eligible and one further clean run before deletion. `.staging/prune-needed` persists while the
+   quarantine is non-empty or pruning cannot finish, and ordinary no-change timer runs retry it;
+   a continuing consumer or indeterminate process therefore repeats the failure alert instead of
+   becoming an invisible disk backlog. Proven zombies, vanished processes, and processes already
+   rooted in unrelated deleted directories do not block that retry. This is application rollback
+   only; Flyway schema migrations remain forward-only.
 8. **Emits a sanitized failure alert.** The stderr `ALERT` record includes only allow-listed gate,
    component and rollback state values plus validated target, marker, backend, frontend, and
    rollback shas. It never interpolates response bodies, command output, environment values,
@@ -159,12 +169,25 @@ cat /opt/connex-staging/.staging/deployed-sha
 cat /opt/connex-staging/.staging/frontend-release
 cat /opt/connex-staging/.staging/frontend-running
 cat /opt/connex-staging/.staging/rollback-sha
+find /opt/connex-staging/.staging/release-quarantine -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+test ! -e /opt/connex-staging/.staging/prune-needed || cat /opt/connex-staging/.staging/prune-needed
 journalctl -u connex-staging-deploy -n 50 --no-pager
 ```
 
 For artifact recovery, read `rollback-sha`, then inspect the matching
 `.staging/releases/<sha>/manifest.tsv`. The automatic rollback verifies the manifest, both
 digests, and both embedded identities again before using the pair.
+
+An entry in `release-quarantine` for one timer interval is normal: the quarantine protocol always
+requires a later clean cycle before unlinking. If the same sha remains for multiple cycles, or the
+journal repeats `Release pruning pending` / `Release prune backlog remains unresolved`, do not
+delete or move the directory manually. Find the process or unit named by the adjacent journal
+message, stop or restart that out-of-band consumer through its owning service, and let the timer
+rescan the quarantine. For an indeterminate process, first determine whether it is a live process,
+a zombie, or a stale/deleted cwd and correct the owning service. Escalate persistent unreadable
+state or an invalid quarantine/marker to the staging owner; retain the directory until absence is
+proved. Once the backlog is clean, the timer removes eligible entries and clears `prune-needed`
+without operator deletion.
 
 ## Operator preflight for maintenance releases
 

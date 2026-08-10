@@ -20,11 +20,13 @@ CGROUP_ROOT=/sys/fs/cgroup
 
 STATE_DIR="$STAGING_DIR/.staging"
 RELEASES_DIR="$STATE_DIR/releases"
+RELEASE_QUARANTINE_DIR="$STATE_DIR/release-quarantine"
 MARKER="$STATE_DIR/deployed-sha"
 ROLLBACK_MARKER="$STATE_DIR/rollback-sha"
 FRONTEND_RELEASE_MARKER="$STATE_DIR/frontend-release"
 FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
 TRANSACTION_FILE="$STATE_DIR/deploy-transaction"
+PRUNE_NEEDED_MARKER="$STATE_DIR/prune-needed"
 LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
 FRONTEND_ENV=/etc/connex-staging/frontend.env
 SMOKE_LOGIN_FILE=/etc/connex-staging/smoke-login.json
@@ -889,9 +891,26 @@ post_deploy_smoke() {
 }
 
 process_uses_release_tree() {
-    local pid="$1" resolved="$2" cwd
+    local pid="$1" resolved="$2" raw_cwd cwd state
+    if ! raw_cwd="$(readlink "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
+        [ ! -d "$PROC_ROOT/$pid" ] && return 1
+        state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' \
+            "$PROC_ROOT/$pid/status" 2>/dev/null)" || {
+            [ ! -d "$PROC_ROOT/$pid" ] && return 1
+            return 2
+        }
+        [ "$state" = "Z" ] && return 1
+        return 2
+    fi
+    [[ "$raw_cwd" = *" (deleted)" ]] && return 1
     if ! cwd="$(readlink -f "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
         [ ! -d "$PROC_ROOT/$pid" ] && return 1
+        state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' \
+            "$PROC_ROOT/$pid/status" 2>/dev/null)" || {
+            [ ! -d "$PROC_ROOT/$pid" ] && return 1
+            return 2
+        }
+        [ "$state" = "Z" ] && return 1
         return 2
     fi
     if [ "$cwd" = "$resolved" ] || [[ "$cwd" = "$resolved/"* ]]; then
@@ -900,8 +919,16 @@ process_uses_release_tree() {
     return 1
 }
 
+list_process_directories() {
+    local process_dir
+    for process_dir in "$PROC_ROOT"/[0-9]*; do
+        [ -d "$process_dir" ] || continue
+        printf '%s\n' "$process_dir" || return 1
+    done
+}
+
 release_tree_in_use() {
-    local release="$1" control_group="$2" deploy_uid resolved cgroup_procs pid usage
+    local release="$1" control_group="$2" deploy_uid resolved cgroup_procs pid usage process_dirs
     local process_dir process_uid
     deploy_uid="$(id -u)" || return 2
     resolved="$(readlink -f "$release")" || return 2
@@ -914,7 +941,9 @@ release_tree_in_use() {
         [ "$usage" -ne 0 ] || return 0
         [ "$usage" -eq 1 ] || return 2
     done < "$cgroup_procs"
-    for process_dir in "$PROC_ROOT"/[0-9]*; do
+    process_dirs="$(list_process_directories)" || return 2
+    while IFS= read -r process_dir; do
+        [ -n "$process_dir" ] || continue
         if ! process_uid="$(stat -c '%u' "$process_dir" 2>/dev/null)"; then
             [ ! -d "$process_dir" ] || return 2
             continue
@@ -925,17 +954,77 @@ release_tree_in_use() {
         process_uses_release_tree "$pid" "$resolved" || usage=$?
         [ "$usage" -ne 0 ] || return 0
         [ "$usage" -eq 1 ] || return 2
-    done
+    done <<< "$process_dirs"
     return 1
+}
+
+prune_needed_state_valid() {
+    [ -f "$PRUNE_NEEDED_MARKER" ] && [ ! -L "$PRUNE_NEEDED_MARKER" ] || return 1
+    awk 'NR == 1 { valid = ($0 == "pending"); next } { valid = 0 } END { exit !valid }' \
+        "$PRUNE_NEEDED_MARKER"
+}
+
+ensure_prune_needed() {
+    local temporary
+    if [ -e "$PRUNE_NEEDED_MARKER" ] || [ -L "$PRUNE_NEEDED_MARKER" ]; then
+        prune_needed_state_valid
+        return $?
+    fi
+    temporary="$(mktemp "$STATE_DIR/.prune-needed.XXXXXX")" || return 1
+    if ! printf 'pending\n' > "$temporary" || ! mv -f "$temporary" "$PRUNE_NEEDED_MARKER"; then
+        rm -f "$temporary" || true
+        return 1
+    fi
+}
+
+quarantine_entry_eligible() {
+    local marker="$1/.prune-eligible"
+    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+    awk 'NR == 1 { valid = ($0 == "eligible"); next } { valid = 0 } END { exit !valid }' \
+        "$marker"
+}
+
+mark_quarantine_entry_eligible() {
+    local quarantine="$1" marker="$1/.prune-eligible" temporary
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+        quarantine_entry_eligible "$quarantine"
+        return $?
+    fi
+    temporary="$(mktemp "$quarantine/.prune-eligible.XXXXXX")" || return 1
+    if ! printf 'eligible\n' > "$temporary" || ! mv -f "$temporary" "$marker"; then
+        rm -f "$temporary" || true
+        return 1
+    fi
+}
+
+revoke_quarantine_entry_eligibility() {
+    local marker="$1/.prune-eligible"
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+        rm -f -- "$marker"
+    fi
+}
+
+quarantine_has_entries() {
+    find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
+}
+
+prune_backlog_present() {
+    [ -e "$PRUNE_NEEDED_MARKER" ] || [ -L "$PRUNE_NEEDED_MARKER" ] \
+        || quarantine_has_entries
 }
 
 prune_releases() {
     local deployed rollback running running_sha running_pid extra control_group paths path sha usage kept=0
+    local quarantine_paths quarantine eligible blocked=0
+    if ! ensure_prune_needed; then
+        log "Release pruning refused: prune-needed state is invalid or unwritable"
+        return 1
+    fi
     deployed="$(read_sha_file "$MARKER" 2>/dev/null)" || return 1
     rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)" || return 1
-    # A release tree is removable only after the launcher's durable PID/SHA record,
-    # systemd cgroup membership, and live process cwd prove which tree is serving.
-    # Refuse the entire prune before touching disk when recovery state is uncertain.
+    # Serving-state attestation protects the committed and rollback trees from even
+    # entering quarantine. Candidate inspection only controls how quickly an atomic
+    # quarantine move becomes eligible for later deletion; it is not the safety edge.
     if ! running="$(read_frontend_running)"; then
         log "Release pruning refused: frontend serving state is missing or inconsistent"
         return 1
@@ -947,6 +1036,60 @@ prune_releases() {
     fi
     control_group="$(frontend_control_group)" || return 1
     [[ "$control_group" = /* ]] || return 1
+    quarantine_paths="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -print)" \
+        || return 1
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        sha="$(basename "$path")" || return 1
+        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ] \
+            || [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] \
+            || [ "$sha" = "$running_sha" ]; then
+            log "Release pruning refused: quarantine contains an invalid or protected entry"
+            return 1
+        fi
+    done <<< "$quarantine_paths"
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        sha="$(basename "$path")" || return 1
+        usage=0
+        release_tree_in_use "$path" "$control_group" || usage=$?
+        if [ "$usage" -eq 0 ]; then
+            if ! revoke_quarantine_entry_eligibility "$path"; then
+                log "Release pruning refused: could not revoke eligibility for quarantined $sha"
+                blocked=1
+                continue
+            fi
+            log "Release pruning pending: a process still uses quarantined $sha"
+            blocked=1
+            continue
+        fi
+        if [ "$usage" -ne 1 ]; then
+            if ! revoke_quarantine_entry_eligibility "$path"; then
+                log "Release pruning refused: could not revoke eligibility for quarantined $sha"
+            fi
+            log "Release pruning pending: could not resolve quarantined $sha"
+            blocked=1
+            continue
+        fi
+        eligible=0
+        if [ -e "$path/.prune-eligible" ] || [ -L "$path/.prune-eligible" ]; then
+            if ! quarantine_entry_eligible "$path"; then
+                log "Release pruning refused: quarantined $sha has invalid eligibility state"
+                blocked=1
+                continue
+            fi
+            eligible=1
+        fi
+        if [ "$eligible" -eq 1 ]; then
+            rm -rf -- "$path" || return 1
+            log "Pruned quarantined release ${sha:0:8} after a clean later cycle"
+        elif ! mark_quarantine_entry_eligible "$path"; then
+            log "Release pruning refused: could not promote quarantined $sha"
+            blocked=1
+        else
+            log "Quarantined release ${sha:0:8} was clean this cycle; deletion waits for the next run"
+        fi
+    done <<< "$quarantine_paths"
     paths="$(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -printf '%T@ %p\n' \
         | sort -rn | cut -d' ' -f2-)" || return 1
     while IFS= read -r path; do
@@ -960,22 +1103,42 @@ prune_releases() {
         fi
         kept=$((kept + 1))
         if [ "$kept" -gt 3 ]; then
-            # The launcher contract keeps every staging Node process rooted in its
-            # immutable runtime. This catches an escaped or detached process even
-            # when it is no longer the PID recorded by systemd.
             usage=0
             release_tree_in_use "$path" "$control_group" || usage=$?
-            if [ "$usage" -eq 0 ]; then
-                log "Release pruning refused: a process still uses $sha"
-                return 1
+            quarantine="$RELEASE_QUARANTINE_DIR/$sha"
+            if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
+                log "Release pruning refused: quarantine destination already exists for $sha"
+                blocked=1
+                continue
             fi
-            if [ "$usage" -ne 1 ]; then
-                log "Release pruning refused: could not resolve candidate $sha"
-                return 1
+            # rename(2) within .staging is atomic. Existing cwd and open handles
+            # follow the inode, so even a consumer that entered after the scan keeps
+            # a complete runtime while the old public release path disappears.
+            if ! mv -T -- "$path" "$quarantine"; then
+                log "Release pruning refused: could not quarantine $sha"
+                blocked=1
+                continue
             fi
-            rm -rf "$path" || return 1
+            if [ "$usage" -eq 1 ]; then
+                if ! mark_quarantine_entry_eligible "$quarantine"; then
+                    log "Release pruning refused: could not promote quarantined $sha"
+                    blocked=1
+                    continue
+                fi
+                log "Quarantined unused release ${sha:0:8}; deletion waits for the next run"
+            elif [ "$usage" -eq 0 ]; then
+                log "Release pruning pending: quarantined $sha because a process still uses it"
+                blocked=1
+            else
+                log "Release pruning pending: quarantined $sha with indeterminate process state"
+                blocked=1
+            fi
         fi
     done <<< "$paths"
+    if [ "$blocked" -eq 0 ] && ! quarantine_has_entries; then
+        rm -f -- "$PRUNE_NEEDED_MARKER" || return 1
+    fi
+    [ "$blocked" -eq 0 ]
 }
 
 deployment_exit() {
@@ -1056,7 +1219,10 @@ recover_transaction() {
         && [ "$backend" = "$target" ] && [ "$frontend" = "$target" ] \
         && [ "$live_jar" = "$target" ] \
         && frontend_runtime_matches "$target"; then
-        rm -f "$TRANSACTION_FILE"
+        set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
+        ensure_prune_needed || return 1
+        rm -f "$TRANSACTION_FILE" || return 1
+        prune_releases || return 1
         FAILURE_ACTIVE=0
         return 0
     fi
@@ -1122,7 +1288,7 @@ main() {
         pinned_target="$(git rev-parse origin/main)"
     fi
     DEPLOY_TARGET="$pinned_target"
-    mkdir -p "$STATE_DIR" "$RELEASES_DIR"
+    mkdir -p "$STATE_DIR" "$RELEASES_DIR" "$RELEASE_QUARANTINE_DIR"
 
     if [ -e "$TRANSACTION_FILE" ]; then
         if transaction_record="$(read_transaction 2>/dev/null)"; then
@@ -1165,6 +1331,10 @@ main() {
         if ! verify_no_change_release "$DEPLOY_PREVIOUS"; then
             set_failure_context preflight release "Deploy refused: live components or retained rollback pair are missing or invalid"
             return 1
+        fi
+        if prune_backlog_present; then
+            set_failure_context recovery release "Release prune backlog remains unresolved"
+            prune_releases || return 1
         fi
         FAILURE_ACTIVE=0
         return 0
@@ -1215,6 +1385,7 @@ main() {
     set_failure_context marker release "Deploy components passed smoke but release markers could not be committed"
     commit_release_markers "$DEPLOY_PREVIOUS" "$DEPLOY_TARGET" || return 1
     set_failure_context recovery release "Release committed but transaction cleanup or safe release pruning FAILED"
+    ensure_prune_needed || return 1
     rm -f "$TRANSACTION_FILE" || return 1
     prune_releases || return 1
     FAILURE_ACTIVE=0

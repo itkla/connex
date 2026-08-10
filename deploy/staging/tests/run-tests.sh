@@ -92,11 +92,13 @@ load_deploy() {
     STAGING_DIR="$root/staging"
     STATE_DIR="$STAGING_DIR/.staging"
     RELEASES_DIR="$STATE_DIR/releases"
+    RELEASE_QUARANTINE_DIR="$STATE_DIR/release-quarantine"
     MARKER="$STATE_DIR/deployed-sha"
     ROLLBACK_MARKER="$STATE_DIR/rollback-sha"
     FRONTEND_RELEASE_MARKER="$STATE_DIR/frontend-release"
     FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
     TRANSACTION_FILE="$STATE_DIR/deploy-transaction"
+    PRUNE_NEEDED_MARKER="$STATE_DIR/prune-needed"
     LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
     SMOKE_LOGIN_FILE="$root/smoke-login.json"
     SMOKE_LOGIN_REQUIRED_UID="$(id -u)"
@@ -104,7 +106,7 @@ load_deploy() {
     SMOKE_LOGIN_REQUIRED_MODE=640
     BACKEND_URL=http://backend.test
     FRONTEND_URL=http://frontend.test
-    mkdir -p "$RELEASES_DIR" "$(dirname "$LIVE_JAR")"
+    mkdir -p "$RELEASES_DIR" "$RELEASE_QUARANTINE_DIR" "$(dirname "$LIVE_JAR")"
 }
 
 make_jar() {
@@ -139,6 +141,38 @@ make_bundle() {
     rm -rf "$runtime" "$jar"
 }
 
+setup_prune_fixture() {
+    local root="$1" deployed="$2" rollback="$3" candidate="$4"
+    local recent_one="$5" recent_two="$6" recent_three="$7"
+    local fake_proc="$root/proc" fake_cgroup="$root/cgroup" control_group=/test-frontend
+    load_deploy "$root"
+    mkdir -p \
+        "$RELEASES_DIR/$deployed/frontend" \
+        "$RELEASES_DIR/$rollback" \
+        "$RELEASES_DIR/$candidate" \
+        "$RELEASES_DIR/$recent_one" \
+        "$RELEASES_DIR/$recent_two" \
+        "$RELEASES_DIR/$recent_three" \
+        "$fake_proc/$$" \
+        "$fake_cgroup$control_group"
+    printf 'candidate-runtime\n' > "$RELEASES_DIR/$candidate/live-sentinel"
+    touch -d @10 "$RELEASES_DIR/$candidate"
+    touch -d @20 "$RELEASES_DIR/$recent_one"
+    touch -d @30 "$RELEASES_DIR/$recent_two"
+    touch -d @40 "$RELEASES_DIR/$recent_three"
+    printf '%s\n' "$deployed" > "$MARKER"
+    printf '%s\n' "$rollback" > "$ROLLBACK_MARKER"
+    printf '%s\t%s\n' "$deployed" "$$" > "$FRONTEND_RUNNING_MARKER"
+    ln -s "$RELEASES_DIR/$deployed/frontend" "$fake_proc/$$/cwd"
+    printf '0::%s\n' "$control_group" > "$fake_proc/$$/cgroup"
+    printf 'Name:\ttest\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/$$/status"
+    printf '%s\n' "$$" > "$fake_cgroup$control_group/cgroup.procs"
+    PROC_ROOT="$fake_proc"
+    CGROUP_ROOT="$fake_cgroup"
+    frontend_pid() { printf '%s\n' "$$"; }
+    frontend_control_group() { printf '/test-frontend\n'; }
+}
+
 systemctl_active_stub() {
     case "$1" in
         is-active) return 0 ;;
@@ -150,15 +184,6 @@ systemctl_active_stub() {
             ;;
         *) return 0 ;;
     esac
-}
-
-process_systemd_control_group() {
-    local pid="$1"
-    awk -F: '
-        $1 == "0" && $2 == "" { print $3; found = 1; exit }
-        index("," $2 ",", ",name=systemd,") { print $3; found = 1; exit }
-        END { if (!found) exit 1 }
-    ' "/proc/$pid/cgroup"
 }
 
 make_wrapper_boundary_shims() {
@@ -180,11 +205,12 @@ make_wrapper_boundary_shims() {
         printf '        ;;\n'
         printf '    show)\n'
         printf '        case "${2:-}" in\n'
-        printf '            "$MOCK_SELECTED_SHA:deploy/staging/connex-staging-deploy.sh"|"$MOCK_ADVANCED_SHA:deploy/staging/connex-staging-deploy.sh") ;;\n'
+        printf '            "$MOCK_SELECTED_SHA:deploy/staging/connex-staging-deploy.sh") source="$MOCK_SELECTED_DEPLOY_SOURCE" ;;\n'
+        printf '            "$MOCK_ADVANCED_SHA:deploy/staging/connex-staging-deploy.sh") source="$MOCK_ADVANCED_DEPLOY_SOURCE" ;;\n'
         printf '            *) exit 2 ;;\n'
         printf '        esac\n'
         printf '        printf "%%s\\n" "$2" >> "$MOCK_SHOW_LOG"\n'
-        printf '        /bin/cat "$MOCK_DEPLOY_SOURCE"\n'
+        printf '        /bin/cat "$source"\n'
         printf '        ;;\n'
         printf '    cat-file)\n'
         printf '        [ "${2:-}" = "-e" ]\n'
@@ -303,6 +329,31 @@ case_frontend_attestation_requires_current_unit_lineage() (
     record="$(read_frontend_running)"
     assert_status current_unit_ancestor_attests_runtime 0 "$?" || return 1
     assert_equals attested_sha_and_pid "$sha"$'\t'"$recorded_pid" "$record" || return 1
+)
+
+case_frontend_attestation_rejects_wrong_cgroup() (
+    local root="$SANDBOX/frontend-wrong-cgroup" sha recorded_pid fake_proc
+    sha=2525252525252525252525252525252525252525
+    load_deploy "$root"
+    mkdir -p "$RELEASES_DIR/$sha/frontend"
+    (
+        cd "$RELEASES_DIR/$sha/frontend" || exit 1
+        exec sleep 300
+    ) &
+    recorded_pid=$!
+    trap 'kill "$recorded_pid" 2>/dev/null || true; wait "$recorded_pid" 2>/dev/null || true' EXIT
+    printf '%s\t%s\n' "$sha" "$recorded_pid" > "$FRONTEND_RUNNING_MARKER"
+    fake_proc="$root/proc"
+    mkdir -p "$fake_proc/$recorded_pid"
+    ln -s "$RELEASES_DIR/$sha/frontend" "$fake_proc/$recorded_pid/cwd"
+    printf '0::/wrong-frontend-unit\n' > "$fake_proc/$recorded_pid/cgroup"
+    printf 'Name:\ttest\nState:\tS (sleeping)\nPPid:\t%s\n' "$$" > "$fake_proc/$recorded_pid/status"
+    PROC_ROOT="$fake_proc"
+    frontend_pid() { printf '%s\n' "$$"; }
+    frontend_control_group() { printf '/test-frontend\n'; }
+
+    read_frontend_running >/dev/null 2>&1
+    assert_status wrong_cgroup_cannot_attest_runtime 1 "$?" || return 1
 )
 
 case_complete_pair_integrity_and_tamper_refusal() (
@@ -459,14 +510,17 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     orphan_pid=$!
     mkdir -p "$mock_proc_root/$orphan_pid"
     ln -s "$RELEASES_DIR/$first_extra" "$mock_proc_root/$orphan_pid/cwd"
-    printf '%s\n' "$serving_pid" "$orphan_pid" \
-        > "$mock_cgroup_root$mock_control_group/cgroup.procs"
+    printf '%s\n' "$serving_pid" > "$mock_cgroup_root$mock_control_group/cgroup.procs"
     trap 'kill "$serving_pid" "$orphan_pid" 2>/dev/null || true; wait "$serving_pid" "$orphan_pid" 2>/dev/null || true' EXIT
     output="$(prune_cycle 2>&1)"
     status=$?
-    assert_status detached_process_blocks_prune 1 "$status" || return 1
-    assert_contains detached_process_reports_refusal 'a process still uses' <(printf '%s\n' "$output") || return 1
-    assert_file_exists detached_process_tree_preserved "$RELEASES_DIR/$first_extra" || return 1
+    assert_status detached_process_quarantines_and_alerts 1 "$status" || return 1
+    assert_contains detached_process_reports_pending 'quarantined 4545454545454545454545454545454545454545 because a process still uses it' \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_missing detached_process_leaves_public_release_path "$RELEASES_DIR/$first_extra" || return 1
+    assert_file_exists detached_process_runtime_survives_quarantine \
+        "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
+    assert_file_exists detached_process_persists_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
     kill "$orphan_pid" || return 1
     wait "$orphan_pid" 2>/dev/null || true
     rm -rf "$mock_proc_root/${orphan_pid:?}"
@@ -474,9 +528,12 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
 
     prune_cycle >/dev/null 2>&1
-    assert_status reconciled_state_allows_prune 0 "$?" || return 1
+    assert_status reconciled_state_promotes_quarantine 0 "$?" || return 1
     assert_file_exists reconciled_prune_preserves_serving_tree "$RELEASES_DIR/$serving" || return 1
-    assert_file_missing reconciled_prune_removes_old_candidate "$RELEASES_DIR/$first_extra" || return 1
+    assert_file_exists reconciled_prune_waits_one_clean_cycle "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
+    prune_cycle >/dev/null 2>&1
+    assert_status later_clean_cycle_allows_unlink 0 "$?" || return 1
+    assert_file_missing later_clean_cycle_removes_quarantine "$RELEASE_QUARANTINE_DIR/$first_extra" || return 1
 )
 
 case_prune_refuses_unknown_deploy_process_state() (
@@ -513,6 +570,7 @@ case_prune_refuses_unknown_deploy_process_state() (
     ln -s "$RELEASES_DIR/$deployed/frontend" "$fake_proc/$serving_pid/cwd"
     ln -s "$root/missing-parent/indeterminate-cwd" "$fake_proc/$unknown_pid/cwd"
     printf '0::/test-frontend\n' > "$fake_proc/$serving_pid/cgroup"
+    printf 'Name:\tunknown\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/$unknown_pid/status"
     PROC_ROOT="$fake_proc"
     fake_cgroup="$root/cgroup"
     mkdir -p "$fake_cgroup/test-frontend"
@@ -528,11 +586,219 @@ case_prune_refuses_unknown_deploy_process_state() (
     assert_status unreadable_deploy_process_is_indeterminate 2 "$status" || return 1
     output="$(prune_releases 2>&1)"
     status=$?
-    assert_status unknown_deploy_process_refuses_prune 1 "$status" || return 1
+    assert_status unknown_deploy_process_quarantines_and_alerts 1 "$status" || return 1
     assert_contains unknown_process_reports_indeterminate_candidate \
-        "Release pruning refused: could not resolve candidate $candidate" \
+        "Release pruning pending: quarantined $candidate with indeterminate process state" \
         <(printf '%s\n' "$output") || return 1
-    assert_file_exists unknown_process_preserves_candidate "$RELEASES_DIR/$candidate" || return 1
+    assert_file_missing unknown_process_removes_public_candidate_path "$RELEASES_DIR/$candidate" || return 1
+    assert_file_exists unknown_process_preserves_quarantined_candidate \
+        "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    assert_file_exists unknown_process_persists_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
+
+    output="$(prune_releases 2>&1)"
+    status=$?
+    assert_status repeated_unknown_process_stays_loud 1 "$status" || return 1
+    assert_contains repeated_unknown_process_reports_pending \
+        "Release pruning pending: could not resolve quarantined $candidate" \
+        <(printf '%s\n' "$output") || return 1
+
+    printf 'Name:\tunknown\nState:\tZ (zombie)\nPPid:\t1\n' > "$fake_proc/$unknown_pid/status"
+    prune_releases >/dev/null 2>&1
+    assert_status zombie_no_longer_blocks_promotion 0 "$?" || return 1
+    assert_file_exists promoted_quarantine_survives_clean_cycle \
+        "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    prune_releases >/dev/null 2>&1
+    assert_status later_cycle_deletes_promoted_quarantine 0 "$?" || return 1
+    assert_file_missing promoted_quarantine_deleted "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    assert_file_missing completed_backlog_clears_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
+)
+
+case_process_state_classification_ignores_terminal_processes() (
+    local root="$SANDBOX/process-classification" release fake_proc status
+    load_deploy "$root"
+    release="$RELEASES_DIR/abababababababababababababababababababab"
+    fake_proc="$root/proc"
+    mkdir -p "$release" "$fake_proc/70001" "$fake_proc/70002" "$fake_proc/70003"
+    PROC_ROOT="$fake_proc"
+
+    process_uses_release_tree 79999 "$release"
+    assert_status nonexistent_process_is_not_indeterminate 1 "$?" || return 1
+
+    printf 'Name:\tzombie\nState:\tZ (zombie)\nPPid:\t1\n' > "$fake_proc/70001/status"
+    process_uses_release_tree 70001 "$release"
+    assert_status zombie_process_is_not_indeterminate 1 "$?" || return 1
+
+    ln -s "$root/unrelated-runtime (deleted)" "$fake_proc/70002/cwd"
+    printf 'Name:\tdeleted\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/70002/status"
+    process_uses_release_tree 70002 "$release"
+    assert_status deleted_unrelated_cwd_is_not_indeterminate 1 "$?" || return 1
+
+    ln -s "$root/unreadable-live-runtime" "$fake_proc/70003/cwd"
+    printf 'Name:\tlive\nState:\tS (sleeping)\nPPid:\t1\n' > "$fake_proc/70003/status"
+    readlink() {
+        if [ "${1:-}" = "-f" ] && [ "${2:-}" = "$fake_proc/70003/cwd" ]; then
+            return 1
+        fi
+        command readlink "$@"
+    }
+    process_uses_release_tree 70003 "$release"
+    status=$?
+    unset -f readlink
+    assert_status unreadable_live_process_remains_indeterminate 2 "$status" || return 1
+)
+
+case_cgroup_only_consumer_is_quarantined() (
+    local root="$SANDBOX/prune-cgroup-only" deployed rollback candidate consumer_pid output status
+    deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    rollback=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    candidate=cccccccccccccccccccccccccccccccccccccccc
+    setup_prune_fixture "$root" "$deployed" "$rollback" "$candidate" \
+        dddddddddddddddddddddddddddddddddddddddd \
+        eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+        ffffffffffffffffffffffffffffffffffffffff
+    consumer_pid=71001
+    mkdir -p "$PROC_ROOT/$consumer_pid"
+    ln -s "$RELEASES_DIR/$candidate" "$PROC_ROOT/$consumer_pid/cwd"
+    printf 'Name:\tcgroup-only\nState:\tS (sleeping)\nPPid:\t1\n' > "$PROC_ROOT/$consumer_pid/status"
+    printf '%s\n' "$consumer_pid" > "$CGROUP_ROOT/test-frontend/cgroup.procs"
+    list_process_directories() { return 0; }
+
+    output="$(prune_releases 2>&1)"
+    status=$?
+    assert_status cgroup_only_consumer_keeps_backlog_loud 1 "$status" || return 1
+    assert_contains cgroup_only_consumer_reported 'because a process still uses it' \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_exists cgroup_only_consumer_runtime_quarantined \
+        "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+)
+
+case_same_uid_different_unit_consumer_is_quarantined() (
+    local root="$SANDBOX/prune-same-uid-other-unit" deployed rollback candidate consumer_pid output status
+    deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    rollback=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    candidate=cccccccccccccccccccccccccccccccccccccccc
+    setup_prune_fixture "$root" "$deployed" "$rollback" "$candidate" \
+        dddddddddddddddddddddddddddddddddddddddd \
+        eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+        ffffffffffffffffffffffffffffffffffffffff
+    consumer_pid=71002
+    mkdir -p "$PROC_ROOT/$consumer_pid"
+    ln -s "$RELEASES_DIR/$candidate" "$PROC_ROOT/$consumer_pid/cwd"
+    printf 'Name:\tother-unit\nState:\tS (sleeping)\nPPid:\t1\n' > "$PROC_ROOT/$consumer_pid/status"
+    list_process_directories() { printf '%s\n' "$PROC_ROOT/$consumer_pid"; }
+
+    output="$(prune_releases 2>&1)"
+    status=$?
+    assert_status same_uid_other_unit_keeps_backlog_loud 1 "$status" || return 1
+    assert_contains same_uid_other_unit_consumer_reported 'because a process still uses it' \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_exists same_uid_other_unit_runtime_quarantined \
+        "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+)
+
+case_different_uid_consumer_survives_quarantine() (
+    local root="$SANDBOX/prune-different-uid" deployed rollback candidate consumer_pid other_uid status
+    deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    rollback=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    candidate=cccccccccccccccccccccccccccccccccccccccc
+    setup_prune_fixture "$root" "$deployed" "$rollback" "$candidate" \
+        dddddddddddddddddddddddddddddddddddddddd \
+        eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+        ffffffffffffffffffffffffffffffffffffffff
+    consumer_pid=71003
+    other_uid=$(( $(id -u) + 1 ))
+    mkdir -p "$PROC_ROOT/$consumer_pid"
+    ln -s "$RELEASES_DIR/$candidate" "$PROC_ROOT/$consumer_pid/cwd"
+    printf 'Name:\tother-uid\nState:\tS (sleeping)\nPPid:\t1\n' > "$PROC_ROOT/$consumer_pid/status"
+    list_process_directories() { printf '%s\n' "$PROC_ROOT/$consumer_pid"; }
+    stat() {
+        if [ "${1:-}" = "-c" ] && [ "${2:-}" = "%u" ] \
+            && [ "${3:-}" = "$PROC_ROOT/$consumer_pid" ]; then
+            printf '%s\n' "$other_uid"
+            return 0
+        fi
+        command stat "$@"
+    }
+
+    prune_releases >/dev/null 2>&1
+    status=$?
+    assert_status different_uid_scan_does_not_block_atomic_quarantine 0 "$status" || return 1
+    assert_file_missing different_uid_consumer_loses_old_path "$RELEASES_DIR/$candidate" || return 1
+    assert_file_exists different_uid_consumer_runtime_survives_in_quarantine \
+        "$RELEASE_QUARANTINE_DIR/$candidate/live-sentinel" || return 1
+    assert_file_exists different_uid_quarantine_waits_for_later_cycle \
+        "$RELEASE_QUARANTINE_DIR/$candidate/.prune-eligible" || return 1
+)
+
+case_process_appearing_after_scan_survives_quarantine() (
+    local root="$SANDBOX/prune-scan-race" deployed rollback candidate late_pid=0 status attempt
+    local ready="$SANDBOX/prune-scan-race/consumer-ready"
+    local trigger="$SANDBOX/prune-scan-race/read-after-quarantine"
+    local result="$SANDBOX/prune-scan-race/consumer-result"
+    deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    rollback=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    candidate=cccccccccccccccccccccccccccccccccccccccc
+    setup_prune_fixture "$root" "$deployed" "$rollback" "$candidate" \
+        dddddddddddddddddddddddddddddddddddddddd \
+        eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+        ffffffffffffffffffffffffffffffffffffffff
+    trap 'if [ "$late_pid" -ne 0 ]; then kill "$late_pid" 2>/dev/null || true; wait "$late_pid" 2>/dev/null || true; fi' EXIT
+    release_tree_in_use() {
+        local release="$1"
+        (
+            cd "$release" || exit 1
+            printf 'ready\n' > "$ready"
+            while [ ! -e "$trigger" ]; do sleep 0.01; done
+            sed -n '1p' live-sentinel > "$result"
+            exec sleep 300
+        ) &
+        late_pid=$!
+        for ((attempt = 0; attempt < 100; attempt += 1)); do
+            [ -e "$ready" ] && break
+            sleep 0.01
+        done
+        [ -e "$ready" ] || return 2
+        return 1
+    }
+
+    prune_releases >/dev/null 2>&1
+    status=$?
+    assert_status late_consumer_does_not_prevent_quarantine 0 "$status" || return 1
+    assert_file_exists late_consumer_runtime_quarantined "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    : > "$trigger"
+    for ((attempt = 0; attempt < 100; attempt += 1)); do
+        [ -e "$result" ] && break
+        sleep 0.01
+    done
+    assert_file_exists late_consumer_reads_after_atomic_rename "$result" || return 1
+    assert_equals late_consumer_reads_complete_runtime candidate-runtime "$(sed -n '1p' "$result")" || return 1
+)
+
+case_no_change_run_retries_prune_backlog() (
+    local root="$SANDBOX/no-change-prune-retry" deployed status retry_log main_log
+    deployed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    retry_log="$root/retry.log"
+    main_log="$root/main.log"
+    load_deploy "$root"
+    printf '%s\n' "$deployed" > "$MARKER"
+    printf 'pending\n' > "$PRUNE_NEEDED_MARKER"
+    guard_wrapper_contract() { return 0; }
+    git() { [ "$1" = "cat-file" ] && [ "$2" = "-e" ]; }
+    verify_no_change_release() { return 0; }
+    prune_releases() { printf 'retried\n' > "$retry_log"; return 1; }
+    deploy_failure_alert() { printf 'ALERT prune backlog\n' >&2; }
+
+    CONNEX_DEPLOY_TARGET="$deployed" \
+        CONNEX_DEPLOY_LOCK_HELD=1 \
+        main > "$main_log" 2>&1
+    status=$?
+    trap - EXIT INT TERM
+    assert_status no_change_prune_failure_stays_nonzero 1 "$status" || return 1
+    assert_file_exists no_change_path_retries_prune "$retry_log" || return 1
+    assert_equals no_change_prune_failure_remains_alertable 1 "$FAILURE_ACTIVE" || return 1
+    deploy_failure_alert >> "$main_log" 2>&1
+    assert_contains no_change_prune_failure_realerts 'ALERT prune backlog' \
+        "$main_log" || return 1
 )
 
 case_isolated_frontend_build_preserves_working_directory() (
@@ -575,7 +841,7 @@ case_isolated_frontend_build_preserves_working_directory() (
 
 case_first_transactional_run_preserves_live_legacy_trees() (
     local root="$SANDBOX/legacy-migration" previous target fixture fake_bin reset_log
-    local legacy_pid target_pid path
+    local legacy_pid target_pid path fake_proc mock_control_group
     previous=6565656565656565656565656565656565656565
     target=6666666666666666666666666666666666666666
     load_deploy "$root"
@@ -687,6 +953,11 @@ case_first_transactional_run_preserves_live_legacy_trees() (
                 ) &
                 target_pid=$!
                 printf '%s\t%s\n' "$target" "$target_pid" > "$FRONTEND_RUNNING_MARKER"
+                mkdir -p "$fake_proc/$target_pid"
+                ln -s "$RELEASES_DIR/$target/frontend" "$fake_proc/$target_pid/cwd"
+                printf '0::%s\n' "$mock_control_group" > "$fake_proc/$target_pid/cgroup"
+                printf 'Name:\ttarget\nState:\tS (sleeping)\nPPid:\t%s\n' "$$" \
+                    > "$fake_proc/$target_pid/status"
                 ;;
             *) return 2 ;;
         esac
@@ -696,8 +967,11 @@ case_first_transactional_run_preserves_live_legacy_trees() (
     assert_contains checkout_switched_after_stop "reset --hard $target --quiet" "$reset_log" || return 1
 
     wait_for_frontend() { return 0; }
+    fake_proc="$root/proc"
+    mock_control_group=/test-frontend
+    PROC_ROOT="$fake_proc"
     frontend_pid() { printf '%s\n' "$$"; }
-    frontend_control_group() { process_systemd_control_group "$target_pid"; }
+    frontend_control_group() { printf '/test-frontend\n'; }
     systemctl() { systemctl_active_stub "$@"; }
     activate_frontend "$target"
     assert_status sealed_frontend_activated 0 "$?" || return 1
@@ -879,7 +1153,7 @@ case_stale_installed_wrapper_restores_prior_checkout() (
 
 case_wrapper_selected_commit_survives_remote_advance() (
     local root="$SANDBOX/wrapper-pin" selected advanced retained fake_bin fetch_state output status
-    local serving_pid
+    local serving_pid selected_source advanced_source logic_sentinel
     selected=5151515151515151515151515151515151515151
     advanced=5252525252525252525252525252525252525252
     retained=5353535353535353535353535353535353535353
@@ -900,6 +1174,20 @@ case_wrapper_selected_commit_survives_remote_advance() (
 
     fake_bin="$root/bin"
     fetch_state="$root/fetch-count"
+    selected_source="$root/selected-deploy.sh"
+    advanced_source="$root/advanced-deploy.sh"
+    logic_sentinel="$root/logic-sentinel.log"
+    {
+        sed -n '1p' "$STAGING_DEPLOY_DIR/connex-staging-deploy.sh"
+        printf 'printf "selected\\n" >> "$MOCK_LOGIC_SENTINEL"\n'
+        sed -n '2,$p' "$STAGING_DEPLOY_DIR/connex-staging-deploy.sh" \
+            | awk '$0 == "main \"$@\"" { print "verify_no_change_release() { return 0; }" } { print }'
+    } > "$selected_source"
+    {
+        printf '#!/bin/bash\n'
+        printf 'printf "advanced\\n" >> "$MOCK_LOGIC_SENTINEL"\n'
+        printf 'exit 99\n'
+    } > "$advanced_source"
     make_wrapper_boundary_shims "$fake_bin"
 
     unset CONNEX_DEPLOY_TARGET
@@ -908,10 +1196,12 @@ case_wrapper_selected_commit_survives_remote_advance() (
         MOCK_FETCH_STATE="$fetch_state" \
         MOCK_SELECTED_SHA="$selected" \
         MOCK_ADVANCED_SHA="$advanced" \
-        MOCK_DEPLOY_SOURCE="$STAGING_DEPLOY_DIR/connex-staging-deploy.sh" \
+        MOCK_SELECTED_DEPLOY_SOURCE="$selected_source" \
+        MOCK_ADVANCED_DEPLOY_SOURCE="$advanced_source" \
+        MOCK_LOGIC_SENTINEL="$logic_sentinel" \
         MOCK_SHOW_LOG="$root/show.log" \
         MOCK_FRONTEND_PID="$$" \
-        MOCK_FRONTEND_CONTROL_GROUP="$(process_systemd_control_group "$serving_pid")" \
+        MOCK_FRONTEND_CONTROL_GROUP=/fixture-frontend \
         CONNEX_STAGING_DIR="$STAGING_DIR" \
         CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
         bash "$STAGING_DEPLOY_DIR/connex-staging-deploy-wrapper.sh" 2>&1
@@ -926,13 +1216,15 @@ case_wrapper_selected_commit_survives_remote_advance() (
         "$selected:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
     assert_absent advanced_logic_not_loaded \
         "$advanced:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
+    assert_contains selected_script_bytes_executed selected "$logic_sentinel" || return 1
+    assert_absent advanced_script_bytes_not_executed advanced "$logic_sentinel" || return 1
     assert_equals selected_commit_remains_deployed "$selected" "$(read_sha_file "$MARKER")" || return 1
     assert_file_exists selected_runtime_survives "$RELEASES_DIR/$selected/frontend" || return 1
 )
 
 case_transaction_target_reexecs_recorded_logic() (
     local root="$SANDBOX/transaction-pin" selected recorded prior fake_bin fetch_state output status
-    local serving_pid control_group
+    local serving_pid selected_source recorded_source logic_sentinel recovery_owner
     selected=6262626262626262626262626262626262626262
     recorded=6363636363636363636363636363636363636363
     prior=6464646464646464646464646464646464646464
@@ -957,7 +1249,24 @@ case_transaction_target_reexecs_recorded_logic() (
 
     fake_bin="$root/bin"
     fetch_state="$root/fetch-count"
-    control_group="$(process_systemd_control_group "$serving_pid")" || return 1
+    selected_source="$root/selected-deploy.sh"
+    recorded_source="$root/recorded-deploy.sh"
+    logic_sentinel="$root/logic-sentinel.log"
+    recovery_owner="$root/recovery-owner"
+    {
+        sed -n '1p' "$STAGING_DEPLOY_DIR/connex-staging-deploy.sh"
+        printf 'printf "selected\\n" >> "$MOCK_LOGIC_SENTINEL"\n'
+        sed -n '2,$p' "$STAGING_DEPLOY_DIR/connex-staging-deploy.sh"
+    } > "$selected_source"
+    {
+        printf '#!/bin/bash\n'
+        printf 'set -eu\n'
+        printf '[ "$CONNEX_DEPLOY_TARGET" = "$MOCK_ADVANCED_SHA" ]\n'
+        printf 'printf "recorded\\n" >> "$MOCK_LOGIC_SENTINEL"\n'
+        printf 'printf "recorded\\n" > "$MOCK_RECOVERY_OWNER"\n'
+        printf 'rm -f "$CONNEX_STAGING_DIR/.staging/deploy-transaction"\n'
+        printf 'exit 1\n'
+    } > "$recorded_source"
     make_wrapper_boundary_shims "$fake_bin"
     unset CONNEX_DEPLOY_TARGET
     output="$(
@@ -965,10 +1274,13 @@ case_transaction_target_reexecs_recorded_logic() (
         MOCK_FETCH_STATE="$fetch_state" \
         MOCK_SELECTED_SHA="$selected" \
         MOCK_ADVANCED_SHA="$recorded" \
-        MOCK_DEPLOY_SOURCE="$STAGING_DEPLOY_DIR/connex-staging-deploy.sh" \
+        MOCK_SELECTED_DEPLOY_SOURCE="$selected_source" \
+        MOCK_ADVANCED_DEPLOY_SOURCE="$recorded_source" \
+        MOCK_LOGIC_SENTINEL="$logic_sentinel" \
+        MOCK_RECOVERY_OWNER="$recovery_owner" \
         MOCK_SHOW_LOG="$root/show.log" \
         MOCK_FRONTEND_PID="$$" \
-        MOCK_FRONTEND_CONTROL_GROUP="$control_group" \
+        MOCK_FRONTEND_CONTROL_GROUP=/fixture-frontend \
         MOCK_SERVED_SHA="$prior" \
         CONNEX_STAGING_DIR="$STAGING_DIR" \
         CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
@@ -984,6 +1296,9 @@ case_transaction_target_reexecs_recorded_logic() (
         "$selected:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
     assert_contains recorded_recovery_logic \
         "$recorded:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
+    assert_contains selected_script_bytes_executed selected "$logic_sentinel" || return 1
+    assert_contains recorded_script_bytes_executed recorded "$logic_sentinel" || return 1
+    assert_equals recorded_script_owned_recovery recorded "$(sed -n '1p' "$recovery_owner")" || return 1
     assert_equals interrupted_recovery_keeps_prior_marker "$prior" "$(read_sha_file "$MARKER")" || return 1
     assert_file_missing prepared_transaction_consumed "$TRANSACTION_FILE" || return 1
 )
@@ -1496,11 +1811,18 @@ run_case() {
 run_case case_mixed_live_release_refused
 run_case case_failed_identity_probe_output_is_rejected
 run_case case_frontend_attestation_requires_current_unit_lineage
+run_case case_frontend_attestation_rejects_wrong_cgroup
 run_case case_complete_pair_integrity_and_tamper_refusal
 run_case case_no_change_requires_valid_retained_pair
 run_case case_prune_aborts_when_protected_marker_read_fails
 run_case case_consecutive_prunes_preserve_recorded_serving_release
 run_case case_prune_refuses_unknown_deploy_process_state
+run_case case_process_state_classification_ignores_terminal_processes
+run_case case_cgroup_only_consumer_is_quarantined
+run_case case_same_uid_different_unit_consumer_is_quarantined
+run_case case_different_uid_consumer_survives_quarantine
+run_case case_process_appearing_after_scan_survives_quarantine
+run_case case_no_change_run_retries_prune_backlog
 run_case case_isolated_frontend_build_preserves_working_directory
 run_case case_first_transactional_run_preserves_live_legacy_trees
 run_case case_backend_activation_never_skips_target
