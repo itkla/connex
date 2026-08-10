@@ -64,7 +64,11 @@ class OffboardingIndexArchTest {
         new String[] {"workflow_version", "published_by_id"},
         new String[] {"workflow_recipe_origin", "installed_by_id"},
         new String[] {"workflow_invocation", "requested_by_id"},
-        new String[] {"workflow_intervention", "owner_user_id"});
+        new String[] {"workflow_intervention", "owner_user_id"},
+        new String[] {"ai_chat_session", "created_by_user_id"},
+        new String[] {"ai_chat_message", "author_user_id"},
+        new String[] {"ai_chat_tool_call", "executed_by_user_id"},
+        new String[] {"ai_chat_turn", "requested_by_user_id"});
 
     @Autowired private DataSource dataSource;
 

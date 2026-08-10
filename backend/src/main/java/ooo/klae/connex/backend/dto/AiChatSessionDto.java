@@ -10,7 +10,7 @@ import ooo.klae.connex.backend.beans.AiChatSession;
 public class AiChatSessionDto {
     private int id;
     private int workspaceId;
-    private int createdByUserId;
+    private Integer createdByUserId;
     private String title;
     private String visibility;
     private String status;

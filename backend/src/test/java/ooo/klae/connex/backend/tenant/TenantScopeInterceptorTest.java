@@ -91,6 +91,11 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientMemberships"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.findRecipientIdsByActor"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientIdsByActor"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AiChatMapper.deleteParticipantsForUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AiChatMapper.clearSessionOwnershipAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AiChatMapper.clearMessageAuthorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AiChatMapper.clearToolCallExecutorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AiChatMapper.clearTurnRequestersAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearOwnershipAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "PersonMapper.clearOwnershipAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearDefinitionCreatorsAnywhere"));
@@ -115,21 +120,28 @@ class TenantScopeInterceptorTest {
     }
 
     /**
-     * Every statement {@code UserOffboardingService.prepareFreshMembership} reaches must run
-     * without a resolved context, because a first-time invitee and every SSO JIT provisioning
-     * arrive on a request thread with no workspace to resolve. The provider-capture purge was
-     * added to that flow after its exempt set was curated, so only the {@code *Anywhere} variants
-     * were listed and the workspace-scoped ones it actually calls threw (#1011).
+     * Workspace-scoped assistant-chat and provider statements reached by
+     * {@code UserOffboardingService.prepareFreshMembership} must run without a resolved context,
+     * because a first-time invitee and every SSO JIT provisioning arrive on a request thread with
+     * no workspace to resolve. Each exemption remains bound to the exact workspace and user in SQL.
      */
     @Test
-    void freshMembershipProviderCapturePurgeRunsWithoutAResolvedContext() {
+    void freshMembershipScopedCleanupRunsWithoutAResolvedContext() {
         bindRequest();
-        for (String statement : new String[] {
-            "deleteProviderActivities", "deleteInteractions", "deleteSyncStates",
-            "deleteUserPolicy", "deleteDecisions", "countUserProviderResiduals",
-            "clearWorkspacePolicyUpdater",
+        for (String id : new String[] {
+            NS + "AiChatMapper.deleteParticipantsForUser",
+            NS + "AiChatMapper.clearSessionOwnershipForUser",
+            NS + "AiChatMapper.clearMessageAuthorsForUser",
+            NS + "AiChatMapper.clearToolCallExecutorsForUser",
+            NS + "AiChatMapper.clearTurnRequestersForUser",
+            NS + "ProviderCaptureMapper.deleteProviderActivities",
+            NS + "ProviderCaptureMapper.deleteInteractions",
+            NS + "ProviderCaptureMapper.deleteSyncStates",
+            NS + "ProviderCaptureMapper.deleteUserPolicy",
+            NS + "ProviderCaptureMapper.deleteDecisions",
+            NS + "ProviderCaptureMapper.countUserProviderResiduals",
+            NS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
         }) {
-            String id = NS + "ProviderCaptureMapper." + statement;
             assertFalse(interceptor.requiresResolvedContext(id), id);
             assertDoesNotThrow(() -> interceptor.enforce(id), id);
         }

@@ -117,11 +117,62 @@
       AND user_id = #{userId}
   </delete>
 
-  <delete id="deleteOwnedSessionsForUser">
-    DELETE FROM ai_chat_session
+  <update id="clearSessionOwnershipForUser">
+    UPDATE ai_chat_session
+    SET created_by_user_id = NULL
     WHERE workspace_id = #{workspaceId}
       AND created_by_user_id = #{userId}
+  </update>
+
+  <update id="clearMessageAuthorsForUser">
+    UPDATE ai_chat_message
+    SET author_user_id = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND author_user_id = #{userId}
+  </update>
+
+  <update id="clearToolCallExecutorsForUser">
+    UPDATE ai_chat_tool_call
+    SET executed_by_user_id = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND executed_by_user_id = #{userId}
+  </update>
+
+  <update id="clearTurnRequestersForUser">
+    UPDATE ai_chat_turn
+    SET requested_by_user_id = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND requested_by_user_id = #{userId}
+  </update>
+
+  <delete id="deleteParticipantsForUserAnywhere">
+    DELETE FROM ai_chat_session_participant
+    WHERE user_id = #{userId}
   </delete>
+
+  <update id="clearSessionOwnershipAnywhere">
+    UPDATE ai_chat_session
+    SET created_by_user_id = NULL
+    WHERE created_by_user_id = #{userId}
+  </update>
+
+  <update id="clearMessageAuthorsAnywhere">
+    UPDATE ai_chat_message
+    SET author_user_id = NULL
+    WHERE author_user_id = #{userId}
+  </update>
+
+  <update id="clearToolCallExecutorsAnywhere">
+    UPDATE ai_chat_tool_call
+    SET executed_by_user_id = NULL
+    WHERE executed_by_user_id = #{userId}
+  </update>
+
+  <update id="clearTurnRequestersAnywhere">
+    UPDATE ai_chat_turn
+    SET requested_by_user_id = NULL
+    WHERE requested_by_user_id = #{userId}
+  </update>
 
   <select id="isParticipant" resultType="boolean">
     SELECT EXISTS(

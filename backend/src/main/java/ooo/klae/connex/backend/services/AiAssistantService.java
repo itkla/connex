@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -196,14 +197,14 @@ public class AiAssistantService {
 
     private AiChatSession requireOwnedLocked(int workspaceId, int userId, int id) {
         AiChatSession session = requireLocked(workspaceId, userId, id);
-        if (session.getCreatedByUserId() != userId) {
+        if (!Objects.equals(session.getCreatedByUserId(), userId)) {
             throw inaccessible();
         }
         return session;
     }
 
     private void requireAppendAccess(int workspaceId, int userId, AiChatSession session) {
-        if (session.getCreatedByUserId() == userId) {
+        if (Objects.equals(session.getCreatedByUserId(), userId)) {
             return;
         }
         if (!SHARED.equals(session.getVisibility())

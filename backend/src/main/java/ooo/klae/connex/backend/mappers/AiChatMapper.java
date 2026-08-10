@@ -51,9 +51,31 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
 
-    void deleteOwnedSessionsForUser(
+    void clearSessionOwnershipForUser(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+
+    void clearMessageAuthorsForUser(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    void clearToolCallExecutorsForUser(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    void clearTurnRequestersForUser(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    void deleteParticipantsForUserAnywhere(@Param("userId") int userId);
+
+    void clearSessionOwnershipAnywhere(@Param("userId") int userId);
+
+    void clearMessageAuthorsAnywhere(@Param("userId") int userId);
+
+    void clearToolCallExecutorsAnywhere(@Param("userId") int userId);
+
+    void clearTurnRequestersAnywhere(@Param("userId") int userId);
 
     boolean isParticipant(
         @Param("workspaceId") int workspaceId,
