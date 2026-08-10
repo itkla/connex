@@ -46,9 +46,14 @@ without changing the live checkout, and hands off to that reviewed script. The c
    frontend's release identity to agree. A partial or corrupt directory is never overwritten or
    activated. The first transactional run rebuilds the marker commit's frontend from Git into the
    same standalone format; it does not label the unversioned legacy `.next` tree as proven.
+   These co-located hashes detect partial writes and accidental corruption; they are not a trust
+   boundary against a process already running as the deploy user. Such a process can rewrite the
+   artifacts, embedded identities, and writable manifest together and recompute the hashes. Strong
+   tamper evidence would require a signature or digest anchored outside the deploy user's control.
 4. **Records a recoverable transaction.** `.staging/deploy-transaction` atomically records the
-   validated prior sha, target sha, and phase (`prepared`, `frontend_stopped`, `backend_live`,
-   `frontend_live`, or `committed`). EXIT/INT/TERM restore the prior pair after activation begins.
+   validated prior sha, target sha, pre-deploy retained rollback sha, and phase (`prepared`,
+   `frontend_stopped`, `backend_live`, `frontend_live`, or `committed`). EXIT/INT/TERM restore the
+   prior pair and the pre-deploy rollback marker after activation begins.
    On SIGKILL, reboot, or power loss, the next timer run validates the recorded bundles and either
    reinstalls and health-gates both target artifacts before re-smoking them, or restores the exact
    prior pair. Recovery never trusts a running backend response without also reinstalling the
@@ -63,10 +68,16 @@ without changing the live checkout, and hands off to that reviewed script. The c
 6. **Runs the full post-deploy smoke.** Before committing the marker, the script verifies the
    public frontend, direct backend readiness, the proxied `/api/version` target sha, the complete
    capabilities response shape, the login page, a normal password/session login, and `/dashboard`
-   rendered inside `data-app-main`. The smoke session uses a temporary mode-0700 directory and is
-   logged out and removed; credential content and cookies are never logged or placed in argv.
+   rendered inside `data-app-main`. The smoke session uses a temporary mode-0700 directory. A failed
+   logout blocks marker advancement and alerts because deleting the local cookie cannot invalidate
+   Spring Session; cleanup failure also blocks the deploy, scrubs sensitive files when deletion is
+   unavailable, and cannot prevent rollback or alerting. Credential content and cookies are never
+   logged or placed in argv.
 7. **Commits or rolls back the pair.** Only after smoke passes does the script atomically write
-   `rollback-sha` and `deployed-sha`, mark the transaction committed, and print `Done`. Every
+   `rollback-sha` and `deployed-sha`, mark the transaction committed, disarm rollback, and print
+   `Done`. The no-change path also verifies that `rollback-sha` names a valid pair distinct from the
+   deployed release; a missing, current-release, or corrupt retained pair is a loud refusal rather
+   than a successful no-op. Every
    activation failure stops the frontend, first installs the target checkout's sealed-runtime
    launcher as deployment control plane, then restores both artifacts from the verified prior
    bundle. It requires the exact rollback backend sha/readiness/stable PID plus frontend release,

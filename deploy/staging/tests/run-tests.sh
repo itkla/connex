@@ -177,6 +177,30 @@ case_mixed_live_release_refused() (
     assert_status corrupt_marker_refused 1 "$?" || return 1
 )
 
+case_failed_identity_probe_output_is_rejected() (
+    local root="$SANDBOX/identity-probe" expected
+    expected=2323232323232323232323232323232323232323
+    load_deploy "$root"
+    make_jar "$LIVE_JAR" "$expected"
+    printf '%s\n' "$expected" > "$FRONTEND_RELEASE_MARKER"
+    systemctl() { systemctl_active_stub "$@"; }
+    frontend_runtime_matches() { return 0; }
+
+    served_git_sha() { builtin printf '%s\n' "$expected"; return 1; }
+    validate_live_components "$expected" 0 >/dev/null 2>&1
+    assert_status failed_served_probe_refused 1 "$?" || return 1
+
+    served_git_sha() { builtin printf '%s\n' "$expected"; }
+    jar_git_sha() { builtin printf '%s\n' "$expected"; return 1; }
+    validate_live_components "$expected" 0 >/dev/null 2>&1
+    assert_status failed_jar_probe_refused 1 "$?" || return 1
+
+    jar_git_sha() { builtin printf '%s\n' "$expected"; }
+    live_frontend_sha() { builtin printf '%s\n' "$expected"; return 1; }
+    validate_live_components "$expected" 0 >/dev/null 2>&1
+    assert_status failed_frontend_probe_refused 1 "$?" || return 1
+)
+
 case_complete_pair_integrity_and_tamper_refusal() (
     local root="$SANDBOX/pair" sha
     sha=3333333333333333333333333333333333333333
@@ -190,6 +214,63 @@ case_complete_pair_integrity_and_tamper_refusal() (
     printf 'tampered\n' >> "$RELEASES_DIR/$sha/frontend/server.js"
     verify_release_bundle "$sha" >/dev/null 2>&1
     assert_status frontend_tamper_refused 1 "$?" || return 1
+)
+
+case_no_change_requires_valid_retained_pair() (
+    local root="$SANDBOX/no-change-retained" deployed retained
+    deployed=3434343434343434343434343434343434343434
+    retained=3535353535353535353535353535353535353535
+    load_deploy "$root"
+    make_bundle "$root" "$deployed"
+    make_bundle "$root" "$retained" rebuilt-from-marker-commit
+    printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
+    validate_live_components() { [ "$1" = "$deployed" ] && [ "$2" = "0" ]; }
+
+    verify_no_change_release "$deployed"
+    assert_status retained_pair_valid 0 "$?" || return 1
+
+    printf '%s\n' "$deployed" > "$ROLLBACK_MARKER"
+    verify_no_change_release "$deployed" >/dev/null 2>&1
+    assert_status current_release_is_not_a_rollback_pair 1 "$?" || return 1
+    printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
+
+    printf 'tampered\n' >> "$RELEASES_DIR/$retained/frontend/server.js"
+    verify_no_change_release "$deployed" >/dev/null 2>&1
+    assert_status corrupt_retained_pair_refused 1 "$?" || return 1
+
+    rm -rf "$RELEASES_DIR/${retained:?}"
+    verify_no_change_release "$deployed" >/dev/null 2>&1
+    assert_status missing_retained_pair_refused 1 "$?" || return 1
+)
+
+case_prune_aborts_when_protected_marker_read_fails() (
+    local root="$SANDBOX/prune-marker" deployed rollback sha status
+    deployed=3636363636363636363636363636363636363636
+    rollback=3737373737373737373737373737373737373737
+    load_deploy "$root"
+    for sha in \
+        "$deployed" \
+        "$rollback" \
+        3838383838383838383838383838383838383838 \
+        3939393939393939393939393939393939393939 \
+        4040404040404040404040404040404040404040 \
+        4141414141414141414141414141414141414141; do
+        mkdir -p "$RELEASES_DIR/$sha"
+    done
+    read_sha_file() { builtin printf '%s\n' "$deployed"; return 1; }
+
+    prune_releases >/dev/null 2>&1
+    status=$?
+    assert_status prune_marker_read_failure 1 "$status" || return 1
+    for sha in \
+        "$deployed" \
+        "$rollback" \
+        3838383838383838383838383838383838383838 \
+        3939393939393939393939393939393939393939 \
+        4040404040404040404040404040404040404040 \
+        4141414141414141414141414141414141414141; do
+        assert_file_exists "prune_preserved_$sha" "$RELEASES_DIR/$sha" || return 1
+    done
 )
 
 case_isolated_frontend_build_preserves_working_directory() (
@@ -254,6 +335,7 @@ case_denied_frontend_stop_prevents_checkout_switch() (
     load_deploy "$root"
     DEPLOY_PREVIOUS="$previous"
     DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$previous"
     write_transaction prepared || return 1
     sudo() { return 1; }
     git() { printf '%s\n' "$*" >> "$git_log"; return 0; }
@@ -261,7 +343,127 @@ case_denied_frontend_stop_prevents_checkout_switch() (
     assert_status denied_stop 1 "$?" || return 1
     assert_file_missing checkout_not_switched "$git_log" || return 1
     transaction="$(read_transaction)" || return 1
-    assert_equals transaction_stays_prepared "$previous"$'\t'"$target"$'\t'prepared "$transaction" || return 1
+    assert_equals transaction_stays_prepared \
+        "$previous"$'\t'"$target"$'\t'"$previous"$'\t'prepared "$transaction" || return 1
+)
+
+case_failed_transaction_write_is_rejected() (
+    local root="$SANDBOX/transaction-write" previous target status
+    previous=4949494949494949494949494949494949494949
+    target=5050505050505050505050505050505050505050
+    load_deploy "$root"
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$previous"
+    printf() {
+        if [ "$1" = 'target_sha\t%s\n' ]; then
+            return 1
+        fi
+        # shellcheck disable=SC2059
+        builtin printf "$@"
+    }
+    write_transaction prepared
+    status=$?
+    unset -f printf
+    assert_status transaction_write_failure 1 "$status" || return 1
+    assert_file_missing malformed_transaction_not_published "$TRANSACTION_FILE" || return 1
+)
+
+case_failed_sha_read_is_rejected() (
+    local root="$SANDBOX/sha-read" sha status
+    sha=5353535353535353535353535353535353535353
+    load_deploy "$root"
+    sed() {
+        builtin printf '%s\n' "$sha"
+        return 1
+    }
+    read_sha_file "$MARKER" >/dev/null
+    status=$?
+    unset -f sed
+    assert_status sha_output_with_failed_read_refused 1 "$status" || return 1
+)
+
+case_failed_marker_write_keeps_rollback_armed() (
+    local root="$SANDBOX/marker-write" previous target rollback_log transaction_log alert_log status exit_status=0
+    previous=5151515151515151515151515151515151515151
+    target=5252525252525252525252525252525252525252
+    rollback_log="$root/rollback.log"
+    transaction_log="$root/transaction.log"
+    alert_log="$root/alert.log"
+    load_deploy "$root"
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    ROLLBACK_ARMED=1
+    RELEASE_COMMITTED=0
+    write_sha_marker() {
+        if [ "$1" = "$MARKER" ]; then
+            return 1
+        fi
+        builtin printf '%s\n' "$2" > "$1" || return 1
+    }
+    write_transaction() { builtin printf '%s\n' "$1" > "$transaction_log"; }
+    rollback_release() { builtin printf '%s\n' "$1" > "$rollback_log"; ROLLBACK_STATE=complete; return 0; }
+    deploy_failure_alert() { builtin printf 'alert\n' > "$alert_log"; }
+    set_failure_context marker release "marker write failed"
+
+    commit_release_markers "$previous" "$target"
+    status=$?
+    assert_status marker_write_failure 1 "$status" || return 1
+    assert_equals rollback_stays_armed 1 "$ROLLBACK_ARMED" || return 1
+    assert_equals release_stays_uncommitted 0 "$RELEASE_COMMITTED" || return 1
+    assert_file_missing committed_transaction_not_written "$transaction_log" || return 1
+
+    ( deployment_exit "$status" ) >/dev/null 2>&1 || exit_status=$?
+    assert_status deploy_exits_failed 1 "$exit_status" || return 1
+    assert_equals previous_pair_rolled_back "$previous" "$(sed -n '1p' "$rollback_log")" || return 1
+    assert_file_exists failure_alerted "$alert_log" || return 1
+)
+
+case_failed_committed_transaction_restores_release_markers() (
+    local root="$SANDBOX/commit-transaction" retained previous target rollback_log alert_log status exit_status=0
+    retained=6161616161616161616161616161616161616161
+    previous=6262626262626262626262626262626262626262
+    target=6363636363636363636363636363636363636363
+    rollback_log="$root/rollback.log"
+    alert_log="$root/alert.log"
+    load_deploy "$root"
+    make_bundle "$root" "$retained" rebuilt-from-marker-commit
+    make_bundle "$root" "$previous" rebuilt-from-marker-commit
+    make_bundle "$root" "$target"
+    cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$previous" > "$MARKER"
+    printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$target" > "$FRONTEND_RELEASE_MARKER"
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$retained"
+    ROLLBACK_ARMED=1
+    served_git_sha() { jar_git_sha "$LIVE_JAR"; }
+    sudo() { builtin printf '%s\n' "$*" >> "$rollback_log"; }
+    systemctl() { systemctl_active_stub "$@"; }
+    ensure_frontend_launcher() { [ "$1" = "$target" ]; }
+    frontend_runtime_matches() { [ "$1" = "$previous" ]; }
+    wait_for_backend_sha() { [ "$1" = "$previous" ]; }
+    verify_backend_stability() { [ "$1" = "$previous" ]; }
+    wait_for_frontend() { return 0; }
+    write_transaction() { return 1; }
+    deploy_failure_alert() { builtin printf 'alert\n' > "$alert_log"; }
+    set_failure_context marker release "committed transaction write failed"
+
+    commit_release_markers "$previous" "$target"
+    status=$?
+    assert_status committed_transaction_failure 1 "$status" || return 1
+    assert_equals deployed_marker_advanced_before_failure "$target" "$(read_sha_file "$MARKER")" || return 1
+    assert_equals rollback_marker_advanced_before_failure "$previous" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    assert_equals committed_transaction_keeps_rollback_armed 1 "$ROLLBACK_ARMED" || return 1
+    assert_equals committed_transaction_keeps_release_uncommitted 0 "$RELEASE_COMMITTED" || return 1
+
+    ( deployment_exit "$status" ) >/dev/null 2>&1 || exit_status=$?
+    assert_status committed_transaction_failure_exit 1 "$exit_status" || return 1
+    assert_equals committed_transaction_restores_deployed "$previous" "$(read_sha_file "$MARKER")" || return 1
+    assert_equals committed_transaction_restores_retained "$retained" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    assert_equals committed_transaction_restores_backend "$previous" "$(jar_git_sha "$LIVE_JAR")" || return 1
+    assert_file_exists committed_transaction_failure_alerts "$alert_log" || return 1
 )
 
 case_stale_installed_wrapper_restores_prior_checkout() (
@@ -279,16 +481,21 @@ case_stale_installed_wrapper_restores_prior_checkout() (
 )
 
 case_pair_rollback_restores_exact_artifacts() (
-    local root="$SANDBOX/rollback" previous target sudo_log
+    local root="$SANDBOX/rollback" retained previous target sudo_log
+    retained=5454545454545454545454545454545454545454
     previous=5555555555555555555555555555555555555555
     target=6666666666666666666666666666666666666666
     sudo_log="$root/sudo.log"
     load_deploy "$root"
+    make_bundle "$root" "$retained" rebuilt-from-marker-commit
     make_bundle "$root" "$previous" rebuilt-from-marker-commit
     make_bundle "$root" "$target"
     cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$target" > "$MARKER"
+    printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
     printf '%s\n' "$target" > "$FRONTEND_RELEASE_MARKER"
     DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$retained"
     served_git_sha() { jar_git_sha "$LIVE_JAR"; }
     sudo() { printf '%s\n' "$*" >> "$sudo_log"; }
     systemctl() { systemctl_active_stub "$@"; }
@@ -301,6 +508,8 @@ case_pair_rollback_restores_exact_artifacts() (
     assert_status paired_rollback 0 "$?" || return 1
     assert_equals backend_restored "$previous" "$(jar_git_sha "$LIVE_JAR")" || return 1
     assert_equals frontend_restored "$previous" "$(read_sha_file "$FRONTEND_RELEASE_MARKER")" || return 1
+    assert_equals deployed_marker_restored "$previous" "$(read_sha_file "$MARKER")" || return 1
+    assert_equals retained_marker_restored "$retained" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
     assert_contains frontend_stopped 'systemctl stop connex-staging-frontend' "$sudo_log" || return 1
     assert_contains sealed_launcher "launcher $target" "$sudo_log" || return 1
     assert_contains backend_restarted 'systemctl restart connex-staging-backend' "$sudo_log" || return 1
@@ -369,7 +578,7 @@ smoke_curl_stub() {
         "$FRONTEND_URL/api/auth/login")
             [ "$data_binary" = "@$SMOKE_LOGIN_FILE" ] || return 22
             [ -n "$cookie_jar" ] || return 22
-            printf 'JSESSIONID\toffline-session-secret\n' > "$cookie_jar"
+            printf 'frontend.test\tFALSE\t/\tFALSE\t0\tJSESSIONID\toffline-session-secret\n' > "$cookie_jar"
             body=''
             ;;
         "$FRONTEND_URL/dashboard")
@@ -380,6 +589,9 @@ smoke_curl_stub() {
         "$FRONTEND_URL/api/auth/logout") body='' ;;
         *) return 22 ;;
     esac
+    if [ -n "${SMOKE_FAIL_AFTER_URL:-}" ] && [ "$url" = "$SMOKE_FAIL_AFTER_URL" ]; then
+        return 23
+    fi
     if [ -n "$output" ] && [ "$output" != "/dev/null" ]; then
         printf '%s\n' "$body" > "$output"
     fi
@@ -405,9 +617,146 @@ case_post_deploy_smoke_covers_all_gates() (
         "$FRONTEND_URL/api/capabilities" \
         "$FRONTEND_URL/auth/login" \
         "$FRONTEND_URL/api/auth/login" \
-        "$FRONTEND_URL/dashboard"; do
+        "$FRONTEND_URL/dashboard" \
+        "$FRONTEND_URL/api/auth/logout"; do
         assert_contains "smoke_$expected" "$expected" "$SMOKE_CALL_LOG" || return 1
     done
+)
+
+case_failed_logout_blocks_deploy() (
+    local root="$SANDBOX/smoke-logout" cookie_path status
+    SMOKE_TARGET=7979797979797979797979797979797979797979
+    SMOKE_CALL_LOG="$root/calls.log"
+    export SMOKE_TARGET SMOKE_CALL_LOG
+    load_deploy "$root"
+    SMOKE_FAIL_URL="$FRONTEND_URL/api/auth/logout"
+    export SMOKE_FAIL_URL
+    install_smoke_fixture
+    curl() { smoke_curl_stub "$@"; }
+
+    post_deploy_smoke "$SMOKE_TARGET" >/dev/null 2>&1
+    status=$?
+    cookie_path="$SMOKE_COOKIE_JAR"
+    assert_status logout_failure_blocks_deploy 1 "$status" || return 1
+    assert_equals logout_failure_gate smoke_logout "$FAILURE_GATE" || return 1
+    assert_equals failed_logout_leaves_retry_armed 1 "$SMOKE_SESSION_ACTIVE" || return 1
+    assert_file_exists cookie_available_for_exit_cleanup "$cookie_path" || return 1
+    unset SMOKE_FAIL_URL
+    printf 'frontend.test\tFALSE\t/\tFALSE\t0\tconnex_workspace\tworkspace-id\n' > "$cookie_path"
+    logout_smoke_session >/dev/null 2>&1
+    assert_status workspace_cookie_cannot_claim_logout 1 "$?" || return 1
+    assert_equals workspace_cookie_leaves_logout_armed 1 "$SMOKE_SESSION_ACTIVE" || return 1
+    printf 'frontend.test\tFALSE\t/\tFALSE\t0\tJSESSIONID\toffline-session-secret\n' > "$cookie_path"
+    logout_smoke_session || return 1
+    assert_equals logout_retry_invalidates_session 0 "$SMOKE_SESSION_ACTIVE" || return 1
+    cleanup_smoke_work || return 1
+    assert_file_missing logout_failure_cookie_removed "$cookie_path" || return 1
+)
+
+case_login_transport_failure_after_session_creation_logs_out_on_exit() (
+    local root="$SANDBOX/smoke-login-transport" cookie_path rollback_log alert_log status exit_status=0
+    SMOKE_TARGET=8282828282828282828282828282828282828282
+    SMOKE_CALL_LOG="$root/calls.log"
+    rollback_log="$root/rollback.log"
+    alert_log="$root/alert.log"
+    export SMOKE_TARGET SMOKE_CALL_LOG
+    load_deploy "$root"
+    SMOKE_FAIL_AFTER_URL="$FRONTEND_URL/api/auth/login"
+    export SMOKE_FAIL_AFTER_URL
+    install_smoke_fixture
+    curl() { smoke_curl_stub "$@"; }
+    rollback_release() { builtin printf '%s\n' "$1" > "$rollback_log"; ROLLBACK_STATE=complete; return 0; }
+    deploy_failure_alert() { builtin printf 'alert\n' > "$alert_log"; }
+    DEPLOY_PREVIOUS=8585858585858585858585858585858585858585
+    ROLLBACK_ARMED=1
+
+    post_deploy_smoke "$SMOKE_TARGET" >/dev/null 2>&1
+    status=$?
+    cookie_path="$SMOKE_COOKIE_JAR"
+    assert_status login_transport_failure 1 "$status" || return 1
+    assert_equals login_failure_gate smoke_login "$FAILURE_GATE" || return 1
+    assert_equals login_failure_arms_logout 1 "$SMOKE_SESSION_ACTIVE" || return 1
+    assert_contains login_failure_received_session offline-session-secret "$cookie_path" || return 1
+    unset SMOKE_FAIL_AFTER_URL
+
+    ( deployment_exit "$status" ) >/dev/null 2>&1 || exit_status=$?
+    assert_status login_transport_failure_exit 1 "$exit_status" || return 1
+    assert_contains login_failure_exit_attempted_logout "$FRONTEND_URL/api/auth/logout" "$SMOKE_CALL_LOG" || return 1
+    assert_file_missing login_failure_exit_removed_cookie "$cookie_path" || return 1
+    assert_equals login_transport_failure_rolls_back "$DEPLOY_PREVIOUS" "$(sed -n '1p' "$rollback_log")" || return 1
+    assert_file_exists login_transport_failure_alerts "$alert_log" || return 1
+)
+
+case_failed_authenticated_route_logs_out_on_exit() (
+    local root="$SANDBOX/smoke-exit-logout" cookie_path rollback_log alert_log status exit_status=0
+    SMOKE_TARGET=8383838383838383838383838383838383838383
+    SMOKE_CALL_LOG="$root/calls.log"
+    rollback_log="$root/rollback.log"
+    alert_log="$root/alert.log"
+    export SMOKE_TARGET SMOKE_CALL_LOG
+    load_deploy "$root"
+    SMOKE_FAIL_URL="$FRONTEND_URL/dashboard"
+    export SMOKE_FAIL_URL
+    install_smoke_fixture
+    curl() { smoke_curl_stub "$@"; }
+    rollback_release() { builtin printf '%s\n' "$1" > "$rollback_log"; ROLLBACK_STATE=complete; return 0; }
+    deploy_failure_alert() { builtin printf 'alert\n' > "$alert_log"; }
+    DEPLOY_PREVIOUS=8484848484848484848484848484848484848484
+    ROLLBACK_ARMED=1
+
+    post_deploy_smoke "$SMOKE_TARGET" >/dev/null 2>&1
+    status=$?
+    cookie_path="$SMOKE_COOKIE_JAR"
+    assert_status authenticated_route_failure 1 "$status" || return 1
+    assert_equals session_armed_before_exit 1 "$SMOKE_SESSION_ACTIVE" || return 1
+    unset SMOKE_FAIL_URL
+
+    ( deployment_exit "$status" ) >/dev/null 2>&1 || exit_status=$?
+    assert_status authenticated_route_failure_exit 1 "$exit_status" || return 1
+    assert_contains exit_attempted_logout "$FRONTEND_URL/api/auth/logout" "$SMOKE_CALL_LOG" || return 1
+    assert_file_missing exit_removed_cookie "$cookie_path" || return 1
+    assert_equals authenticated_route_failure_rolls_back "$DEPLOY_PREVIOUS" "$(sed -n '1p' "$rollback_log")" || return 1
+    assert_file_exists authenticated_route_failure_alerts "$alert_log" || return 1
+)
+
+case_failed_smoke_cleanup_scrubs_and_does_not_block_rollback() (
+    local root="$SANDBOX/smoke-cleanup" cookie_path dashboard_path rollback_log alert_log exit_log status exit_status=0
+    SMOKE_TARGET=8080808080808080808080808080808080808080
+    SMOKE_CALL_LOG="$root/calls.log"
+    rollback_log="$root/rollback.log"
+    alert_log="$root/alert.log"
+    exit_log="$root/exit.log"
+    export SMOKE_TARGET SMOKE_CALL_LOG
+    load_deploy "$root"
+    install_smoke_fixture
+    curl() { smoke_curl_stub "$@"; }
+    rm() {
+        if [ "${1:-}" = "-rf" ] && [ "${2:-}" = "--" ] \
+            && [[ "${3:-}" = "$STATE_DIR"/.smoke.* ]]; then
+            return 1
+        fi
+        command rm "$@"
+    }
+    rollback_release() { builtin printf '%s\n' "$1" > "$rollback_log"; ROLLBACK_STATE=complete; return 0; }
+    deploy_failure_alert() { builtin printf 'alert\n' > "$alert_log"; }
+    DEPLOY_PREVIOUS=8181818181818181818181818181818181818181
+    ROLLBACK_ARMED=1
+
+    post_deploy_smoke "$SMOKE_TARGET" >/dev/null 2>&1
+    status=$?
+    cookie_path="$SMOKE_COOKIE_JAR"
+    dashboard_path="${cookie_path%/cookies}/dashboard.html"
+    assert_status cleanup_failure_blocks_deploy 1 "$status" || return 1
+    assert_equals cleanup_failure_gate smoke_cleanup "$FAILURE_GATE" || return 1
+    assert_file_exists undeletable_cookie_file_still_present "$cookie_path" || return 1
+    assert_absent cookie_secret_scrubbed offline-session-secret "$cookie_path" || return 1
+    assert_absent dashboard_response_scrubbed data-app-main "$dashboard_path" || return 1
+
+    ( deployment_exit "$status" ) > "$exit_log" 2>&1 || exit_status=$?
+    assert_status cleanup_failure_exit 1 "$exit_status" || return 1
+    assert_equals cleanup_failure_still_rolls_back "$DEPLOY_PREVIOUS" "$(sed -n '1p' "$rollback_log")" || return 1
+    assert_file_exists cleanup_failure_still_alerts "$alert_log" || return 1
+    assert_contains cleanup_failure_logged 'Smoke artifact cleanup FAILED' "$exit_log" || return 1
 )
 
 case_incomplete_capabilities_fail_closed() (
@@ -462,6 +811,7 @@ case_backend_live_transaction_recovers_and_commits() (
     printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
     DEPLOY_PREVIOUS="$previous"
     DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$previous"
     write_transaction backend_live || return 1
     served_git_sha() { printf '%s\n' "$target"; }
     validate_smoke_login_file() { return 0; }
@@ -481,6 +831,53 @@ case_backend_live_transaction_recovers_and_commits() (
     assert_file_missing transaction_removed "$TRANSACTION_FILE" || return 1
 )
 
+case_recovery_commit_failure_rolls_back_and_restores_markers() (
+    local root="$SANDBOX/recovery-commit-failure" retained previous target alert_log status exit_status=0
+    retained=8686868686868686868686868686868686868686
+    previous=8989898989898989898989898989898989898989
+    target=9090909090909090909090909090909090909090
+    alert_log="$root/alert.log"
+    load_deploy "$root"
+    make_bundle "$root" "$retained" rebuilt-from-marker-commit
+    make_bundle "$root" "$previous" rebuilt-from-marker-commit
+    make_bundle "$root" "$target"
+    printf '%s\n' "$previous" > "$MARKER"
+    printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$retained"
+    write_transaction backend_live || return 1
+    cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
+    served_git_sha() { jar_git_sha "$LIVE_JAR"; }
+    validate_smoke_login_file() { return 0; }
+    systemctl() { systemctl_active_stub "$@"; }
+    sudo() { return 0; }
+    ensure_frontend_launcher() { [ "$1" = "$target" ]; }
+    wait_for_backend_sha() { return 0; }
+    verify_backend_stability() { return 0; }
+    frontend_runtime_matches() { return 0; }
+    wait_for_frontend() { return 0; }
+    post_deploy_smoke() { return 0; }
+    write_transaction() { return 1; }
+    deploy_failure_alert() { builtin printf 'alert\n' > "$alert_log"; }
+
+    recover_transaction
+    status=$?
+    assert_status recovery_commit_failure 1 "$status" || return 1
+    assert_equals recovery_commit_keeps_rollback_armed 1 "$ROLLBACK_ARMED" || return 1
+    assert_equals recovery_commit_keeps_release_uncommitted 0 "$RELEASE_COMMITTED" || return 1
+    assert_equals recovery_commit_advanced_deployed "$target" "$(read_sha_file "$MARKER")" || return 1
+    assert_equals recovery_commit_advanced_rollback "$previous" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+
+    ( deployment_exit "$status" ) >/dev/null 2>&1 || exit_status=$?
+    assert_status recovery_commit_failure_exit 1 "$exit_status" || return 1
+    assert_equals recovery_commit_restores_deployed "$previous" "$(read_sha_file "$MARKER")" || return 1
+    assert_equals recovery_commit_restores_retained "$retained" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    assert_equals recovery_commit_restores_backend "$previous" "$(jar_git_sha "$LIVE_JAR")" || return 1
+    assert_file_exists recovery_commit_failure_alerts "$alert_log" || return 1
+)
+
 case_frontend_stopped_transaction_rolls_back() (
     local root="$SANDBOX/recovery-rollback" previous target rollback_log
     previous=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -493,6 +890,7 @@ case_frontend_stopped_transaction_rolls_back() (
     printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
     DEPLOY_PREVIOUS="$previous"
     DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$previous"
     write_transaction frontend_stopped || return 1
     served_git_sha() { printf '%s\n' "$previous"; }
     rollback_release() { printf '%s\n' "$1" > "$rollback_log"; rm -f "$TRANSACTION_FILE"; return 0; }
@@ -588,17 +986,29 @@ run_case() {
 }
 
 run_case case_mixed_live_release_refused
+run_case case_failed_identity_probe_output_is_rejected
 run_case case_complete_pair_integrity_and_tamper_refusal
+run_case case_no_change_requires_valid_retained_pair
+run_case case_prune_aborts_when_protected_marker_read_fails
 run_case case_isolated_frontend_build_preserves_working_directory
 run_case case_backend_activation_never_skips_target
 run_case case_denied_frontend_stop_prevents_checkout_switch
+run_case case_failed_transaction_write_is_rejected
+run_case case_failed_sha_read_is_rejected
+run_case case_failed_marker_write_keeps_rollback_armed
+run_case case_failed_committed_transaction_restores_release_markers
 run_case case_stale_installed_wrapper_restores_prior_checkout
 run_case case_pair_rollback_restores_exact_artifacts
 run_case case_smoke_credentials_require_safe_exact_schema
 run_case case_post_deploy_smoke_covers_all_gates
+run_case case_failed_logout_blocks_deploy
+run_case case_login_transport_failure_after_session_creation_logs_out_on_exit
+run_case case_failed_authenticated_route_logs_out_on_exit
+run_case case_failed_smoke_cleanup_scrubs_and_does_not_block_rollback
 run_case case_incomplete_capabilities_fail_closed
 run_case case_each_smoke_gate_fails_closed
 run_case case_backend_live_transaction_recovers_and_commits
+run_case case_recovery_commit_failure_rolls_back_and_restores_markers
 run_case case_frontend_stopped_transaction_rolls_back
 run_case case_alert_is_actionable_and_secret_free
 run_case case_frontend_launcher_uses_sealed_runtime
