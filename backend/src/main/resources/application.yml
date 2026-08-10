@@ -231,6 +231,9 @@ connex:
         max-reports-per-window: ${CONNEX_CLIENT_ERRORS_MAX_REPORTS_PER_WINDOW:20}
         window-seconds: ${CONNEX_CLIENT_ERRORS_WINDOW_SECONDS:300}
         eviction-delay-ms: ${CONNEX_CLIENT_ERRORS_EVICTION_DELAY_MS:300000}
+        retention-enabled: ${CONNEX_CLIENT_ERRORS_RETENTION_ENABLED:true}
+        retention-delay-ms: ${CONNEX_CLIENT_ERRORS_RETENTION_DELAY_MS:3600000}
+        retention-initial-delay-ms: ${CONNEX_CLIENT_ERRORS_RETENTION_INITIAL_DELAY_MS:3600000}
     webauthn:
         # Passkey / WebAuthn relying-party config (#295). rp-id is the site's registrable domain
         # (no scheme/port); allowed-origins (CSV) must list every origin the SPA is served from.

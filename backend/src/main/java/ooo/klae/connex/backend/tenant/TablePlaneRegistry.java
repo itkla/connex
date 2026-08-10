@@ -43,6 +43,7 @@ public final class TablePlaneRegistry {
         "audit_log",
         "audit_log_integrity_checkpoint",
         "audit_log_integrity_head",
+        "client_error",
         "data_subject_request",
         "email_change_token",
         "federated_identity",

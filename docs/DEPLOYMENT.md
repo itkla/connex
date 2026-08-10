@@ -511,25 +511,24 @@ deployment unless the operator explicitly configures a vendor integration.
   a `HEAD` request. Unset token = endpoint unavailable to every caller, which the backend warns
   about at startup.
 
-**Support flow (correlation ids):** every API response carries an `X-Correlation-Id` header, and
-unexpected `500` responses include the same id in the JSON body. Production logs are structured
-JSON (ECS) and include the `correlationId` field, so when a user quotes that id the operator can
-find the exact server-side stack trace with e.g.
-`journalctl -u <backend-unit> | grep '"correlationId":"<id>"'` and include it in a support ticket.
-For rendering failures the frontend error screen shows a `Reference:` digest instead; the app
-reports it (best-effort) to this deployment's own `/api/client-errors` sink, so the matching log
-line is found by grepping for the digest value itself:
-`journalctl -u <backend-unit> | grep '<reference>'` — the `CLIENT`-source entry carries the
-digest, the page path, and the client stack. Both lookups run entirely against the deployment's
-own logs — that pairing is the support path for deployments Connex does not operate.
+**Support flow (references and correlation ids):** every API response carries an
+`X-Correlation-Id` header, and unexpected `500` responses include the same id in the JSON body.
+For rendering failures the frontend error screen instead shows a `Reference:` digest. The app
+best-effort reports that digest to `/api/client-errors`, which stores only the digest, redacted page
+path, effective correlation id, workspace, and report time for 30 days. Start a broken-page ticket
+with `deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --digest <reference>`; the reader
+finds the exact metadata row while retaining the complete entity-scoped audit slice. The later
+client-error report's correlation id is not treated as a causal filter for earlier audit events.
+Local ECS logs still carry stack details for an operator with host access, but those
+user-data-bearing lines do not belong in an artefact sent to support.
 
 **Support bundle:** an organization administrator can download a redacted, manifest-bearing
 support bundle from `GET /api/orgs/{orgId}/support-bundle` and hand it to a support engineer, so a
 ticket can be diagnosed without database or SSH access. The bundle carries readiness, allowlisted
-configuration, migration history, and a windowed audit slice — and never carries secrets, hosts,
-record values, or personal names. Note that the audit slice is keyed by a server-minted request
-id, not by the `X-Correlation-Id` a user can quote; the two are deliberately separate and
-`SUPPORT_BUNDLE.md` explains how to pivot. Collect and read it with
+configuration, migration history, redacted client-error metadata, and a windowed audit slice — and
+never carries secrets, hosts, record values, or personal names. The audit slice carries both a
+server-minted request id and an unmistakably labelled untrusted client-asserted correlation id;
+`SUPPORT_BUNDLE.md` explains the digest and correlation pivots. Collect and read it with
 [`deploy/support-bundle/`](../deploy/support-bundle/README.md); the full contents, redaction
 contract, and a worked "a contact vanished" investigation are in
 [`SUPPORT_BUNDLE.md`](SUPPORT_BUNDLE.md).

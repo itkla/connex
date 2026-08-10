@@ -29,6 +29,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.observability.CorrelationIds;
+import ooo.klae.connex.backend.services.ClientErrorService.ClientErrorSlice;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -61,13 +62,14 @@ public class SupportBundleService {
 
     private static final String AUDIT_ACTION = "org.support_bundle.download";
     private static final String AUDIT_OUTCOME_ACTION = "org.support_bundle.completed";
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
     private static final Duration DEFAULT_WINDOW = Duration.ofDays(7);
     private static final Duration MAXIMUM_WINDOW = Duration.ofDays(30);
     private static final String MANIFEST_ENTRY = "manifest.json";
 
     /** The maximum number of audit rows a slice may carry. */
     static final int AUDIT_SLICE_LIMIT = 10_000;
+    static final int CLIENT_ERROR_SLICE_LIMIT = 10_000;
 
     /**
      * The uncompressed ceiling for one bundle. The audit slice dominates it: {@link
@@ -95,6 +97,7 @@ public class SupportBundleService {
     private final MigrationHistoryService migrationHistoryService;
     private final ProductVersionService productVersionService;
     private final AuditService auditService;
+    private final ClientErrorService clientErrorService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Semaphore admission = new Semaphore(MAX_CONCURRENT_BUNDLES);
@@ -160,7 +163,8 @@ public class SupportBundleService {
             Map.of(
                 "since", filters.since().toString(),
                 "until", filters.until().toString(),
-                "correlationFiltered", filters.correlationId() != null,
+                "untrustedClientAssertedCorrelationFiltered",
+                    filters.untrustedClientAssertedCorrelationId() != null,
                 "entityFiltered", filters.entityType() != null));
     }
 
@@ -212,6 +216,7 @@ public class SupportBundleService {
     private SupportBundle assemble(int orgId, SupportBundleFilters filters) {
         Assembly assembly = new Assembly(filters, clock.instant().plus(ASSEMBLY_BUDGET));
         AtomicReference<AuditService.AuditSlice> slice = new AtomicReference<>();
+        AtomicReference<ClientErrorSlice> clientErrors = new AtomicReference<>();
         try (ZipOutputStream zip = new ZipOutputStream(assembly.buffer, StandardCharsets.UTF_8)) {
             // Every source is read inside collect(), never before it. Reading eagerly would put
             // the expensive work ahead of the budget check and, worse, would make a failing source
@@ -232,10 +237,19 @@ public class SupportBundleService {
                 slice.set(collected);
                 return collected.csv().getBytes(StandardCharsets.UTF_8);
             });
+            collect(assembly, zip, "client-errors.json", "application/json", () -> {
+                ClientErrorSlice collected = clientErrorService.supportSliceForOrg(
+                    orgId,
+                    filters.since(),
+                    filters.until(),
+                    filters.untrustedClientAssertedCorrelationId(),
+                    CLIENT_ERROR_SLICE_LIMIT);
+                clientErrors.set(collected);
+                return objectMapper.writeValueAsBytes(collected.rows());
+            });
 
-            assembly.omit("client-errors.json", "no_persisted_source");
             assembly.omit("job-runs.json", "job_run_not_available");
-            writeManifest(zip, orgId, filters, assembly, slice.get());
+            writeManifest(zip, orgId, filters, assembly, slice.get(), clientErrors.get());
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to assemble the support bundle", exception);
         }
@@ -329,7 +343,8 @@ public class SupportBundleService {
     }
 
     private AuditService.AuditSlice auditSlice(int orgId, SupportBundleFilters filters) {
-        String requestId = filters.correlationId();
+        String untrustedClientAssertedCorrelationId =
+            filters.untrustedClientAssertedCorrelationId();
         if (filters.entityType() != null && filters.workspaceId() == null) {
             throw new IllegalStateException(
                 "An entity-filtered bundle requires a resolved workspace; refusing to widen to the "
@@ -343,14 +358,14 @@ public class SupportBundleService {
                 filters.entityId(),
                 filters.since(),
                 filters.until(),
-                requestId,
+                untrustedClientAssertedCorrelationId,
                 AUDIT_SLICE_LIMIT);
         }
         return auditService.supportSliceForOrg(
             orgId,
             filters.since(),
             filters.until(),
-            requestId,
+            untrustedClientAssertedCorrelationId,
             AUDIT_SLICE_LIMIT);
     }
 
@@ -374,7 +389,8 @@ public class SupportBundleService {
             int orgId,
             SupportBundleFilters filters,
             Assembly assembly,
-            AuditService.AuditSlice slice) throws IOException {
+            AuditService.AuditSlice slice,
+            ClientErrorSlice clientErrors) throws IOException {
         List<ManifestEntry> inventory = assembly.inventory;
         Map<String, Object> omissions = assembly.omissions;
         Map<String, Object> manifest = new LinkedHashMap<>();
@@ -388,11 +404,21 @@ public class SupportBundleService {
         manifest.put("auditSliceRowCount", slice == null ? null : slice.rowCount());
         manifest.put("auditSliceTruncated", slice == null ? null : slice.truncated());
         manifest.put("auditSliceLimit", AUDIT_SLICE_LIMIT);
-        // A correlation filter matches the server-minted request id, which a user cannot quote, so
-        // an empty result under that filter is reported as inconclusive rather than as evidence
-        // that nothing happened.
+        manifest.put("auditSliceIdentifiers", auditSliceIdentifiers());
+        manifest.put(
+            "auditSliceCorrelationFilterField",
+            "untrustedClientAssertedCorrelationId");
         manifest.put("auditSliceInconclusive",
-            filters.correlationId() != null && slice != null && slice.rowCount() == 0);
+            filters.untrustedClientAssertedCorrelationId() != null
+                && slice != null
+                && slice.rowCount() == 0);
+        manifest.put(
+            "clientErrorSliceRowCount",
+            clientErrors == null ? null : clientErrors.rowCount());
+        manifest.put(
+            "clientErrorSliceTruncated",
+            clientErrors == null ? null : clientErrors.truncated());
+        manifest.put("clientErrorSliceLimit", CLIENT_ERROR_SLICE_LIMIT);
         manifest.put("omissions", omissions);
         ZipEntry entry = new ZipEntry(MANIFEST_ENTRY);
         entry.setTime(filters.until().toEpochMilli());
@@ -403,13 +429,24 @@ public class SupportBundleService {
 
     private static Map<String, Object> manifestFilters(SupportBundleFilters filters) {
         Map<String, Object> values = new LinkedHashMap<>();
-        values.put("correlationId", filters.correlationId());
+        values.put(
+            "untrustedClientAssertedCorrelationId",
+            filters.untrustedClientAssertedCorrelationId());
         values.put("entityType", filters.entityType());
         values.put("entityId", filters.entityId());
         values.put("resolvedWorkspaceId", filters.workspaceId());
         values.put("since", filters.since().toString());
         values.put("until", filters.until().toString());
         return values;
+    }
+
+    private static Map<String, String> auditSliceIdentifiers() {
+        Map<String, String> identifiers = new LinkedHashMap<>();
+        identifiers.put("serverMintedRequestId", "server_minted_non_spoofable");
+        identifiers.put(
+            "untrustedClientAssertedCorrelationId",
+            "client_asserted_untrusted");
+        return identifiers;
     }
 
     private static String sha256(byte[] content) {
@@ -426,7 +463,7 @@ public class SupportBundleService {
      * The validated inputs of one support bundle request.
      *
      * @param orgId         the organization to collect for
-     * @param correlationId the correlation id filter, or null
+     * @param correlationId the user-visible correlation id filter, or null
      * @param entityType    the record type filter, or null
      * @param entityId      the record id filter, or null
      * @param workspaceId   the resolved workspace backing the entity filter, or null
@@ -444,7 +481,8 @@ public class SupportBundleService {
     /**
      * The effective filters recorded in the manifest.
      *
-     * @param correlationId the correlation id filter, or null
+     * @param untrustedClientAssertedCorrelationId the untrusted client-asserted correlation id
+     *        filter, or null
      * @param entityType    the record type filter, or null
      * @param entityId      the record id filter, or null
      * @param workspaceId   the resolved workspace, or null
@@ -452,7 +490,7 @@ public class SupportBundleService {
      * @param until         the generation instant and inclusive window end
      */
     public record SupportBundleFilters(
-        String correlationId,
+        String untrustedClientAssertedCorrelationId,
         String entityType,
         Integer entityId,
         Integer workspaceId,

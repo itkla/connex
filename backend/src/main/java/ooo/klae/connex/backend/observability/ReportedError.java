@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.observability;
 
 /**
- * Metadata-only application error report.
+ * Bounded application error report for the deployment-local reporter sink.
  *
  * @param source whether the report originated on the server or client
  * @param correlationId request correlation identifier

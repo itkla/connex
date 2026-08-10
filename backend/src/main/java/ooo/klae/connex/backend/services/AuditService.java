@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AuditSupportRowDto;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
@@ -427,6 +429,10 @@ public class AuditService {
         entry.setUserAgent(truncate(req.getHeader("User-Agent"), USER_AGENT_MAX));
         entry.setSessionId(sessionHash(req));
         entry.setRequestId(requestId(attrs));
+        String clientAssertedCorrelationId = MDC.get(CorrelationIds.MDC_KEY);
+        if (CorrelationIds.isValid(clientAssertedCorrelationId)) {
+            entry.setUntrustedClientAssertedCorrelationId(clientAssertedCorrelationId);
+        }
     }
 
     /**
@@ -934,13 +940,21 @@ public class AuditService {
      * @param orgId     the organization to read
      * @param since     the inclusive window start
      * @param until     the inclusive window end
-     * @param requestId the request identifier to match, or null for the whole window
+     * @param untrustedClientAssertedCorrelationId the untrusted client-asserted identifier to
+     *        match, or null for the whole window
      * @param limit     the maximum number of rows to disclose
      * @return the support slice
      */
-    public AuditSlice supportSliceForOrg(int orgId, Instant since, Instant until, String requestId, int limit) {
+    public AuditSlice supportSliceForOrg(
+            int orgId,
+            Instant since,
+            Instant until,
+            String untrustedClientAssertedCorrelationId,
+            int limit) {
         return toSupportSlice(
-            auditLogMapper.findOrgSupportSlice(orgId, since, until, requestId, limit + 1), limit);
+            auditLogMapper.findOrgSupportSlice(
+                orgId, since, until, untrustedClientAssertedCorrelationId, limit + 1),
+            limit);
     }
 
     /**
@@ -955,14 +969,17 @@ public class AuditService {
      * @param entityId    the record id
      * @param since       the inclusive window start
      * @param until       the inclusive window end
-     * @param requestId   the request identifier to match, or null for the whole window
+     * @param untrustedClientAssertedCorrelationId the untrusted client-asserted identifier to
+     *        match, or null for the whole window
      * @param limit       the maximum number of rows to disclose
      * @return the support slice
      */
     public AuditSlice supportSliceForEntity(int workspaceId, int orgId, String entityType,
-            int entityId, Instant since, Instant until, String requestId, int limit) {
+            int entityId, Instant since, Instant until,
+            String untrustedClientAssertedCorrelationId, int limit) {
         return toSupportSlice(auditLogMapper.findEntitySupportSlice(
-                workspaceId, orgId, entityType, entityId, since, until, requestId, limit + 1),
+                workspaceId, orgId, entityType, entityId, since, until,
+                untrustedClientAssertedCorrelationId, limit + 1),
             limit);
     }
 
@@ -976,8 +993,10 @@ public class AuditService {
         boolean truncated = rows.size() > limit;
         List<AuditSupportRowDto> disclosed = truncated ? rows.subList(0, limit) : rows;
         StringBuilder sb = new StringBuilder();
-        writeCsvRow(sb, List.of("auditId", "scope", "workspaceId", "orgId", "action", "entityType",
-                "entityId", "actorId", "outcome", "requestId", "createdAt", "contentFieldsOmitted"));
+        writeCsvRow(sb, List.of(
+                "auditId", "scope", "workspaceId", "orgId", "action", "entityType",
+                "entityId", "actorId", "outcome", "serverMintedRequestId",
+                "untrustedClientAssertedCorrelationId", "createdAt", "contentFieldsOmitted"));
         for (AuditSupportRowDto row : disclosed) {
             writeCsvRow(sb, List.of(
                     csvCell(row.auditId()),
@@ -989,7 +1008,8 @@ public class AuditService {
                     csvCell(row.entityId()),
                     csvCell(row.actorId()),
                     csvCell(row.outcome()),
-                    csvCell(row.requestId()),
+                    csvCell(row.serverMintedRequestId()),
+                    csvCell(row.untrustedClientAssertedCorrelationId()),
                     csvCell(row.createdAt()),
                     csvCell(true)));
         }
@@ -1010,7 +1030,8 @@ public class AuditService {
         StringBuilder sb = new StringBuilder();
         writeCsvRow(sb, List.of("id", "workspaceId", "orgId", "action", "entityType", "entityId",
                 "actorId", "actorLabel", "currentActorLabel", "targetLabel", "outcome", "summary",
-                "changes", "context", "ipAddress", "userAgent", "sessionId", "requestId",
+                "changes", "context", "ipAddress", "userAgent", "sessionId",
+                "serverMintedRequestId", "untrustedClientAssertedCorrelationId",
                 "chainScopeType", "chainScopeId", "chainIndex", "prevHash", "rowHash", "createdAt",
                 "contentRedacted", "integrityPayloadRedacted", "integrityPayload"));
         for (AuditLog entry : entries) {
@@ -1038,6 +1059,7 @@ public class AuditService {
                     csvCell(entry.getUserAgent()),
                     csvCell(entry.getSessionId()),
                     csvCell(entry.getRequestId()),
+                    csvCell(entry.getUntrustedClientAssertedCorrelationId()),
                     csvCell(entry.getChainScopeType()),
                     csvCell(entry.getChainScopeId()),
                     csvCell(entry.getChainIndex()),

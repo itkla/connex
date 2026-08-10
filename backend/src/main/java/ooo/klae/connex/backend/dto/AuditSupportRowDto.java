@@ -22,7 +22,8 @@ import java.time.Instant;
  * @param entityId   the record id the event concerns
  * @param actorId    the acting account id
  * @param outcome    the recorded outcome
- * @param requestId  the server-minted request identifier
+ * @param serverMintedRequestId the non-spoofable server-minted request identifier
+ * @param untrustedClientAssertedCorrelationId the untrusted client-asserted correlation identifier
  * @param createdAt  when the event was recorded
  */
 public record AuditSupportRowDto(
@@ -34,6 +35,7 @@ public record AuditSupportRowDto(
     Integer entityId,
     Integer actorId,
     String outcome,
-    String requestId,
+    String serverMintedRequestId,
+    String untrustedClientAssertedCorrelationId,
     Instant createdAt) {
 }

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ClientErrorMapper">
+
+  <insert id="insert">
+    INSERT INTO client_error (workspace_id, correlation_id, digest, page_path)
+    VALUES (#{workspaceId}, #{correlationId}, #{digest}, #{pagePath})
+  </insert>
+
+  <select id="findOrgSupportSlice"
+          resultType="ooo.klae.connex.backend.dto.ClientErrorSupportRowDto" timeout="20">
+    SELECT ce.id, ce.workspace_id, ce.correlation_id, ce.digest, ce.page_path, ce.reported_at
+    FROM client_error ce
+    JOIN workspace w ON w.id = ce.workspace_id
+    WHERE w.org_id = #{orgId}
+      AND ce.reported_at &gt;= #{since}
+      AND ce.reported_at &lt;= #{until}
+      <if test="correlationId != null">
+        AND ce.correlation_id = CONVERT(#{correlationId} USING ascii) COLLATE ascii_bin
+      </if>
+    ORDER BY ce.reported_at ASC, ce.id ASC
+    LIMIT #{limit}
+  </select>
+
+  <delete id="deleteExpired">
+    DELETE FROM client_error
+    WHERE reported_at &lt; DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 30 DAY)
+  </delete>
+
+</mapper>

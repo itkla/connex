@@ -111,24 +111,32 @@ JSON
     cat > "$directory/migrations.json" <<'JSON'
 [{"version":"139","description":"report snapshot origin","success":true,"installedOn":"2026-07-30T02:11:04Z"}]
 JSON
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$directory/audit-slice.csv"
-    printf '9001,workspace,7,3,person.archive,person,412,55,SUCCESS,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$directory/audit-slice.csv"
+    cat > "$directory/client-errors.json" <<'JSON'
+[{"id":71,"workspaceId":7,"correlationId":"client-report-123","digest":"3819274061","pagePath":"/records/people/412","reportedAt":"2026-07-31T04:05:05Z"}]
+JSON
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationId,createdAt,contentFieldsOmitted\r\n' > "$directory/audit-slice.csv"
+    printf '9001,workspace,7,3,person.archive,person,412,55,SUCCESS,server-request-1,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$directory/audit-slice.csv"
     local files_json="[]"
     local path length hash
-    for path in readiness.json config.json migrations.json audit-slice.csv; do
+    for path in readiness.json config.json migrations.json audit-slice.csv client-errors.json; do
         length="$(stat -c '%s' "$directory/$path")"
         hash="$(sha256sum "$directory/$path" | awk '{print $1}')"
         files_json="$(printf '%s' "$files_json" | jq --arg path "$path" --argjson byte_length "$length" --arg sha256 "$hash" \
             '. += [{path: $path, mediaType: "application/json", byteLength: $byte_length, sha256: $sha256}]')"
     done
     jq -n --argjson files "$files_json" '{
-        schemaVersion: 1,
+        schemaVersion: 2,
         productVersion: "test",
         generatedAt: "2026-07-31T05:00:00Z",
         orgId: 3,
-        filters: {correlationId: "abcd1234efgh", entityType: "person", entityId: 412, resolvedWorkspaceId: 7, since: "2026-07-24T05:00:00Z", until: "2026-07-31T05:00:00Z"},
+        filters: {untrustedClientAssertedCorrelationId: "abcd1234efgh", entityType: "person", entityId: 412, resolvedWorkspaceId: 7, since: "2026-07-24T05:00:00Z", until: "2026-07-31T05:00:00Z"},
+        auditSliceIdentifiers: {serverMintedRequestId: "server_minted_non_spoofable", untrustedClientAssertedCorrelationId: "client_asserted_untrusted"},
+        auditSliceCorrelationFilterField: "untrustedClientAssertedCorrelationId",
+        auditSliceRowCount: 1, auditSliceTruncated: false, auditSliceLimit: 10000,
+        auditSliceInconclusive: false,
+        clientErrorSliceRowCount: 1, clientErrorSliceTruncated: false, clientErrorSliceLimit: 10000,
         files: ($files | sort_by(.path)),
-        omissions: {"client-errors.json": "no_persisted_source", "job-runs.json": "job_run_not_available"}
+        omissions: {"job-runs.json": "job_run_not_available"}
     }' > "$directory/manifest.json"
     if [ -n "$archive" ]; then
         ( cd "$directory" && zip --quiet --no-dir-entries -X "$archive" ./* )
@@ -205,6 +213,10 @@ case_argument_validation() (
     assert_status correlation_space 64 "$?" || return 1
     support_bundle_validate_correlation_id 'a; rm -rf /' >/dev/null 2>&1
     assert_status correlation_injection 64 "$?" || return 1
+    support_bundle_validate_framework_digest '3819274061@E394' >/dev/null 2>&1
+    assert_status framework_digest_ok 0 "$?" || return 1
+    support_bundle_validate_framework_digest 'private@example.com' >/dev/null 2>&1
+    assert_status framework_digest_user_data 64 "$?" || return 1
     support_bundle_validate_instant since '2026-07-31T05:00:00Z' >/dev/null 2>&1
     assert_status instant_ok 0 "$?" || return 1
     support_bundle_validate_instant since '2026-07-31' >/dev/null 2>&1
@@ -250,6 +262,8 @@ case_redactor_fixtures() (
     assert_equals redact_future_credential '/api/future/{token}' "$(support_bundle_redact_path "/api/future/$token")" || return 1
     assert_equals redact_hex_webhook '/api/delivery/webhooks/sendgrid/{token}' "$(support_bundle_redact_path "/api/delivery/webhooks/sendgrid/$hex")" || return 1
     assert_equals redact_trailing_slash '/invite/{token}/' "$(support_bundle_redact_path '/invite/short/')" || return 1
+    assert_equals redact_query_and_fragment '/records/people/42' \
+        "$(support_bundle_redact_path '/records/people/42?email=private@example.com#notes')" || return 1
     assert_equals redact_empty '' "$(support_bundle_redact_path '')" || return 1
     assert_equals redact_root '/' "$(support_bundle_redact_path '/')" || return 1
     local preserved
@@ -473,7 +487,7 @@ case_read_renders_and_filters() (
     assert_status read_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
     assert_contains read_summary 'event=support_bundle_read_summary status=success exit_code=0' <(printf '%s\n' "$output") || return 1
     assert_contains read_audit_row 'person.archive' <(printf '%s\n' "$output") || return 1
-    assert_contains read_omissions 'no_persisted_source' <(printf '%s\n' "$output") || return 1
+    assert_absent read_unrelated_client_digest '3819274061' <(printf '%s\n' "$output") || return 1
     assert_contains read_job_omission 'job_run_not_available' <(printf '%s\n' "$output") || return 1
 )
 
@@ -485,6 +499,24 @@ case_read_no_matching_rows_is_success() (
     local status=$?
     assert_status read_empty_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
     assert_contains read_empty_message '(no matching rows)' <(printf '%s\n' "$output") || return 1
+)
+
+case_read_presents_digest_with_the_complete_audit_slice() (
+    local work="$SANDBOX/read-digest"
+    make_bundle "$work/src" "$work/bundle.zip"
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" \
+        --digest 3819274061 2>&1)"
+    local status=$?
+    assert_status read_digest_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_contains read_digest_client_reference '3819274061' \
+        <(printf '%s\n' "$output") || return 1
+    assert_contains read_digest_client_path '/records/people/412' \
+        <(printf '%s\n' "$output") || return 1
+    assert_contains read_digest_audit_event 'person.archive' \
+        <(printf '%s\n' "$output") || return 1
+    assert_contains read_digest_server_request 'server-request-1' \
+        <(printf '%s\n' "$output") || return 1
 )
 
 case_read_refuses_tampered_archive() (
@@ -507,6 +539,11 @@ case_read_rejects_bad_arguments() (
     assert_status read_missing_archive 67 "$status" || return 1
     output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" --section bogus 2>&1)"; status=$?
     assert_status read_bad_section 64 "$status" || return 1
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" --digest private@example.com 2>&1)"; status=$?
+    assert_status read_bad_digest 64 "$status" || return 1
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" --digest 3819274061 \
+        --correlation-id abcd1234efgh 2>&1)"; status=$?
+    assert_status read_mutually_exclusive_filters 64 "$status" || return 1
 )
 
 # Regression: awk's IGNORECASE is a gawk extension that mawk (the default awk on Debian and
@@ -735,7 +772,7 @@ case_read_strips_terminal_control_sequences() (
     local work="$SANDBOX/ansi"
     make_bundle "$work/src" ""
     jq --arg v "$(printf 'x\033[2K\rts=2026-01-01T00:00:00Z level=info event=support_bundle_read_summary status=success exit_code=0')" \
-        '.omissions["client-errors.json"] = $v' "$work/src/manifest.json" > "$work/src/m.new"
+        '.omissions["job-runs.json"] = $v' "$work/src/manifest.json" > "$work/src/m.new"
     mv "$work/src/m.new" "$work/src/manifest.json"
     rebuild_archive "$work/src" "$work/bundle.zip"
     local output
@@ -925,8 +962,8 @@ case_hostile_entry_name_cannot_repaint_the_terminal() (
 case_read_parses_quoted_csv_fields() (
     local work="$SANDBOX/quoted-csv"
     make_bundle "$work/src" ""
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
-    printf '9001,workspace,7,3,"person.archive, bulk",person,412,55,success,req-1,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
+    printf '9001,workspace,7,3,"person.archive, bulk",person,412,55,success,server-request-1,client-correlation-1,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
     local length hash
     length="$(stat -c '%s' "$work/src/audit-slice.csv")"
     hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
@@ -973,9 +1010,9 @@ case_extract_refuses_an_oversized_archive() (
 case_read_matches_correlation_ids_exactly() (
     local work="$SANDBOX/exact-correlation"
     make_bundle "$work/src" ""
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
-    printf '9001,workspace,7,3,person.archive,person,412,55,success,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
-    printf '9002,workspace,7,3,person.update,person,413,56,success,abcd1234,2026-07-31T04:05:07Z,true\r\n' >> "$work/src/audit-slice.csv"
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
+    printf '9001,workspace,7,3,person.archive,person,412,55,success,server-request-1,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
+    printf '9002,workspace,7,3,person.update,person,413,56,success,server-request-2,abcd1234,2026-07-31T04:05:07Z,true\r\n' >> "$work/src/audit-slice.csv"
     local length hash
     length="$(stat -c '%s' "$work/src/audit-slice.csv")"
     hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
@@ -993,6 +1030,57 @@ case_read_matches_correlation_ids_exactly() (
         printf 'a prefix match was rendered as an exact match\n'
         return 1
     fi
+)
+
+case_read_matches_client_error_correlations_exactly() (
+    local work="$SANDBOX/exact-client-correlation"
+    make_bundle "$work/src" ""
+    cat > "$work/src/client-errors.json" <<'JSON'
+[{"id":71,"workspaceId":7,"correlationId":"abcd1234efgh","digest":"3819274061","pagePath":"/records/people/412","reportedAt":"2026-07-31T04:05:05Z"},{"id":72,"workspaceId":7,"correlationId":"abcd1234","digest":"2046813579","pagePath":"/records/people/413","reportedAt":"2026-07-31T04:05:06Z"}]
+JSON
+    local length hash
+    length="$(stat -c '%s' "$work/src/client-errors.json")"
+    hash="$(sha256sum "$work/src/client-errors.json" | awk '{print $1}')"
+    jq --argjson len "$length" --arg sha "$hash" \
+        '.files = [.files[] | if .path == "client-errors.json" then .byteLength = $len | .sha256 = $sha else . end]' \
+        "$work/src/manifest.json" > "$work/src/m.new"
+    mv "$work/src/m.new" "$work/src/manifest.json"
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" \
+        --correlation-id abcd1234 --section client-errors 2>&1)"
+    assert_status exact_client_correlation_ok 0 "$?" || { printf '%s\n' "$output"; return 1; }
+    assert_contains exact_client_correlation_hit '2046813579' <(printf '%s\n' "$output") || return 1
+    assert_absent exact_client_correlation_no_prefix '3819274061' <(printf '%s\n' "$output") || return 1
+)
+
+case_read_matches_digests_exactly_without_narrowing_the_audit_slice() (
+    local work="$SANDBOX/exact-digest"
+    make_bundle "$work/src" ""
+    cat > "$work/src/client-errors.json" <<'JSON'
+[{"id":71,"workspaceId":7,"correlationId":"abcd1234efgh","digest":"3819274061","pagePath":"/records/people/412","reportedAt":"2026-07-31T04:05:05Z"},{"id":72,"workspaceId":7,"correlationId":"abcd1234","digest":"381927406","pagePath":"/records/people/413","reportedAt":"2026-07-31T04:05:06Z"}]
+JSON
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
+    printf '9001,workspace,7,3,person.archive,person,412,55,success,server-request-1,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
+    printf '9002,workspace,7,3,person.update,person,413,56,success,server-request-2,abcd1234,2026-07-31T04:05:07Z,true\r\n' >> "$work/src/audit-slice.csv"
+    local path length hash
+    for path in client-errors.json audit-slice.csv; do
+        length="$(stat -c '%s' "$work/src/$path")"
+        hash="$(sha256sum "$work/src/$path" | awk '{print $1}')"
+        jq --arg path "$path" --argjson len "$length" --arg sha "$hash" \
+            '.files = [.files[] | if .path == $path then .byteLength = $len | .sha256 = $sha else . end]' \
+            "$work/src/manifest.json" > "$work/src/m.new"
+        mv "$work/src/m.new" "$work/src/manifest.json"
+    done
+    rebuild_archive "$work/src" "$work/bundle.zip"
+    local output
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" \
+        --digest 381927406 2>&1)"
+    assert_status exact_digest_ok 0 "$?" || { printf '%s\n' "$output"; return 1; }
+    assert_contains exact_digest_client_hit '"id": 72' <(printf '%s\n' "$output") || return 1
+    assert_contains exact_digest_first_audit_row_preserved '9001' <(printf '%s\n' "$output") || return 1
+    assert_contains exact_digest_second_audit_row_preserved '9002' <(printf '%s\n' "$output") || return 1
+    assert_absent exact_digest_no_client_prefix '"id": 71' <(printf '%s\n' "$output") || return 1
 )
 
 case_validate_instant_accepts_fractional_seconds() (
@@ -1033,7 +1121,7 @@ case_verify_requires_the_declared_bundle_entries() (
     length="$(stat -c '%s' "$work/src/foo")"
     hash="$(sha256sum "$work/src/foo" | awk '{print $1}')"
     jq -n --argjson len "$length" --arg sha "$hash" '{
-        schemaVersion: 1, productVersion: "x", generatedAt: "2026-07-31T05:00:00Z", orgId: 3,
+        schemaVersion: 2, productVersion: "x", generatedAt: "2026-07-31T05:00:00Z", orgId: 3,
         filters: {since: "a", until: "b"},
         files: [{path: "foo", mediaType: "application/json", byteLength: $len, sha256: $sha}],
         omissions: {}
@@ -1074,6 +1162,8 @@ case_collect_has_no_journal_option() (
 )
 
 run_case read_matches_correlation_ids_exactly case_read_matches_correlation_ids_exactly
+run_case read_matches_client_error_correlations_exactly case_read_matches_client_error_correlations_exactly
+run_case read_matches_digests_exactly_without_narrowing_the_audit_slice case_read_matches_digests_exactly_without_narrowing_the_audit_slice
 run_case validate_instant_accepts_fractional_seconds case_validate_instant_accepts_fractional_seconds
 run_case base_url_rejects_query_fragment_and_userinfo case_base_url_rejects_query_fragment_and_userinfo
 run_case verify_requires_the_declared_bundle_entries case_verify_requires_the_declared_bundle_entries
@@ -1121,6 +1211,7 @@ run_case collect_rejects_partial_entity_filter case_collect_rejects_partial_enti
 run_case collect_query_encoding case_collect_query_encoding
 run_case collect_status_classification case_collect_status_classification
 run_case read_renders_and_filters case_read_renders_and_filters
+run_case read_presents_digest_with_the_complete_audit_slice case_read_presents_digest_with_the_complete_audit_slice
 run_case read_no_matching_rows_is_success case_read_no_matching_rows_is_success
 run_case read_refuses_tampered_archive case_read_refuses_tampered_archive
 run_case read_rejects_bad_arguments case_read_rejects_bad_arguments

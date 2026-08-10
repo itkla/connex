@@ -36,7 +36,7 @@ public interface AuditLogMapper {
     List<AuditSupportRowDto> findOrgSupportSlice(@Param("orgId") int orgId,
         @Param("since") Instant since,
         @Param("until") Instant until,
-        @Param("requestId") String requestId,
+        @Param("untrustedClientAssertedCorrelationId") String untrustedClientAssertedCorrelationId,
         @Param("limit") int limit);
 
     List<AuditSupportRowDto> findEntitySupportSlice(@Param("workspaceId") int workspaceId,
@@ -45,6 +45,6 @@ public interface AuditLogMapper {
         @Param("entityId") int entityId,
         @Param("since") Instant since,
         @Param("until") Instant until,
-        @Param("requestId") String requestId,
+        @Param("untrustedClientAssertedCorrelationId") String untrustedClientAssertedCorrelationId,
         @Param("limit") int limit);
 }

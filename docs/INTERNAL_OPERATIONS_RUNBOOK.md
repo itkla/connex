@@ -583,10 +583,11 @@ This is the single most common support-flow mistake, so internalize it before th
 then never displays it. So a user reporting a broken page will hand you a **digest**, not a
 correlation ID — asking them for a correlation ID will produce confusion, not an identifier.
 
-The digest is nonetheless the join key. When the frontend error boundary fires, it best-effort
-reports to `POST /api/client-errors`, and the server **stamps its own correlation ID onto that
-record**. So digest → client-error log line → correlation ID → the rest of the request's server
-logs.
+The digest is the client-error lookup key. When the frontend error boundary fires, it best-effort
+reports to `POST /api/client-errors`, and the server stores a redacted metadata row with the report
+request's correlation ID. The message and stack remain only in the local log sink and never enter
+the bundle. Because reporting is a later request, that correlation is not a causal link to an
+earlier audit event; inspect the complete entity-scoped audit slice beside the exact digest match.
 
 `/api/client-errors` is bounded on purpose, which explains the gaps you will see:
 
@@ -608,21 +609,24 @@ logs.
   streamed export that fails mid-body reuses the id already sent.
 - Only unexpected `500`s put it in the body. `400`/`403`/`404`/`409` responses do **not** carry it.
 
-### Log lookup recipes
+### Support-bundle lookup recipes
 
-Both lookups run entirely against the deployment's own logs. Full context in the "Monitoring &
-support" section of [DEPLOYMENT.md](DEPLOYMENT.md); the two commands are:
+The redacted bundle is the first-line ticket path. It requires no SSH or ad-hoc SQL:
 
 ```bash
-# The user quoted a correlation ID (raw API 500, or an integration's captured header)
-journalctl -u <backend-unit> | grep '"correlationId":"<id>"'
-
 # The user quoted a `Reference:` digest from a broken page
-journalctl -u <backend-unit> | grep '<reference>'
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --digest <reference>
+
+# The user quoted a correlation ID from a raw API 500 or integration
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --correlation-id <id>
 ```
 
-The digest grep matches the `CLIENT`-source entry, which carries the digest, the page path, and the
-client stack — and, because the server stamped it, the correlation ID to continue with.
+The digest lookup matches only the safe framework reference in `client-errors.json` and deliberately
+does not narrow `audit-slice.csv`: the report request happens after the original failure. Use a
+quoted API correlation id to filter `untrustedClientAssertedCorrelationId`, and use
+`serverMintedRequestId` only as the trustworthy within-audit request pivot. Deployment-local log
+lookup remains available for an operator investigating stack details, but those user-data-bearing
+lines must not be copied into a support artefact.
 
 ### Tenant diagnostics — open this before you ask for logs
 
@@ -735,15 +739,16 @@ one by collecting logs ad hoc** — deployment logs contain tenant-identifying d
 the collection the bundle refuses to make. If you genuinely need log content, agree the scope in
 writing first.
 
-**The bundle's request id is not the id your user quoted.** `audit-slice.csv` carries a
-**server-minted** `requestId`, deliberately distinct from the `X-Correlation-Id` a caller can supply.
-Do not expect a user's reference to appear in a bundle; use the bundle for state and the deployment's
-own logs for that lookup.
+**The two audit identifiers have different trust.** `audit-slice.csv` carries
+`serverMintedRequestId`, the non-spoofable within-audit pivot, and
+`untrustedClientAssertedCorrelationId`, the exact client-settable value a raw API error can expose.
+The manifest repeats those trust labels. A digest from a broken page instead exact-matches the
+metadata in `client-errors.json`; it does not filter the earlier audit slice.
 
 The audit slice carries `actorId` only and no display names, marks truncation explicitly
 (`auditSliceTruncated` with a row count), and ships a declared-omissions map so a missing file is
-visibly a decision rather than a gap — `client-errors.json` is declared absent because no persisted
-source exists for it.
+visibly a decision rather than a gap. `client-errors.json` now ships its closed metadata projection
+or declares `source_failed`; it never contains message, detail, or stack.
 
 ## Access boundaries
 

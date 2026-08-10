@@ -15,7 +15,7 @@ holds.
 | Script | Purpose |
 |---|---|
 | `collect.sh` | Downloads a bundle for one organization, verifies it, and publishes it atomically. Optionally appends a closed-field journal projection. |
-| `read.sh` | Verifies a bundle's manifest and hashes, then renders it and filters by correlation ID. |
+| `read.sh` | Verifies a bundle's manifest and hashes, then renders it and filters client errors plus the explicitly untrusted client-asserted audit column by correlation ID. |
 | `support-bundle-lib.sh` | Shared logging, validation, and integrity primitives. Not run directly. |
 | `tests/run-tests.sh` | Offline regression tests. No network, backend, Docker, root, or systemd. |
 
@@ -80,8 +80,19 @@ Read a bundle:
 ```bash
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --correlation-id abcd1234efgh
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --digest 3819274061
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section audit
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section client-errors
 ```
+
+The correlation filter is a lookup aid, not an audit identity. It matches
+`client-errors.json.correlationId` and
+`audit-slice.csv.untrustedClientAssertedCorrelationId`. Use the separate
+`serverMintedRequestId` column for the non-spoofable within-audit pivot.
+The digest filter is the normal broken-page workflow: it finds the exact
+framework reference in `client-errors.json` and leaves the bundle's complete audit
+slice visible. The error report is a later request, so its correlation id is not
+treated as proof that an earlier audit event caused the page failure.
 
 Nothing is rendered until the archive has passed verification in full: safe
 entry names, every inventory entry matched to its recorded byte length and

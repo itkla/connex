@@ -6,15 +6,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.AuditLog;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.AuditSupportRowDto;
 
 class AuditLogMapperTest extends AbstractMapperTest {
     @Autowired private AuditLogMapper auditLogMapper;
+    @Autowired private OrganizationMapper organizationMapper;
 
     private long nextChainIndex = 1;
 
@@ -75,6 +80,30 @@ class AuditLogMapperTest extends AbstractMapperTest {
         assertEquals(List.of(first, second), idsOf(auditLogMapper.findWorkspaceExport(ws.getId(), 50, 0)));
     }
 
+    @Test
+    void clientAssertedCorrelationFilterCannotPullAnotherTenantsAuditRows() {
+        Workspace mine = newWorkspace();
+        Organization foreignOrg = newOrganization();
+        Workspace foreign = newWorkspace(foreignOrg.getId());
+        String correlationId = "client-correlation-123";
+        int mineId = insertAudit(
+            mine.getId(), "person", 412, "mine", correlationId);
+        insertAudit(foreign.getId(), "person", 412, "foreign", correlationId);
+        Instant now = Instant.now();
+
+        List<AuditSupportRowDto> rows = auditLogMapper.findEntitySupportSlice(
+            mine.getId(),
+            workspaceMapper.getOrgId(mine.getId()),
+            "person",
+            412,
+            now.minus(1, ChronoUnit.DAYS),
+            now.plus(1, ChronoUnit.DAYS),
+            correlationId,
+            10);
+
+        assertEquals(List.of((long) mineId), rows.stream().map(AuditSupportRowDto::auditId).toList());
+    }
+
     private Workspace newWorkspace() {
         Workspace ws = new Workspace();
         ws.setName("WS " + unique());
@@ -83,7 +112,34 @@ class AuditLogMapperTest extends AbstractMapperTest {
         return ws;
     }
 
+    private Organization newOrganization() {
+        String suffix = unique();
+        Organization organization = new Organization();
+        organization.setName("Organization " + suffix);
+        organization.setSlug("organization-" + suffix);
+        organizationMapper.insert(organization);
+        return organization;
+    }
+
+    private Workspace newWorkspace(int orgId) {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setOrgId(orgId);
+        ws.setSlug("workspace-" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
     private int insertAudit(Integer workspaceId, String entityType, Integer entityId, String summary) {
+        return insertAudit(workspaceId, entityType, entityId, summary, null);
+    }
+
+    private int insertAudit(
+            Integer workspaceId,
+            String entityType,
+            Integer entityId,
+            String summary,
+            String untrustedClientAssertedCorrelationId) {
         AuditLog entry = new AuditLog();
         entry.setWorkspaceId(workspaceId);
         entry.setAction("company.update");
@@ -91,6 +147,7 @@ class AuditLogMapperTest extends AbstractMapperTest {
         entry.setEntityId(entityId);
         entry.setOutcome("success");
         entry.setSummary(summary);
+        entry.setUntrustedClientAssertedCorrelationId(untrustedClientAssertedCorrelationId);
         entry.setOrgId(workspaceMapper.getOrgId(workspaceId));
         entry.setChainScopeType("workspace");
         entry.setChainScopeId(workspaceId);

@@ -361,6 +361,9 @@ class AuditServiceTest {
             String recorded = captor.getValue().getRequestId();
             assertNotNull(recorded);
             assertNotEquals("abcd1234efgh", recorded);
+            assertEquals(
+                "abcd1234efgh",
+                captor.getValue().getUntrustedClientAssertedCorrelationId());
         } finally {
             MDC.remove(CorrelationIds.MDC_KEY);
             RequestContextHolder.resetRequestAttributes();
@@ -399,5 +402,6 @@ class AuditServiceTest {
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditIntegrityService).append(captor.capture());
         assertNull(captor.getValue().getRequestId());
+        assertNull(captor.getValue().getUntrustedClientAssertedCorrelationId());
     }
 }

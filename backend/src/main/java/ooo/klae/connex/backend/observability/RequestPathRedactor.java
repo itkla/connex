@@ -3,7 +3,8 @@ package ooo.klae.connex.backend.observability;
 import java.util.Set;
 
 /**
- * Collapses credential-bearing segments of a reported request path.
+ * Removes query and fragment content and collapses credential-bearing segments of a reported
+ * request path.
  *
  * <p>Two independent rules apply. A segment that directly follows one of the enumerable
  * token-bearing route prefixes — the {@code /invite}, {@code /invite-link} and {@code /unsubscribe}
@@ -35,7 +36,8 @@ public final class RequestPathRedactor {
     }
 
     /**
-     * Returns the path with credential-bearing segments replaced by a fixed placeholder.
+     * Returns the query-free path with credential-bearing segments replaced by a fixed
+     * placeholder.
      *
      * @param path the raw request path, or null
      * @return the redacted path, or null when the path was null
@@ -44,8 +46,10 @@ public final class RequestPathRedactor {
         if (path == null || path.isEmpty()) {
             return path;
         }
-        String[] segments = path.split("/", -1);
-        StringBuilder redacted = new StringBuilder(path.length());
+        int suffixStart = suffixStart(path);
+        String pathname = path.substring(0, suffixStart);
+        String[] segments = pathname.split("/", -1);
+        StringBuilder redacted = new StringBuilder(pathname.length());
         String previous = "";
         for (int index = 0; index < segments.length; index++) {
             String segment = segments[index];
@@ -61,6 +65,18 @@ public final class RequestPathRedactor {
             previous = segment;
         }
         return redacted.toString();
+    }
+
+    private static int suffixStart(String path) {
+        int query = path.indexOf('?');
+        int fragment = path.indexOf('#');
+        if (query < 0) {
+            return fragment < 0 ? path.length() : fragment;
+        }
+        if (fragment < 0) {
+            return query;
+        }
+        return Math.min(query, fragment);
     }
 
     private static boolean isNumericId(String segment) {

@@ -85,6 +85,14 @@ class RequestPathRedactorTest {
     }
 
     @Test
+    void removesQueryAndFragmentContentBeforeDisclosure() {
+        assertEquals("/records/people/42",
+                RequestPathRedactor.redact("/records/people/42?email=private@example.com#notes"));
+        assertEquals("/invite/{token}",
+                RequestPathRedactor.redact("/invite/private?token=private#fragment"));
+    }
+
+    @Test
     void redactsAtTheReportBoundarySoNoReporterCanSeeARawToken() {
         ReportedError error = new ReportedError(
                 Source.CLIENT, "id", 1, 2, "Render failed", "stack", "/invite/aBc123defGhi456jklMno");

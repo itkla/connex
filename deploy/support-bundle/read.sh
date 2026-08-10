@@ -16,14 +16,15 @@
 # Exit codes: 64 usage/configuration/dependency, 67 bundle integrity,
 # 69 rendering or filtering failure.
 #
-# Usage: deploy/support-bundle/read.sh --archive PATH [--correlation-id ID]
-#            [--section SECTION]
+# Usage: deploy/support-bundle/read.sh --archive PATH
+#            [--correlation-id ID | --digest DIGEST] [--section SECTION]
 
 # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/support-bundle-lib.sh"
 
 ARCHIVE=
 CORRELATION_ID=
+DIGEST=
 SECTION=all
 
 support_bundle_usage() {
@@ -39,6 +40,10 @@ support_bundle_parse_arguments() {
                 ;;
             --correlation-id)
                 CORRELATION_ID="${2-}"
+                shift 2 || return "$EXIT_USAGE"
+                ;;
+            --digest)
+                DIGEST="${2-}"
                 shift 2 || return "$EXIT_USAGE"
                 ;;
             --section)
@@ -60,7 +65,7 @@ support_bundle_parse_arguments() {
         return "$EXIT_USAGE"
     fi
     case "$SECTION" in
-        all|manifest|readiness|config|migrations|job-runs|audit)
+        all|manifest|readiness|config|migrations|job-runs|client-errors|audit)
             ;;
         *)
             support_bundle_log error config_error reason invalid_section section "$SECTION"
@@ -69,6 +74,13 @@ support_bundle_parse_arguments() {
     esac
     if [ -n "$CORRELATION_ID" ]; then
         support_bundle_validate_correlation_id "$CORRELATION_ID" || return "$EXIT_USAGE"
+    fi
+    if [ -n "$DIGEST" ]; then
+        support_bundle_validate_framework_digest "$DIGEST" || return "$EXIT_USAGE"
+    fi
+    if [ -n "$CORRELATION_ID" ] && [ -n "$DIGEST" ]; then
+        support_bundle_log error config_error reason mutually_exclusive_filters
+        return "$EXIT_USAGE"
     fi
 }
 
@@ -112,7 +124,11 @@ support_bundle_render_manifest() {
     local directory="$1"
     local manifest="$directory/manifest.json"
     support_bundle_heading "Manifest"
-    jq '{schemaVersion, productVersion, generatedAt, orgId, filters, omissions}' "$manifest" \
+    jq '{schemaVersion, productVersion, generatedAt, orgId, filters,
+         auditSliceIdentifiers, auditSliceCorrelationFilterField,
+         auditSliceRowCount, auditSliceTruncated, auditSliceLimit, auditSliceInconclusive,
+         clientErrorSliceRowCount, clientErrorSliceTruncated, clientErrorSliceLimit,
+         omissions}' "$manifest" \
         | support_bundle_sanitize_output || return "$EXIT_READ"
     support_bundle_heading "Inventory (verified)"
     jq -r '.files[] | "\(.path)\t\(.byteLength) bytes\t\(.sha256[0:16])..."' "$manifest" \
@@ -135,14 +151,18 @@ support_bundle_render_audit() {
         return 0
     fi
     if [ -z "$CORRELATION_ID" ]; then
-        support_bundle_heading "Audit slice"
+        if [ -n "$DIGEST" ]; then
+            support_bundle_heading "Audit slice (complete; digest is not an audit filter)"
+        else
+            support_bundle_heading "Audit slice"
+        fi
         support_bundle_render_csv < "$slice" || return "$EXIT_READ"
         return 0
     fi
     support_bundle_heading "Audit slice (correlation $CORRELATION_ID)"
-    # Compare the requestId COLUMN for equality. A substring search over the whole row would match
-    # an unrelated request whose id merely starts with this one — every 8-64 character prefix is
-    # itself a valid correlation id — and would present it to support as the same request.
+    # Compare the explicitly untrusted client-asserted correlation column for equality. A
+    # substring search over the whole row would match an unrelated request whose id merely starts
+    # with this one and would present it to support as the same request.
     matches="$(SUPPORT_BUNDLE_CORRELATION_ID="$CORRELATION_ID" python3 -c '
 import csv, os, sys
 wanted = os.environ["SUPPORT_BUNDLE_CORRELATION_ID"]
@@ -152,7 +172,8 @@ if header is None:
     sys.exit(0)
 writer = csv.writer(sys.stdout, lineterminator="\n")
 writer.writerow(header)
-column = header.index("requestId") if "requestId" in header else None
+name = "untrustedClientAssertedCorrelationId"
+column = header.index(name) if name in header else None
 count = 0
 for row in reader:
     if column is not None and column < len(row) and row[column] == wanted:
@@ -166,6 +187,31 @@ sys.stderr.write(str(count))
         return 0
     fi
     printf '%s\n' "$matches" | support_bundle_render_csv || return "$EXIT_READ"
+}
+
+support_bundle_render_client_errors() {
+    local directory="$1"
+    local errors="$directory/client-errors.json"
+    if [ ! -f "$errors" ] || [ -L "$errors" ]; then
+        return 0
+    fi
+    if [ -z "$CORRELATION_ID" ] && [ -z "$DIGEST" ]; then
+        support_bundle_render_json "$directory" client-errors.json "Client errors" || return "$EXIT_READ"
+        return 0
+    fi
+    if [ -n "$CORRELATION_ID" ]; then
+        support_bundle_heading "Client errors (correlation $CORRELATION_ID)"
+        jq --arg correlation_id "$CORRELATION_ID" \
+            'if type == "array" then [.[] | select(.correlationId == $correlation_id)]
+             else error("client-errors.json must be an array") end' "$errors" \
+            | support_bundle_sanitize_output || return "$EXIT_READ"
+        return 0
+    fi
+    support_bundle_heading "Client errors (digest $DIGEST)"
+    jq --arg digest "$DIGEST" \
+        'if type == "array" then [.[] | select(.digest == $digest)]
+         else error("client-errors.json must be an array") end' "$errors" \
+        | support_bundle_sanitize_output || return "$EXIT_READ"
 }
 
 
@@ -206,6 +252,9 @@ main() {
         if [ "$exit_code" -eq 0 ] && support_bundle_section_wanted job-runs; then
             support_bundle_render_json "$WORK_DIR" job-runs.json "Job runs" || exit_code=$?
         fi
+        if [ "$exit_code" -eq 0 ] && support_bundle_section_wanted client-errors; then
+            support_bundle_render_client_errors "$WORK_DIR" || exit_code=$?
+        fi
         if [ "$exit_code" -eq 0 ] && support_bundle_section_wanted audit; then
             support_bundle_render_audit "$WORK_DIR" || exit_code=$?
         fi
@@ -217,7 +266,7 @@ main() {
     fi
     SUPPORT_BUNDLE_PHASE=complete
     support_bundle_finish 0 support_bundle_read_summary archive "$ARCHIVE" \
-        correlation_id "${CORRELATION_ID:-none}" section "$SECTION"
+        correlation_id "${CORRELATION_ID:-none}" digest "${DIGEST:-none}" section "$SECTION"
 }
 
 main "$@"

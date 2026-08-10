@@ -109,6 +109,17 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void untrustedClientCorrelationStaysOutsideTheRollingCompatibleIntegrityPayload() {
+        AuditLog withoutClientCorrelation = new AuditLog();
+        AuditLog withClientCorrelation = new AuditLog();
+        withClientCorrelation.setUntrustedClientAssertedCorrelationId("client-correlation-123");
+
+        assertEquals(
+            auditIntegrityService.integrityPayload(withoutClientCorrelation),
+            auditIntegrityService.integrityPayload(withClientCorrelation));
+    }
+
+    @Test
     void databaseSnapshotsIntegrityReferencesForRollingDeploymentWriters() {
         int orgId = workspaceMapper.getOrgId(workspace.getId());
         AuditLog entry = new AuditLog();
