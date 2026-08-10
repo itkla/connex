@@ -15,7 +15,7 @@ strictly bounded journal projection documented below.
 | Script | Purpose |
 |---|---|
 | `collect.sh` | Downloads a bundle for one organization, verifies it, and publishes it atomically. Optionally appends a closed-field journal projection. |
-| `read.sh` | Verifies a bundle's manifest and hashes, then renders it and filters by correlation ID. |
+| `read.sh` | Verifies a bundle's manifest and hashes, then renders the already-filtered redacted contents. |
 | `support-bundle-lib.sh` | Shared logging, validation, and integrity primitives. Not run directly. |
 | `tests/run-tests.sh` | Offline regression tests. No network, backend, Docker, root, or systemd. |
 
@@ -92,10 +92,19 @@ Read a bundle:
 
 ```bash
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
-deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --correlation-id abcd1234efgh
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section audit
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section client-errors
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section journal
 ```
+
+Apply `--correlation-id` to `collect.sh`, not `read.sh`. The server transforms that lookup input and
+the archive contains only the organization-scoped `untrustedClientAssertedCorrelationHmac`; the raw
+client assertion never leaves the deployment. The same disclosure HMAC joins current audit,
+client-error, and optional journal rows; a correlation-filtered slice also normalizes matched legacy
+rows to that value. Unfiltered legacy rows remain independently pseudonymized. Use
+`serverMintedRequestId` for the non-spoofable within-audit pivot. Framework digests are omitted
+because their shape does not establish their provenance; use a quoted digest only with
+deployment-local structured logs.
 
 Nothing is rendered until the archive has passed verification in full: safe
 entry names, every inventory entry matched to its recorded byte length and
@@ -115,9 +124,10 @@ active context do not emit this event.
 Journald stores Spring's ECS JSON inside `MESSAGE`. The collector rejects duplicate JSON keys,
 requires the organization discriminator to be an exact positive integer match before inspecting
 the rest of the record, and then constructs a fresh eight-field projection: timestamp, level,
-logger, correlation id, method, redacted route template, status, and fixed event class. It never
-copies raw `MESSAGE`, messages, stacks, headers, hosts, query strings, or unknown future fields.
-Missing, malformed, ambiguous, and other-organization records are dropped.
+logger, `untrustedClientAssertedCorrelationHmac`, method, redacted route template, status, and fixed
+event class. It never copies the raw caller correlation value, raw `MESSAGE`, messages, stacks,
+headers, hosts, query strings, or unknown future fields. Missing, malformed, ambiguous, and
+other-organization records are dropped.
 
 The downloaded backend bundle is verified before journal collection. After adding the slice, the collector
 updates the manifest inventory, repacks, and verifies the complete archive again before publishing
@@ -136,7 +146,7 @@ deliberately narrow.
 | 66 | API transport failure, including 400 and 429. |
 | 67 | Bundle integrity: ZIP structure, manifest schema, inventory coverage, or SHA-256 mismatch. |
 | 68 | Optional journal collection, projection, repack, or post-repack verification failure. |
-| 69 | Reader extraction, rendering, or filtering failure. |
+| 69 | Reader rendering failure. |
 
 Every run emits single-line structured events (`ts=… level=… event=… key=value`)
 and one final `support_bundle_collect_summary` or `support_bundle_read_summary`

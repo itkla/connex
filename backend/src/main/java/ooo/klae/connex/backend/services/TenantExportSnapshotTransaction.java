@@ -19,11 +19,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
+import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
 import ooo.klae.connex.backend.mappers.TenantLifecycleMapper;
 import ooo.klae.connex.backend.services.TenantExportExecution.TrackedResource;
 import ooo.klae.connex.backend.services.TenantExportQueryCancellationInterceptor.Scope;
+import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
+import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 import tools.jackson.databind.ObjectMapper;
 
 /** Captures one point-in-time tenant export through streaming cursors. */
@@ -32,6 +35,8 @@ import tools.jackson.databind.ObjectMapper;
 public class TenantExportSnapshotTransaction {
     private final TenantLifecycleMapper mapper;
     private final ObjectMapper objectMapper;
+    private final ClientErrorService clientErrorService;
+    private final TenantLifecycleProperties properties;
 
     /**
      * Writes table rows to the ZIP and object references to the private spool in one snapshot.
@@ -54,9 +59,77 @@ public class TenantExportSnapshotTransaction {
                     tables.add(table);
                 }
             }
+            for (ControlWorkspaceLifecycleRegistry.TableLifecycle declaration
+                    : ControlWorkspaceLifecycleRegistry.declarations().values()) {
+                execution.checkActive();
+                CapturedTable table = writeControlWorkspaceTable(
+                    workspaceId, declaration, zip, execution);
+                if (table != null) {
+                    tables.add(table);
+                }
+            }
             long objectCount = writeObjectReferences(workspaceId, objectSpool, execution);
             return new Snapshot(tables, objectCount);
         }
+    }
+
+    private CapturedTable writeControlWorkspaceTable(
+            int workspaceId,
+            ControlWorkspaceLifecycleRegistry.TableLifecycle declaration,
+            ZipOutputStream zip,
+            TenantExportExecution execution) throws IOException {
+        ControlWorkspaceLifecycleRegistry.TableLifecycle registered =
+            ControlWorkspaceLifecycleRegistry.requireRegistered(declaration);
+        return switch (registered.exportKind()) {
+            case CLIENT_ERROR -> writeClientErrors(workspaceId, registered, zip, execution);
+        };
+    }
+
+    private CapturedTable writeClientErrors(
+            int workspaceId,
+            ControlWorkspaceLifecycleRegistry.TableLifecycle declaration,
+            ZipOutputStream zip,
+            TenantExportExecution execution) throws IOException {
+        long afterId = 0;
+        long rows = 0;
+        boolean entryOpen = false;
+        try {
+            while (true) {
+                List<ClientErrorSupportRowDto> page = clientErrorService.workspaceExportPage(
+                    workspaceId, afterId, properties.getTableBatchSize());
+                if (page.isEmpty()) {
+                    break;
+                }
+                if (!entryOpen) {
+                    zip.putNextEntry(new ZipEntry("data/" + declaration.table() + ".jsonl"));
+                    entryOpen = true;
+                }
+                for (ClientErrorSupportRowDto row : page) {
+                    execution.checkActive();
+                    if (row.id() == null || row.id() <= afterId) {
+                        throw new IllegalStateException(
+                            "Control-workspace export keyset did not advance");
+                    }
+                    zip.write(objectMapper.writeValueAsBytes(row));
+                    zip.write('\n');
+                    afterId = row.id();
+                    rows = Math.addExact(rows, 1);
+                }
+                if (page.size() < properties.getTableBatchSize()) {
+                    break;
+                }
+            }
+        } finally {
+            if (entryOpen) {
+                zip.closeEntry();
+            }
+        }
+        return rows == 0
+            ? null
+            : new CapturedTable(
+                declaration.table(),
+                "data/" + declaration.table() + ".jsonl",
+                rows);
     }
 
     private CapturedTable writeTable(

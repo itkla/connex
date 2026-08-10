@@ -25,6 +25,8 @@
     <result property="userAgent" column="user_agent"/>
     <result property="sessionId" column="session_id"/>
     <result property="requestId" column="request_id"/>
+    <result property="untrustedClientAssertedCorrelationHmac"
+            column="untrusted_client_asserted_correlation_id"/>
     <result property="chainScopeType" column="chain_scope_type"/>
     <result property="chainScopeId" column="chain_scope_id"/>
     <result property="chainIndex" column="chain_index"/>
@@ -39,7 +41,8 @@
     al.integrity_workspace_id, al.integrity_org_id, al.integrity_actor_id,
     al.integrity_reference_state, al.actor_label,
     al.target_label, al.outcome, al.summary, al.changes, al.context, al.ip_address,
-    al.user_agent, al.session_id, al.request_id, al.chain_scope_type, al.chain_scope_id,
+    al.user_agent, al.session_id, al.request_id, al.untrusted_client_asserted_correlation_id,
+    al.chain_scope_type, al.chain_scope_id,
     al.chain_index, al.prev_hash, al.row_hash, al.created_at,
     u.display_name AS current_actor_label
   </sql>
@@ -50,12 +53,14 @@
        integrity_workspace_id, integrity_org_id, integrity_actor_id, actor_label, target_label,
        integrity_reference_state,
        outcome, summary, changes, context, ip_address, user_agent, session_id, request_id,
+       untrusted_client_asserted_correlation_id,
        chain_scope_type, chain_scope_id, chain_index, prev_hash, row_hash, created_at)
     VALUES
       (#{workspaceId}, #{orgId}, #{action}, #{entityType}, #{entityId}, #{actorId},
        #{integrityWorkspaceId}, #{integrityOrgId}, #{integrityActorId}, #{actorLabel}, #{targetLabel},
        #{integrityReferenceState},
        #{outcome}, #{summary}, #{changes}, #{context}, #{ipAddress}, #{userAgent}, #{sessionId}, #{requestId},
+       #{untrustedClientAssertedCorrelationHmac},
        #{chainScopeType}, #{chainScopeId}, #{chainIndex}, #{prevHash}, #{rowHash}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP))
   </insert>
 
@@ -88,23 +93,13 @@
 
   <sql id="supportColumns">
     al.id, al.workspace_id, al.org_id, al.action, al.entity_type, al.entity_id,
-    al.actor_id, al.outcome, al.request_id, al.created_at
+    al.actor_id, al.outcome, al.request_id,
+    al.untrusted_client_asserted_correlation_id AS stored_correlation_value,
+    al.created_at
   </sql>
 
-  <resultMap id="AuditSupportRow" type="ooo.klae.connex.backend.dto.AuditSupportRowDto">
-    <result property="auditId" column="id"/>
-    <result property="workspaceId" column="workspace_id"/>
-    <result property="orgId" column="org_id"/>
-    <result property="action" column="action"/>
-    <result property="entityType" column="entity_type"/>
-    <result property="entityId" column="entity_id"/>
-    <result property="actorId" column="actor_id"/>
-    <result property="outcome" column="outcome"/>
-    <result property="requestId" column="request_id"/>
-    <result property="createdAt" column="created_at"/>
-  </resultMap>
-
-  <select id="findOrgSupportSlice" resultMap="AuditSupportRow" timeout="20">
+  <select id="findOrgSupportSlice"
+          resultType="ooo.klae.connex.backend.dto.AuditSupportRowDto" timeout="20">
     SELECT <include refid="supportColumns"/>
     FROM audit_log al
     WHERE al.org_id = #{orgId}
@@ -115,14 +110,20 @@
       )
       AND al.created_at &gt;= #{since}
       AND al.created_at &lt;= #{until}
-      <if test="requestId != null">
-        AND al.request_id = #{requestId} COLLATE utf8mb4_0900_as_cs
+      <if test="untrustedClientAssertedCorrelationHmac != null">
+        AND (
+          al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{untrustedClientAssertedCorrelationHmac} USING ascii) COLLATE ascii_bin
+          OR al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{legacyRawCorrelationId} USING ascii) COLLATE ascii_bin
+        )
       </if>
     ORDER BY al.created_at ASC, al.id ASC
     LIMIT #{limit}
   </select>
 
-  <select id="findEntitySupportSlice" resultMap="AuditSupportRow" timeout="20">
+  <select id="findEntitySupportSlice"
+          resultType="ooo.klae.connex.backend.dto.AuditSupportRowDto" timeout="20">
     SELECT <include refid="supportColumns"/>
     FROM audit_log al
     WHERE al.workspace_id = #{workspaceId}
@@ -131,8 +132,13 @@
       AND al.entity_id = #{entityId}
       AND al.created_at &gt;= #{since}
       AND al.created_at &lt;= #{until}
-      <if test="requestId != null">
-        AND al.request_id = #{requestId} COLLATE utf8mb4_0900_as_cs
+      <if test="untrustedClientAssertedCorrelationHmac != null">
+        AND (
+          al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{untrustedClientAssertedCorrelationHmac} USING ascii) COLLATE ascii_bin
+          OR al.untrusted_client_asserted_correlation_id =
+            CONVERT(#{legacyRawCorrelationId} USING ascii) COLLATE ascii_bin
+        )
       </if>
     ORDER BY al.created_at ASC, al.id ASC
     LIMIT #{limit}

@@ -20,6 +20,7 @@ import org.springframework.web.servlet.HandlerMapping;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
@@ -76,6 +77,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     private final TenantCatalogResolver tenantCatalogResolver;
     private final WorkspaceRequestResolver workspaceRequestResolver;
     private final WorkspaceCookie workspaceCookie;
+    private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
 
     /**
      * Discards any scope left on this pooled thread, then resolves the request's own.
@@ -165,7 +167,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         tenantContext.clear();
     }
 
-    private static void emitJournalRecord(
+    private void emitJournalRecord(
             HttpServletRequest request, HttpServletResponse response, Object handler) {
         if (!(handler instanceof HandlerMethod handlerMethod)
                 || !journalAttributable(handlerMethod)
@@ -184,13 +186,21 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         if (!CorrelationIds.isValid(correlationId)) {
             return;
         }
-        log.atInfo()
-            .addKeyValue("connexOrganizationId", orgId)
-            .addKeyValue("requestMethod", request.getMethod())
-            .addKeyValue("requestPath", path)
-            .addKeyValue("responseStatus", response.getStatus())
-            .addKeyValue("eventClass", JOURNAL_EVENT_CLASS)
-            .log("Tenant request completed");
+        String disclosureHmac = correlationPseudonymizer.forDisclosure(
+            orgId, correlationPseudonymizer.forStorage(orgId, correlationId));
+        MDC.remove(CorrelationIds.MDC_KEY);
+        try {
+            log.atInfo()
+                .addKeyValue("connexOrganizationId", orgId)
+                .addKeyValue("untrustedClientAssertedCorrelationHmac", disclosureHmac)
+                .addKeyValue("requestMethod", request.getMethod())
+                .addKeyValue("requestPath", path)
+                .addKeyValue("responseStatus", response.getStatus())
+                .addKeyValue("eventClass", JOURNAL_EVENT_CLASS)
+                .log("Tenant request completed");
+        } finally {
+            MDC.put(CorrelationIds.MDC_KEY, correlationId);
+        }
     }
 
     private static boolean journalAttributable(HandlerMethod handler) {

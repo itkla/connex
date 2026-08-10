@@ -97,6 +97,8 @@
     "ariaPrimarySidebar": "メインサイドバー",
     "brand": "CONNEX",
     "sectionPinnedViews": "固定したビュー",
+    "pinnedViewsUnavailable": "固定したビューを読み込めませんでした。",
+    "retryPinnedViews": "再試行",
     "sectionRecent": "最近",
     "sectionOverview": "概要",
     "sectionRecords": "レコード",

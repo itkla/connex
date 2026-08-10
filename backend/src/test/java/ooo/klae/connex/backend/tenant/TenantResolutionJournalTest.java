@@ -36,12 +36,16 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.AuditIntegrityProperties;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 class TenantResolutionJournalTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String CORRELATION_ID = "request_ID-1234";
+    private static final String RAW_DISCLOSURE_SENTINEL =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final TenantCatalogResolver catalogResolver = mock(TenantCatalogResolver.class);
@@ -49,18 +53,24 @@ class TenantResolutionJournalTest {
     private final WorkspaceCookie workspaceCookie = mock(WorkspaceCookie.class);
     private final TenantContext tenantContext = new TenantContext();
     private final Logger logger = (Logger) LoggerFactory.getLogger(TenantResolutionInterceptor.class);
-    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    private final ListAppender<ILoggingEvent> appender = new FreezingListAppender();
 
+    private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
     private TenantResolutionInterceptor interceptor;
 
     @BeforeEach
     void setUp() {
+        AuditIntegrityProperties integrityProperties = new AuditIntegrityProperties();
+        integrityProperties.setHmacSecret("tenant-journal-test-secret-at-least-32-bytes");
+        correlationPseudonymizer =
+            new ClientAssertedCorrelationPseudonymizer(integrityProperties);
         interceptor = new TenantResolutionInterceptor(
             workspaceService,
             tenantContext,
             catalogResolver,
             requestResolver,
-            workspaceCookie);
+            workspaceCookie,
+            correlationPseudonymizer);
         User user = new User();
         user.setId(7);
         Authentication authentication = mock(Authentication.class);
@@ -106,7 +116,11 @@ class TenantResolutionJournalTest {
         assertEquals(404, fields.get("responseStatus"));
         assertEquals(TenantResolutionInterceptor.JOURNAL_EVENT_CLASS, fields.get("eventClass"));
         assertFalse(event.getFormattedMessage().contains("SENTINEL"));
-        assertEquals(CORRELATION_ID, event.getMDCPropertyMap().get(CorrelationIds.MDC_KEY));
+        String expectedDisclosureHmac = disclosureHmac(3, CORRELATION_ID);
+        assertEquals(expectedDisclosureHmac,
+            fields.get("untrustedClientAssertedCorrelationHmac"));
+        assertNull(event.getMDCPropertyMap().get(CorrelationIds.MDC_KEY));
+        assertEquals(CORRELATION_ID, MDC.get(CorrelationIds.MDC_KEY));
         assertFalse(tenantContext.isResolved());
 
         JsonNode ecs = encodeEcs(event);
@@ -115,10 +129,30 @@ class TenantResolutionJournalTest {
         assertEquals("/api/persons/{id}/profile-picture/{token:.+}", ecs.path("requestPath").textValue());
         assertEquals(404, ecs.path("responseStatus").intValue());
         assertEquals(TenantResolutionInterceptor.JOURNAL_EVENT_CLASS, ecs.path("eventClass").textValue());
-        assertEquals(CORRELATION_ID, ecs.path("correlationId").textValue());
+        assertEquals(expectedDisclosureHmac,
+            ecs.path("untrustedClientAssertedCorrelationHmac").textValue());
+        assertFalse(ecs.has("correlationId"));
         assertEquals("INFO", ecs.path("log").path("level").textValue());
         assertEquals(TenantResolutionInterceptor.class.getName(), ecs.path("log").path("logger").textValue());
         assertFalse(ecs.toString().contains("SENTINEL"));
+    }
+
+    @Test
+    void rawClientCorrelationNeverReachesTheWrittenJournalEvent() throws Exception {
+        MDC.put(CorrelationIds.MDC_KEY, RAW_DISCLOSURE_SENTINEL);
+        MockHttpServletRequest request = resolvedRequest();
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/persons/{id}");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        HandlerMethod handler = handler(new AttributableHandler());
+
+        interceptor.preHandle(request, response, handler);
+        interceptor.afterCompletion(request, response, handler, null);
+
+        assertEquals(1, appender.list.size());
+        JsonNode ecs = encodeEcs(appender.list.getFirst());
+        assertEquals(disclosureHmac(3, RAW_DISCLOSURE_SENTINEL),
+            ecs.path("untrustedClientAssertedCorrelationHmac").textValue());
+        assertFalse(ecs.toString().contains(RAW_DISCLOSURE_SENTINEL));
     }
 
     @Test
@@ -193,6 +227,11 @@ class TenantResolutionJournalTest {
         return new HandlerMethod(target, method);
     }
 
+    private String disclosureHmac(int orgId, String correlationId) {
+        return correlationPseudonymizer.forDisclosure(
+            orgId, correlationPseudonymizer.forStorage(orgId, correlationId));
+    }
+
     private static JsonNode encodeEcs(ILoggingEvent event) throws Exception {
         LoggerContext context = new LoggerContext();
         context.putObject(Environment.class.getName(), new MockEnvironment());
@@ -216,6 +255,14 @@ class TenantResolutionJournalTest {
 
     private static final class UnmarkedHandler {
         public void handle() {
+        }
+    }
+
+    private static final class FreezingListAppender extends ListAppender<ILoggingEvent> {
+        @Override
+        protected void append(ILoggingEvent event) {
+            event.prepareForDeferredProcessing();
+            super.append(event);
         }
     }
 }

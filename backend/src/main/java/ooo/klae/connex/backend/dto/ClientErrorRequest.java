@@ -6,10 +6,10 @@ import jakarta.validation.constraints.Size;
 /**
  * Validated client error-boundary report.
  *
- * @param digest optional framework error digest
+ * @param digest optional client-asserted framework error digest used only in deployment-local logs
  * @param message client error summary
  * @param stack optional client stack trace
- * @param path optional browser pathname
+ * @param path optional caller-controlled browser pathname mapped to a server-owned route template
  */
 public record ClientErrorRequest(
         @Size(max = 128) String digest,

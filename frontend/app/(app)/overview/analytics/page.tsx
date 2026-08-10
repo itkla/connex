@@ -12,7 +12,7 @@ import {
     getIntroductions,
     getMyWorkspacesFromCookie,
     getPipelinesFromCookie,
-    getRecentMovesFromCookie,
+    getRecentMovesResultFromCookie,
     getTaskSummaryFromCookie,
     getUsers,
     getWarmthSummaryFromCookie,
@@ -22,7 +22,6 @@ import type {
     DealRiskAnalytics,
     IntroSuggestion,
     IntroductionRecord,
-    JobMove,
     Pipeline,
     TaskSummary,
     User,
@@ -72,7 +71,7 @@ export default async function AnalyticsPage() {
         users,
         dealRiskAnalytics,
         introSuggestions,
-        recentMoves,
+        recentMovesResult,
         introLineage,
         taskSummary,
         warmth,
@@ -83,13 +82,14 @@ export default async function AnalyticsPage() {
         getUsers(init).catch(() => [] as User[]),
         getDealRiskAnalyticsFromCookie(cookie).catch(() => EMPTY_DEAL_RISK_ANALYTICS),
         getIntroSuggestionsFromCookie(cookie).catch(() => [] as IntroSuggestion[]),
-        getRecentMovesFromCookie(cookie).catch(() => [] as JobMove[]),
+        getRecentMovesResultFromCookie(cookie),
         getIntroductions({ size: 500 }, init)
             .then((page) => page.items)
             .catch(() => [] as IntroductionRecord[]),
         getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
         getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
     ]);
+    const recentMoves = recentMovesResult.ok ? recentMovesResult.data : [];
 
     return (
         <AnalyticsBoard
@@ -102,6 +102,7 @@ export default async function AnalyticsPage() {
             introSuggestions={introSuggestions}
             introLineage={introLineage}
             recentMoves={recentMoves}
+            recentMovesAvailable={recentMovesResult.ok}
             taskSummary={taskSummary}
             warmth={warmth}
         />

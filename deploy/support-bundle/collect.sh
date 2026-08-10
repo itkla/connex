@@ -13,7 +13,8 @@
 # With --include-journal the script appends only dedicated, server-attributed request-completion
 # records for the requested organization. It parses Spring's ECS JSON inside journald MESSAGE,
 # filters exactly on the server-owned organization field before projection, and never copies raw
-# messages, stack traces, query strings, headers, hosts, or unknown fields.
+# client correlation values, messages, stack traces, query strings, headers, hosts, or unknown
+# fields.
 #
 # Exit codes: 64 usage/configuration/dependency, 65 authentication or
 # authorization, 66 API transport, 67 bundle integrity, 68 journal collection.
@@ -166,7 +167,8 @@ support_bundle_journal_projection() {
     local since="$1"
     local until="$2"
     local organization_id="$3"
-    local destination="$4"
+    local correlation_hmac="$4"
+    local destination="$5"
     local projected="$WORK_DIR/journal-projected.jsonl"
     local -a journal_arguments=(
         --unit "$JOURNAL_UNIT"
@@ -179,7 +181,7 @@ support_bundle_journal_projection() {
         ulimit -f "$(( SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES / 512 ))" 2>/dev/null
         journalctl "${journal_arguments[@]}" 2>/dev/null \
             | SUPPORT_BUNDLE_JOURNAL_ORG_ID="$organization_id" \
-              SUPPORT_BUNDLE_JOURNAL_CORRELATION_ID="$CORRELATION_ID" \
+              SUPPORT_BUNDLE_JOURNAL_CORRELATION_HMAC="$correlation_hmac" \
               python3 -c '
 import json
 import os
@@ -188,11 +190,11 @@ import sys
 import unicodedata
 
 TARGET_ORG = int(os.environ["SUPPORT_BUNDLE_JOURNAL_ORG_ID"])
-TARGET_CORRELATION = os.environ["SUPPORT_BUNDLE_JOURNAL_CORRELATION_ID"]
+TARGET_CORRELATION_HMAC = os.environ["SUPPORT_BUNDLE_JOURNAL_CORRELATION_HMAC"]
 LOGGER = "ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"
 EVENT_CLASS = "http.request.completed"
 METHODS = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
-CORRELATION = re.compile(r"[A-Za-z0-9_-]{8,64}\Z")
+CORRELATION_HMAC = re.compile(r"[0-9a-f]{64}\Z")
 TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z\Z")
 MAX_INPUT_CHARS = 268435456
 MAX_RECORDS = 50000
@@ -244,7 +246,7 @@ for line in sys.stdin:
     ):
         continue
     log = ecs.get("log")
-    correlation_id = ecs.get("correlationId")
+    correlation_hmac = ecs.get("untrustedClientAssertedCorrelationHmac")
     status = ecs.get("responseStatus")
     if (
         not isinstance(log, dict)
@@ -253,9 +255,9 @@ for line in sys.stdin:
         or ecs.get("eventClass") != EVENT_CLASS
         or not isinstance(ecs.get("@timestamp"), str)
         or TIMESTAMP.fullmatch(ecs["@timestamp"]) is None
-        or not isinstance(correlation_id, str)
-        or CORRELATION.fullmatch(correlation_id) is None
-        or (TARGET_CORRELATION and correlation_id != TARGET_CORRELATION)
+        or not isinstance(correlation_hmac, str)
+        or CORRELATION_HMAC.fullmatch(correlation_hmac) is None
+        or (TARGET_CORRELATION_HMAC and correlation_hmac != TARGET_CORRELATION_HMAC)
         or ecs.get("requestMethod") not in METHODS
         or not safe_path(ecs.get("requestPath"))
         or isinstance(status, bool)
@@ -271,7 +273,7 @@ for line in sys.stdin:
         "timestamp": ecs["@timestamp"],
         "level": log["level"],
         "logger": log["logger"],
-        "correlationId": correlation_id,
+        "untrustedClientAssertedCorrelationHmac": correlation_hmac,
         "method": ecs["requestMethod"],
         "path": ecs["requestPath"],
         "status": status,
@@ -301,7 +303,7 @@ for line in sys.stdin:
 support_bundle_append_journal() {
     local staging="$1"
     local manifest="$staging/manifest.json"
-    local manifest_org since until manifest_correlation entry_length entry_hash total_length
+    local manifest_org since until manifest_correlation_hmac entry_length entry_hash total_length
     if ! manifest_org="$(jq -er 'select((.orgId | type) == "number" and .orgId > 0 and .orgId == (.orgId | floor)) | .orgId | tostring' "$manifest")" \
         || [ "$manifest_org" != "$ORG_ID" ]; then
         support_bundle_log error journal_failed reason manifest_organization_mismatch expected "$ORG_ID"
@@ -317,16 +319,24 @@ support_bundle_append_journal() {
         support_bundle_log error journal_failed reason manifest_window_malformed
         return "$EXIT_JOURNAL"
     fi
-    if ! manifest_correlation="$(jq -er '
-        if .filters.correlationId == null then ""
-        elif (.filters.correlationId | type) == "string" then .filters.correlationId
+    if ! manifest_correlation_hmac="$(jq -er '
+        if .filters.untrustedClientAssertedCorrelationHmac == null then ""
+        elif (.filters.untrustedClientAssertedCorrelationHmac | type) == "string"
+            and (.filters.untrustedClientAssertedCorrelationHmac | test("^[0-9a-f]{64}$"))
+        then .filters.untrustedClientAssertedCorrelationHmac
         else error("invalid correlation filter") end
-    ' "$manifest")" || [ "$manifest_correlation" != "$CORRELATION_ID" ]; then
+    ' "$manifest")"; then
+        support_bundle_log error journal_failed reason manifest_correlation_mismatch
+        return "$EXIT_JOURNAL"
+    fi
+    if { [ -n "$CORRELATION_ID" ] && [ -z "$manifest_correlation_hmac" ]; } \
+        || { [ -z "$CORRELATION_ID" ] && [ -n "$manifest_correlation_hmac" ]; } \
+        || { [ -n "$CORRELATION_ID" ] && [ "$manifest_correlation_hmac" = "$CORRELATION_ID" ]; }; then
         support_bundle_log error journal_failed reason manifest_correlation_mismatch
         return "$EXIT_JOURNAL"
     fi
     support_bundle_journal_projection "$since" "$until" "$manifest_org" \
-        "$staging/journal-slice.jsonl" || return "$EXIT_JOURNAL"
+        "$manifest_correlation_hmac" "$staging/journal-slice.jsonl" || return "$EXIT_JOURNAL"
     entry_length="$(stat -c '%s' "$staging/journal-slice.jsonl")"
     entry_hash="$(sha256sum "$staging/journal-slice.jsonl" | awk '{print $1}')"
     if ! jq --arg path journal-slice.jsonl \
@@ -341,7 +351,7 @@ support_bundle_append_journal() {
             unit: $unit,
             organizationId: $organization_id,
             organizationDiscriminator: "connexOrganizationId",
-            projection: "ecs_message_closed_fields_v1",
+            projection: "ecs_message_closed_fields_v2",
             redactor: "request_path_redactor_v1"
           }
     ' "$manifest" > "$manifest.new"; then

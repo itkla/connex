@@ -407,7 +407,7 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void internalErrorRedactsCredentialBearingRequestPaths() {
+    void internalErrorMapsUnrecognizedApiPathsToUnknown() {
         MockHttpServletRequest request =
                 new MockHttpServletRequest("GET", "/api/invites/aBc123defGhi456jklMno/accept");
 
@@ -415,7 +415,7 @@ class GlobalExceptionHandlerTest {
 
         ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
         verify(errorReporter).report(captor.capture());
-        assertEquals("/api/invites/{token}/accept", captor.getValue().path());
+        assertEquals("unknown", captor.getValue().path());
     }
 
     private static List<ILoggingEvent> captureHandlerLogs(Runnable action) {

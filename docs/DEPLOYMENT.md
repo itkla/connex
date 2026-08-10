@@ -511,33 +511,37 @@ deployment unless the operator explicitly configures a vendor integration.
   a `HEAD` request. Unset token = endpoint unavailable to every caller, which the backend warns
   about at startup.
 
-**Support flow (correlation ids):** every API response carries an `X-Correlation-Id` header, and
-unexpected `500` responses include the same id in the JSON body. Production logs are structured
-JSON (ECS) and include the `correlationId` field, so when a user quotes that id the operator can
-find the exact server-side stack trace with e.g.
-`journalctl -u <backend-unit> | grep '"correlationId":"<id>"'` and include it in a support ticket.
-For rendering failures the frontend error screen shows a `Reference:` digest instead; the app
-reports it (best-effort) to this deployment's own `/api/client-errors` sink, so the matching log
-line is found by grepping for the digest value itself:
-`journalctl -u <backend-unit> | grep '<reference>'` — the `CLIENT`-source entry carries the
-digest, the page path, and the client stack. Both lookups run entirely against the deployment's
-own logs — that pairing is the support path for deployments Connex does not operate.
+**Support flow (references and correlation ids):** every API response carries an
+`X-Correlation-Id` header, and unexpected `500` responses include the same id in the JSON body.
+For rendering failures the frontend error screen instead shows a `Reference:` digest. The app
+best-effort reports that digest to `/api/client-errors`. Because its decimal shape does not prove
+framework provenance, the digest is retained only in the deployment-local error report and is not
+persisted or exported. Client-error metadata keeps only workspace, report time, a closed-vocabulary
+route template, and a domain-separated correlation HMAC; it is purged on startup and hourly at the
+fixed 30-day UTC cutoff. Local ECS logs still carry the digest and stack details for an operator
+with host access, but those
+user-data-bearing lines do not belong in an artefact sent to support.
 
 **Support bundle:** an organization administrator can download a redacted, manifest-bearing
 support bundle from `GET /api/orgs/{orgId}/support-bundle` and hand it to a support engineer, so a
 ticket can be diagnosed without database or SSH access. The bundle carries readiness, allowlisted
-configuration, migration history, and a windowed audit slice — and never carries secrets, hosts,
-record values, or personal names. On a systemd deployment, the host operator can add the optional
-closed-field request-completion slice with `collect.sh --include-journal --journal-unit <unit>`.
-Those records are filtered first by the server-resolved organization integer; missing, malformed,
-ambiguous, and other-organization records are dropped, and raw journald `MESSAGE`, exception text,
-stacks, headers, hosts, and query strings are never copied. Async request completions are omitted
-because tenant resolution can change before redispatch. A journal collection, projection, repack,
-or pre-publication post-repack verification failure uses exit code `68` and publishes no archive.
-Note that the audit slice is keyed by a server-minted
-request id, not by the `X-Correlation-Id` a user can quote; the two are deliberately separate, while
-the optional journal projection may use the quoted id only as a secondary filter after organization
-scoping. `SUPPORT_BUNDLE.md` explains how to pivot. Collect and read it with
+configuration, migration history, redacted client-error metadata, and a windowed audit slice — and
+never carries secrets, hosts, record values, or personal names. The audit slice labels its
+non-spoofable `serverMintedRequestId` separately from
+`untrustedClientAssertedCorrelationHmac`, which is only an organization-scoped lookup aid and never
+proof of request identity.
+
+On a systemd deployment, the host operator can add the optional closed-field request-completion
+slice with `collect.sh --include-journal --journal-unit <unit>`. Those records are filtered first by
+the server-resolved organization integer; missing, malformed, ambiguous, and other-organization
+records are dropped, and raw journald `MESSAGE`, exception text, stacks, headers, hosts, and query
+strings are never copied. The dedicated record and bundle carry only
+`untrustedClientAssertedCorrelationHmac`, using the same organization-scoped disclosure-HMAC
+derivation as current audit and client-error rows, never the raw caller value. It is only a secondary
+lookup aid after organization scoping, not a substitute for `serverMintedRequestId`. Async request
+completions are omitted because tenant resolution can change before redispatch. A journal collection,
+projection, repack, or pre-publication post-repack verification failure uses exit code `68` and
+publishes no archive. `SUPPORT_BUNDLE.md` explains the correlation boundary. Collect and read it with
 [`deploy/support-bundle/`](../deploy/support-bundle/README.md); the full contents, redaction
 contract, and a worked "a contact vanished" investigation are in
 [`SUPPORT_BUNDLE.md`](SUPPORT_BUNDLE.md).
