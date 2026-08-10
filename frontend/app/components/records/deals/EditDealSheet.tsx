@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
+import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 import { getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
 import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
@@ -117,7 +118,7 @@ export default function EditDealSheet({
             const payload: UpdateDealPayload = {
                 name: draft.name.trim(),
                 value: draft.value,
-                actualValue: draft.actualValue,
+                actualValue: actualValueForOutcome(draft.won, draft.actualValue),
                 currency: draft.currency.trim() || 'USD',
                 pipeline: draft.pipeline,
                 stage: draft.stage,

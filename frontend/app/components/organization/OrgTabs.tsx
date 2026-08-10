@@ -18,10 +18,17 @@ const TABS = [
     { key: "tabDiagnostics", href: "/organization/diagnostics" },
 ] as const;
 
-export default function OrgTabs({ ssoEnabled = false }: { ssoEnabled?: boolean }) {
+export default function OrgTabs({
+    isOrgAdmin,
+    ssoEnabled = false,
+}: {
+    isOrgAdmin: boolean;
+    ssoEnabled?: boolean;
+}) {
     const pathname = usePathname() ?? "";
     const t = useTranslations("Organization");
     const reduce = useReducedMotion() ?? false;
+    if (!isOrgAdmin) return null;
     const tabs = TABS.filter((tab) => tab.key !== "tabSso" || ssoEnabled);
 
     return (

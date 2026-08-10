@@ -381,6 +381,7 @@
         "closedAt": "決着日時",
         "closedReason": "決着理由",
         "actualValue": "実績金額",
+        "actualValueLost": "失注した案件の実績金額は常にゼロです。",
         "cancel": "キャンセル",
         "save": "保存",
         "valueDerivedFromLineItems": "この金額は明細から自動計算されています。変更するには明細を編集または削除してください。"

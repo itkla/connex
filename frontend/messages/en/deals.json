@@ -381,6 +381,7 @@
         "closedAt": "Closed at",
         "closedReason": "Closed reason",
         "actualValue": "Actual value",
+        "actualValueLost": "Lost deals always have an actual value of zero.",
         "cancel": "Cancel",
         "save": "Save",
         "valueDerivedFromLineItems": "This value is derived from the deal's line items. Edit or remove the line items to change it."

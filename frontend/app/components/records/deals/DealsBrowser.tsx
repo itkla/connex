@@ -121,7 +121,7 @@ import {
     type Tag,
     type WorkspaceMember,
 } from '@/app/lib/types';
-import { isDealClosed } from './dealOutcome';
+import { actualValueForOutcome, isDealClosed } from './dealOutcome';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -819,7 +819,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     const payload: UpdateDealPayload = {
                         name: draft.name.trim(),
                         value: draft.value,
-                        actualValue: draft.actualValue,
+                        actualValue: actualValueForOutcome(draft.won, draft.actualValue),
                         currency: draft.currency.trim(),
                         pipeline: draft.pipeline,
                         stage: draft.stage,
