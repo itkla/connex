@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "bash ../deploy/staging/connex-frontend-start.sh",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
