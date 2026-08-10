@@ -14,7 +14,7 @@ import {
 import { RangeCalendar } from '@/components/ui/range-calendar';
 import { getActivityVolume } from '@/app/lib/api';
 import { addDays, dayKeyOf } from '@/app/lib/calendar';
-import { parseDayKey, rangeDays, sumSeries, type DateRange } from '@/app/lib/rangeCalendar';
+import { parseDayKey, rangeDays, splitIntoWindows, sumSeries, type DateRange } from '@/app/lib/rangeCalendar';
 import {
     MAX_CUSTOM_RANGE_DAYS,
     parseCustomAnalyticsWindow,
@@ -125,18 +125,24 @@ export default function CustomRangePopover({
             requestRef.current?.abort();
             const controller = new AbortController();
             requestRef.current = controller;
-            getActivityVolume(undefined, scope, { ...window, granularity: 'day', timezone }, {
-                signal: controller.signal,
-            })
-                .then((buckets) => {
+            Promise.all(
+                splitIntoWindows(window, MAX_CUSTOM_RANGE_DAYS).map((chunk) =>
+                    getActivityVolume(undefined, scope, { ...chunk, granularity: 'day', timezone }, {
+                        signal: controller.signal,
+                    }),
+                ),
+            )
+                .then((pages) => {
                     setSeries((current) => {
                         const next = new Map(current);
-                        for (const bucket of buckets) {
-                            if (!bucket.periodStart) continue;
-                            next.set(
-                                bucket.periodStart,
-                                bucket.call + bucket.email + bucket.meeting + bucket.note + bucket.other,
-                            );
+                        for (const buckets of pages) {
+                            for (const bucket of buckets) {
+                                if (!bucket.periodStart) continue;
+                                next.set(
+                                    bucket.periodStart,
+                                    bucket.call + bucket.email + bucket.meeting + bucket.note + bucket.other,
+                                );
+                            }
                         }
                         return next;
                     });

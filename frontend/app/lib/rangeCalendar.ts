@@ -153,6 +153,23 @@ export function visibleSpan(zoom: CalendarZoom, anchor: Date, panelCount: number
     return { from: dayKeyOf(first), to: dayKeyOf(last) };
 }
 
+/**
+ * Splits a span into consecutive windows of at most `maxDays`, covering it exactly. A year grid
+ * shows twelve years at once, far past what a windowed analytics endpoint will accept, so the
+ * caller has to request it in pieces rather than have one oversized call rejected.
+ */
+export function splitIntoWindows(range: DateRange, maxDays: number): DateRange[] {
+    const start = parseDayKey(range.from);
+    const end = parseDayKey(range.to);
+    if (!start || !end || start.getTime() > end.getTime() || maxDays < 1) return [];
+    const windows: DateRange[] = [];
+    for (let from = start; from.getTime() <= end.getTime(); from = addDays(from, maxDays)) {
+        const last = addDays(from, maxDays - 1);
+        windows.push({ from: dayKeyOf(from), to: dayKeyOf(last.getTime() < end.getTime() ? last : end) });
+    }
+    return windows;
+}
+
 /** Daily magnitudes keyed by `YYYY-MM-DD`. Days with no entry count as zero. */
 export type DaySeries = ReadonlyMap<string, number>;
 

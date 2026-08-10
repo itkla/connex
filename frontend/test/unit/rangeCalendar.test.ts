@@ -15,6 +15,7 @@ import {
     rangeDays,
     spanPeriods,
     startOfYear,
+    splitIntoWindows,
     sumSeries,
     visibleSpan,
     withinSpanLimit,
@@ -332,5 +333,38 @@ describe("visibleSpan", () => {
             from: "2016-01-01",
             to: "2027-12-31",
         });
+    });
+});
+
+describe("splitIntoWindows", () => {
+    it("leaves a span already within the limit whole", () => {
+        expect(splitIntoWindows({ from: "2026-01-01", to: "2026-03-01" }, 731)).toEqual([
+            { from: "2026-01-01", to: "2026-03-01" },
+        ]);
+    });
+
+    it("splits a twelve-year page into windows the backend accepts", () => {
+        const range = { from: "2016-01-01", to: "2027-12-31" };
+        const windows = splitIntoWindows(range, 731);
+        expect(windows.length).toBe(Math.ceil(rangeDays(range) / 731));
+        for (const window of windows) expect(rangeDays(window)).toBeLessThanOrEqual(731);
+        expect(windows.length).toBeGreaterThan(1);
+        expect(windows[0].from).toBe("2016-01-01");
+        expect(windows.at(-1)!.to).toBe("2027-12-31");
+    });
+
+    it("covers the span exactly, with no gap or overlap between windows", () => {
+        const range = { from: "2016-01-01", to: "2027-12-31" };
+        const windows = splitIntoWindows(range, 731);
+        expect(windows.reduce((total, window) => total + rangeDays(window), 0)).toBe(rangeDays(range));
+        for (let index = 1; index < windows.length; index++) {
+            const previousEnd = parseDayKey(windows[index - 1].to)!;
+            expect(windows[index].from).toBe(dayKeyOf(new Date(previousEnd.getFullYear(), previousEnd.getMonth(), previousEnd.getDate() + 1)));
+        }
+    });
+
+    it("returns nothing for a reversed or unparseable span", () => {
+        expect(splitIntoWindows({ from: "2026-03-01", to: "2026-01-01" }, 731)).toEqual([]);
+        expect(splitIntoWindows({ from: "nope", to: "2026-01-01" }, 731)).toEqual([]);
     });
 });

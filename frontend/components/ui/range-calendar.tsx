@@ -160,7 +160,7 @@ function Sparkline({
                     <span
                         key={index}
                         className={cn(
-                            'min-w-0 flex-1 rounded-t-[1px] transition-colors duration-150',
+                            'min-w-0 flex-1 transition-colors duration-150',
                             value === 0 ? 'opacity-0' : lit ? 'bg-brand-dark dark:bg-brand' : 'bg-foreground/20',
                         )}
                         style={{ height: `${Math.max(6, Math.round((value / peak) * 100))}%` }}
@@ -332,6 +332,7 @@ function useRangeInput({
     setDraft,
     setFocusValue,
     rangeOf,
+    canExtendTo,
     onCommit,
     onPage,
 }: {
@@ -344,6 +345,7 @@ function useRangeInput({
     setDraft: React.Dispatch<React.SetStateAction<Draft | null>>;
     setFocusValue: (value: string) => void;
     rangeOf: (candidate: Draft | null) => DateRange;
+    canExtendTo: (value: string) => boolean;
     onCommit: (range: DateRange) => void;
     onPage: (delta: number) => void;
 }) {
@@ -354,7 +356,7 @@ function useRangeInput({
     const activate = useCallback(
         (cellValue: string) => {
             const date = parseDayKey(cellValue);
-            if (!date) return;
+            if (!date || !canExtendTo(cellValue)) return;
             if (draft && draft.zoom === zoom) {
                 const anchor = parseDayKey(draft.anchor);
                 if (anchor) {
@@ -371,7 +373,7 @@ function useRangeInput({
             setDraft(null);
             onCommit(periodRange(zoom, date));
         },
-        [draft, onCommit, setDraft, setFocusValue, zoom],
+        [canExtendTo, draft, onCommit, setDraft, setFocusValue, zoom],
     );
 
     const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -445,13 +447,34 @@ function useRangeInput({
         const nextValue = dayKeyOf(next);
         setFocusValue(nextValue);
         setDraft((current) =>
-            current && current.zoom === zoom ? { ...current, cursor: nextValue } : current,
+            current && current.zoom === zoom && canExtendTo(nextValue)
+                ? { ...current, cursor: nextValue }
+                : current,
         );
         const onScreen = panels.some((panel) =>
             panel.cells.some((cell) => cell.value === nextValue && !cell.muted),
         );
         if (onScreen) return;
         onPage(delta > 0 ? 1 : -1);
+    };
+
+    const moveToRowEdge = (toEnd: boolean) => {
+        for (const panel of panels) {
+            const index = panel.cells.findIndex((cell) => cell.value === tabValue);
+            if (index < 0) continue;
+            const rowStart = index - (index % columns);
+            const row = panel.cells.slice(rowStart, rowStart + columns);
+            const ordered = toEnd ? [...row].reverse() : row;
+            const target = ordered.find((cell) => !cell.muted) ?? ordered[0];
+            if (!target) return;
+            setFocusValue(target.value);
+            setDraft((current) =>
+                current && current.zoom === zoom && canExtendTo(target.value)
+                    ? { ...current, cursor: target.value }
+                    : current,
+            );
+            return;
+        }
     };
 
     const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -479,6 +502,12 @@ function useRangeInput({
             moveFocus(delta);
             return;
         }
+        if (event.key === 'Home' || event.key === 'End') {
+            event.preventDefault();
+            keyboardRef.current = true;
+            moveToRowEdge(event.key === 'End');
+            return;
+        }
         if (event.key === 'PageUp' || event.key === 'PageDown') {
             event.preventDefault();
             keyboardRef.current = true;
@@ -488,6 +517,7 @@ function useRangeInput({
 
     useEffect(() => {
         if (!keyboardRef.current) return;
+        keyboardRef.current = false;
         gridRef.current?.querySelector<HTMLElement>('[data-cell-value][tabindex="0"]')?.focus();
     }, [gridRef, panels, tabValue]);
 
@@ -656,6 +686,15 @@ export function RangeCalendar({
         [applyView, reduce, setDraft],
     );
 
+    const canExtendTo = useCallback(
+        (cellValue: string) => {
+            if (!spanAnchor) return true;
+            const date = parseDayKey(cellValue);
+            return date != null && withinSpanLimit(zoom, spanAnchor, date, maxDays);
+        },
+        [maxDays, spanAnchor, zoom],
+    );
+
     const commitRange = useCallback(
         (range: DateRange) => {
             onChange(range);
@@ -684,6 +723,7 @@ export function RangeCalendar({
         setDraft,
         setFocusValue,
         rangeOf,
+        canExtendTo,
         onCommit: commitRange,
         onPage: pageFocus,
     });
