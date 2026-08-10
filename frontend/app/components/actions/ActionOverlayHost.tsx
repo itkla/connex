@@ -14,7 +14,11 @@ import { submitRadarTaskWithCurrentSignal, type RadarTaskSignalSnapshot } from "
 import { toastError, toastWarn } from "@/app/lib/toast";
 import { draftKey, getDraftKeyGeneration, subscribeDraftChanges } from "@/app/lib/formDrafts";
 import ImportDialog from "@/app/components/import/LazyImportDialog";
-import { reduceOverlayRetention } from "@/lib/overlay-lifecycle";
+import { OverlayChunkFailureBoundary } from "@/app/components/actions/OverlayChunkFailureBoundary";
+import {
+    reduceOverlayRetention,
+    type OverlayLifecycleCapabilities,
+} from "@/lib/overlay-lifecycle";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -33,6 +37,22 @@ const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
 ]);
 
 const INACTIVE_RADAR_TASK_SNAPSHOT: RadarTaskSignalSnapshot = { status: "changed" };
+
+const OVERLAY_LIFECYCLE_CAPABILITIES: Record<
+    OverlayRequest["kind"],
+    OverlayLifecycleCapabilities
+> = {
+    "create-task": { reportsMount: true, reportsCloseCompletion: true },
+    "create-note": { reportsMount: false, reportsCloseCompletion: false },
+    "create-activity": { reportsMount: false, reportsCloseCompletion: false },
+    "create-company": { reportsMount: false, reportsCloseCompletion: false },
+    "create-person": { reportsMount: false, reportsCloseCompletion: false },
+    "create-deal": { reportsMount: false, reportsCloseCompletion: false },
+    "import-companies": { reportsMount: false, reportsCloseCompletion: false },
+    "import-contacts": { reportsMount: false, reportsCloseCompletion: false },
+    "import-deals": { reportsMount: false, reportsCloseCompletion: false },
+    "workflow-manual-run": { reportsMount: false, reportsCloseCompletion: false },
+};
 
 function subscribeToInactiveRadarTask(): () => void {
     return () => undefined;
@@ -130,7 +150,9 @@ async function loadReferences(
  * The requested overlay is kept mounted through its close animation: the `visible` flag drives each
  * dialog's `open` prop and flips to false when the request clears, while `rendered` (and its loaded
  * reference data) persist so the dialog can play its exit transition instead of unmounting instantly.
- * Task composers report completion so their retained live request can be released afterward.
+ * Overlays declare whether they report mount and close completion. Unreported lifecycles release on
+ * cancellation, while the task composer remains retained only after it has mounted and until its exit
+ * completes.
  */
 export default function ActionOverlayHost({
     overlay,
@@ -162,7 +184,7 @@ export default function ActionOverlayHost({
             },
             open: true,
             mounted: false,
-            releaseBeforeMount: overlay.kind === "create-task",
+            capabilities: OVERLAY_LIFECYCLE_CAPABILITIES[overlay.kind],
         } : null,
     );
     if (overlay && overlayGeneration !== null && overlayGeneration !== retainedOverlay?.generation) {
@@ -175,7 +197,7 @@ export default function ActionOverlayHost({
                 request: overlay,
                 signal: requestSignal,
             },
-            releaseBeforeMount: overlay.kind === "create-task",
+            capabilities: OVERLAY_LIFECYCLE_CAPABILITIES[overlay.kind],
         });
     } else if (!overlay && retainedOverlay?.open) {
         dispatchRetention({ type: "cancelled", generation: retainedOverlay.generation });
@@ -403,6 +425,11 @@ export default function ActionOverlayHost({
         rosterOnly,
         usersReady,
     ]);
+    const handleOverlayLoadFailure = useCallback(() => {
+        if (rendered === null) return;
+        dispatchRetention({ type: "load-failed", generation: rendered.generation });
+        onClose();
+    }, [onClose, rendered]);
 
     if (!user) return null;
 
@@ -484,7 +511,10 @@ export default function ActionOverlayHost({
     const defaultActivityType = ACTIVITY_TYPES.find((activityType) => activityType === activityDraft?.type);
 
     return (
-        <>
+        <OverlayChunkFailureBoundary
+            key={rendered?.generation ?? "no-overlay"}
+            onFailure={handleOverlayLoadFailure}
+        >
             <Fragment key={rendered?.generation}>
                 {rendered?.request.kind === "create-task" && users && references && restoredDraftCanMount ? (
                     <TaskDialog
@@ -599,6 +629,6 @@ export default function ActionOverlayHost({
                     />
                 ) : null}
             </Fragment>
-        </>
+        </OverlayChunkFailureBoundary>
     );
 }

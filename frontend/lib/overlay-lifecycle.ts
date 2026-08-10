@@ -1,9 +1,14 @@
+export type OverlayLifecycleCapabilities = {
+  reportsMount: boolean
+  reportsCloseCompletion: boolean
+}
+
 export type RetainedOverlay<T> = {
   generation: number
   value: T
   open: boolean
   mounted: boolean
-  releaseBeforeMount: boolean
+  capabilities: OverlayLifecycleCapabilities
 }
 
 export type OverlayRetentionEvent<T> =
@@ -11,11 +16,12 @@ export type OverlayRetentionEvent<T> =
       type: "opened"
       generation: number
       value: T
-      releaseBeforeMount: boolean
+      capabilities: OverlayLifecycleCapabilities
     }
   | { type: "mounted"; generation: number }
   | { type: "cancelled"; generation: number }
   | { type: "close-completed"; generation: number }
+  | { type: "load-failed"; generation: number }
 
 /** Retains mounted overlays for their exit while releasing requests cancelled before they mount. */
 export function reduceOverlayRetention<T>(
@@ -29,7 +35,7 @@ export function reduceOverlayRetention<T>(
         value: event.value,
         open: true,
         mounted: false,
-        releaseBeforeMount: event.releaseBeforeMount,
+        capabilities: event.capabilities,
       }
     case "mounted":
       return state?.generation === event.generation
@@ -37,9 +43,12 @@ export function reduceOverlayRetention<T>(
         : state
     case "cancelled":
       if (state?.generation !== event.generation) return state
-      if (state.releaseBeforeMount && !state.mounted) return null
+      if (!state.capabilities.reportsCloseCompletion) return null
+      if (state.capabilities.reportsMount && !state.mounted) return null
       return { ...state, open: false }
     case "close-completed":
+      return state?.generation === event.generation ? null : state
+    case "load-failed":
       return state?.generation === event.generation ? null : state
   }
 }

@@ -51,16 +51,26 @@ public class RelationshipSignalScheduler {
 
     private void reconcile(int workspaceId) {
         JobRunDetail started = JobRunDetail.startedUtc();
-        RelationshipSignalReconciliationService.Result result =
-            reconciliationService.reconcileWorkspace(workspaceId);
-        JobRunStatus status = result.failedCount() == 0
-            ? JobRunStatus.SUCCEEDED
-            : JobRunStatus.FAILED;
-        jobRunRecorder.record(
-            JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION,
-            workspaceId,
-            status,
-            new JobRunDetail(
-                started.startedAt(), Map.of("failedCount", result.failedCount())));
+        try {
+            RelationshipSignalReconciliationService.Result result =
+                reconciliationService.reconcileWorkspace(workspaceId);
+            JobRunStatus status = result.failedCount() == 0
+                ? JobRunStatus.SUCCEEDED
+                : JobRunStatus.FAILED;
+            jobRunRecorder.record(
+                JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION,
+                workspaceId,
+                status,
+                new JobRunDetail(
+                    started.startedAt(), Map.of("failedCount", result.failedCount())));
+        } catch (RuntimeException exception) {
+            jobRunRecorder.record(
+                JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION,
+                workspaceId,
+                JobRunStatus.FAILED,
+                new JobRunDetail(
+                    started.startedAt(), Map.of("phase", "workspace_reconciliation")));
+            throw exception;
+        }
     }
 }

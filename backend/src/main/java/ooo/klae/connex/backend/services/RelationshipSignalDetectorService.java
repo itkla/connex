@@ -136,6 +136,7 @@ public class RelationshipSignalDetectorService {
     }
 
     /** Detects high and medium deal risks from the canonical risk assessment output. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detection detectDealRisk(int workspaceId, String generationToken) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         Map<Integer, RelationshipTemperatureDto> warmth = new LinkedHashMap<>();
@@ -183,10 +184,21 @@ public class RelationshipSignalDetectorService {
     }
 
     /** Detects warm introduction opportunities from the existing warm-path graph output. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detection detectWarmPaths(
             int workspaceId, String generationToken, Instant evidenceAsOf) {
+        Map<Integer, RelationshipTemperatureDto> warmth = new LinkedHashMap<>();
+        scoringService.scoreContacts(workspaceId)
+            .forEach(temperature -> warmth.put(temperature.getId(), temperature));
+        Map<Integer, String> contactSourceStateHashes =
+            scoringService.contactSourceStateHashes(
+                workspaceId, Set.of(), Set.of(), Set.of());
         List<RelationshipSignal> candidates = warmPathService
-            .computePaths(workspaceId, WARM_PATH_CAP)
+            .computePaths(
+                workspaceId,
+                WARM_PATH_CAP,
+                warmth,
+                contactSourceStateHashes)
             .stream()
             .map(path -> warmPathSignal(
                 workspaceId, path, evidenceAsOf, generationToken))
@@ -305,8 +317,7 @@ public class RelationshipSignalDetectorService {
                 "person",
                 path.getTargetId(),
                 "opportunity",
-                path.getScore(),
-                evidence),
+                path.getSourceState()),
             generationToken);
     }
 
@@ -387,15 +398,13 @@ public class RelationshipSignalDetectorService {
             String subjectType,
             int subjectId,
             String priority,
-            int rankValue,
-            List<RadarResponseDto.Evidence> evidence) {
+            List<String> sourceState) {
         Map<String, Object> state = new LinkedHashMap<>();
         state.put("family", family);
         state.put("subjectType", subjectType);
         state.put("subjectId", subjectId);
         state.put("priority", priority);
-        state.put("rankValue", rankValue);
-        state.put("evidence", evidence);
+        state.put("sourceState", sourceState == null ? List.of() : sourceState);
         return hash(objectMapper.writeValueAsString(state));
     }
 

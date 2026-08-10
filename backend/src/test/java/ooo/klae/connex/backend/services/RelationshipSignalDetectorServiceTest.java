@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -22,7 +23,9 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
@@ -71,6 +74,7 @@ class RelationshipSignalDetectorServiceTest {
                 WORKSPACE_ID, java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
             .thenReturn(Map.of());
         when(scoringService.companySourceStateHashes(WORKSPACE_ID)).thenReturn(Map.of());
+        when(scoringService.scoreContacts(WORKSPACE_ID)).thenReturn(List.of());
         when(dealMapper.getByIds(eq(WORKSPACE_ID), anyList()))
             .thenAnswer(invocation -> {
                 List<Integer> ids = invocation.getArgument(1);
@@ -117,7 +121,9 @@ class RelationshipSignalDetectorServiceTest {
         path.setReachType("reach");
         path.setScore(80);
         path.setBridges(List.of(bridge));
-        when(warmPathService.computePaths(WORKSPACE_ID, 10)).thenReturn(List.of(path));
+        path.setSourceState(List.of("persisted-path-state"));
+        when(warmPathService.computePaths(eq(WORKSPACE_ID), eq(10), anyMap(), anyMap()))
+            .thenReturn(List.of(path));
 
         RelationshipSignalDetectorService.Detection decay =
             detector.detectDecay(WORKSPACE_ID, "decay-token");
@@ -137,7 +143,7 @@ class RelationshipSignalDetectorServiceTest {
         assertEquals("warm_path:person:3", warmPath.candidates().getFirst().getDedupeKey());
         assertTrue(warmPath.candidates().getFirst().getEvidenceJson().contains("Bridge"));
         assertTrue(warmPath.candidates().getFirst().getEvidenceJson().contains("reach"));
-        verify(warmPathService).computePaths(WORKSPACE_ID, 10);
+        verify(warmPathService).computePaths(eq(WORKSPACE_ID), eq(10), anyMap(), anyMap());
     }
 
     @Test
@@ -222,9 +228,11 @@ class RelationshipSignalDetectorServiceTest {
             path.setReachType("reach");
             path.setScore(100 - id);
             path.setBridges(List.of(bridge));
+            path.setSourceState(List.of("persisted-path-state-" + id));
             paths.add(path);
         }
-        when(warmPathService.computePaths(WORKSPACE_ID, 10)).thenReturn(paths);
+        when(warmPathService.computePaths(eq(WORKSPACE_ID), eq(10), anyMap(), anyMap()))
+            .thenReturn(paths);
 
         List<String> firstRisks = detector.detectDealRisk(WORKSPACE_ID, "risk-one")
             .candidates().stream().map(signal -> signal.getDedupeKey()).toList();
@@ -315,12 +323,15 @@ class RelationshipSignalDetectorServiceTest {
         path.setReachType("reach");
         path.setScore(70);
         path.setBridges(List.of(bridge));
-        when(warmPathService.computePaths(WORKSPACE_ID, 10)).thenReturn(List.of(path));
+        path.setSourceState(List.of("touch-state-before", "employment-state-before"));
+        when(warmPathService.computePaths(eq(WORKSPACE_ID), eq(10), anyMap(), anyMap()))
+            .thenReturn(List.of(path));
         String pathBefore = detector.detectWarmPaths(WORKSPACE_ID, "before", AS_OF)
             .candidates().getFirst().getSourceStateHash();
         bridge.setOverlapEndYear(2021);
         bridge.setScore(75);
         path.setScore(75);
+        path.setSourceState(List.of("touch-state-before", "employment-state-after"));
         String pathAfter = detector.detectWarmPaths(WORKSPACE_ID, "after", AS_OF)
             .candidates().getFirst().getSourceStateHash();
 
@@ -359,6 +370,76 @@ class RelationshipSignalDetectorServiceTest {
         assertNotEquals(first.getRankValue(), second.getRankValue());
     }
 
+    @Test
+    void clockOnlyWarmPathChangesKeepThePersistedSourceFingerprint() {
+        WarmPathBridgeDto bridge = new WarmPathBridgeDto();
+        bridge.setPersonId(22);
+        bridge.setName("Bridge");
+        bridge.setEvidenceType("connection");
+        bridge.setScore(70);
+        bridge.setSupportingPersonIds(List.of(22, 23));
+        bridge.setSupportingEdgeIds(List.of(31));
+        WarmPathDto path = new WarmPathDto();
+        path.setTargetId(23);
+        path.setTargetName("Target");
+        path.setReachType("reach");
+        path.setScore(70);
+        path.setBridges(List.of(bridge));
+        path.setSourceState(List.of("target-touch-state", "bridge-touch-and-edge-state"));
+        when(warmPathService.computePaths(eq(WORKSPACE_ID), eq(10), anyMap(), anyMap()))
+            .thenReturn(List.of(path));
+
+        var first = detector.detectWarmPaths(WORKSPACE_ID, "before", AS_OF)
+            .candidates().getFirst();
+        bridge.setScore(62);
+        path.setScore(62);
+        var second = detector.detectWarmPaths(
+            WORKSPACE_ID, "later", AS_OF.plusSeconds(86_400)).candidates().getFirst();
+
+        assertEquals(first.getSourceStateHash(), second.getSourceStateHash());
+        assertNotEquals(first.getEvidenceJson(), second.getEvidenceJson());
+        assertNotEquals(first.getRankValue(), second.getRankValue());
+    }
+
+    @Test
+    void warmPathSourceStateTracksPersistedTouchesAndGraphEvidenceInsteadOfScores() {
+        IntroCandidatePerson bridge = introCandidate(22, "Bridge");
+        IntroCandidatePerson target = introCandidate(23, "Target");
+        PersonEdge edge = edge(31, bridge.getId(), target.getId(), 2);
+        Map<Integer, String> sourceHashes = Map.of(
+            bridge.getId(), "a".repeat(64),
+            target.getId(), "b".repeat(64));
+
+        WarmPathDto before = WarmPathService.rankPaths(
+            List.of(bridge, target),
+            List.of(edge),
+            List.of(),
+            List.of(),
+            Map.of(bridge.getId(), warmTemperature(bridge.getId(), 80)),
+            sourceHashes,
+            10).getFirst();
+        WarmPathDto later = WarmPathService.rankPaths(
+            List.of(bridge, target),
+            List.of(edge),
+            List.of(),
+            List.of(),
+            Map.of(bridge.getId(), warmTemperature(bridge.getId(), 70)),
+            sourceHashes,
+            10).getFirst();
+        WarmPathDto changedEdge = WarmPathService.rankPaths(
+            List.of(bridge, target),
+            List.of(edge(31, bridge.getId(), target.getId(), 3)),
+            List.of(),
+            List.of(),
+            Map.of(bridge.getId(), warmTemperature(bridge.getId(), 70)),
+            sourceHashes,
+            10).getFirst();
+
+        assertNotEquals(before.getScore(), later.getScore());
+        assertEquals(before.getSourceState(), later.getSourceState());
+        assertNotEquals(later.getSourceState(), changedEdge.getSourceState());
+    }
+
     private static RelationshipTemperatureDto temperature(int id, int daysUntilCold) {
         return new RelationshipTemperatureDto(
             id,
@@ -372,6 +453,38 @@ class RelationshipSignalDetectorServiceTest {
             daysUntilCold,
             "warmth-v1",
             AS_OF);
+    }
+
+    private static RelationshipTemperatureDto warmTemperature(int id, int score) {
+        return new RelationshipTemperatureDto(
+            id,
+            score,
+            "warm",
+            "stable",
+            "2026-08-01 12:00:00",
+            7,
+            3,
+            null,
+            null,
+            "warmth-v1",
+            AS_OF);
+    }
+
+    private static IntroCandidatePerson introCandidate(int id, String name) {
+        IntroCandidatePerson candidate = new IntroCandidatePerson();
+        candidate.setId(id);
+        candidate.setName(name);
+        return candidate;
+    }
+
+    private static PersonEdge edge(int id, int personA, int personB, int strength) {
+        PersonEdge edge = new PersonEdge();
+        edge.setId(id);
+        edge.setSourcePersonId(Math.min(personA, personB));
+        edge.setTargetPersonId(Math.max(personA, personB));
+        edge.setType("knows");
+        edge.setStrength(strength);
+        return edge;
     }
 
     private static Person person(int id) {
