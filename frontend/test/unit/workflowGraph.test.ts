@@ -202,6 +202,58 @@ describe("canonical workflow graph editing", () => {
 });
 
 describe("workflow editor history and recovery", () => {
+    it("preserves edits made while a save request is in flight", () => {
+        let history = createWorkflowEditorHistory(document());
+        const submittedDocument = { ...history.present, name: "Submitted name" };
+        history = workflowEditorReducer(history, { type: "commit", document: submittedDocument });
+        history = workflowEditorReducer(history, {
+            type: "commit",
+            document: { ...history.present, description: "Edited during save" },
+        });
+        const savedDocument = { ...submittedDocument, name: "Normalized submitted name" };
+
+        history = workflowEditorReducer(history, {
+            type: "markSaved",
+            submittedDocument,
+            document: savedDocument,
+        });
+
+        expect(history.baseline).toEqual(savedDocument);
+        expect(history.present.description).toBe("Edited during save");
+        expect(history.present.name).toBe("Submitted name");
+        expect(workflowDocumentIsDirty(history)).toBe(true);
+    });
+
+    it("adopts the saved server document when no newer edit exists", () => {
+        let history = createWorkflowEditorHistory(document());
+        const submittedDocument = { ...history.present, name: " Submitted name " };
+        history = workflowEditorReducer(history, { type: "commit", document: submittedDocument });
+        const savedDocument = { ...submittedDocument, name: "Submitted name" };
+
+        history = workflowEditorReducer(history, {
+            type: "markSaved",
+            submittedDocument,
+            document: savedDocument,
+        });
+
+        expect(history.present).toEqual(savedDocument);
+        expect(history.baseline).toEqual(savedDocument);
+        expect(workflowDocumentIsDirty(history)).toBe(false);
+    });
+
+    it("merges a conflict response against edits made after the rejected request", () => {
+        const baseline = document();
+        const submittedDocument = { ...baseline, name: "Submitted name" };
+        const currentDocument = { ...submittedDocument, name: "Edited during conflict recovery" };
+        const serverDocument = { ...baseline, description: "Changed by another editor" };
+
+        const merged = mergeWorkflowDocuments(baseline, currentDocument, serverDocument);
+
+        expect(merged.conflicts).toEqual([]);
+        expect(merged.document.name).toBe("Edited during conflict recovery");
+        expect(merged.document.description).toBe("Changed by another editor");
+    });
+
     it("coalesces typing into one undo entry", () => {
         let history = createWorkflowEditorHistory(document());
         history = workflowEditorReducer(history, { type: "replace", document: { ...history.present, name: "M" } });

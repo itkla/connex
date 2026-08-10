@@ -428,6 +428,7 @@
     "previewAction": "プレビュー",
     "validate": "検証",
     "saveDraft": "下書きを保存",
+    "savingDraft": "下書きを保存中…",
     "publish": "公開",
     "enable": "有効にする",
     "disable": "無効にする",
