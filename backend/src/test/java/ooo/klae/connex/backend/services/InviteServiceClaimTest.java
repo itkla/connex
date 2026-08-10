@@ -2,12 +2,17 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.function.Supplier;
+
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -38,8 +43,15 @@ class InviteServiceClaimTest {
     @Mock private InviteEmailService inviteEmailService;
     @Mock private SessionSecurityService sessionSecurityService;
     @Mock private NotificationStateVersionService notificationStateVersionService;
+    @Mock private FreshMembershipTransaction freshMembershipTransaction;
 
     @InjectMocks private InviteService inviteService;
+
+    @BeforeEach
+    void runFreshMembershipTransactionInline() {
+        when(freshMembershipTransaction.execute(anyInt(), any())).thenAnswer(invocation ->
+            ((Supplier<?>) invocation.getArgument(1)).get());
+    }
 
     @Test
     void lostClaimStopsBeforeEveryMembershipSideEffect() {

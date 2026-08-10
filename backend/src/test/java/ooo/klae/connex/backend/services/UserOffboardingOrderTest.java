@@ -1,18 +1,25 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.mockito.ArgumentMatchers.eq;
 
 import java.util.List;
+import java.util.function.BiFunction;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.User;
@@ -42,6 +49,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
+import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
@@ -70,19 +78,33 @@ class UserOffboardingOrderTest {
     @Mock private NotificationStateVersionService stateVersionService;
     @Mock private WorkflowOffboardingService workflowOffboardingService;
     @Mock private ProviderCapturePurgeService providerCapturePurgeService;
+    @Mock private TenantWorkScope tenantWorkScope;
+    @Spy private TenantContext tenantContext = new TenantContext();
 
     @InjectMocks private UserOffboardingService service;
 
     @Test
-    void freshMembershipPurgesSavedViewDataWhenNoMembershipRemains() {
-        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(null);
+    void freshMembershipScopesWholeCleanupBeforeLockAndPreservesPurgeOrder() {
+        when(tenantWorkScope.withWorkspacePlacement(eq(7), any())).thenAnswer(invocation -> {
+            BiFunction<Integer, String, Object> work = invocation.getArgument(1);
+            return work.apply(13, "cnx_target");
+        });
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenAnswer(invocation -> {
+            assertFreshMembershipScope();
+            return null;
+        });
+        doAnswer(invocation -> {
+            assertFreshMembershipScope();
+            return null;
+        }).when(dealMapper).removeCollaboratorFromWorkspace(7, 9);
 
         service.prepareFreshMembership(7, 9);
 
         InOrder order = inOrder(
-            workspaceMapper, providerCapturePurgeService,
+            tenantWorkScope, workspaceMapper, providerCapturePurgeService,
             savedViewPreferenceMapper, savedViewMapper, aiChatMapper,
             notificationMapper, dealMapper);
+        order.verify(tenantWorkScope).withWorkspacePlacement(eq(7), any());
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
@@ -94,6 +116,15 @@ class UserOffboardingOrderTest {
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
+        assertFalse(tenantContext.isResolved());
+    }
+
+    private void assertFreshMembershipScope() {
+        assertTrue(tenantContext.isResolved());
+        assertEquals(7, tenantContext.getWorkspaceId());
+        assertEquals(13, tenantContext.getOrgId());
+        assertEquals(9, tenantContext.getUserId());
+        assertEquals("cnx_target", tenantContext.getCatalog());
     }
 
     @Test
