@@ -3,111 +3,76 @@ package ooo.klae.connex.backend.observability;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import java.security.SecureRandom;
-import java.util.HexFormat;
-import java.util.Base64;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.observability.ReportedError.Source;
 
 class RequestPathRedactorTest {
 
-    @Test
-    void masksTheSegmentAfterEveryTokenBearingClientRoute() {
-        assertEquals("/invite/{token}", RequestPathRedactor.redact("/invite/aBc123defGhi456jklMno"));
-        assertEquals("/invite-link/{token}", RequestPathRedactor.redact("/invite-link/short"));
-        assertEquals("/unsubscribe/{token}", RequestPathRedactor.redact("/unsubscribe/short"));
-        assertEquals("/ja/invite/{token}", RequestPathRedactor.redact("/ja/invite/short"));
-    }
-
-    @Test
-    void masksTheSegmentAfterEveryTokenBearingServerRoute() {
-        assertEquals("/api/invites/{token}", RequestPathRedactor.redact("/api/invites/short"));
-        assertEquals("/api/invites/{token}/accept",
-                RequestPathRedactor.redact("/api/invites/short/accept"));
-        assertEquals("/api/invite-links/{token}/accept",
-                RequestPathRedactor.redact("/api/invite-links/short/accept"));
-        assertEquals("/api/delivery/unsubscribe/{token}",
-                RequestPathRedactor.redact("/api/delivery/unsubscribe/deadbeef"));
-        assertEquals("/api/attachments/content/{token}",
-                RequestPathRedactor.redact("/api/attachments/content/opaque"));
-        assertEquals("/api/companies/12/logo/{token}",
-                RequestPathRedactor.redact("/api/companies/12/logo/opaque"));
-        assertEquals("/api/people/12/profile-picture/{token}",
-                RequestPathRedactor.redact("/api/people/12/profile-picture/opaque"));
-    }
-
-    @Test
-    void masksGeneratedCredentialsOnRoutesTheAllowlistDoesNotKnow() {
-        String token = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(new byte[] {
-                    1, 35, 69, 103, -119, -85, -51, -17, 1, 35, 69, 103,
-                    -119, -85, -51, -17, 1, 35, 69, 103, -119, -85, -51, -17 });
-
-        assertEquals("/api/future/{token}", RequestPathRedactor.redact("/api/future/" + token));
-    }
-
-    @Test
-    void masksRealInviteTokensWhateverRouteTheyAppearOn() {
-        byte[] bytes = new byte[32];
-        new SecureRandom().nextBytes(bytes);
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-
-        String redacted = RequestPathRedactor.redact("/api/invites/" + token + "/accept");
-
-        assertEquals("/api/invites/{token}/accept", redacted);
+    @ParameterizedTest
+    @CsvSource({
+        "/dashboard, /dashboard",
+        "/records/contacts/42, /records/contacts/{id}",
+        "/records/contacts/private@example.com, /records/contacts/{id}",
+        "/overview/reports/9/snapshots/12, /overview/reports/{id}/snapshots/{snapshotId}",
+        "/docs/using-connex/notifications-and-mentions, /docs/{...slug}",
+        "/invite/private-token, /invite/{token}",
+        "/ja/invite/private-token, /{locale}/invite/{token}"
+    })
+    void mapsKnownRoutesToServerOwnedTemplates(String path, String expected) {
+        assertEquals(expected, RequestPathRedactor.redact(path));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "/api/nonexistent",
-        "/api/companies/1234567890",
-        "/docs/using-connex/notifications-and-mentions",
-        "/docs/using-connex/connections-and-employment",
-        "/docs/getting-started/add-your-first-company",
-        "/records/companies/42/deals",
-        "/api/attachments/by-url",
-        "/api/business-cards/9f1d7c3e-4b21-4a0e-9c2f-6d5b8e7a1c04"
+        "",
+        "/records/private@example.com",
+        "/records/contacts/42/private@example.com",
+        "/api/nonexistent/private@example.com",
+        "/future/privateCRMRecordEncoded123",
+        "/dashboard/"
     })
-    void keepsLegitimatePathsLegible(String path) {
-        assertEquals(path, RequestPathRedactor.redact(path));
+    void mapsEveryUnrecognizedShapeToOneUnknownValue(String path) {
+        assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, RequestPathRedactor.redact(path));
     }
 
     @Test
-    void toleratesEmptyAndNullPaths() {
+    void removesQueryAndFragmentBeforeMatchingWithoutPreservingTheirContent() {
+        assertEquals(
+            "/records/contacts/{id}",
+            RequestPathRedactor.redact(
+                "/records/contacts/42?email=private@example.com#privateCRMRecord"));
+    }
+
+    @Test
+    void safelyReacceptsAnAlreadyStoredTemplateAtReadTime() {
+        assertEquals(
+            "/records/contacts/{id}",
+            RequestPathRedactor.redact("/records/contacts/{id}"));
+        assertEquals(
+            "/{locale}/records/contacts/{id}",
+            RequestPathRedactor.redact("/{locale}/records/contacts/{id}"));
+    }
+
+    @Test
+    void toleratesNullWithoutInventingAReportedRoute() {
         assertNull(RequestPathRedactor.redact(null));
-        assertEquals("", RequestPathRedactor.redact(""));
-        assertEquals("/", RequestPathRedactor.redact("/"));
-        assertEquals("/invite/{token}/", RequestPathRedactor.redact("/invite/short/"));
     }
 
     @Test
-    void redactsAtTheReportBoundarySoNoReporterCanSeeARawToken() {
+    void appliesTheClosedVocabularyAtTheReporterBoundary() {
         ReportedError error = new ReportedError(
-                Source.CLIENT, "id", 1, 2, "Render failed", "stack", "/invite/aBc123defGhi456jklMno");
+            Source.CLIENT,
+            "id",
+            1,
+            2,
+            "Render failed",
+            "stack",
+            "/records/private@example.com");
 
-        assertEquals("/invite/{token}", error.path());
-    }
-
-    @Test
-    void masksTheHexWebhookTokenTheDeliveryControllerTreatsAsItsOnlyCredential() {
-        String token = HexFormat.of().formatHex(new byte[32]);
-        assertEquals("/api/delivery/webhooks/sendgrid/{token}",
-                RequestPathRedactor.redact("/api/delivery/webhooks/sendgrid/" + token));
-        byte[] random = new byte[32];
-        new SecureRandom().nextBytes(random);
-        assertEquals("/api/delivery/webhooks/postmark/{token}",
-                RequestPathRedactor.redact("/api/delivery/webhooks/postmark/" + HexFormat.of().formatHex(random)));
-    }
-
-    @Test
-    void keepsNumericRowIdsOnTheWorkspaceAdminInviteRoutes() {
-        assertEquals("/api/workspaces/12/invites/348",
-                RequestPathRedactor.redact("/api/workspaces/12/invites/348"));
-        assertEquals("/api/workspaces/12/invite-links/9",
-                RequestPathRedactor.redact("/api/workspaces/12/invite-links/9"));
+        assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, error.path());
     }
 }

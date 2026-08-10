@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.observability;
 
 /**
- * Metadata-only application error report.
+ * Bounded application error report for the deployment-local reporter sink.
  *
  * @param source whether the report originated on the server or client
  * @param correlationId request correlation identifier
@@ -9,7 +9,7 @@ package ooo.klae.connex.backend.observability;
  * @param userId resolved user identifier, or null
  * @param message bounded error summary
  * @param detail bounded diagnostic detail
- * @param path request path without query parameters, redacted at construction
+ * @param path server-owned route template or {@code unknown}, normalized at construction
  */
 public record ReportedError(
         Source source,
@@ -21,8 +21,7 @@ public record ReportedError(
         String path) {
 
     /**
-     * Redacts credential-bearing path segments so no reporter implementation and no caller can
-     * publish a request path that carries an invite, unsubscribe or managed-object token.
+     * Maps the path into the closed route-template vocabulary before any reporter sees it.
      */
     public ReportedError {
         path = RequestPathRedactor.redact(path);

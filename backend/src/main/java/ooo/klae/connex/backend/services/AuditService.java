@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,8 @@ import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AuditSupportRowDto;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
+import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
@@ -109,6 +112,7 @@ public class AuditService {
     private final ObjectMapper objectMapper;
     private final TenantContext tenantContext;
     private final ClientIpResolver clientIpResolver;
+    private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
 
     /**
      * Records a single successful audit event. Never throws.
@@ -428,6 +432,12 @@ public class AuditService {
         entry.setUserAgent(truncate(req.getHeader("User-Agent"), USER_AGENT_MAX));
         entry.setSessionId(sessionHash(req));
         entry.setRequestId(requestId(attrs));
+        String clientAssertedCorrelationId = MDC.get(CorrelationIds.MDC_KEY);
+        Integer orgId = entry.getOrgId();
+        if (CorrelationIds.isValid(clientAssertedCorrelationId) && orgId != null && orgId > 0) {
+            entry.setUntrustedClientAssertedCorrelationHmac(
+                correlationPseudonymizer.forStorage(orgId, clientAssertedCorrelationId));
+        }
     }
 
     /**
@@ -550,6 +560,12 @@ public class AuditService {
     }
 
     private void redactAuditEntry(AuditLog entry) {
+        Integer orgId = entry.getOrgId();
+        entry.setUntrustedClientAssertedCorrelationHmac(
+            orgId == null || orgId <= 0
+                ? null
+                : correlationPseudonymizer.forDisclosure(
+                    orgId, entry.getUntrustedClientAssertedCorrelationHmac()));
         SensitiveAuditFamily family = sensitiveAuditFamily(entry);
         if (family != SensitiveAuditFamily.NONE) {
             redactSensitiveAuditEntry(entry, family);
@@ -935,13 +951,24 @@ public class AuditService {
      * @param orgId     the organization to read
      * @param since     the inclusive window start
      * @param until     the inclusive window end
-     * @param requestId the request identifier to match, or null for the whole window
+     * @param clientAssertedCorrelationId the validated client-asserted identifier to
+     *        match, or null for the whole window
      * @param limit     the maximum number of rows to disclose
      * @return the support slice
      */
-    public AuditSlice supportSliceForOrg(int orgId, Instant since, Instant until, String requestId, int limit) {
+    public AuditSlice supportSliceForOrg(
+            int orgId,
+            Instant since,
+            Instant until,
+            String clientAssertedCorrelationId,
+            int limit) {
+        String correlationHmac = clientAssertedCorrelationId == null
+            ? null
+            : correlationPseudonymizer.forStorage(orgId, clientAssertedCorrelationId);
         return toSupportSlice(
-            auditLogMapper.findOrgSupportSlice(orgId, since, until, requestId, limit + 1), limit);
+            auditLogMapper.findOrgSupportSlice(
+                orgId, since, until, correlationHmac, clientAssertedCorrelationId, limit + 1),
+            orgId, clientAssertedCorrelationId, correlationHmac, limit);
     }
 
     /**
@@ -956,15 +983,21 @@ public class AuditService {
      * @param entityId    the record id
      * @param since       the inclusive window start
      * @param until       the inclusive window end
-     * @param requestId   the request identifier to match, or null for the whole window
+     * @param clientAssertedCorrelationId the validated client-asserted identifier to
+     *        match, or null for the whole window
      * @param limit       the maximum number of rows to disclose
      * @return the support slice
      */
     public AuditSlice supportSliceForEntity(int workspaceId, int orgId, String entityType,
-            int entityId, Instant since, Instant until, String requestId, int limit) {
+            int entityId, Instant since, Instant until,
+            String clientAssertedCorrelationId, int limit) {
+        String correlationHmac = clientAssertedCorrelationId == null
+            ? null
+            : correlationPseudonymizer.forStorage(orgId, clientAssertedCorrelationId);
         return toSupportSlice(auditLogMapper.findEntitySupportSlice(
-                workspaceId, orgId, entityType, entityId, since, until, requestId, limit + 1),
-            limit);
+                workspaceId, orgId, entityType, entityId, since, until,
+                correlationHmac, clientAssertedCorrelationId, limit + 1),
+            orgId, clientAssertedCorrelationId, correlationHmac, limit);
     }
 
     /**
@@ -973,12 +1006,19 @@ public class AuditService {
      * <p>The query asks for one row more than it may disclose, so a saturated slice is detectable
      * rather than silently indistinguishable from a complete one. The extra row is never emitted.
      */
-    private AuditSlice toSupportSlice(List<AuditSupportRowDto> rows, int limit) {
+    private AuditSlice toSupportSlice(
+            List<AuditSupportRowDto> rows,
+            int orgId,
+            String legacyRawCorrelationId,
+            String normalizedStorageHmac,
+            int limit) {
         boolean truncated = rows.size() > limit;
         List<AuditSupportRowDto> disclosed = truncated ? rows.subList(0, limit) : rows;
         StringBuilder sb = new StringBuilder();
-        writeCsvRow(sb, List.of("auditId", "scope", "workspaceId", "orgId", "action", "entityType",
-                "entityId", "actorId", "outcome", "requestId", "createdAt", "contentFieldsOmitted"));
+        writeCsvRow(sb, List.of(
+                "auditId", "scope", "workspaceId", "orgId", "action", "entityType",
+                "entityId", "actorId", "outcome", "serverMintedRequestId",
+                "untrustedClientAssertedCorrelationHmac", "createdAt", "contentFieldsOmitted"));
         for (AuditSupportRowDto row : disclosed) {
             writeCsvRow(sb, List.of(
                     csvCell(row.auditId()),
@@ -990,7 +1030,12 @@ public class AuditService {
                     csvCell(row.entityId()),
                     csvCell(row.actorId()),
                     csvCell(row.outcome()),
-                    csvCell(row.requestId()),
+                    csvCell(row.serverMintedRequestId()),
+                    csvCell(correlationPseudonymizer.forDisclosure(orgId,
+                        legacyRawCorrelationId != null
+                                && Objects.equals(row.storedCorrelationValue(), legacyRawCorrelationId)
+                            ? normalizedStorageHmac
+                            : row.storedCorrelationValue())),
                     csvCell(row.createdAt()),
                     csvCell(true)));
         }
@@ -1011,7 +1056,8 @@ public class AuditService {
         StringBuilder sb = new StringBuilder();
         writeCsvRow(sb, List.of("id", "workspaceId", "orgId", "action", "entityType", "entityId",
                 "actorId", "actorLabel", "currentActorLabel", "targetLabel", "outcome", "summary",
-                "changes", "context", "ipAddress", "userAgent", "sessionId", "requestId",
+                "changes", "context", "ipAddress", "userAgent", "sessionId",
+                "serverMintedRequestId", "untrustedClientAssertedCorrelationHmac",
                 "chainScopeType", "chainScopeId", "chainIndex", "prevHash", "rowHash", "createdAt",
                 "contentRedacted", "integrityPayloadRedacted", "integrityPayload"));
         for (AuditLog entry : entries) {
@@ -1039,6 +1085,7 @@ public class AuditService {
                     csvCell(entry.getUserAgent()),
                     csvCell(entry.getSessionId()),
                     csvCell(entry.getRequestId()),
+                    csvCell(entry.getUntrustedClientAssertedCorrelationHmac()),
                     csvCell(entry.getChainScopeType()),
                     csvCell(entry.getChainScopeId()),
                     csvCell(entry.getChainIndex()),

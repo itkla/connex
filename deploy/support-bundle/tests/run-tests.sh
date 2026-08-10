@@ -111,24 +111,32 @@ JSON
     cat > "$directory/migrations.json" <<'JSON'
 [{"version":"139","description":"report snapshot origin","success":true,"installedOn":"2026-07-30T02:11:04Z"}]
 JSON
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$directory/audit-slice.csv"
-    printf '9001,workspace,7,3,person.archive,person,412,55,SUCCESS,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$directory/audit-slice.csv"
+    cat > "$directory/client-errors.json" <<'JSON'
+[{"id":71,"workspaceId":7,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","pagePath":"/records/contacts/{id}","reportedAt":"2026-07-31T04:05:05Z"}]
+JSON
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationHmac,createdAt,contentFieldsOmitted\r\n' > "$directory/audit-slice.csv"
+    printf '9001,workspace,7,3,person.archive,person,412,55,SUCCESS,server-request-1,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,2026-07-31T04:05:06Z,true\r\n' >> "$directory/audit-slice.csv"
     local files_json="[]"
     local path length hash
-    for path in readiness.json config.json migrations.json audit-slice.csv; do
+    for path in readiness.json config.json migrations.json audit-slice.csv client-errors.json; do
         length="$(stat -c '%s' "$directory/$path")"
         hash="$(sha256sum "$directory/$path" | awk '{print $1}')"
         files_json="$(printf '%s' "$files_json" | jq --arg path "$path" --argjson byte_length "$length" --arg sha256 "$hash" \
             '. += [{path: $path, mediaType: "application/json", byteLength: $byte_length, sha256: $sha256}]')"
     done
     jq -n --argjson files "$files_json" '{
-        schemaVersion: 1,
+        schemaVersion: 3,
         productVersion: "test",
         generatedAt: "2026-07-31T05:00:00Z",
         orgId: 3,
-        filters: {correlationId: "abcd1234efgh", entityType: "person", entityId: 412, resolvedWorkspaceId: 7, since: "2026-07-24T05:00:00Z", until: "2026-07-31T05:00:00Z"},
+        filters: {untrustedClientAssertedCorrelationHmac: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", entityType: "person", entityId: 412, resolvedWorkspaceId: 7, since: "2026-07-24T05:00:00Z", until: "2026-07-31T05:00:00Z"},
+        auditSliceIdentifiers: {serverMintedRequestId: "server_minted_non_spoofable", untrustedClientAssertedCorrelationHmac: "organization_scoped_domain_separated_hmac_sha256_of_untrusted_client_assertion"},
+        auditSliceCorrelationFilterField: "untrustedClientAssertedCorrelationHmac",
+        auditSliceRowCount: 1, auditSliceTruncated: false, auditSliceLimit: 10000,
+        auditSliceInconclusive: false,
+        clientErrorSliceRowCount: 1, clientErrorSliceTruncated: false, clientErrorSliceLimit: 10000,
         files: ($files | sort_by(.path)),
-        omissions: {"client-errors.json": "no_persisted_source", "job-runs.json": "job_run_not_available"}
+        omissions: {"job-runs.json": "job_run_not_available"}
     }' > "$directory/manifest.json"
     if [ -n "$archive" ]; then
         ( cd "$directory" && zip --quiet --no-dir-entries -X "$archive" ./* )
@@ -250,6 +258,8 @@ case_redactor_fixtures() (
     assert_equals redact_future_credential '/api/future/{token}' "$(support_bundle_redact_path "/api/future/$token")" || return 1
     assert_equals redact_hex_webhook '/api/delivery/webhooks/sendgrid/{token}' "$(support_bundle_redact_path "/api/delivery/webhooks/sendgrid/$hex")" || return 1
     assert_equals redact_trailing_slash '/invite/{token}/' "$(support_bundle_redact_path '/invite/short/')" || return 1
+    assert_equals redact_query_and_fragment '/records/people/42' \
+        "$(support_bundle_redact_path '/records/people/42?email=private@example.com#notes')" || return 1
     assert_equals redact_empty '' "$(support_bundle_redact_path '')" || return 1
     assert_equals redact_root '/' "$(support_bundle_redact_path '/')" || return 1
     local preserved
@@ -464,27 +474,19 @@ case_collect_status_classification() (
 
 
 
-case_read_renders_and_filters() (
+case_read_renders_pseudonymized_bundle() (
     local work="$SANDBOX/read"
     make_bundle "$work/src" "$work/bundle.zip"
     local output
-    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --correlation-id abcd1234efgh 2>&1)"
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" 2>&1)"
     local status=$?
     assert_status read_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
     assert_contains read_summary 'event=support_bundle_read_summary status=success exit_code=0' <(printf '%s\n' "$output") || return 1
     assert_contains read_audit_row 'person.archive' <(printf '%s\n' "$output") || return 1
-    assert_contains read_omissions 'no_persisted_source' <(printf '%s\n' "$output") || return 1
+    assert_contains read_client_hmac 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' <(printf '%s\n' "$output") || return 1
+    assert_absent read_raw_correlation 'abcd1234efgh' <(printf '%s\n' "$output") || return 1
+    assert_absent read_digest_field '"digest"' <(printf '%s\n' "$output") || return 1
     assert_contains read_job_omission 'job_run_not_available' <(printf '%s\n' "$output") || return 1
-)
-
-case_read_no_matching_rows_is_success() (
-    local work="$SANDBOX/read-empty"
-    make_bundle "$work/src" "$work/bundle.zip"
-    local output
-    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --correlation-id ffffffffffff 2>&1)"
-    local status=$?
-    assert_status read_empty_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
-    assert_contains read_empty_message '(no matching rows)' <(printf '%s\n' "$output") || return 1
 )
 
 case_read_refuses_tampered_archive() (
@@ -507,6 +509,11 @@ case_read_rejects_bad_arguments() (
     assert_status read_missing_archive 67 "$status" || return 1
     output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" --section bogus 2>&1)"; status=$?
     assert_status read_bad_section 64 "$status" || return 1
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" --digest private@example.com 2>&1)"; status=$?
+    assert_status read_digest_option_removed 64 "$status" || return 1
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" \
+        --correlation-id abcd1234efgh 2>&1)"; status=$?
+    assert_status read_correlation_option_removed 64 "$status" || return 1
 )
 
 # Regression: awk's IGNORECASE is a gawk extension that mawk (the default awk on Debian and
@@ -735,7 +742,7 @@ case_read_strips_terminal_control_sequences() (
     local work="$SANDBOX/ansi"
     make_bundle "$work/src" ""
     jq --arg v "$(printf 'x\033[2K\rts=2026-01-01T00:00:00Z level=info event=support_bundle_read_summary status=success exit_code=0')" \
-        '.omissions["client-errors.json"] = $v' "$work/src/manifest.json" > "$work/src/m.new"
+        '.omissions["job-runs.json"] = $v' "$work/src/manifest.json" > "$work/src/m.new"
     mv "$work/src/m.new" "$work/src/manifest.json"
     rebuild_archive "$work/src" "$work/bundle.zip"
     local output
@@ -925,8 +932,8 @@ case_hostile_entry_name_cannot_repaint_the_terminal() (
 case_read_parses_quoted_csv_fields() (
     local work="$SANDBOX/quoted-csv"
     make_bundle "$work/src" ""
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
-    printf '9001,workspace,7,3,"person.archive, bulk",person,412,55,success,req-1,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationHmac,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
+    printf '9001,workspace,7,3,"person.archive, bulk",person,412,55,success,server-request-1,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
     local length hash
     length="$(stat -c '%s' "$work/src/audit-slice.csv")"
     hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
@@ -968,33 +975,6 @@ case_extract_refuses_an_oversized_archive() (
     rm -f "$work/bundle.zip"
 )
 
-# A correlation id is a prefix-free-less token: every 8-64 character prefix is itself valid, so a
-# substring search over the whole row presented an unrelated request as a match.
-case_read_matches_correlation_ids_exactly() (
-    local work="$SANDBOX/exact-correlation"
-    make_bundle "$work/src" ""
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
-    printf '9001,workspace,7,3,person.archive,person,412,55,success,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
-    printf '9002,workspace,7,3,person.update,person,413,56,success,abcd1234,2026-07-31T04:05:07Z,true\r\n' >> "$work/src/audit-slice.csv"
-    local length hash
-    length="$(stat -c '%s' "$work/src/audit-slice.csv")"
-    hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
-    jq --argjson len "$length" --arg sha "$hash" \
-        '.files = [.files[] | if .path == "audit-slice.csv" then .byteLength = $len | .sha256 = $sha else . end]' \
-        "$work/src/manifest.json" > "$work/src/m.new"
-    mv "$work/src/m.new" "$work/src/manifest.json"
-    rebuild_archive "$work/src" "$work/bundle.zip"
-    local output
-    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --correlation-id abcd1234 --section audit 2>&1)"
-    assert_status exact_correlation_ok 0 "$?" || { printf '%s\n' "$output"; return 1; }
-    assert_contains exact_correlation_hit '9002' <(printf '%s\n' "$output") || return 1
-    # The longer id merely starts with the requested one and must not be presented as a match.
-    if printf '%s\n' "$output" | grep -q '9001'; then
-        printf 'a prefix match was rendered as an exact match\n'
-        return 1
-    fi
-)
-
 case_validate_instant_accepts_fractional_seconds() (
     # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
@@ -1033,7 +1013,7 @@ case_verify_requires_the_declared_bundle_entries() (
     length="$(stat -c '%s' "$work/src/foo")"
     hash="$(sha256sum "$work/src/foo" | awk '{print $1}')"
     jq -n --argjson len "$length" --arg sha "$hash" '{
-        schemaVersion: 1, productVersion: "x", generatedAt: "2026-07-31T05:00:00Z", orgId: 3,
+        schemaVersion: 3, productVersion: "x", generatedAt: "2026-07-31T05:00:00Z", orgId: 3,
         filters: {since: "a", until: "b"},
         files: [{path: "foo", mediaType: "application/json", byteLength: $len, sha256: $sha}],
         omissions: {}
@@ -1073,7 +1053,6 @@ case_collect_has_no_journal_option() (
     assert_contains journal_option_rejected 'unknown_argument' <(printf '%s\n' "$output") || return 1
 )
 
-run_case read_matches_correlation_ids_exactly case_read_matches_correlation_ids_exactly
 run_case validate_instant_accepts_fractional_seconds case_validate_instant_accepts_fractional_seconds
 run_case base_url_rejects_query_fragment_and_userinfo case_base_url_rejects_query_fragment_and_userinfo
 run_case verify_requires_the_declared_bundle_entries case_verify_requires_the_declared_bundle_entries
@@ -1120,8 +1099,7 @@ run_case manifest_self_listing_rejected case_manifest_self_listing_rejected
 run_case collect_rejects_partial_entity_filter case_collect_rejects_partial_entity_filter
 run_case collect_query_encoding case_collect_query_encoding
 run_case collect_status_classification case_collect_status_classification
-run_case read_renders_and_filters case_read_renders_and_filters
-run_case read_no_matching_rows_is_success case_read_no_matching_rows_is_success
+run_case read_renders_pseudonymized_bundle case_read_renders_pseudonymized_bundle
 run_case read_refuses_tampered_archive case_read_refuses_tampered_archive
 run_case read_rejects_bad_arguments case_read_rejects_bad_arguments
 

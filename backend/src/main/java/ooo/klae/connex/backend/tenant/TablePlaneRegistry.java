@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.tenant;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -34,7 +36,7 @@ public final class TablePlaneRegistry {
     }
 
     /** Identity, membership, session, org and instance configuration. */
-    public static final Set<String> CONTROL_PLANE_TABLES = Set.of(
+    public static final Set<String> CONTROL_PLANE_STATE_TABLES = Set.of(
         "SPRING_SESSION",
         "SPRING_SESSION_ATTRIBUTES",
         "ai_provider_config",
@@ -79,6 +81,27 @@ public final class TablePlaneRegistry {
         "workspace_member",
         "workspace_role",
         "workspace_role_permission");
+
+    /** Workspace-owned holdings retained on the control plane by an explicit placement decision. */
+    public static final Set<String> CONTROL_PLANE_WORKSPACE_DATA_TABLES = Set.of(
+        "client_error");
+
+    /** All physical control-plane tables. */
+    public static final Set<String> CONTROL_PLANE_TABLES = controlPlaneTables();
+
+    /** Direct workspace-keyed control state that is not tenant-export content. */
+    public static final Set<String> CONTROL_PLANE_WORKSPACE_STATE_TABLES = Set.of(
+        "audit_log",
+        "secret_value",
+        "tenant_cleanup_tombstone",
+        "tenant_export_download_grant",
+        "tenant_operation_lease",
+        "workspace_allowed_domain",
+        "workspace_invite",
+        "workspace_invite_link",
+        "workspace_mail_config",
+        "workspace_member",
+        "workspace_role");
 
     /** Workspace-scoped tenant content — the future per-org catalog. */
     public static final Set<String> ORG_DATA_TABLES = Set.of(
@@ -179,4 +202,10 @@ public final class TablePlaneRegistry {
         "workflow_step_run",
         "workflow_trigger_outbox",
         "workflow_version");
+
+    private static Set<String> controlPlaneTables() {
+        Set<String> tables = new HashSet<>(CONTROL_PLANE_STATE_TABLES);
+        tables.addAll(CONTROL_PLANE_WORKSPACE_DATA_TABLES);
+        return Collections.unmodifiableSet(tables);
+    }
 }

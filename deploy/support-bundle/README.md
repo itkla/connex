@@ -15,7 +15,7 @@ holds.
 | Script | Purpose |
 |---|---|
 | `collect.sh` | Downloads a bundle for one organization, verifies it, and publishes it atomically. Optionally appends a closed-field journal projection. |
-| `read.sh` | Verifies a bundle's manifest and hashes, then renders it and filters by correlation ID. |
+| `read.sh` | Verifies a bundle's manifest and hashes, then renders it and filters client errors plus the explicitly untrusted client-asserted audit column by correlation ID. |
 | `support-bundle-lib.sh` | Shared logging, validation, and integrity primitives. Not run directly. |
 | `tests/run-tests.sh` | Offline regression tests. No network, backend, Docker, root, or systemd. |
 
@@ -79,9 +79,15 @@ Read a bundle:
 
 ```bash
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
-deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --correlation-id abcd1234efgh
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section audit
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section client-errors
 ```
+
+Apply `--correlation-id` to `collect.sh`, not `read.sh`. The server transforms that lookup input and
+the archive contains only the organization-scoped `untrustedClientAssertedCorrelationHmac`; the raw client assertion never leaves
+the deployment. Use `serverMintedRequestId` for the non-spoofable within-audit pivot. Framework
+digests are omitted because their shape does not establish their provenance; use a quoted digest
+only with deployment-local structured logs.
 
 Nothing is rendered until the archive has passed verification in full: safe
 entry names, every inventory entry matched to its recorded byte length and

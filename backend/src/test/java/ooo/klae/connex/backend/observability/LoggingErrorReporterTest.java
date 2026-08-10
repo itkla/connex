@@ -43,7 +43,7 @@ class LoggingErrorReporterTest {
             assertEquals(9, values.get("userId"));
             assertEquals("messageend", values.get("message"));
             assertEquals("line1\nline2\tline3", values.get("detail"));
-            assertEquals("/pathforged", values.get("path"));
+            assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, values.get("path"));
         } finally {
             logger.detachAppender(appender);
             appender.stop();
@@ -72,7 +72,7 @@ class LoggingErrorReporterTest {
             assertEquals(64, ((String) keyed.get("correlationId")).length());
             assertEquals(1_000, ((String) keyed.get("message")).length());
             assertEquals(8_192, ((String) keyed.get("detail")).length());
-            assertEquals(300, ((String) keyed.get("path")).length());
+            assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, keyed.get("path"));
             assertFalse(((String) keyed.get("message")).endsWith("\uD83D"));
             assertTrue(keyed.size() >= 7);
         } finally {

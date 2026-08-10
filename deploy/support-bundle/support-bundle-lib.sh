@@ -41,7 +41,7 @@ declare -rx EXIT_API=66
 declare -rx EXIT_INTEGRITY=67
 declare -rx EXIT_READ=69
 
-declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=1
+declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=3
 
 # Mirrors the backend's own uncompressed ceiling.
 declare -rx SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES=67108864
@@ -271,6 +271,7 @@ support_bundle_redact_path() {
                 || parent == "logo" || parent == "profile-picture"
         }
         BEGIN {
+            sub(/[?#].*$/, "", raw)
             count = split(raw, segments, "/")
             previous = ""
             output = ""
@@ -489,7 +490,7 @@ support_bundle_verify_inventory() {
     # Every entry the schema requires must be present or explicitly declared as omitted; silence
     # is not an acceptable third state for a diagnostic the reader promises to render.
     local required present_or_omitted
-    for required in readiness.json config.json migrations.json audit-slice.csv; do
+    for required in readiness.json config.json migrations.json audit-slice.csv client-errors.json; do
         present_or_omitted="$(jq -r --arg path "$required" \
             'if ([.files[].path] | index($path)) != null then "present"
              elif (.omissions | has($path)) then "omitted"

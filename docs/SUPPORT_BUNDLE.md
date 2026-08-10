@@ -23,13 +23,14 @@ order, under what deployment posture*. It never answers *what the record said*.
 | `config.json` | Values for an explicit allowlist of configuration keys — nothing else. |
 | `migrations.json` | Flyway history: version, description, success, installed-on. |
 | `audit-slice.csv` | The audit events for the requested window, organization-plane always, workspace record events only under an entity filter. |
+| `client-errors.json` | Redacted client-error metadata: id, workspace id, client-asserted correlation HMAC, closed-vocabulary route template, and report time. |
 | `job-runs.json` | Not produced in this release — see [Declared omissions](#declared-omissions). |
 
 ### Filters
 
 | Parameter | Contract |
 |---|---|
-| `correlationId` | Matches the **server-minted** request id on audit rows — see [Request ids](#request-ids). |
+| `correlationId` | Server-side lookup input. The raw client assertion is never written into a new audit/client-error row or returned in the bundle — see [Request ids](#request-ids). |
 | `entityType` + `entityId` | Legal only together. Unlocks workspace record events for that one record. |
 | `since` | Defaults to 7 days before generation; 30 days is the maximum. Older or future values are rejected. |
 
@@ -40,7 +41,6 @@ When a source is unavailable or cannot be proven safe, the bundle **says so** in
 
 | Omission | Meaning |
 |---|---|
-| `client-errors.json: no_persisted_source` | Client errors are forwarded to the log sink and never persisted, so there is no safe stored source to slice. See [Client errors](#client-errors). |
 | `job-runs.json: job_run_not_available` | This deployment predates the job-run table. |
 
 An absent file therefore never means "no problem found". It means "this source
@@ -61,7 +61,7 @@ may contain:
 - raw mail, AI, OCR, SSO, storage, or database hosts and URLs;
 - any hostname carrying URI user-info;
 - audit `changes` or `context` bodies, target labels, or summaries;
-- client error messages or stack traces;
+- client error messages, framework digests, or stack traces;
 - job-run `detail` payloads;
 - personal names, email addresses, or any record field values;
 - raw journald messages or stack traces (no log content is collected at all);
@@ -118,51 +118,69 @@ resolution step is part of the walk-through below.
 
 ### Client errors
 
-`ClientErrorService` forwards reports to the logging sink and persists nothing.
-Its `message` and `detail` fields carry the browser's error text and stack, which
-are only length-bounded — never redacted — and routinely embed record values,
-email addresses, and query strings.
+`ClientErrorService` still forwards the full bounded report to the deployment-local logging sink,
+but it separately persists a constructive metadata projection containing only `id`, `workspaceId`,
+the organization-scoped storage-domain correlation HMAC, a server-owned route template, and
+`reportedAt`.
+`RequestPathRedactor` accepts only the closed vocabulary of known frontend route patterns; any
+unrecognized caller-controlled path becomes the single value `unknown`. The same mapping runs
+again when a row is read, so a future vocabulary tightening also protects rows already stored.
+Metadata is purged on startup and hourly using the fixed 30-day UTC cutoff.
 
-So there is no safe stored source, and the bundle declares
-`client-errors.json: no_persisted_source` rather than reading logs. Persisting a
-metadata-only projection (correlation id, redacted page path, digest, timestamp)
-is tracked as follow-up work ([#970](https://github.com/itkla/connex/issues/970));
-until it exists, the bundle cannot correlate client errors at all. There is no
-journal slice to fall back on — see [Why there is no journal slice](#why-there-is-no-journal-slice)
-— so this lookup has to be done against the deployment's own logs, outside the
-bundle.
+The client error's `message`, composed `detail`, and browser `stack` never reach the metadata mapper,
+the database table, or `client-errors.json`. They remain user-data-bearing local log content and must
+not be copied into a support artefact. A framework digest is client-asserted and has no
+cryptographic framework provenance, so it is never persisted or disclosed even when it has the
+expected decimal shape. It remains available only in the deployment-local error report.
+
+Rows written before this boundary was tightened receive the same safe read projection: raw legacy
+correlation values are replaced by an organization-scoped disclosure-domain HMAC, old paths are
+mapped to a recognized template or `unknown`, and old digest columns are not selected. Existing
+stored paths therefore cannot escape through a later bundle or complete workspace export. A
+filtered slice normalizes matched legacy and current correlation rows to the same disclosure HMAC;
+an unfiltered legacy row remains independently pseudonymized because its raw-at-rest provenance
+cannot safely be inferred from syntax.
 
 ### Request ids
 
-`audit-slice.csv` carries a **server-minted** `requestId`, and the `correlationId` filter matches
-that value.
+`audit-slice.csv` carries both identifiers under names that encode their provenance:
 
-This is deliberately **not** the `X-Correlation-Id` a user reads off an error screen. That header
-is client-settable and is preserved as sent, because its legitimate job is correlating a user's
-report with log lines. Adopting it as the audit identifier would let any authenticated caller make
-unrelated requests share one id, or inject rows into an investigator's filtered slice — so the
-audit field is minted server-side and cannot be influenced by the caller.
+- `serverMintedRequestId` is the unchanged, non-spoofable `audit_log.request_id`. It groups audit
+  events emitted during one server request and remains the trustworthy audit pivot.
+- `untrustedClientAssertedCorrelationHmac` is an organization-scoped, domain-separated HMAC derived from the
+  client-settable `X-Correlation-Id`. It remains useful for joining bundle rows without disclosing
+  the raw caller value and is still not proof that two requests share an origin.
 
-**The practical consequence:** a user-quoted correlation id will *not* find audit rows. Investigate
-by `entityType`/`entityId` and `since` instead, and use the user-quoted id against the deployment's
-own logs — the bundle carries no log content of any kind. Linking the two properly needs a schema
-change and is tracked as follow-up work.
+The server accepts the raw `correlationId` only as a lookup input, applies the same storage-domain
+HMAC, and matches both new pseudonymized rows and legacy raw rows. The bundle carries only a
+separately domain-separated, organization-scoped disclosure HMAC; the manifest never repeats the raw input. The filter
+never changes or aliases the server-minted audit id. Organization and workspace predicates are
+applied independently, so choosing a value used in another tenant cannot pull that tenant's row
+into the bundle.
 
-Audit rows written on scheduler and other non-request threads have no request id at all; this is
-long-standing behaviour, not a gap introduced here. Rows written on async or error-dispatch threads
-would likewise carry none, so the correlation story above applies to request threads only.
+The client-correlation lookup column deliberately stays outside the existing audit-row HMAC payload so old
+and new binaries can verify the same chain during a rolling deployment or rollback. It is not
+integrity evidence. The server-minted id and the audited event fields retain their existing chain
+semantics.
+
+Audit rows written on scheduler and other non-request threads have neither request identifier; this
+is long-standing behaviour, not a gap introduced here. Servlet redispatches keep the correlation
+filter's stashed client value, and audit rows written against the same request retain its
+server-minted id.
 
 ### Truncation and inconclusive results
 
-The audit slice is capped, and a saturated window is never silently indistinguishable from a
-complete one. The query asks for one row beyond the cap, the extra row is never emitted, and the
-manifest records `auditSliceRowCount`, `auditSliceTruncated`, and `auditSliceLimit`. When
-truncation is reported, narrow `since` or add an entity filter and collect again.
+The audit and client-error slices are capped, and a saturated window is never silently
+indistinguishable from a complete one. Each query asks for one row beyond its cap and never emits
+the extra row. The manifest records `auditSliceRowCount`, `auditSliceTruncated`,
+`auditSliceLimit`, `clientErrorSliceRowCount`, `clientErrorSliceTruncated`, and
+`clientErrorSliceLimit`. When truncation is reported, narrow `since` or add an entity filter and
+collect again.
 
-A correlation filter matches the **server-minted** request id, which a user cannot quote, so an
-empty result under that filter means "no rows carried this id", not "nothing happened". The
-manifest records `auditSliceInconclusive: true` for exactly that case so an empty slice is not
-misread as evidence of absence.
+A request need not emit an audit row, and a client-asserted id is not authoritative. An empty audit
+slice under a correlation filter therefore means "no permitted audit rows carried this untrusted
+value", not "nothing happened". The manifest records `auditSliceInconclusive: true` for exactly
+that case so an empty slice is not misread as evidence of absence.
 
 ### Why there is no journal slice
 
@@ -255,13 +273,16 @@ and no SSH.
 
    The bundle is verified against its manifest before it is published.
 
-2. **Read.**
+2. **Read the verified bundle.** Render the complete, already server-filtered archive:
 
    ```bash
    deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
    ```
 
-   Hashes are checked before anything renders.
+   Hashes are checked before anything renders. Offline correlation and digest filtering is not
+   offered: the raw correlation is absent by design, and a client-asserted digest is not a trusted
+   support pivot. Apply a correlation filter while collecting when one was quoted from a raw API
+   response.
 
 3. **Rule out the platform.** `readiness.json` shows the deployment profile and
    capability/provider state; `job-runs.json` (where present) shows recent
@@ -269,22 +290,30 @@ and no SSH.
    lost by an integration or a failed job. `migrations.json` confirms the schema
    is fully migrated, ruling out a half-applied deployment.
 
-4. **Find the event.** The audit slice contains a `person.archive` row for
-   entity `412`, with its timestamp, outcome, correlation id, and `actorId`.
-   The record was archived deliberately — it was never deleted and never lost.
+4. **Correlate the report.** `client-errors.json` shows the later report request's correlation HMAC,
+   route template, workspace, and report time. It contains no digest, error text, or stack.
+   `audit-slice.csv` remains the complete history for entity 412, with
+   `untrustedClientAssertedCorrelationHmac` and `serverMintedRequestId` separately labelled.
 
-5. **Resolve the actor.** Support reports the `actorId` and timestamp back to
+5. **Find the event.** The audit slice contains a `person.archive` row for entity `412`, with its
+   timestamp, outcome, both clearly-labelled ids, and `actorId`. The record was archived
+   deliberately — it was never deleted and never lost.
+
+6. **Resolve the actor.** Support reports the `actorId` and timestamp back to
    the organization administrator, who resolves that id to a colleague in their
    own admin UI. The name never leaves the tenant.
 
-6. **Resolve the ticket.** The administrator restores the person from the
+7. **Resolve the ticket.** The administrator restores the person from the
    Archived view. Support's answer is complete: *what happened* (archived, not
    lost), *when*, *by which account*, and *that no platform fault was involved* —
    established entirely from the bundle, with no database and no SSH.
 
-If the user quoted an error id from the UI, note that it will **not** match the audit slice — see
-[Request ids](#request-ids). Narrow with `--entity-type`/`--entity-id` and `--since`, and use the
-quoted id against the deployment's own logs, which the bundle does not collect.
+Treat a match on `untrustedClientAssertedCorrelationHmac` as a lookup aid, never as proof of request
+identity. Use `serverMintedRequestId` for the trustworthy within-audit pivot, and retain the entity,
+workspace, organization, and time predicates when answering the ticket.
+
+A framework `Reference:` can still help a deployment operator find the local structured error
+report, but it is not exported because the server cannot prove the caller did not choose it.
 
 ### Exit codes
 

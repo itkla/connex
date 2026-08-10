@@ -583,10 +583,11 @@ This is the single most common support-flow mistake, so internalize it before th
 then never displays it. So a user reporting a broken page will hand you a **digest**, not a
 correlation ID — asking them for a correlation ID will produce confusion, not an identifier.
 
-The digest is nonetheless the join key. When the frontend error boundary fires, it best-effort
-reports to `POST /api/client-errors`, and the server **stamps its own correlation ID onto that
-record**. So digest → client-error log line → correlation ID → the rest of the request's server
-logs.
+When the frontend error boundary fires, it best-effort reports to `POST /api/client-errors`. The
+digest, message, and stack remain only in the local log sink and never enter the database or bundle:
+decimal syntax does not prove that Next.js generated a caller-controlled value. The stored metadata
+contains the report request's correlation HMAC, a closed-vocabulary route template, workspace, and
+time. Because reporting is a later request, that HMAC is not a causal link to an earlier audit event.
 
 `/api/client-errors` is bounded on purpose, which explains the gaps you will see:
 
@@ -608,21 +609,23 @@ logs.
   streamed export that fails mid-body reuses the id already sent.
 - Only unexpected `500`s put it in the body. `400`/`403`/`404`/`409` responses do **not** carry it.
 
-### Log lookup recipes
+### Support-bundle lookup recipes
 
-Both lookups run entirely against the deployment's own logs. Full context in the "Monitoring &
-support" section of [DEPLOYMENT.md](DEPLOYMENT.md); the two commands are:
+The redacted bundle is the first-line ticket path. It requires no SSH or ad-hoc SQL:
 
 ```bash
-# The user quoted a correlation ID (raw API 500, or an integration's captured header)
-journalctl -u <backend-unit> | grep '"correlationId":"<id>"'
+# The user quoted a correlation ID from a raw API 500 or integration
+deploy/support-bundle/collect.sh ... --correlation-id <id> --output /var/tmp/bundle.zip
 
-# The user quoted a `Reference:` digest from a broken page
-journalctl -u <backend-unit> | grep '<reference>'
+# Render the complete, already server-filtered archive
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
 ```
 
-The digest grep matches the `CLIENT`-source entry, which carries the digest, the page path, and the
-client stack — and, because the server stamped it, the correlation ID to continue with.
+The server transforms the raw correlation lookup before comparing it with new HMAC rows and legacy
+raw rows. The bundle and its manifest carry only `untrustedClientAssertedCorrelationHmac`; `read.sh` therefore
+does not accept a raw offline filter. Use `serverMintedRequestId` only as the trustworthy
+within-audit request pivot. A quoted framework digest can be searched only in deployment-local logs;
+those user-data-bearing lines must not be copied into a support artefact.
 
 ### Tenant diagnostics — open this before you ask for logs
 
@@ -735,15 +738,16 @@ one by collecting logs ad hoc** — deployment logs contain tenant-identifying d
 the collection the bundle refuses to make. If you genuinely need log content, agree the scope in
 writing first.
 
-**The bundle's request id is not the id your user quoted.** `audit-slice.csv` carries a
-**server-minted** `requestId`, deliberately distinct from the `X-Correlation-Id` a caller can supply.
-Do not expect a user's reference to appear in a bundle; use the bundle for state and the deployment's
-own logs for that lookup.
+**The two audit identifiers have different trust.** `audit-slice.csv` carries
+`serverMintedRequestId`, the non-spoofable within-audit pivot, and
+`untrustedClientAssertedCorrelationHmac`, an organization-scoped, domain-separated HMAC of the client-settable value. The manifest
+repeats those provenance labels and never carries the raw assertion. A digest from a broken page is
+not exported because the service cannot authenticate its framework provenance.
 
 The audit slice carries `actorId` only and no display names, marks truncation explicitly
 (`auditSliceTruncated` with a row count), and ships a declared-omissions map so a missing file is
-visibly a decision rather than a gap — `client-errors.json` is declared absent because no persisted
-source exists for it.
+visibly a decision rather than a gap. `client-errors.json` now ships its closed metadata projection
+or declares `source_failed`; it never contains digest, message, detail, or stack.
 
 ## Access boundaries
 
