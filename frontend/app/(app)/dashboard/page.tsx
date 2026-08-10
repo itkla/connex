@@ -56,11 +56,8 @@ import type {
     DealKpis,
     DealMetrics,
     DealRevenueSeries,
-    NotificationPage,
     RelationshipDashboard,
-    Task,
     TaskSummary as TaskSummaryCounts,
-    User,
     WarmthSummary,
 } from '@/app/lib/types';
 import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
@@ -266,25 +263,24 @@ export default async function Dashboard() {
     const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [contactsResult, dealsResult, pipelinesResult, stagesResult, tasksResult, upcomingTasks, activitiesResult, notesResult, users, recentFilesResult, fileFacetsResult, recentMovesResult, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notifications, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolumeResult, leaderboardResult, taskSummaryResult, upcomingActivityCountResult, closingSoonCountResult, closingSoonDealsResult, captureOverviewResult] =
+    const [contactsResult, dealsResult, pipelinesResult, stagesResult, tasksResult, upcomingTasksResult, activitiesResult, notesResult, usersResult, recentFilesResult, fileFacetsResult, recentMovesResult, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notificationsResult, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolumeResult, leaderboardResult, taskSummaryResult, upcomingActivityCountResult, closingSoonCountResult, closingSoonDealsResult, captureOverviewResult] =
         await Promise.all([
             getContactsPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getDealsPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getPipelinesResultFromCookie(cookie),
             getAllStagesResultFromCookie(cookie),
             getTasksPageResultFromCookie(cookie, { page: 1, size: 100 }),
-            getUpcomingTasksFromCookie(cookie, 4).catch(() => [] as Task[]),
+            toResult(getUpcomingTasksFromCookie(cookie, 4)),
             getActivitiesPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getNotesPageResultFromCookie(cookie, { page: 1, size: 100 }),
-            getUsers(init).catch(() => [] as User[]),
+            toResult(getUsers(init)),
             toResult(getAttachmentsPage({ size: 6, sort: 'newest' }, init)),
             toResult(getAttachmentFacets(init)),
             getRecentMovesResultFromCookie(cookie),
             getIntroSuggestionsResultFromCookie(cookie, 4),
             getRelationshipDashboardResultFromCookie(cookie),
             getDashboardLayoutFromCookie(cookie),
-            getNotifications({ status: 'unread', page: 1, size: 6 }, init)
-                .catch(() => ({ items: [], total: 0, stateVersion: 0, asOf: '1970-01-01T00:00:00Z' }) as NotificationPage),
+            toResult(getNotifications({ status: 'unread', page: 1, size: 6 }, init)),
             getDealMetricsResultFromCookie(cookie),
             getCompaniesPageResultFromCookie(cookie, { size: 1 }),
             getContactsPageResultFromCookie(cookie, { size: 1 }),
@@ -300,8 +296,10 @@ export default async function Dashboard() {
     const contacts = contactsResult.ok ? contactsResult.data.items : [];
     const deals = dealsResult.ok ? dealsResult.data.items : [];
     const tasks = tasksResult.ok ? tasksResult.data.items : [];
+    const upcomingTasks = upcomingTasksResult.ok ? upcomingTasksResult.data : [];
     const activities = activitiesResult.ok ? activitiesResult.data.items : [];
     const notes = notesResult.ok ? notesResult.data.items : [];
+    const users = usersResult.ok ? usersResult.data : [];
     const recentMoves = recentMovesResult.ok ? recentMovesResult.data : [];
     const recentFiles = recentFilesResult.ok ? recentFilesResult.data : { items: [], total: 0 };
     const fileFacets = fileFacetsResult.ok ? fileFacetsResult.data : EMPTY_ATTACHMENT_FACETS;
@@ -315,7 +313,8 @@ export default async function Dashboard() {
         && dealsResult.ok
         && tasksResult.ok
         && activitiesResult.ok
-        && notesResult.ok;
+        && notesResult.ok
+        && usersResult.ok;
     const introSuggestions = introSuggestionsResult.ok ? introSuggestionsResult.data : [];
     const relationshipDashboard = relationshipDashboardResult.ok
         ? relationshipDashboardResult.data
@@ -490,7 +489,7 @@ export default async function Dashboard() {
         pipeline: revenueAvailable
             ? <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />
             : <SectionUnavailable />,
-        tasks: taskSummaryResult.ok
+        tasks: taskSummaryResult.ok && upcomingTasksResult.ok
             ? <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />
             : <SectionUnavailable />,
         atRiskDeals: relationshipDashboardResult.ok ? (
@@ -531,13 +530,15 @@ export default async function Dashboard() {
         ) : (
             <SectionUnavailable />
         ),
-        notifications: (
+        notifications: notificationsResult.ok ? (
             <NotificationsCard
-                key={`${notifications.stateVersion}:${notifications.items.map((item) => item.id).join(',')}`}
-                items={notifications.items}
+                key={`${notificationsResult.data.stateVersion}:${notificationsResult.data.items.map((item) => item.id).join(',')}`}
+                items={notificationsResult.data.items}
                 recipientId={user.id}
-                initialStateVersion={notifications.stateVersion}
+                initialStateVersion={notificationsResult.data.stateVersion}
             />
+        ) : (
+            <SectionUnavailable />
         ),
         quickActions: (
             <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card p-6">
@@ -568,7 +569,7 @@ export default async function Dashboard() {
         activityVolume: activityVolumeResult.ok
             ? chartCard(<ActivityVolume buckets={activityVolume} range={DASHBOARD_RANGE} />)
             : <SectionUnavailable />,
-        teamLeaderboard: leaderboardResult.ok
+        teamLeaderboard: leaderboardResult.ok && usersResult.ok
             ? chartCard(<TeamLeaderboard users={users} standings={leaderboard} />)
             : <SectionUnavailable />,
     };

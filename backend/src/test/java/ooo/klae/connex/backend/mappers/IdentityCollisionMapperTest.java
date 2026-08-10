@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.sql.SQLException;
@@ -244,7 +245,7 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
         long companyIdentity = insertCompanyIdentity(company, "domain", "check.example.com");
         Workspace other = newWorkspace("collision-fk");
 
-        assertThrows(
+        DataAccessException membershipFailure = assertThrows(
             DataAccessException.class,
             () -> jdbcTemplate.update(
                 """
@@ -257,6 +258,7 @@ class IdentityCollisionMapperTest extends AbstractMapperTest {
                 personIdentity,
                 companyIdentity,
                 REBUILT_AT));
+        assertFalse(membershipFailure instanceof DataIntegrityViolationException);
         assertThrows(
             DataIntegrityViolationException.class,
             () -> jdbcTemplate.update(
