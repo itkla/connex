@@ -1,18 +1,25 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import { getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
-import type { Contact, Deal, User } from "@/app/lib/types";
+import { ApiError, createRadarTask, getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
+import type { Contact, CreateTaskPayload, Deal, User } from "@/app/lib/types";
 import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
 import { publishRecordMutation } from "@/app/lib/record-mutation-events";
+import { submitRadarTaskWithCurrentSignal, type RadarTaskSignalSnapshot } from "@/app/lib/radar";
 import { toastError, toastWarn } from "@/app/lib/toast";
 import { draftKey, getDraftKeyGeneration, subscribeDraftChanges } from "@/app/lib/formDrafts";
 import ImportDialog from "@/app/components/import/LazyImportDialog";
+import { OverlayChunkFailureBoundary } from "@/app/components/actions/OverlayChunkFailureBoundary";
+import {
+    OVERLAY_MAX_EXIT_DURATION_MS,
+    reduceOverlayRetention,
+    type OverlayLifecycleCapabilities,
+} from "@/lib/overlay-lifecycle";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -30,9 +37,42 @@ const REFERENCE_KINDS: ReadonlySet<OverlayRequest["kind"]> = new Set([
     "create-activity",
 ]);
 
+const INACTIVE_RADAR_TASK_SNAPSHOT: RadarTaskSignalSnapshot = { status: "changed" };
+
+const OVERLAY_LIFECYCLE_CAPABILITIES: Record<
+    OverlayRequest["kind"],
+    OverlayLifecycleCapabilities
+> = {
+    "create-task": { reportsMount: true, reportsCloseCompletion: true },
+    "create-note": { reportsMount: false, reportsCloseCompletion: false },
+    "create-activity": { reportsMount: false, reportsCloseCompletion: false },
+    "create-company": { reportsMount: false, reportsCloseCompletion: false },
+    "create-person": { reportsMount: false, reportsCloseCompletion: false },
+    "create-deal": { reportsMount: false, reportsCloseCompletion: false },
+    "import-companies": { reportsMount: false, reportsCloseCompletion: false },
+    "import-contacts": { reportsMount: false, reportsCloseCompletion: false },
+    "import-deals": { reportsMount: false, reportsCloseCompletion: false },
+    "workflow-manual-run": { reportsMount: false, reportsCloseCompletion: false },
+};
+
+function subscribeToInactiveRadarTask(): () => void {
+    return () => undefined;
+}
+
+function getInactiveRadarTaskSnapshot(): RadarTaskSignalSnapshot {
+    return INACTIVE_RADAR_TASK_SNAPSHOT;
+}
+
 type RestoredDraftMount = {
     accept: (overlayGeneration: number) => void;
     isAccepted: (overlayGeneration: number | undefined) => boolean;
+};
+
+type RenderedOverlay = {
+    generation: number;
+    originWorkspaceId: number | null;
+    request: OverlayRequest;
+    signal: AbortSignal | null;
 };
 
 function createRestoredDraftMount(): RestoredDraftMount {
@@ -111,6 +151,9 @@ async function loadReferences(
  * The requested overlay is kept mounted through its close animation: the `visible` flag drives each
  * dialog's `open` prop and flips to false when the request clears, while `rendered` (and its loaded
  * reference data) persist so the dialog can play its exit transition instead of unmounting instantly.
+ * Overlays declare whether they report mount and close completion. Unreported lifecycles release on
+ * cancellation, while the task composer remains retained only after it has mounted and until its exit
+ * completes.
  */
 export default function ActionOverlayHost({
     overlay,
@@ -130,26 +173,60 @@ export default function ActionOverlayHost({
     const t = useTranslations("Actions");
     const router = useRouter();
 
-    const [rendered, setRendered] = useState<{
-        generation: number;
-        originWorkspaceId: number | null;
-        request: OverlayRequest;
-        signal: AbortSignal | null;
-    } | null>(() => overlay && overlayGeneration !== null ? {
-        generation: overlayGeneration,
-        originWorkspaceId,
-        request: overlay,
-        signal: requestSignal,
-    } : null);
-    if (overlay && overlayGeneration !== null && overlayGeneration !== rendered?.generation) {
-        setRendered({
+    const [retainedOverlay, dispatchRetention] = useReducer(
+        reduceOverlayRetention<RenderedOverlay>,
+        overlay && overlayGeneration !== null ? {
             generation: overlayGeneration,
-            originWorkspaceId,
-            request: overlay,
-            signal: requestSignal,
+            value: {
+                generation: overlayGeneration,
+                originWorkspaceId,
+                request: overlay,
+                signal: requestSignal,
+            },
+            open: true,
+            mounted: false,
+            capabilities: OVERLAY_LIFECYCLE_CAPABILITIES[overlay.kind],
+        } : null,
+    );
+    if (overlay && overlayGeneration !== null && overlayGeneration !== retainedOverlay?.generation) {
+        dispatchRetention({
+            type: "opened",
+            generation: overlayGeneration,
+            value: {
+                generation: overlayGeneration,
+                originWorkspaceId,
+                request: overlay,
+                signal: requestSignal,
+            },
+            capabilities: OVERLAY_LIFECYCLE_CAPABILITIES[overlay.kind],
         });
+    } else if (!overlay && retainedOverlay?.open) {
+        dispatchRetention({ type: "cancelled", generation: retainedOverlay.generation });
     }
-    const visible = overlay != null;
+    const rendered = retainedOverlay?.value ?? null;
+    const visible = retainedOverlay?.open ?? false;
+    const closingGeneration = retainedOverlay !== null
+        && !retainedOverlay.open
+        && retainedOverlay.mounted
+        && retainedOverlay.capabilities.reportsCloseCompletion
+        ? retainedOverlay.generation
+        : null;
+    useEffect(() => {
+        if (closingGeneration === null) return;
+        let timeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+        const frame = globalThis.requestAnimationFrame(() => {
+            timeout = globalThis.setTimeout(() => {
+                dispatchRetention({
+                    type: "retention-expired",
+                    generation: closingGeneration,
+                });
+            }, OVERLAY_MAX_EXIT_DURATION_MS);
+        });
+        return () => {
+            globalThis.cancelAnimationFrame(frame);
+            if (timeout !== null) globalThis.clearTimeout(timeout);
+        };
+    }, [closingGeneration]);
     const requestInit = useMemo<RequestInit>(() => ({
         ...(rendered?.signal ? { signal: rendered.signal } : {}),
         ...(rendered?.originWorkspaceId !== null && rendered?.originWorkspaceId !== undefined
@@ -165,6 +242,8 @@ export default function ActionOverlayHost({
     } | null>(null);
 
     const kind = rendered?.request.kind;
+    const radarTask = rendered?.request.kind === "create-task" ? rendered.request.radarTask : undefined;
+    const subscribedRadarTask = visible ? radarTask : undefined;
     const needsReference = kind !== undefined && REFERENCE_KINDS.has(kind);
     const needsUsers = kind === "create-task";
     const defaults = rendered && "defaults" in rendered.request ? rendered.request.defaults : undefined;
@@ -224,6 +303,11 @@ export default function ActionOverlayHost({
         getRestoredDraftGeneration,
         getServerDraftGeneration,
     );
+    const radarTaskSnapshot = useSyncExternalStore(
+        subscribedRadarTask?.signalState.subscribe ?? subscribeToInactiveRadarTask,
+        subscribedRadarTask?.signalState.getSnapshot ?? getInactiveRadarTaskSnapshot,
+        getInactiveRadarTaskSnapshot,
+    );
     const restoredDraftCanMount = !rosterOnly ||
         observedRestoredDraftGeneration === restoredDraftGeneration;
     const handleRestoredDraftMounted = useCallback(() => {
@@ -238,6 +322,11 @@ export default function ActionOverlayHost({
         }
         restoredDraftMount.accept(rendered.generation);
     }, [onClose, rendered, restoredDraftGeneration, restoredDraftKey, restoredDraftMount]);
+    const handleTaskDialogMounted = useCallback(() => {
+        if (rendered === null) return;
+        dispatchRetention({ type: "mounted", generation: rendered.generation });
+        if (rosterOnly) handleRestoredDraftMounted();
+    }, [handleRestoredDraftMounted, rendered, rosterOnly]);
 
     useEffect(() => {
         if (!referenceKey) return;
@@ -359,11 +448,19 @@ export default function ActionOverlayHost({
         rosterOnly,
         usersReady,
     ]);
+    const handleOverlayLoadFailure = useCallback(() => {
+        if (rendered === null) return;
+        dispatchRetention({ type: "load-failed", generation: rendered.generation });
+        onClose();
+    }, [onClose, rendered]);
 
     if (!user) return null;
 
     const handleOpenChange = (open: boolean) => {
         if (!open) onClose();
+    };
+    const handleRenderedCloseComplete = (generation: number) => {
+        dispatchRetention({ type: "close-completed", generation });
     };
 
     const handleCompaniesImported = () => {
@@ -382,6 +479,41 @@ export default function ActionOverlayHost({
     const defaultPerson = resolvePerson(persons, defaults);
     const defaultDeal = resolveDeal(deals, defaults);
     const taskDraft = rendered?.request.kind === "create-task" ? rendered.request.draft : undefined;
+    const taskCreateRequest = radarTask
+        ? (payload: CreateTaskPayload, init?: RequestInit) => submitRadarTaskWithCurrentSignal(
+            radarTask.signalState,
+            async (version) => {
+                try {
+                    const signal = await createRadarTask(
+                        radarTask.signalId,
+                        version,
+                        {
+                            ...payload,
+                            ...(radarTask.bridgePersonId === undefined
+                                ? {}
+                                : { bridgePersonId: radarTask.bridgePersonId }),
+                        },
+                        init,
+                    );
+                    radarTask.onCreated(signal);
+                    return signal;
+                } catch (error) {
+                    if (error instanceof ApiError && error.status === 409) {
+                        radarTask.signalState.refresh(undefined, "checking");
+                        radarTask.onRefresh();
+                    }
+                    throw error;
+                }
+            },
+        )
+        : undefined;
+    const taskSubmissionBlockedMessage = radarTask === undefined || radarTaskSnapshot.status === "current"
+        ? undefined
+        : t(radarTaskSnapshot.status === "checking"
+            ? "feedback.radarTaskRefreshing"
+            : radarTaskSnapshot.status === "unavailable"
+                ? "feedback.radarTaskUnavailable"
+                : "feedback.radarTaskChanged");
     const taskDefaultAssignee = taskDraft?.assigneeId == null
         ? null
         : users?.find((candidate) => candidate.id === taskDraft.assigneeId) ?? null;
@@ -402,7 +534,10 @@ export default function ActionOverlayHost({
     const defaultActivityType = ACTIVITY_TYPES.find((activityType) => activityType === activityDraft?.type);
 
     return (
-        <>
+        <OverlayChunkFailureBoundary
+            key={rendered?.generation ?? "no-overlay"}
+            onFailure={handleOverlayLoadFailure}
+        >
             <Fragment key={rendered?.generation}>
                 {rendered?.request.kind === "create-task" && users && references && restoredDraftCanMount ? (
                     <TaskDialog
@@ -418,8 +553,18 @@ export default function ActionOverlayHost({
                         defaultDueDate={taskDraft?.dueDate ?? ""}
                         defaultDescription={taskDraft?.description ?? ""}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
-                        onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
+                        onDraftMounted={handleTaskDialogMounted}
                         requestInit={requestInit}
+                        createRequest={taskCreateRequest}
+                        compact={radarTask?.mode === 'warm_path'}
+                        hideLinks={radarTask !== undefined}
+                        failureMessage={radarTask ? t('feedback.createFailed') : undefined}
+                        draftPersistence={radarTask === undefined}
+                        preserveDraftOnClose={radarTask !== undefined}
+                        submissionBlockedMessage={taskSubmissionBlockedMessage}
+                        onPersistDraft={radarTask?.onDraftChange}
+                        onClearDraft={radarTask?.onDraftClear}
+                        onCloseComplete={() => handleRenderedCloseComplete(rendered.generation)}
                     />
                 ) : null}
                 {rendered?.request.kind === "create-note" && references && restoredDraftCanMount ? (
@@ -507,6 +652,6 @@ export default function ActionOverlayHost({
                     />
                 ) : null}
             </Fragment>
-        </>
+        </OverlayChunkFailureBoundary>
     );
 }

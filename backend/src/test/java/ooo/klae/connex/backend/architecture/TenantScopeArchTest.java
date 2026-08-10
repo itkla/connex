@@ -157,6 +157,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper.deletePinsForUserAnywhere",
         "ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere",
         "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.RelationshipSignalMapper.deleteActorStateAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere",
         "ooo.klae.connex.backend.mappers.ReportMapper.clearDefinitionCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.ReportMapper.clearSnapshotGeneratorsAnywhere",

@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -26,4 +28,6 @@ public class WarmPathDto {
     private int score;
     private List<WarmPathBridgeDto> bridges;
     private String asOf;
+    @JsonIgnore
+    private List<String> sourceState;
 }

@@ -80,6 +80,7 @@ export const config = {
         '/notifications/:path*',
         '/organization/:path*',
         '/overview/:path*',
+        '/radar/:path*',
         '/records/:path*',
         '/search/:path*',
         '/settings/:path*',

@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -74,6 +75,7 @@ public class UserOffboardingService {
     private final CampaignMapper campaignMapper;
     private final ConsentMapper consentMapper;
     private final ReportMapper reportMapper;
+    private final RelationshipSignalMapper relationshipSignalMapper;
     private final ShareMapper shareMapper;
     private final SuppressionMapper suppressionMapper;
     private final SavedViewPreferenceMapper savedViewPreferenceMapper;
@@ -149,6 +151,7 @@ public class UserOffboardingService {
                 workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
             dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
+            relationshipSignalMapper.deleteActorState(workspaceId, userId);
         }
     }
 
@@ -185,6 +188,7 @@ public class UserOffboardingService {
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
             workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
+        relationshipSignalMapper.deleteActorState(workspaceId, userId);
     }
 
     /**
@@ -266,5 +270,6 @@ public class UserOffboardingService {
         shareMapper.clearPersonShareGrantedByAnywhere(userId);
         shareMapper.clearPipelineShareGrantedByAnywhere(userId);
         suppressionMapper.clearCreatorsAnywhere(userId);
+        relationshipSignalMapper.deleteActorStateAnywhere(userId);
     }
 }

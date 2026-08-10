@@ -22,6 +22,7 @@
     },
     "navigate": {
       "dashboard": "ダッシュボード",
+      "radar": "リレーションシップ・レーダー",
       "companies": "会社",
       "contacts": "連絡先",
       "deals": "案件",
@@ -113,6 +114,9 @@
       "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",
       "restoredLinkUnavailable": "保存されていた人物または案件は利用できません。作成する前に関連レコードを確認してください。",
       "restoredAssigneeUnavailable": "保存されていた担当者は利用できません。タスクを作成する前に担当者を確認してください。",
+      "radarTaskRefreshing": "レーダーのシグナルを更新しています。タスクの下書きはこのまま保持されます。",
+      "radarTaskChanged": "編集中にレーダーのシグナルが変更されました。レーダーの更新後に閉じて開き直してください。タスクの下書きは復元されます。",
+      "radarTaskUnavailable": "レーダーのシグナルを確認できませんでした。閉じてレーダーを再読み込みしてください。タスクの下書きは復元されます。",
       "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
       "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
       "taskCreated": "タスクを作成しました",

@@ -42,6 +42,7 @@ export type BreadcrumbMessageKey =
     | "pipelines"
     | "products"
     | "profile"
+    | "radar"
     | "recipes"
     | "reports"
     | "roles"
@@ -91,6 +92,7 @@ type StaticWorkspaceRoute = {
 
 const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/dashboard": { key: "dashboard" },
+    "/radar": { key: "radar" },
     "/overview/calendar": { key: "calendar" },
     "/overview/map": { key: "map" },
     "/overview/introductions": { key: "introductions" },
