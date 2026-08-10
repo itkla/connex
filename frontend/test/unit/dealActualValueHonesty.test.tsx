@@ -6,17 +6,31 @@ import {
     type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { submitDealDraftUpdates } from "@/app/components/records/deals/DealsBrowser";
+import { submitDealDraftUpdate } from "@/app/components/records/deals/EditDealSheet";
 import QuickEditDealSheet, { type DealDraft } from "@/app/components/records/deals/QuickEditDealSheet";
 import { actualValueForOutcome } from "@/app/components/records/deals/dealOutcome";
 import type { Deal, Pipeline, Stage } from "@/app/lib/types";
+
+const { updateDealMock } = vi.hoisted(() => ({
+    updateDealMock: vi.fn(),
+}));
 
 vi.mock("react", async () => {
     const React = await vi.importActual<typeof import("react")>("react");
     return {
         ...React,
         useEffect: () => undefined,
+    };
+});
+
+vi.mock("@/app/lib/api", async () => {
+    const actual = await vi.importActual<typeof import("@/app/lib/api")>("@/app/lib/api");
+    return {
+        ...actual,
+        updateDeal: updateDealMock,
     };
 });
 
@@ -213,7 +227,6 @@ function findFailureStageSelector(root: unknown): (stage: Stage) => unknown {
 
 function createOutcomeDraftHarness() {
     let draft: DealDraft = { ...WON_LINE_ITEM_DRAFT };
-    let submittedActualValue: number | undefined;
     const props = {
         open: true,
         onOpenChange: () => undefined,
@@ -226,9 +239,7 @@ function createOutcomeDraftHarness() {
         pipelines: [PIPELINE],
         stagesByPipeline: { [PIPELINE.id]: [WON_STAGE, LOST_STAGE] },
         isSaving: false,
-        saveEdits: () => {
-            submittedActualValue = actualValueForOutcome(draft.won, draft.actualValue);
-        },
+        saveEdits: () => undefined,
     } satisfies ComponentProps<typeof QuickEditDealSheet>;
 
     return {
@@ -247,12 +258,12 @@ function createOutcomeDraftHarness() {
             });
             findFailureStageSelector(tree)(LOST_STAGE);
         },
-        submit: () => {
-            props.saveEdits();
-            return submittedActualValue;
-        },
     };
 }
+
+beforeEach(() => {
+    updateDealMock.mockReset().mockResolvedValue(WON_LINE_ITEM_DEAL);
+});
 
 describe("lost-deal actual value", () => {
     function renderActualValueInput(won: boolean, actualValue: number) {
@@ -298,33 +309,52 @@ describe("lost-deal actual value", () => {
         expect(actualValueForOutcome(null, 275)).toBe(275);
     });
 
-    it("preserves realized value when a won deal is toggled through lost back to won before submit", () => {
+    it("preserves realized value when a won deal is toggled through lost back to won before submit", async () => {
         const form = createOutcomeDraftHarness();
 
         form.selectOutcome("Lost");
         expect(form.getDraft().actualValue).toBe(WON_LINE_ITEM_DEAL.actualValue);
         form.selectOutcome("Won");
+        await submitDealDraftUpdate(WON_LINE_ITEM_DEAL.id, form.getDraft());
 
-        expect(form.submit()).toBe(WON_LINE_ITEM_DEAL.actualValue);
+        expect(updateDealMock).toHaveBeenCalledWith(
+            WON_LINE_ITEM_DEAL.id,
+            expect.objectContaining({ actualValue: WON_LINE_ITEM_DEAL.actualValue }),
+        );
     });
 
-    it("preserves realized value when a won deal is toggled through lost to open before submit", () => {
+    it("preserves realized value when a won deal is toggled through lost to open before submit", async () => {
         const form = createOutcomeDraftHarness();
 
         form.selectOutcome("Lost");
         expect(form.getDraft().actualValue).toBe(WON_LINE_ITEM_DEAL.actualValue);
         form.selectOutcome("Open");
+        await submitDealDraftUpdates([{ dealId: WON_LINE_ITEM_DEAL.id, draft: form.getDraft() }]);
 
-        expect(form.submit()).toBe(WON_LINE_ITEM_DEAL.actualValue);
+        expect(updateDealMock).toHaveBeenCalledWith(
+            WON_LINE_ITEM_DEAL.id,
+            expect.objectContaining({ actualValue: WON_LINE_ITEM_DEAL.actualValue }),
+        );
     });
 
-    it("submits zero for a committed loss while retaining the provisional draft value", () => {
+    it("submits zero for a committed loss while retaining the provisional draft value", async () => {
         const form = createOutcomeDraftHarness();
 
         form.selectOutcome("Lost");
+        await submitDealDraftUpdate(WON_LINE_ITEM_DEAL.id, form.getDraft());
+        await submitDealDraftUpdates([{ dealId: WON_LINE_ITEM_DEAL.id, draft: form.getDraft() }]);
 
         expect(form.getDraft().actualValue).toBe(WON_LINE_ITEM_DEAL.actualValue);
-        expect(form.submit()).toBe(0);
+        expect(updateDealMock).toHaveBeenNthCalledWith(
+            1,
+            WON_LINE_ITEM_DEAL.id,
+            expect.objectContaining({ actualValue: 0 }),
+        );
+        expect(updateDealMock).toHaveBeenNthCalledWith(
+            2,
+            WON_LINE_ITEM_DEAL.id,
+            expect.objectContaining({ actualValue: 0 }),
+        );
     });
 
     it("preserves realized value while a failure-stage selection remains provisional", () => {

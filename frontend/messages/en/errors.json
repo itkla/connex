@@ -57,6 +57,12 @@
     "retry": "Try again",
     "retrying": "Retrying"
   },
+  "CapabilityUnavailable": {
+    "title": "We couldn't check feature availability",
+    "body": "Feature availability couldn't be confirmed. The issue is usually temporary — try again in a moment.",
+    "retry": "Try again",
+    "retrying": "Retrying"
+  },
   "SectionUnavailable": {
     "title": "Couldn't load this",
     "body": "This section couldn't be loaded. Try again in a moment.",

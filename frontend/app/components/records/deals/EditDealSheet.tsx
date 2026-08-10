@@ -28,6 +28,24 @@ function toDraft(d: Deal): DealDraft {
     };
 }
 
+/** Persists one edit-sheet draft with outcome-canonicalized realized value. */
+export async function submitDealDraftUpdate(dealId: number, draft: DealDraft): Promise<void> {
+    const payload: UpdateDealPayload = {
+        name: draft.name.trim(),
+        value: draft.value,
+        actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+        currency: draft.currency.trim() || 'USD',
+        pipeline: draft.pipeline,
+        stage: draft.stage,
+        company: draft.company,
+        expectedCloseDate: draft.expectedCloseDate || null,
+        closedAt: draft.closedAt || null,
+        closedReason: draft.closedReason || null,
+        won: draft.won,
+    };
+    await updateDeal(dealId, payload);
+}
+
 export default function EditDealSheet({
     deal,
     open,
@@ -115,20 +133,7 @@ export default function EditDealSheet({
 
         setIsSaving(true);
         try {
-            const payload: UpdateDealPayload = {
-                name: draft.name.trim(),
-                value: draft.value,
-                actualValue: actualValueForOutcome(draft.won, draft.actualValue),
-                currency: draft.currency.trim() || 'USD',
-                pipeline: draft.pipeline,
-                stage: draft.stage,
-                company: draft.company,
-                expectedCloseDate: draft.expectedCloseDate || null,
-                closedAt: draft.closedAt || null,
-                closedReason: draft.closedReason || null,
-                won: draft.won,
-            };
-            await updateDeal(deal.id, payload);
+            await submitDealDraftUpdate(deal.id, draft);
             await cfRef.current?.save();
             toastSuccess(t('dealUpdated'));
             onOpenChange(false);

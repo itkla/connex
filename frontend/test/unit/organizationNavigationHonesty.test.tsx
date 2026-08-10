@@ -11,12 +11,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import OrganizationLayout from "@/app/(app)/organization/layout";
+import OrgSsoPage from "@/app/(app)/organization/sso/page";
+import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
 import OrgTabs from "@/app/components/organization/OrgTabs";
+import OrganizationWorkspaceGuard from "@/app/components/organization/OrganizationWorkspaceGuard";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { MyWorkspaces, Workspace } from "@/app/lib/types";
 
-const { workspaceResultMock } = vi.hoisted(() => ({
+const { activeWorkspaceState, capabilityResultMock, redirectMock, workspaceResultMock } = vi.hoisted(() => ({
+    activeWorkspaceState: { id: 7 as number | null },
+    capabilityResultMock: vi.fn(),
+    redirectMock: vi.fn(),
     workspaceResultMock: vi.fn(),
 }));
 
@@ -35,7 +41,9 @@ vi.mock("next/link", async () => {
 });
 
 vi.mock("next/navigation", () => ({
+    redirect: redirectMock,
     usePathname: () => "/organization/members",
+    useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 vi.mock("next-intl", () => ({
@@ -62,10 +70,20 @@ vi.mock("motion/react", async () => {
 });
 
 vi.mock("@/app/lib/api", () => ({
-    DEFAULT_CAPABILITIES: { sso: false },
-    getCapabilities: () => Promise.resolve({ sso: true }),
+    getCapabilitiesResultFromCookie: capabilityResultMock,
     getMyWorkspacesResultFromCookie: workspaceResultMock,
 }));
+
+vi.mock("@/app/hooks/useWorkspace", () => ({
+    useWorkspace: () => ({ activeWorkspaceId: activeWorkspaceState.id }),
+}));
+
+vi.mock("@/app/components/WorkspaceSelectionUnavailable", async () => {
+    const React = await import("react");
+    return {
+        default: () => React.createElement("p", null, "workspace selection unavailable"),
+    };
+});
 
 const MEMBER_WORKSPACE = {
     id: 7,
@@ -78,6 +96,16 @@ const MEMBER_WORKSPACE = {
     orgName: "Connex test",
     orgIdentityVersion: 1,
     orgRole: null,
+} satisfies Workspace;
+
+const OTHER_ORG_ADMIN_WORKSPACE = {
+    ...MEMBER_WORKSPACE,
+    id: 8,
+    name: "Other organization workspace",
+    slug: "other-organization-workspace",
+    orgId: 4,
+    orgName: "Other organization",
+    orgRole: "admin",
 } satisfies Workspace;
 
 const ORG_ADMIN_ROUTES = [
@@ -127,6 +155,9 @@ function isOrgTabsProps(value: unknown): value is { isOrgAdmin: boolean } {
 }
 
 beforeEach(() => {
+    activeWorkspaceState.id = MEMBER_WORKSPACE.id;
+    capabilityResultMock.mockReset().mockResolvedValue({ ok: true, data: { sso: true } });
+    redirectMock.mockReset();
     workspaceResultMock.mockReset();
 });
 
@@ -159,6 +190,38 @@ describe("organization navigation authority", () => {
         const tabs = findByType(rendered, OrgTabs);
 
         expect(workspaceResultMock).toHaveBeenCalledWith("JSESSIONID=session; connex_workspace=7");
+        expect(capabilityResultMock).toHaveBeenCalledWith("JSESSIONID=session; connex_workspace=7");
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(OrganizationWorkspaceGuard);
+        expect(findByType(rendered, NoAccessCard)).not.toBeNull();
+        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(false);
+        expect(containsText(rendered, "admin content")).toBe(false);
+    });
+
+    it("starts capability resolution without waiting for the workspace lookup", async () => {
+        let resolveWorkspace: (result: { ok: true; data: MyWorkspaces }) => void = () => undefined;
+        workspaceResultMock.mockReturnValue(new Promise((resolve) => {
+            resolveWorkspace = resolve;
+        }));
+
+        const rendering = OrganizationLayout({ children: createElement("p", null, "admin content") });
+        await vi.waitFor(() => expect(capabilityResultMock).toHaveBeenCalledOnce());
+        resolveWorkspace({ ok: true, data: workspaceSnapshot(MEMBER_WORKSPACE) });
+
+        await rendering;
+    });
+
+    it("refuses authority held only in a different organization", async () => {
+        workspaceResultMock.mockResolvedValue({
+            ok: true,
+            data: {
+                workspaces: [OTHER_ORG_ADMIN_WORKSPACE, MEMBER_WORKSPACE],
+                activeWorkspaceId: MEMBER_WORKSPACE.id,
+            },
+        });
+
+        const rendered = await OrganizationLayout({ children: createElement("p", null, "admin content") });
+        const tabs = findByType(rendered, OrgTabs);
+
         expect(findByType(rendered, NoAccessCard)).not.toBeNull();
         expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(false);
         expect(containsText(rendered, "admin content")).toBe(false);
@@ -173,6 +236,44 @@ describe("organization navigation authority", () => {
         expect(findByType(rendered, NoAccessCard)).toBeNull();
     });
 
+    it.each([
+        { workspaces: [], activeWorkspaceId: null },
+        { workspaces: [MEMBER_WORKSPACE], activeWorkspaceId: 404 },
+    ] satisfies MyWorkspaces[])(
+        "renders unavailable when the workspace snapshot has no active membership: $activeWorkspaceId",
+        async (snapshot) => {
+            workspaceResultMock.mockResolvedValue({ ok: true, data: snapshot });
+
+            const rendered = await OrganizationLayout({ children: createElement("p", null, "admin content") });
+
+            expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
+            expect(findByType(rendered, NoAccessCard)).toBeNull();
+        },
+    );
+
+    it("renders retryable unavailability instead of treating a failed capability read as disabled", async () => {
+        workspaceResultMock.mockResolvedValue({
+            ok: true,
+            data: workspaceSnapshot({ ...MEMBER_WORKSPACE, orgRole: "owner" }),
+        });
+        capabilityResultMock.mockResolvedValue({ ok: false });
+
+        const layout = await OrganizationLayout({ children: createElement("p", null, "admin content") });
+        const ssoPage = await OrgSsoPage();
+
+        expect(isValidElement(layout) ? layout.type : null).toBe(CapabilityUnavailablePage);
+        expect(isValidElement(ssoPage) ? ssoPage.type : null).toBe(CapabilityUnavailablePage);
+        expect(redirectMock).not.toHaveBeenCalled();
+    });
+
+    it("redirects the SSO route only after a successful disabled-capability result", async () => {
+        capabilityResultMock.mockResolvedValue({ ok: true, data: { sso: false } });
+
+        await OrgSsoPage();
+
+        expect(redirectMock).toHaveBeenCalledWith("/organization/members");
+    });
+
     it("renders the section for a server-resolved organization administrator", async () => {
         workspaceResultMock.mockResolvedValue({
             ok: true,
@@ -185,5 +286,32 @@ describe("organization navigation authority", () => {
         expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(true);
         expect(findByType(rendered, NoAccessCard)).toBeNull();
         expect(containsText(rendered, "admin content")).toBe(true);
+    });
+
+    it("admits an organization owner", async () => {
+        workspaceResultMock.mockResolvedValue({
+            ok: true,
+            data: workspaceSnapshot({ ...MEMBER_WORKSPACE, orgRole: "owner" }),
+        });
+
+        const rendered = await OrganizationLayout({ children: createElement("p", null, "owner content") });
+        const tabs = findByType(rendered, OrgTabs);
+
+        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(true);
+        expect(findByType(rendered, NoAccessCard)).toBeNull();
+        expect(containsText(rendered, "owner content")).toBe(true);
+    });
+
+    it("withholds a retained organization payload after the active workspace changes", () => {
+        activeWorkspaceState.id = OTHER_ORG_ADMIN_WORKSPACE.id;
+
+        const html = renderToStaticMarkup(createElement(
+            OrganizationWorkspaceGuard,
+            { workspaceId: MEMBER_WORKSPACE.id },
+            createElement("p", null, "stale admin content"),
+        ));
+
+        expect(html).toContain("workspace selection unavailable");
+        expect(html).not.toContain("stale admin content");
     });
 });
