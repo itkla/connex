@@ -310,6 +310,79 @@
     "run": "Run",
     "recipes": "Recipes"
   },
+  "AskConnex": {
+    "title": "Ask Connex",
+    "mobileLabel": "Ask",
+    "newChatTitle": "New conversation",
+    "archive": "Archive",
+    "close": "Close Ask Connex",
+    "composerAria": "Message Ask Connex",
+    "composerHint": "Enter to send · Shift+Enter for a new line",
+    "composerPlaceholder": "Ask about this record or your workspace…",
+    "context": "Context",
+    "contextLimit": "You can include up to 10 records. Remove one before sending.",
+    "contextNone": "No record context",
+    "emptyTitle": "Start with a real task",
+    "emptyBody": "Ask Connex uses the records you can access and the context shown above.",
+    "newChat": "New chat",
+    "noRecentSessions": "No recent chats",
+    "moreOptions": "Chat options",
+    "recentSessions": "Recent chats",
+    "removeContext": "Remove {label} from context",
+    "rename": "Rename",
+    "renameCancel": "Cancel",
+    "renameDescription": "Choose a short name that will make this conversation easy to find.",
+    "renameLabel": "Conversation name",
+    "renameSave": "Save",
+    "renameSaving": "Saving…",
+    "renameTitle": "Rename chat",
+    "send": "Send message",
+    "tooLong": "Messages can contain up to 16,000 characters.",
+    "turnAccepted": "Request accepted",
+    "turnWorking": "Working with your authorized workspace context…",
+    "turnResolved": "Answer ready",
+    "turnFailed": "The assistant could not complete this turn.",
+    "turnTimedOut": "This turn timed out before it could finish.",
+    "starters": {
+      "person": {
+        "followUp": "Schedule a follow-up",
+        "activity": "Summarize recent activity",
+        "stalled": "What’s stalled here?"
+      },
+      "company": {
+        "relationships": "Who are the strongest relationships here?",
+        "activity": "Summarize recent activity",
+        "risks": "What needs attention?"
+      },
+      "deal": {
+        "summary": "Summarize this deal",
+        "risks": "What could block this deal?",
+        "nextStep": "What should happen next?"
+      },
+      "workspace": {
+        "followUps": "Which follow-ups need attention?",
+        "risks": "Which relationships are cooling?",
+        "activity": "Summarize recent workspace activity"
+      }
+    },
+    "unavailable": {
+      "permissionTitle": "Ask Connex isn’t available to your role",
+      "permissionBody": "Your workspace role does not include permission to use AI features.",
+      "lookupTitle": "Permission status unavailable",
+      "lookupBody": "Connex could not confirm whether your role can use the assistant. Try again after permissions reload.",
+      "featureTitle": "Ask Connex is unavailable",
+      "featureBody": "The assistant cannot be used right now. Server reason: {reason}",
+      "uncertainTitle": "This turn needs reconciliation",
+      "uncertainBody": "Connex did not receive a reliable turn response, so sending again is blocked to prevent a duplicate. Start a new chat or refresh this session."
+    },
+    "toast": {
+      "archived": "Chat archived",
+      "renamed": "Chat renamed",
+      "requestFailed": "Ask Connex request failed",
+      "turnFailed": "Ask Connex could not complete the turn",
+      "turnTimedOut": "Ask Connex timed out"
+    }
+  },
   "SearchLayout": {
     "title": "Search",
     "description": "Search across your workspace"

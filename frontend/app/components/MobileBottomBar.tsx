@@ -11,6 +11,7 @@ import {
     HomeIcon,
     MagnifyingGlassIcon,
     PlusIcon,
+    SparklesIcon,
 } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
@@ -18,6 +19,7 @@ import { springJiggle, springSnappy, springSmooth, easeOut, instant } from '@/ap
 import { ApiError, getTaskSummary } from '@/app/lib/api';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useAskConnex } from '@/app/components/ask-connex/AskConnexProvider';
 
 const GLASS_FILTER_ID = 'connex-liquid-glass';
 
@@ -244,12 +246,14 @@ function BarButton({
     Icon,
     onClick,
     reduce,
+    working = false,
 }: {
     label: string;
     caption: string;
     Icon: ComponentType<{ className?: string }>;
     onClick: () => void;
     reduce: boolean;
+    working?: boolean;
 }) {
     return (
         <motion.button
@@ -263,6 +267,9 @@ function BarButton({
         >
             <span className={indicatorWrap}>
                 <Icon className="relative z-10 size-6" />
+                {working ? (
+                    <span aria-hidden className="absolute right-2 top-0.5 z-10 size-1.5 rounded-full bg-primary" />
+                ) : null}
             </span>
             <span className={labelBase}>{caption}</span>
         </motion.button>
@@ -287,6 +294,8 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
     const tNav = useTranslations('CommonSidebar');
     const tActions = useTranslations('Actions');
     const t = useTranslations('MobileNav');
+    const tAskConnex = useTranslations('AskConnex');
+    const askConnex = useAskConnex();
 
     const barRef = useRef<HTMLDivElement>(null);
     const [displacementMap, setDisplacementMap] = useState('');
@@ -412,6 +421,14 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     Icon={MagnifyingGlassIcon}
                     onClick={openSearch}
                     reduce={reduce}
+                />
+                <BarButton
+                    label={tAskConnex('title')}
+                    caption={tAskConnex('mobileLabel')}
+                    Icon={SparklesIcon}
+                    onClick={() => askConnex.openDrawer()}
+                    reduce={reduce}
+                    working={askConnex.working}
                 />
 
                 <motion.button
