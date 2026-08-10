@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
 
@@ -15,11 +17,13 @@ import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -30,6 +34,8 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
+import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 
@@ -69,11 +75,13 @@ public class UserOffboardingService {
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
+    private final DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
     private final TaskMapper taskMapper;
     private final AttachmentMapper attachmentMapper;
     private final CampaignMapper campaignMapper;
     private final ConsentMapper consentMapper;
     private final ReportMapper reportMapper;
+    private final RelationshipSignalMapper relationshipSignalMapper;
     private final ShareMapper shareMapper;
     private final SuppressionMapper suppressionMapper;
     private final SavedViewPreferenceMapper savedViewPreferenceMapper;
@@ -84,6 +92,8 @@ public class UserOffboardingService {
     private final NotificationStateVersionService notificationStateVersionService;
     private final WorkflowOffboardingService workflowOffboardingService;
     private final ProviderCapturePurgeService providerCapturePurgeService;
+    private final TenantWorkScope tenantWorkScope;
+    private final TenantContext tenantContext;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -130,12 +140,22 @@ public class UserOffboardingService {
      * membership row exists, so a pending invitee's legitimate data is never
      * touched and a stale repeatable-read snapshot cannot skip cleanup. Called
      * by every fresh-membership path: invites, invite links, and SSO JIT
-     * provisioning.
+     * provisioning. The cleanup installs the target workspace's placement and
+     * tenant context because those paths can run before the caller has a
+     * resolvable workspace of their own.
      *
      * @param workspaceId the workspace being joined
      * @param userId the joining user
      */
     public void prepareFreshMembership(int workspaceId, int userId) {
+        tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, catalog) ->
+            withTenantContext(workspaceId, orgId, userId, catalog, () -> {
+                prepareFreshMembershipInWorkspace(workspaceId, userId);
+                return null;
+            }));
+    }
+
+    private void prepareFreshMembershipInWorkspace(int workspaceId, int userId) {
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
             providerCapturePurgeService.purge(
                 workspaceId, userId, ConnectedAccountProviders.GOOGLE);
@@ -144,11 +164,50 @@ public class UserOffboardingService {
             savedViewPreferenceMapper.deletePinsForFreshMembership(workspaceId, userId);
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
+            dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
             aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
             notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
                 workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
             dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
+            relationshipSignalMapper.deleteActorState(workspaceId, userId);
+        }
+    }
+
+    private <T> T withTenantContext(
+            int workspaceId,
+            int orgId,
+            int userId,
+            String catalog,
+            Supplier<T> work) {
+        boolean hadTenant = tenantContext.isResolved();
+        int previousWorkspace = hadTenant
+            ? Objects.requireNonNull(tenantContext.getWorkspaceId(), "previousWorkspace")
+            : 0;
+        int previousOrg = hadTenant
+            ? Objects.requireNonNull(tenantContext.getOrgId(), "previousOrg")
+            : 0;
+        int previousUser = hadTenant
+            ? Objects.requireNonNull(tenantContext.getUserId(), "previousUser")
+            : 0;
+        String previousRole = hadTenant
+            ? Objects.requireNonNull(tenantContext.getRole(), "previousRole")
+            : null;
+        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
+        tenantContext.set(workspaceId, orgId, userId, "member", catalog);
+        try {
+            return work.get();
+        } finally {
+            if (hadTenant) {
+                tenantContext.set(
+                    previousWorkspace,
+                    previousOrg,
+                    previousUser,
+                    previousRole,
+                    previousCatalog);
+            } else {
+                tenantContext.clear();
+            }
         }
     }
 
@@ -175,6 +234,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deletePinsForUser(workspaceId, userId);
         savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
         savedViewMapper.deleteForUser(workspaceId, userId);
+        dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
         aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         companyMapper.clearMemberOwnership(workspaceId, userId);
@@ -185,6 +245,7 @@ public class UserOffboardingService {
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
             workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
+        relationshipSignalMapper.deleteActorState(workspaceId, userId);
     }
 
     /**
@@ -237,6 +298,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deletePinsForUserAnywhere(userId);
         savedViewPreferenceMapper.deleteDefaultsForUserAnywhere(userId);
         savedViewMapper.deleteForUserAnywhere(userId);
+        dealDuplicateReviewProofMapper.deleteForActorAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
         aiChatMapper.deleteParticipantsForUserAnywhere(userId);
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere(userId);
@@ -266,5 +328,6 @@ public class UserOffboardingService {
         shareMapper.clearPersonShareGrantedByAnywhere(userId);
         shareMapper.clearPipelineShareGrantedByAnywhere(userId);
         suppressionMapper.clearCreatorsAnywhere(userId);
+        relationshipSignalMapper.deleteActorStateAnywhere(userId);
     }
 }

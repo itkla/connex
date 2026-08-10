@@ -105,6 +105,7 @@
     "sectionLibrary": "Library",
     "sectionWorkspace": "Workspace",
     "navDashboard": "Dashboard",
+    "navRadar": "Radar",
     "navCalendar": "Calendar",
     "navMap": "Map",
     "navIntroductions": "Introductions",
@@ -215,7 +216,8 @@
       "PHONE": "Same phone",
       "DOMAIN": "Same domain",
       "EXTERNAL_ID": "Same external ID",
-      "NAME": "Same normalized name"
+      "NAME": "Same normalized name",
+      "DEAL_KEY": "Same deal name and company"
     }
   },
   "CommonSearchBar": {
@@ -261,6 +263,7 @@
     "settings": "Settings",
     "organization": "Organization",
     "dashboard": "Dashboard",
+    "radar": "Radar",
     "calendar": "Calendar",
     "map": "Map",
     "introductions": "Introductions",

@@ -17,7 +17,9 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 
 function recordHref(kind: DuplicatePreflightKind, id: number): string {
-    return kind === 'company' ? `/records/companies/${id}` : `/records/contacts/${id}`;
+    if (kind === 'company') return `/records/companies/${id}`;
+    if (kind === 'deal') return `/records/deals/${id}`;
+    return `/records/contacts/${id}`;
 }
 
 function context(candidate: DuplicateCandidate): string[] {

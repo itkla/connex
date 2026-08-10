@@ -160,6 +160,24 @@ jobs:
       - name: Test (runs Flyway migrations, arch tests, tenant-isolation tests)
         working-directory: backend
         run: bash gradlew test --no-daemon --stacktrace
+      # Spring reports one failed context load as failures for every test sharing that context.
+      # Surface MySQL's capacity counter separately so connection exhaustion cannot mimic a product regression.
+      - name: Diagnose MySQL connection capacity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          capacity_errors="$(mysql -h 127.0.0.1 -P 3306 -u "$CONNEX_DB_USERNAME" \
+            --password="$CONNEX_DB_PASSWORD" --batch --skip-column-names \
+            -e "SHOW GLOBAL STATUS LIKE 'Connection_errors_max_connections';" | awk '{ print $2 }')"
+          if [[ ! "$capacity_errors" =~ ^[0-9]+$ ]]; then
+            echo "::error title=MySQL capacity diagnostic failed::Connection_errors_max_connections did not return a numeric value."
+            exit 1
+          fi
+          if (( capacity_errors > 0 )); then
+            echo "::error title=MySQL connection capacity exhausted::MySQL refused ${capacity_errors} connection attempt(s) because max_connections was reached. Treat cascading Spring context failures as CI infrastructure failures."
+            exit 1
+          fi
 
   frontend:
     name: Frontend — typecheck & lint

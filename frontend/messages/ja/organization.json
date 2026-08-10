@@ -6,6 +6,7 @@
     "tabMembers": "管理者",
     "tabDomains": "許可ドメイン",
     "tabSso": "シングルサインオン",
+    "tabSsoAvailabilityUnknown": "利用可否を確認できません",
     "tabAi": "AIプロバイダー",
     "tabAudit": "監査ログ",
     "noAccessTitle": "組織管理者のみ",

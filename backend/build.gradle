@@ -100,7 +100,11 @@ tasks.withType(JavaCompile).configureEach {
 tasks.named('test') {
 	useJUnitPlatform()
 	maxHeapSize = '1536m'
+	maxParallelForks = 1
 	forkEvery = 100
+	// One test fork retains at most 10 cached pools. Including one context loading, the application-pool
+	// budget is (10 + 1) * 10 = 110, leaving 41 of MySQL's default 151 for auxiliary test connections.
+	systemProperty 'spring.test.context.cache.maxSize', '10'
 }
 
 def seederRuntimeClasspath = sourceSets.main.output + configurations.productionRuntimeClasspath

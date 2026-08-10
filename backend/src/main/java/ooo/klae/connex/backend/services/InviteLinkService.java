@@ -5,7 +5,6 @@ import java.util.Base64;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -47,6 +46,7 @@ public class InviteLinkService {
     private final RegistrationVerificationService registrationVerificationService;
     private final SessionSecurityService sessionSecurityService;
     private final NotificationStateVersionService notificationStateVersionService;
+    private final FreshMembershipTransaction freshMembershipTransaction;
 
     /** Creates a shareable link. Defaults: member role, 14-day expiry, unlimited uses. */
     public InviteLinkDto createLink(int workspaceId, User actor, String roleRaw,
@@ -94,8 +94,17 @@ public class InviteLinkService {
      * fresh redemption, so a prior redemption record never bypasses revocation,
      * expiry, use-exhaustion, or the domain allow-list.
      */
-    @Transactional
     public WorkspaceMembershipDto redeemLink(String token, User user) {
+        WorkspaceInviteLink target = inviteLinkMapper.findByToken(token);
+        if (target == null) {
+            throw new ResourceNotFoundException("Invite link not found");
+        }
+        return freshMembershipTransaction.execute(
+            target.getWorkspaceId(),
+            () -> redeemLinkInWorkspace(token, user));
+    }
+
+    private WorkspaceMembershipDto redeemLinkInWorkspace(String token, User user) {
         WorkspaceInviteLink link = inviteLinkMapper.findByToken(token);
         if (link == null) {
             throw new ResourceNotFoundException("Invite link not found");

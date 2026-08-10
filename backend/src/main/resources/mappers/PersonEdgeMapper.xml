@@ -120,6 +120,21 @@
       AND target_person.suspended_at IS NULL
   </select>
 
+  <select id="getVisibleEdgeIds" resultType="int">
+    SELECT e.id
+    FROM person_edge e
+    JOIN person source_person ON source_person.id = e.source_person_id
+      AND <include refid="visibleSourcePerson"/>
+    JOIN person target_person ON target_person.id = e.target_person_id
+      AND <include refid="visibleTargetPerson"/>
+    WHERE e.workspace_id = #{workspaceId}
+      AND source_person.suspended_at IS NULL
+      AND target_person.suspended_at IS NULL
+      AND e.id IN
+      <foreach collection="edgeIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY e.id
+  </select>
+
   <select id="getEdgesForNetworkReport" resultMap="PersonEdgeResult">
     SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
            e.type, e.strength, e.note, e.created_at

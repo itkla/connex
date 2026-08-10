@@ -428,6 +428,7 @@
     "previewAction": "Preview",
     "validate": "Validate",
     "saveDraft": "Save draft",
+    "savingDraft": "Saving draft…",
     "publish": "Publish",
     "enable": "Enable",
     "disable": "Disable",

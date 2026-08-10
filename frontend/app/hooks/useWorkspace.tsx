@@ -39,6 +39,7 @@ type WorkspaceContextValue = {
     switching: boolean;
     runInWorkspace: (id: number, operation: (switched: boolean) => Promise<void>) => Promise<boolean>;
     runSelectionChange: SelectionChangeRunner;
+    retrySelectionRecovery: () => Promise<void>;
     switchTo: (id: number) => Promise<void>;
     create: (name: string) => Promise<Workspace>;
     publishWorkspaceIdentity: (identity: PublishedWorkspaceIdentity) => void;
@@ -59,6 +60,34 @@ type WorkspaceSnapshotState = {
     workspaceIdentities: PublishedWorkspaceIdentity[];
     organizationIdentities: PublishedOrganizationIdentity[];
 };
+
+const WORKSPACE_SELECTION_RECOVERY_TIMEOUT_MS = 10_000;
+
+class WorkspaceSelectionInProgressError extends Error {
+    constructor() {
+        super("A workspace operation is already in progress");
+        this.name = "WorkspaceSelectionInProgressError";
+    }
+}
+
+async function readAuthoritativeWorkspaceSelectionWithTimeout(): Promise<MyWorkspaces> {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const deadline = new Promise<never>((_, reject) => {
+        timeout = globalThis.setTimeout(() => {
+            controller.abort();
+            reject(new Error("Workspace selection recovery timed out"));
+        }, WORKSPACE_SELECTION_RECOVERY_TIMEOUT_MS);
+    });
+    try {
+        return await Promise.race([
+            readAuthoritativeWorkspaceSelection(true, { signal: controller.signal }),
+            deadline,
+        ]);
+    } finally {
+        if (timeout !== null) globalThis.clearTimeout(timeout);
+    }
+}
 
 function upsertWorkspaceIdentity(
     identities: PublishedWorkspaceIdentity[],
@@ -288,7 +317,7 @@ export function WorkspaceProvider({
         ) => Promise<T>,
         allowUnavailable: boolean,
     ) => {
-        if (switchingRef.current) throw new Error("A workspace operation is already in progress");
+        if (switchingRef.current) throw new WorkspaceSelectionInProgressError();
         if (selectionUnavailableRef.current && !allowUnavailable) {
             throw new Error("Workspace selection is unavailable");
         }
@@ -319,12 +348,13 @@ export function WorkspaceProvider({
     const retrySelectionRecovery = useCallback(async () => {
         try {
             const snapshot = await executeSelectionChange(
-                () => readAuthoritativeWorkspaceSelection(),
+                () => readAuthoritativeWorkspaceSelectionWithTimeout(),
                 true,
             );
             publishAuthoritativeWorkspaceSelection(snapshot);
             router.refresh();
-        } catch {
+        } catch (error) {
+            if (error instanceof WorkspaceSelectionInProgressError) return;
             selectionUnavailableRef.current = true;
             setSelectionUnavailable(true);
         }
@@ -381,6 +411,7 @@ export function WorkspaceProvider({
             switching,
             runInWorkspace,
             runSelectionChange,
+            retrySelectionRecovery,
             switchTo,
             create,
             publishWorkspaceIdentity,
@@ -395,6 +426,7 @@ export function WorkspaceProvider({
             switching,
             runInWorkspace,
             runSelectionChange,
+            retrySelectionRecovery,
             switchTo,
             create,
             publishWorkspaceIdentity,

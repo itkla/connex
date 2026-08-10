@@ -87,6 +87,19 @@ jobs:
             | jq -e '.services.backend.environment.CONNEX_BUSINESS_CARD_SCANNING_ENABLED == "false"' \
               >/dev/null
 
+  staging-deploy:
+    name: Staging deploy tooling — offline regression tests
+    needs: classify
+    if: needs.classify.outputs.compose == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Lint staging deploy shell tooling
+        run: shellcheck -x deploy/staging/*.sh deploy/staging/tests/run-tests.sh
+      - name: Release-unit, rollback, smoke, recovery, and alert regression tests
+        run: bash deploy/staging/tests/run-tests.sh
+
   profile-boot:
     name: Boot every deployment profile
     needs: classify
@@ -206,7 +219,7 @@ jobs:
   required:
     name: Deploy — required
     if: always()
-    needs: [classify, compose-config, profile-boot]
+    needs: [classify, compose-config, staging-deploy, profile-boot]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -214,10 +227,15 @@ jobs:
         env:
           CLASSIFY_RESULT: ${{ needs.classify.result }}
           COMPOSE_RESULT: ${{ needs.compose-config.result }}
+          STAGING_DEPLOY_RESULT: ${{ needs.staging-deploy.result }}
           PROFILE_BOOT_RESULT: ${{ needs.profile-boot.result }}
         run: |
           set -euo pipefail
-          for result in "$CLASSIFY_RESULT" "$COMPOSE_RESULT" "$PROFILE_BOOT_RESULT"; do
+          for result in \
+            "$CLASSIFY_RESULT" \
+            "$COMPOSE_RESULT" \
+            "$STAGING_DEPLOY_RESULT" \
+            "$PROFILE_BOOT_RESULT"; do
             case "$result" in
               success|skipped) ;;
               *) echo "::error::required deployment dependency concluded: $result"; exit 1 ;;

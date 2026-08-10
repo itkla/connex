@@ -110,7 +110,7 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 - **Use the shared API client** in `app/lib/api.ts`; types in `app/lib/types.ts` must match backend DTOs. Don't scatter raw `fetch` calls.
 - **Auth/session is cookie-based** (`JSESSIONID` + `connex_workspace`), enforced in `proxy.ts` (route protection, login/onboarding/invite redirects). When adding protected routes, update the prefixes there.
 - **Slow AI generation uses bounded server handles and identity-bound polling.** The shared client initiates once, keys in-flight work by the opaque authenticated-session generation from `/api/auth/csrf`, workspace, and locale, then polls `/api/ai/generations/{handle}`; never recover a lost response by issuing another generation POST. Auth/workspace transitions must abort polling and notify other tabs without persisting user or session identifiers. Keep accepted/running, failed, timed-out, and resolved UI states distinct.
-- **Creation duplicate checks are canonical and fail closed.** Person/company create forms, staged contacts, and OCR-populated contact/company review use `useDuplicatePreflight` with the complete current identity fields and the same `RequestInit` scope as the mutation. The debounce is only an early warning: every submit calls `reviewNow()`, acknowledgement is bound to the exact request workspace and complete candidate-response token, and truncated results cannot be acknowledged. Person, company, and deal CSV previews return a one-use `duplicateReviewProof`; retain only the proof for the exact workspace/rows/mapping/action/links snapshot and include it in that commit. Keep business-card submission on its dedicated import API so OCR provenance is retained.
+- **Creation duplicate checks are canonical and fail closed.** Person/company/deal create forms, staged contacts, and OCR-populated contact/company review use `useDuplicatePreflight` with the complete current identity fields and the same `RequestInit` scope as the mutation. The debounce is only an early warning: every submit calls `reviewNow()`, an acknowledged deal proof is passed back for validation without replacement, acknowledgement is bound to the exact request workspace and complete candidate-response token, and truncated results cannot be acknowledged. The deal mutation then performs the locked final recheck and consumes that same one-use proof. Person, company, and deal CSV previews return a one-use `duplicateReviewProof`; retain only the proof for the exact workspace/rows/mapping/action/links snapshot and include it in that commit. Keep business-card submission on its dedicated import API so OCR provenance is retained.
 - **Interaction-history imports are review-bound and inert.** The Settings → Data wizard imports one historical person participant per activity, note, or task. Retain its one-use `duplicateReviewProof` only for the exact workspace/kind/rows/mapping/links snapshot, never auto-link shared or ambiguous candidates, and never add client-side automation or notification side effects to the backfill path.
 - **Surface errors as toasts** via `app/lib/toast.ts` (`sonner`) — don't swallow failures or leave dead UI. Handle loading and error states explicitly.
 
@@ -155,6 +155,9 @@ This repo uses **pnpm** — don't run `npm install` or reintroduce `package-lock
 - Add a package: `pnpm add <pkg>` — **then always `pnpm audit`** and resolve/flag findings before continuing.
 - Dev: `pnpm dev`
 - Build: `pnpm build`
+- Production start: `pnpm start`. In ordinary checkouts this runs `next start`; on the staging
+  checkout, `.staging/frontend-release` makes the staging launcher execute that sha's sealed
+  standalone runtime instead. See `../docs/STAGING_DEPLOY.md`.
 - Verify a production build's assets: `node ci/verify_build_chunks.mjs .next`
 - Lint: `pnpm lint`
 - Typecheck: `pnpm exec tsc --noEmit`
@@ -167,10 +170,12 @@ Unit tests cover pure logic only; the browser verification in the Definition of 
 
 `ci/verify_build_chunks.mjs` reads every route's `*_client-reference-manifest.js` under `<dist>/server/app` and asserts that each JS chunk and each non-inlined `entryCSSFiles` stylesheet the route declares was actually emitted. A route that names an asset the build never wrote serves fine until a browser requests it — the page then 404s a chunk or renders unstyled — so no amount of fetching one page catches it. That is how #972 shipped.
 
-It runs in three places, and **any change to how the frontend is built must keep all three fed a real production build directory**:
+It runs in four places, and **any change to how the frontend is built must keep all four fed a real production build directory**:
 
 1. after `next build` in CI's e2e job, against `.next`;
 2. inside the deployable image in `ci/smoke_image.sh`, against `/app/.next`;
 3. against the exact release candidate digest in `release.yml`, via the same smoke script.
+4. inside the staging release builder, against the isolated target commit's `.next-new` before
+   its standalone runtime is sealed and before either live service is changed.
 
 It takes the build directory as its one argument and defaults to `.next`. Point it at `NEXT_DIST_DIR` instead if you build elsewhere. It needs `server/app` **and** `static/` present: in a standalone image those arrive from two different `COPY` layers, so verify against the assembled `/app/.next`, not the `standalone/` subtree alone.

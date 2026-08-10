@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -93,6 +94,58 @@ class DealControllerTest {
     @MockitoBean private WorkspaceCookie workspaceCookie;
     @MockitoBean private WorkspaceRequestResolver workspaceRequestResolver;
     @MockitoBean private ErrorReporter errorReporter;
+
+    @Test
+    void createDelegatesTheWriteOnlyDuplicateReviewToken() throws Exception {
+        Deal deal = deal();
+        String reviewToken = "a".repeat(64);
+        when(dealService.createReviewed(any(Deal.class), eq(reviewToken)))
+            .thenReturn(deal);
+
+        mockMvc.perform(post("/api/deals")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "name":"Renewal",
+                      "value":1000.00,
+                      "actualValue":0.00,
+                      "currency":"USD",
+                      "pipeline":3,
+                      "stage":11,
+                      "company":18,
+                      "duplicateReviewToken":"%s"
+                    }
+                    """.formatted(reviewToken)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(42))
+            .andExpect(jsonPath("$.duplicateReviewToken").doesNotExist());
+
+        verify(dealService).createReviewed(any(Deal.class), eq(reviewToken));
+    }
+
+    @Test
+    void malformedDuplicateReviewTokenReturnsBadRequestWithoutCallingTheService() throws Exception {
+        mockMvc.perform(post("/api/deals")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "name":"Renewal",
+                      "value":1000.00,
+                      "actualValue":0.00,
+                      "currency":"USD",
+                      "pipeline":3,
+                      "stage":11,
+                      "company":18,
+                      "duplicateReviewToken":"invalid"
+                    }
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.duplicateReviewToken").exists());
+
+        verifyNoInteractions(dealService);
+    }
 
     @Test
     void updateNameDelegatesAndSerializesTheFullDeal() throws Exception {

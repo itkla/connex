@@ -9,6 +9,7 @@ const PROTECTED_PREFIXES = [
     '/notifications',
     '/organization',
     '/overview',
+    '/radar',
     '/records',
     '/search',
     '/settings',
