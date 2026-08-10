@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
@@ -62,6 +63,7 @@ class UserOffboardingOrderTest {
     @Mock private SuppressionMapper suppressionMapper;
     @Mock private SavedViewPreferenceMapper savedViewPreferenceMapper;
     @Mock private SavedViewMapper savedViewMapper;
+    @Mock private RelationshipSignalMapper relationshipSignalMapper;
     @Mock private UserDashboardMapper userDashboardMapper;
     @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
@@ -80,7 +82,7 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(
             workspaceMapper, providerCapturePurgeService,
             savedViewPreferenceMapper, savedViewMapper,
-            notificationMapper, dealMapper);
+            notificationMapper, dealMapper, relationshipSignalMapper);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
@@ -91,6 +93,7 @@ class UserOffboardingOrderTest {
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
+        order.verify(relationshipSignalMapper).deleteActorState(7, 9);
     }
 
     @Test
@@ -100,7 +103,8 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(
             providerCapturePurgeService, notificationMapper,
             savedViewPreferenceMapper, savedViewMapper,
-            taskMapper, companyMapper, personMapper, dealMapper, campaignMapper);
+            taskMapper, companyMapper, personMapper, dealMapper, campaignMapper,
+            relationshipSignalMapper);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);
@@ -116,6 +120,7 @@ class UserOffboardingOrderTest {
         order.verify(notificationMapper)
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
+        order.verify(relationshipSignalMapper).deleteActorState(7, 9);
         verifyNoInteractions(stateVersionService);
     }
 
@@ -133,7 +138,7 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(
             userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
             stateVersionService, companyMapper, personMapper, dealMapper,
-            workflowOffboardingService);
+            workflowOffboardingService, suppressionMapper, relationshipSignalMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(workflowOffboardingService).discover(9);
@@ -156,6 +161,8 @@ class UserOffboardingOrderTest {
         order.verify(companyMapper).clearOwnershipAnywhere(9);
         order.verify(personMapper).clearOwnershipAnywhere(9);
         order.verify(dealMapper).clearOwnershipAnywhere(9);
+        order.verify(suppressionMapper).clearCreatorsAnywhere(9);
+        order.verify(relationshipSignalMapper).deleteActorStateAnywhere(9);
     }
 
     @Test

@@ -442,6 +442,7 @@ export default function ActionOverlayHost({
                         compact={radarTask?.mode === 'warm_path'}
                         hideLinks={radarTask !== undefined}
                         failureMessage={radarTask ? t('feedback.createFailed') : undefined}
+                        draftPersistence={radarTask === undefined}
                     />
                 ) : null}
                 {rendered?.request.kind === "create-note" && references && restoredDraftCanMount ? (

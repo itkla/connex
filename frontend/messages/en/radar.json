@@ -140,18 +140,29 @@
       "taskCreatedNamed": "A task has already been created for {subject}",
       "createTaskDeniedNamed": "Task creation is not permitted for {subject}",
       "createTaskPermissionUnavailableNamed": "Task permission could not be checked for {subject}",
+      "createWarmPathTaskDeniedNamed": "Warm-path task creation is not permitted for {subject}",
+      "createWarmPathTaskPermissionUnavailableNamed": "Warm-path task permissions could not be checked for {subject}",
+      "createTaskEvidenceCheckingNamed": "Relationship evidence is being refreshed for {subject}",
+      "createTaskEvidenceUnavailableNamed": "Relationship evidence could not be refreshed for {subject}",
       "createTaskStaleNamed": "Task creation is unavailable because the signal for {subject} is stale",
       "createTaskPathUnavailableNamed": "Task creation is unavailable because the warm path for {subject} has no current bridge",
       "openContextNamed": "Open the source record for {subject}",
       "taskPermissionDenied": "You do not have permission to create tasks.",
       "taskPermissionUnavailable": "Task permissions could not be checked. Retry before creating a task.",
+      "warmPathTaskPermissionDenied": "You need permission to create tasks and update contacts before accepting a warm path.",
+      "warmPathTaskPermissionUnavailable": "Warm-path permissions could not be checked. Retry before creating a task.",
+      "retryPermissionCheck": "Retry check",
+      "taskEvidenceChecking": "Refreshing relationship evidence before task creation.",
+      "taskEvidenceUnavailable": "Relationship evidence could not be refreshed. Retry before creating a task.",
+      "retryEvidenceRefresh": "Retry refresh",
       "taskStale": "Refresh this stale signal before creating a task.",
       "taskPathUnavailable": "The current warm-path bridge is unavailable. Refresh before creating a task.",
       "cancel": "Cancel",
       "snoozing": "Snoozing…"
     },
     "task": {
-      "defaultDescription": "Follow up on the Relationship Radar signal for {subject}"
+      "defaultDescription": "Follow up on the Relationship Radar signal for {subject}",
+      "warmPathDescription": "Ask {bridge} for an introduction to {subject}"
     },
     "snooze": {
       "title": "Snooze signal",

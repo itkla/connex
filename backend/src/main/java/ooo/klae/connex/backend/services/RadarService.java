@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.dto.RadarResponseDto;
 import ooo.klae.connex.backend.dto.RadarTaskRequestDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -182,7 +184,7 @@ public class RadarService {
             RadarTaskRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
-        lockActorMutation(workspaceId, userId);
+        lockTaskMutation(workspaceId, userId, request.assignedToId());
         RelationshipSignal signal = requireLocked(
             workspaceId, signalId, userId, expectedVersion);
         requireCurrentSubject(workspaceId, signal);
@@ -287,14 +289,41 @@ public class RadarService {
     }
 
     private void lockActorMutation(int workspaceId, int userId) {
+        lockActorIdentity(userId);
+        if (!activeMembership(workspaceId, userId)) {
+            throw new ResourceNotFoundException("Radar signal not found");
+        }
+    }
+
+    private void lockTaskMutation(
+            int workspaceId, int userId, @Nullable Integer requestedAssigneeId) {
+        lockActorIdentity(userId);
+        int assigneeId = requestedAssigneeId == null ? userId : requestedAssigneeId;
+        Set<Integer> membershipIds = new TreeSet<>();
+        membershipIds.add(userId);
+        membershipIds.add(assigneeId);
+        for (Integer membershipId : membershipIds) {
+            if (activeMembership(workspaceId, membershipId)) {
+                continue;
+            }
+            if (membershipId == userId) {
+                throw new ResourceNotFoundException("Radar signal not found");
+            }
+            throw new ForbiddenException(
+                "User " + membershipId + " is not a member of this workspace");
+        }
+    }
+
+    private void lockActorIdentity(int userId) {
         if (userMapper.lockByIdForShare(userId) == null
                 || userMapper.isAccountDeletionReserved(userId)) {
             throw new ResourceNotFoundException("Radar signal not found");
         }
+    }
+
+    private boolean activeMembership(int workspaceId, int userId) {
         var membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
-        if (membership == null || !"active".equals(membership.getStatus())) {
-            throw new ResourceNotFoundException("Radar signal not found");
-        }
+        return membership != null && "active".equals(membership.getStatus());
     }
 
     private long ensureState(int workspaceId, RelationshipSignal signal, int userId) {

@@ -17,6 +17,8 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -63,8 +65,14 @@ public class RelationshipSignalDetectorService {
     private final Clock clock;
 
     /** Detects cooling person and company relationships from the canonical warmth output. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detection detectDecay(int workspaceId, String generationToken) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
+        Map<Integer, String> contactSourceStateHashes =
+            scoringService.contactSourceStateHashes(
+                workspaceId, Set.of(), Set.of(), Set.of());
+        Map<Integer, String> companySourceStateHashes =
+            scoringService.companySourceStateHashes(workspaceId);
         List<TemperatureCandidate> ranked = new ArrayList<>();
         for (RelationshipTemperatureDto temperature : scores.contacts()) {
             if ("cooling".equals(temperature.getTrend())) {
@@ -115,6 +123,11 @@ public class RelationshipSignalDetectorService {
                     candidate.subjectType(),
                     subjectLabel,
                     candidate.temperature(),
+                    "person".equals(candidate.subjectType())
+                        ? contactSourceStateHashes.getOrDefault(
+                            subjectId, ScoringService.emptyContactSourceStateHash())
+                        : companySourceStateHashes.getOrDefault(
+                            subjectId, ScoringService.emptyContactSourceStateHash()),
                     generationToken));
             }
         }
@@ -188,6 +201,7 @@ public class RelationshipSignalDetectorService {
             String subjectType,
             String subjectLabel,
             RelationshipTemperatureDto temperature,
+            String sourceStateHash,
             String generationToken) {
         int recencyRank = temperature.getDaysSinceTouch() == null
             ? Integer.MIN_VALUE
@@ -214,17 +228,10 @@ public class RelationshipSignalDetectorService {
                 "daysSinceTouch", "descending", temperature.getDaysSinceTouch()),
             new RadarResponseDto.RankFactor(
                 "subject", "ascending", subjectType + ":" + temperature.getId()));
-        String fingerprint = sourceFingerprint(
-            RELATIONSHIP_DECAY,
-            subjectType,
-            temperature.getId(),
-            "cooling",
-            recencyRank,
-            evidence);
         return signal(
             workspaceId, RELATIONSHIP_DECAY, subjectType, temperature.getId(), subjectLabel,
             "cooling", 2, recencyRank, evidence, factors, temperature.getAsOf(),
-            fingerprint, generationToken);
+            sourceStateHash, generationToken);
     }
 
     private RelationshipSignal dealRiskSignal(

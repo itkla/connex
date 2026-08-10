@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.RelationshipSignal;
+import ooo.klae.connex.backend.beans.RelationshipSignalFamilyState;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 
 /** Isolated tenant writes for detector reconciliation and bounded selection. */
@@ -33,14 +35,20 @@ public class RelationshipSignalWriteService {
             List<RelationshipSignal> candidates,
             LocalDateTime attemptedAt,
             LocalDateTime evidenceAsOf) {
-        signalMapper.ensureFamilyState(workspaceId, family, attemptedAt);
-        signalMapper.lockFamilyState(workspaceId, family);
+        LocalDateTime normalizedAttemptedAt = attemptedAt.truncatedTo(ChronoUnit.MICROS);
+        boolean familyStateCreated = signalMapper.ensureFamilyState(
+            workspaceId, family, normalizedAttemptedAt) == 1;
+        if (staleAttempt(
+                workspaceId, family, normalizedAttemptedAt, familyStateCreated)) {
+            return;
+        }
         for (RelationshipSignal candidate : candidates) {
             signalMapper.upsertSignal(candidate);
         }
-        signalMapper.resolveMissing(workspaceId, family, generationToken, attemptedAt);
+        signalMapper.resolveMissing(
+            workspaceId, family, generationToken, normalizedAttemptedAt);
         signalMapper.upsertFamilyAvailable(
-            workspaceId, family, attemptedAt, evidenceAsOf);
+            workspaceId, family, normalizedAttemptedAt, evidenceAsOf);
     }
 
     /** Records detector failure while preserving the family's last known signals and success time. */
@@ -52,10 +60,29 @@ public class RelationshipSignalWriteService {
             String family,
             LocalDateTime attemptedAt,
             String errorCode) {
-        signalMapper.ensureFamilyState(workspaceId, family, attemptedAt);
-        signalMapper.lockFamilyState(workspaceId, family);
+        LocalDateTime normalizedAttemptedAt = attemptedAt.truncatedTo(ChronoUnit.MICROS);
+        boolean familyStateCreated = signalMapper.ensureFamilyState(
+            workspaceId, family, normalizedAttemptedAt) == 1;
+        if (staleAttempt(
+                workspaceId, family, normalizedAttemptedAt, familyStateCreated)) {
+            return;
+        }
         signalMapper.upsertFamilyUnavailable(
-            workspaceId, family, attemptedAt, errorCode);
+            workspaceId, family, normalizedAttemptedAt, errorCode);
+    }
+
+    private boolean staleAttempt(
+            int workspaceId,
+            String family,
+            LocalDateTime attemptedAt,
+            boolean familyStateCreated) {
+        RelationshipSignalFamilyState locked = signalMapper.lockFamilyState(workspaceId, family);
+        if (locked == null) {
+            throw new IllegalStateException("Relationship signal family state disappeared after creation");
+        }
+        return !familyStateCreated
+            && locked.getLastAttemptAt() != null
+            && !attemptedAt.isAfter(locked.getLastAttemptAt());
     }
 
     /** Applies the hard workspace cap over the canonical global deterministic order. */

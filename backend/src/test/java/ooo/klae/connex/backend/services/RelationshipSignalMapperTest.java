@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -13,14 +14,22 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import tools.jackson.databind.ObjectMapper;
+
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.RelationshipSignal;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.services.RelationshipSignalDetectorService.Detection;
 import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
@@ -100,6 +109,63 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
     }
 
     @Test
+    void olderReconciliationCannotReplaceOrHideNewerFamilyState() {
+        RelationshipSignalWriteService writer = new RelationshipSignalWriteService(signalMapper);
+        LocalDateTime newerAttempt = LocalDateTime.of(2026, 8, 8, 13, 0);
+        LocalDateTime olderAttempt = newerAttempt.minusMinutes(5);
+        RelationshipSignal newer = signal(
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            "person",
+            53,
+            "relationship_decay:person:53",
+            "newer");
+        newer.setSourceStateHash("n".repeat(64));
+        writer.replaceFamily(
+            workspace.getId(),
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            "newer",
+            List.of(newer),
+            newerAttempt,
+            newerAttempt);
+        RelationshipSignal older = signal(
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            "person",
+            53,
+            "relationship_decay:person:53",
+            "older");
+        older.setSourceStateHash("o".repeat(64));
+
+        writer.replaceFamily(
+            workspace.getId(),
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            "older",
+            List.of(older),
+            olderAttempt,
+            olderAttempt);
+        writer.markUnavailable(
+            workspace.getId(),
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            olderAttempt,
+            "detector_failed");
+        writer.markUnavailable(
+            workspace.getId(),
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            newerAttempt,
+            "equal_time_failure");
+
+        RelationshipSignal persisted = signalMapper.findActiveForActor(
+            workspace.getId(), currentUser.getId()).getFirst();
+        var familyState = signalMapper.findFamilyStates(workspace.getId()).getFirst();
+        assertEquals("n".repeat(64), persisted.getSourceStateHash());
+        assertEquals("newer", persisted.getGenerationToken());
+        assertEquals("available", familyState.getStatus());
+        assertEquals(newerAttempt, familyState.getLastAttemptAt());
+        assertEquals(newerAttempt, familyState.getLastSuccessAt());
+        assertEquals(newerAttempt, familyState.getEvidenceAsOf());
+        assertNull(familyState.getErrorCode());
+    }
+
+    @Test
     void allTablesAreClassifiedForPlaneAndLifecycleWithActorStateCascading() {
         assertTrue(TablePlaneRegistry.ORG_DATA_TABLES.containsAll(List.of(
             "relationship_signal",
@@ -156,6 +222,83 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             workspace.getId(), signal.getId(), currentUser.getId()).getTaskId());
     }
 
+    @Test
+    void clockOnlyDecayKeepsFingerprintAttachedTaskAndDismissal() {
+        Person subject = newPerson(null);
+        ScoringService scoringService = mock(ScoringService.class);
+        PersonMapper detectorPersonMapper = mock(PersonMapper.class);
+        String persistedSourceHash = "c".repeat(64);
+        Instant firstAsOf = Instant.parse("2026-08-08T12:00:00Z");
+        Instant laterAsOf = firstAsOf.plusSeconds(86_400);
+        RelationshipTemperatureDto before = temperature(
+            subject.getId(), 60, 7, 9, "warm", "2026-08-20", firstAsOf);
+        RelationshipTemperatureDto later = temperature(
+            subject.getId(), 47, 8, 8, "cool", "2026-08-19", laterAsOf);
+        when(scoringService.scoreWorkspace(workspace.getId())).thenReturn(
+            new ScoringService.WorkspaceScores(List.of(before), List.of()),
+            new ScoringService.WorkspaceScores(List.of(later), List.of()));
+        when(scoringService.contactSourceStateHashes(
+                workspace.getId(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
+            .thenReturn(Map.of(subject.getId(), persistedSourceHash));
+        when(scoringService.companySourceStateHashes(workspace.getId())).thenReturn(Map.of());
+        when(detectorPersonMapper.getByIds(workspace.getId(), List.of(subject.getId())))
+            .thenReturn(List.of(subject));
+        RelationshipSignalDetectorService detector = new RelationshipSignalDetectorService(
+            scoringService,
+            mock(DealRiskService.class),
+            mock(WarmPathService.class),
+            detectorPersonMapper,
+            mock(CompanyMapper.class),
+            mock(DealMapper.class),
+            new ObjectMapper(),
+            Clock.fixed(firstAsOf, ZoneOffset.UTC));
+        RelationshipSignalWriteService writer = new RelationshipSignalWriteService(signalMapper);
+
+        Detection first = detector.detectDecay(workspace.getId(), "first");
+        RelationshipSignal firstSignal = first.candidates().getFirst();
+        writer.replaceFamily(
+            workspace.getId(),
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            first.generationToken(),
+            first.candidates(),
+            LocalDateTime.ofInstant(firstAsOf, ZoneOffset.UTC),
+            LocalDateTime.ofInstant(first.evidenceAsOf(), ZoneOffset.UTC));
+        signalMapper.insertState(
+            workspace.getId(),
+            firstSignal.getId(),
+            currentUser.getId(),
+            "dismissed",
+            null,
+            persistedSourceHash);
+        Task attachedTask = newTask(currentUser, null, null);
+        assertEquals(1, signalMapper.attachTask(
+            workspace.getId(),
+            firstSignal.getId(),
+            currentUser.getId(),
+            attachedTask.getId(),
+            persistedSourceHash,
+            1));
+
+        Detection laterDetection = detector.detectDecay(workspace.getId(), "later");
+        RelationshipSignal laterSignal = laterDetection.candidates().getFirst();
+        writer.replaceFamily(
+            workspace.getId(),
+            RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
+            laterDetection.generationToken(),
+            laterDetection.candidates(),
+            LocalDateTime.ofInstant(laterAsOf, ZoneOffset.UTC),
+            LocalDateTime.ofInstant(laterDetection.evidenceAsOf(), ZoneOffset.UTC));
+
+        RelationshipSignal persisted = signalMapper.getActiveForActor(
+            workspace.getId(), firstSignal.getId(), currentUser.getId());
+        assertEquals(firstSignal.getSourceStateHash(), laterSignal.getSourceStateHash());
+        assertNotEquals(firstSignal.getEvidenceJson(), laterSignal.getEvidenceJson());
+        assertEquals(attachedTask.getId(), persisted.getTaskId());
+        assertEquals("dismissed", persisted.getDisposition());
+        assertEquals(persisted.getSourceStateHash(), persisted.getDismissedSourceHash());
+        assertEquals(persisted.getSourceStateHash(), persisted.getTaskSourceHash());
+    }
+
     private Detection detection(
             String family,
             String subjectType,
@@ -193,6 +336,28 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
         signal.setSourceStateHash("a".repeat(64));
         signal.setGenerationToken(generationToken);
         return signal;
+    }
+
+    private static RelationshipTemperatureDto temperature(
+            int id,
+            int score,
+            int daysSinceTouch,
+            int daysUntilCold,
+            String band,
+            String goesColdAt,
+            Instant asOf) {
+        return new RelationshipTemperatureDto(
+            id,
+            score,
+            band,
+            "cooling",
+            "2026-08-01 12:00:00",
+            daysSinceTouch,
+            3,
+            goesColdAt,
+            daysUntilCold,
+            "warmth-v1",
+            asOf);
     }
 
     private int count(String table) {

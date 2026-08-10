@@ -22,7 +22,9 @@ describe('Radar action integration', () => {
         expect(overlay).toContain('createRadarTask(');
         expect(overlay).toContain("compact={radarTask?.mode === 'warm_path'}");
         expect(overlay).toContain('hideLinks={radarTask !== undefined}');
+        expect(overlay).toContain('draftPersistence={radarTask === undefined}');
         expect(dialog).toContain('createRequest = createTask');
+        expect(dialog).toContain('onPersistDraft={draftPersistence ? draft.persist : undefined}');
         expect(dialog).toContain('!compact ?');
     });
 
@@ -32,6 +34,16 @@ describe('Radar action integration', () => {
 
         expect(board).toContain('busy={busyId !== null}');
         expect(card).toContain('disabled={busy || followed}');
+        expect(card).toContain("usePermissionCheck('PERSON_UPDATE')");
+        expect(card).toContain('usePermissionsRefresh()');
+        expect(board).toContain('const refreshed = await getRadar()');
+        expect(board).toContain(">('checking')");
+        expect(card).toContain("freshnessStatus !== 'current'");
+        expect(board).toContain('radarEvidenceRefreshDelay(');
+        expect(board).toContain('refreshRadarRef.current();');
+        expect(board).toContain('if (nextRefreshDelay !== 0)');
+        expect(board).toContain("t('task.warmPathDescription'");
+        expect(card).not.toContain("value.includes('_')");
         expect(card).not.toContain("if (key === 'subject') return signal.subject.label");
     });
 });

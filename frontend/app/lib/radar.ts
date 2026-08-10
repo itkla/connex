@@ -5,9 +5,11 @@ import type {
     RadarPayload,
     RadarSignal,
 } from '@/app/lib/types';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 
 export const RADAR_FAMILIES = ['all', 'relationship_decay', 'deal_risk', 'warm_path'] as const;
 export const RADAR_STATES = ['attention', 'active', 'followed', 'snoozed', 'dismissed', 'all'] as const;
+export const RADAR_STALE_AFTER_MS = 15 * 60 * 1000;
 
 export type RadarFamilyFilter = (typeof RADAR_FAMILIES)[number];
 export type RadarStateFilter = (typeof RADAR_STATES)[number];
@@ -33,6 +35,30 @@ export function isRadarFamilyFilter(value: string | null): value is RadarFamilyF
 
 export function isRadarStateFilter(value: string | null): value is RadarStateFilter {
     return value !== null && RADAR_STATES.some((candidate) => candidate === value);
+}
+
+export function isRadarEvidenceStale(evidenceAsOf: string, now: number): boolean {
+    const evidenceTimestamp = parseMysqlDateTime(evidenceAsOf);
+    return Number.isFinite(evidenceTimestamp) && evidenceTimestamp < now - RADAR_STALE_AFTER_MS;
+}
+
+export function radarEvidenceRefreshDelay(
+    evidenceAsOf: string,
+    pageAsOf: string,
+    requestDurationMs: number,
+): number {
+    const evidenceTimestamp = parseMysqlDateTime(evidenceAsOf);
+    const serverTimestamp = parseMysqlDateTime(pageAsOf);
+    if (!Number.isFinite(evidenceTimestamp)
+        || !Number.isFinite(serverTimestamp)
+        || !Number.isFinite(requestDurationMs)) return NaN;
+    return Math.max(
+        0,
+        evidenceTimestamp + RADAR_STALE_AFTER_MS
+            - serverTimestamp
+            - Math.max(0, requestDurationMs)
+            + 1,
+    );
 }
 
 function matchesState(state: RadarLifecycleState, filter: RadarStateFilter): boolean {

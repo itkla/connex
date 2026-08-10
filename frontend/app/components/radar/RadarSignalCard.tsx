@@ -15,7 +15,8 @@ import {
 } from '@heroicons/react/24/outline';
 
 import type { RadarSignal } from '@/app/lib/types';
-import { usePermissionCheck } from '@/app/hooks/usePermissions';
+import type { PermissionCheck } from '@/app/lib/permissionState';
+import { usePermissionCheck, usePermissionsRefresh } from '@/app/hooks/usePermissions';
 import RadarSnoozeDialog from '@/app/components/radar/RadarSnoozeDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ import { cn } from '@/lib/utils';
 type RadarSignalCardProps = {
     signal: RadarSignal;
     pageAsOf: string;
+    freshnessStatus: 'checking' | 'current' | 'unavailable';
     busy: boolean;
     snoozeOpen: boolean;
     onSnoozeOpenChange: (open: boolean) => void;
@@ -32,6 +34,7 @@ type RadarSignalCardProps = {
     onSnooze: (until: string) => void;
     onDismiss: () => void;
     onCreateTask: () => void;
+    onRefreshEvidence: () => void;
     onOpenContext: () => void;
 };
 
@@ -41,9 +44,8 @@ const SUBJECT_ICONS = {
     deal: BriefcaseIcon,
 } satisfies Record<RadarSignal['subject']['type'], typeof UserIcon>;
 
-function freshnessLabels(value: string, asOf: string, locale: string): { absolute: string; relative: string } | null {
+function freshnessLabels(value: string, anchor: number, locale: string): { absolute: string; relative: string } | null {
     const timestamp = parseMysqlDateTime(value);
-    const anchor = parseMysqlDateTime(asOf);
     if (!Number.isFinite(timestamp) || !Number.isFinite(anchor)) return null;
     const difference = timestamp - anchor;
     const absolute = new Intl.DateTimeFormat(locale, {
@@ -62,10 +64,22 @@ function freshnessLabels(value: string, asOf: string, locale: string): { absolut
     return { absolute, relative };
 }
 
+function requiredTaskPermission(
+    taskPermission: PermissionCheck,
+    personUpdatePermission: PermissionCheck,
+    warmPath: boolean,
+): PermissionCheck {
+    if (!warmPath) return taskPermission;
+    if (taskPermission === 'denied' || personUpdatePermission === 'denied') return 'denied';
+    if (taskPermission === 'unavailable' || personUpdatePermission === 'unavailable') return 'unavailable';
+    return 'granted';
+}
+
 /** Responsive, evidence-first presentation for one canonical ranked Radar signal. */
 export default function RadarSignalCard({
     signal,
     pageAsOf,
+    freshnessStatus,
     busy,
     snoozeOpen,
     onSnoozeOpenChange,
@@ -73,19 +87,47 @@ export default function RadarSignalCard({
     onSnooze,
     onDismiss,
     onCreateTask,
+    onRefreshEvidence,
     onOpenContext,
 }: RadarSignalCardProps) {
     const t = useTranslations('Radar');
     const locale = useLocale();
     const taskPermission = usePermissionCheck('TASK_CREATE');
-    const canCreateTask = taskPermission === 'granted';
+    const personUpdatePermission = usePermissionCheck('PERSON_UPDATE');
+    const refreshPermissions = usePermissionsRefresh();
+    const warmPath = signal.family === 'warm_path';
+    const taskActionPermission = requiredTaskPermission(
+        taskPermission, personUpdatePermission, warmPath);
+    const canCreateTask = taskActionPermission === 'granted';
     const SubjectIcon = SUBJECT_ICONS[signal.subject.type];
-    const freshness = freshnessLabels(signal.evidenceAsOf, pageAsOf, locale);
-    const hasWarmPathBridge = signal.family !== 'warm_path' || signal.evidence.some((evidence) => (
+    const pageTimestamp = parseMysqlDateTime(pageAsOf);
+    const stale = signal.stale;
+    const freshness = freshnessLabels(signal.evidenceAsOf, pageTimestamp, locale);
+    const hasWarmPathBridge = !warmPath || signal.evidence.some((evidence) => (
         evidence.type === 'warm_path'
         && typeof evidence.parameters.bridgePersonId === 'number'
     ));
-    const taskDisabled = busy || !canCreateTask || signal.stale || signal.taskId != null || !hasWarmPathBridge;
+    const taskDisabled = busy
+        || !canCreateTask
+        || freshnessStatus !== 'current'
+        || stale
+        || signal.taskId != null
+        || !hasWarmPathBridge;
+    const taskPermissionExplanation = !canCreateTask
+        ? t(taskActionPermission === 'denied'
+            ? warmPath
+                ? 'actions.warmPathTaskPermissionDenied'
+                : 'actions.taskPermissionDenied'
+            : warmPath
+                ? 'actions.warmPathTaskPermissionUnavailable'
+                : 'actions.taskPermissionUnavailable')
+        : null;
+    const taskFreshnessExplanation = canCreateTask && freshnessStatus !== 'current'
+        ? t(freshnessStatus === 'checking'
+            ? 'actions.taskEvidenceChecking'
+            : 'actions.taskEvidenceUnavailable')
+        : null;
+    const taskBlockingExplanation = taskPermissionExplanation ?? taskFreshnessExplanation;
     const followed = signal.state === 'followed';
     const dismissed = signal.state === 'dismissed';
     const rankRules: Record<string, string> = {
@@ -142,34 +184,51 @@ export default function RadarSignalCard({
         deal: t('evidence.referenceDeal'),
         person_edge: t('evidence.referencePersonEdge'),
     };
-    const enumValues: Record<string, string> = {
-        hot: t('value.hot'),
-        warm: t('value.warm'),
-        cool: t('value.cool'),
-        cold: t('value.cold'),
-        rising: t('value.rising'),
-        steady: t('value.steady'),
-        cooling: t('value.cooling'),
-        high: t('value.high'),
-        medium: t('value.medium'),
-        low: t('value.low'),
-        opportunity: t('value.opportunity'),
-        connection: t('value.connection'),
-        colleagues: t('value.colleagues'),
-        former_colleagues: t('value.former_colleagues'),
-        reach: t('value.reach'),
-        rewarm: t('value.rewarm'),
+    const enumValuesByKey: Record<string, Record<string, string>> = {
+        priority: {
+            cooling: t('value.cooling'),
+            high: t('value.high'),
+            medium: t('value.medium'),
+            low: t('value.low'),
+            opportunity: t('value.opportunity'),
+        },
+        band: {
+            hot: t('value.hot'),
+            warm: t('value.warm'),
+            cool: t('value.cool'),
+            cold: t('value.cold'),
+        },
+        trend: {
+            rising: t('value.rising'),
+            steady: t('value.steady'),
+            cooling: t('value.cooling'),
+        },
+        severity: {
+            high: t('value.high'),
+            medium: t('value.medium'),
+            low: t('value.low'),
+        },
+        evidenceType: {
+            connection: t('value.connection'),
+            colleagues: t('value.colleagues'),
+            former_colleagues: t('value.former_colleagues'),
+        },
+        reachType: {
+            reach: t('value.reach'),
+            rewarm: t('value.rewarm'),
+        },
     };
     const formatValue = (key: string, value: unknown): string => {
         if (typeof value === 'number') return new Intl.NumberFormat(locale).format(value);
         if (typeof value === 'boolean') return value ? t('value.yes') : t('value.no');
         if (typeof value === 'string') {
-            if (enumValues[value]) return enumValues[value];
+            const enumValues = enumValuesByKey[key];
+            if (enumValues) return enumValues[value] ?? t('value.unavailable');
             if (key === 'lastTouchAt' || key === 'goesColdAt') {
                 const timestamp = parseMysqlDateTime(value);
                 if (Number.isFinite(timestamp)) return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(timestamp);
             }
-            return value.includes('_') ? t('value.unavailable') : value;
+            return value;
         }
         if (Array.isArray(value)) {
             const parts = value.map((entry) => formatValue(key, entry)).filter((entry) => entry !== t('value.unavailable'));
@@ -214,7 +273,7 @@ export default function RadarSignalCard({
                                 {t(`priority.${signal.priority}`)}
                             </Badge>
                             <Badge variant="secondary">{t(`state.${signal.state}`)}</Badge>
-                            {signal.stale ? (
+                            {stale ? (
                                 <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning-foreground">
                                     <ExclamationTriangleIcon aria-hidden />
                                     {t('freshness.stale')}
@@ -333,25 +392,29 @@ export default function RadarSignalCard({
                                 aria-label={signal.taskId != null
                                     ? t('actions.taskCreatedNamed', { subject: signal.subject.label })
                                     : !canCreateTask
-                                    ? t(taskPermission === 'denied'
-                                        ? 'actions.createTaskDeniedNamed'
-                                        : 'actions.createTaskPermissionUnavailableNamed', { subject: signal.subject.label })
-                                    : signal.stale
+                                    ? t(taskActionPermission === 'denied'
+                                        ? warmPath
+                                            ? 'actions.createWarmPathTaskDeniedNamed'
+                                            : 'actions.createTaskDeniedNamed'
+                                        : warmPath
+                                            ? 'actions.createWarmPathTaskPermissionUnavailableNamed'
+                                            : 'actions.createTaskPermissionUnavailableNamed', { subject: signal.subject.label })
+                                    : freshnessStatus !== 'current'
+                                        ? t(freshnessStatus === 'checking'
+                                            ? 'actions.createTaskEvidenceCheckingNamed'
+                                            : 'actions.createTaskEvidenceUnavailableNamed', { subject: signal.subject.label })
+                                    : stale
                                         ? t('actions.createTaskStaleNamed', { subject: signal.subject.label })
                                         : !hasWarmPathBridge
                                             ? t('actions.createTaskPathUnavailableNamed', { subject: signal.subject.label })
                                             : t('actions.createTaskNamed', { subject: signal.subject.label })}
                                 title={signal.taskId != null
                                     ? t('actions.taskCreatedNamed', { subject: signal.subject.label })
-                                    : !canCreateTask
-                                    ? t(taskPermission === 'denied'
-                                        ? 'actions.taskPermissionDenied'
-                                        : 'actions.taskPermissionUnavailable')
-                                    : signal.stale
+                                    : taskBlockingExplanation ?? (stale
                                         ? t('actions.taskStale')
                                         : !hasWarmPathBridge
                                             ? t('actions.taskPathUnavailable')
-                                        : undefined}
+                                            : undefined)}
                             >
                                 {signal.taskId != null ? <CheckCircleIcon aria-hidden /> : <ClipboardDocumentCheckIcon aria-hidden />}
                                 {signal.taskId != null ? t('actions.taskCreated') : t('actions.createTask')}
@@ -367,6 +430,34 @@ export default function RadarSignalCard({
                                 {t('actions.openContext')}
                             </Button>
                         </div>
+                        {signal.taskId == null && taskBlockingExplanation ? (
+                            <div className="flex max-w-sm items-center justify-end gap-2 text-xs text-muted-foreground xl:text-right" role="status">
+                                <span>{taskBlockingExplanation}</span>
+                                {taskActionPermission === 'unavailable' ? (
+                                    <Button
+                                        type="button"
+                                        variant="link"
+                                        size="sm"
+                                        className="h-auto shrink-0 p-0 text-xs"
+                                        onClick={() => void refreshPermissions()}
+                                        disabled={busy}
+                                    >
+                                        {t('actions.retryPermissionCheck')}
+                                    </Button>
+                                ) : freshnessStatus === 'unavailable' ? (
+                                    <Button
+                                        type="button"
+                                        variant="link"
+                                        size="sm"
+                                        className="h-auto shrink-0 p-0 text-xs"
+                                        onClick={onRefreshEvidence}
+                                        disabled={busy}
+                                    >
+                                        {t('actions.retryEvidenceRefresh')}
+                                    </Button>
+                                ) : null}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             </article>

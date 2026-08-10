@@ -67,6 +67,10 @@ class RelationshipSignalDetectorServiceTest {
                 return ids.stream().map(RelationshipSignalDetectorServiceTest::person).toList();
             });
         when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of());
+        when(scoringService.contactSourceStateHashes(
+                WORKSPACE_ID, java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
+            .thenReturn(Map.of());
+        when(scoringService.companySourceStateHashes(WORKSPACE_ID)).thenReturn(Map.of());
         when(dealMapper.getByIds(eq(WORKSPACE_ID), anyList()))
             .thenAnswer(invocation -> {
                 List<Integer> ids = invocation.getArgument(1);
@@ -266,7 +270,7 @@ class RelationshipSignalDetectorServiceTest {
     }
 
     @Test
-    void materialPresentedEvidenceChangesDismissalFingerprints() {
+    void materialPersistedSourceChangesDismissalFingerprints() {
         RelationshipTemperatureDto before = temperature(12, 9);
         RelationshipTemperatureDto after = new RelationshipTemperatureDto(
             12,
@@ -284,6 +288,11 @@ class RelationshipSignalDetectorServiceTest {
             .thenReturn(
                 new ScoringService.WorkspaceScores(List.of(before), List.of()),
                 new ScoringService.WorkspaceScores(List.of(after), List.of()));
+        when(scoringService.contactSourceStateHashes(
+                WORKSPACE_ID, java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
+            .thenReturn(
+                Map.of(12, "a".repeat(64)),
+                Map.of(12, "b".repeat(64)));
 
         String decayBefore = detector.detectDecay(WORKSPACE_ID, "before")
             .candidates().getFirst().getSourceStateHash();
@@ -317,6 +326,37 @@ class RelationshipSignalDetectorServiceTest {
 
         assertNotEquals(decayBefore, decayAfter);
         assertNotEquals(pathBefore, pathAfter);
+    }
+
+    @Test
+    void clockOnlyDecayChangesKeepThePersistedSourceFingerprint() {
+        RelationshipTemperatureDto before = temperature(12, 9);
+        RelationshipTemperatureDto later = new RelationshipTemperatureDto(
+            12,
+            47,
+            "cool",
+            "cooling",
+            before.getLastTouchAt(),
+            before.getDaysSinceTouch() + 1,
+            before.getTouchCount(),
+            "2026-08-19",
+            before.getDaysUntilCold() - 1,
+            before.getModelVersion(),
+            AS_OF.plusSeconds(86_400));
+        when(scoringService.scoreWorkspace(WORKSPACE_ID))
+            .thenReturn(
+                new ScoringService.WorkspaceScores(List.of(before), List.of()),
+                new ScoringService.WorkspaceScores(List.of(later), List.of()));
+        when(scoringService.contactSourceStateHashes(
+                WORKSPACE_ID, java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
+            .thenReturn(Map.of(12, "c".repeat(64)));
+
+        var first = detector.detectDecay(WORKSPACE_ID, "before").candidates().getFirst();
+        var second = detector.detectDecay(WORKSPACE_ID, "later").candidates().getFirst();
+
+        assertEquals(first.getSourceStateHash(), second.getSourceStateHash());
+        assertNotEquals(first.getEvidenceJson(), second.getEvidenceJson());
+        assertNotEquals(first.getRankValue(), second.getRankValue());
     }
 
     private static RelationshipTemperatureDto temperature(int id, int daysUntilCold) {

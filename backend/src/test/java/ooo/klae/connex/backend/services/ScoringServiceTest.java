@@ -131,6 +131,38 @@ class ScoringServiceTest {
     }
 
     @Test
+    void companySourceStateIsClockStableAndDetectsAttributedWeightChange() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Person person = person(1, 10);
+        Activity activity = activity(person, "call", "2026-06-20 09:00:00");
+        activity.setId(12);
+        when(personMapper.getProcessablePersons(WS)).thenReturn(List.of(person));
+        when(dealMapper.getAllDeals(WS)).thenReturn(List.of());
+        when(activityMapper.getAllActivities(WS)).thenReturn(List.of(activity));
+        when(noteMapper.getAllNotes(WS)).thenReturn(List.of());
+        when(taskMapper.getAllTasks(WS)).thenReturn(List.of());
+        ScoringService before = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper,
+            Clock.fixed(NOW, ZoneOffset.UTC));
+        ScoringService later = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper,
+            Clock.fixed(NOW.plusSeconds(60L * 60L * 24L * 90L), ZoneOffset.UTC));
+
+        Map<Integer, String> beforeHashes = before.companySourceStateHashes(WS);
+        Map<Integer, String> laterHashes = later.companySourceStateHashes(WS);
+        activity.setType("meeting");
+        Map<Integer, String> changedHashes = later.companySourceStateHashes(WS);
+
+        assertEquals(beforeHashes, laterHashes);
+        assertNotEquals(beforeHashes.get(10), changedHashes.get(10));
+    }
+
+    @Test
     void asOfNow_matchesLiveContactScores() {
         Person warm = person(1, null);
         Person quiet = person(2, null);

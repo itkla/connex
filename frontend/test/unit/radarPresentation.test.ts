@@ -4,6 +4,8 @@ import {
     classifyRadarSurface,
     classifyRadarReadFailure,
     filterRadarSignals,
+    isRadarEvidenceStale,
+    radarEvidenceRefreshDelay,
     replaceRadarSignal,
 } from '@/app/lib/radar';
 import type { RadarFamilyState, RadarPayload, RadarSignal } from '@/app/lib/types';
@@ -55,6 +57,23 @@ describe('Radar presentation state', () => {
         expect(classifyRadarReadFailure(401)).toBe('unauthenticated');
         expect(classifyRadarReadFailure(403)).toBe('denied');
         expect(classifyRadarReadFailure(503)).toBe('unavailable');
+    });
+
+    it('marks evidence stale only after the live fifteen-minute threshold', () => {
+        const evidenceAsOf = '2026-08-08T12:00:00Z';
+        const evidenceTime = Date.parse(evidenceAsOf);
+
+        expect(isRadarEvidenceStale(evidenceAsOf, evidenceTime + 15 * 60 * 1000)).toBe(false);
+        expect(isRadarEvidenceStale(evidenceAsOf, evidenceTime + 15 * 60 * 1000 + 1)).toBe(true);
+        expect(isRadarEvidenceStale('not-a-date', evidenceTime + 16 * 60 * 1000)).toBe(false);
+    });
+
+    it('refreshes early enough for the backend to own the exact stale decision', () => {
+        const asOf = '2026-08-08T12:00:00Z';
+
+        expect(radarEvidenceRefreshDelay(asOf, asOf, 750)).toBe(15 * 60 * 1000 - 749);
+        expect(radarEvidenceRefreshDelay(asOf, asOf, -10)).toBe(15 * 60 * 1000 + 1);
+        expect(radarEvidenceRefreshDelay('not-a-date', asOf, 750)).toBeNaN();
     });
 
     it('keeps backend rank order while applying family, state, and query filters', () => {

@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -243,6 +245,50 @@ class RadarServiceTest {
     }
 
     @Test
+    void delegatedTaskLocksAllMembershipRootsInUserOrderBeforeSignalAndTaskCreation() {
+        int assigneeId = 5;
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        currentPerson(signal.getSubjectId(), "Visible");
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, assigneeId))
+            .thenReturn(activeMember(assigneeId));
+        when(signalMapper.getActiveForActorForUpdate(
+            WORKSPACE_ID, signal.getId(), USER_ID)).thenReturn(signal);
+        when(signalMapper.insertState(
+                WORKSPACE_ID, signal.getId(), USER_ID, "active", null, null))
+            .thenReturn(1);
+        Task created = new Task();
+        created.setId(67);
+        when(taskService.create(any(Task.class))).thenReturn(created);
+        when(signalMapper.attachTask(
+                WORKSPACE_ID,
+                signal.getId(),
+                USER_ID,
+                67,
+                signal.getSourceStateHash(),
+                1))
+            .thenAnswer(invocation -> {
+                signal.setDisposition("active");
+                signal.setStateVersion(2L);
+                signal.setTaskId(67);
+                return 1;
+            });
+        when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
+
+        service.createTask(
+            signal.getId(),
+            "1:0",
+            new RadarTaskRequestDto(
+                "Call", "2026-08-10", assigneeId, signal.getSubjectId(), null, null));
+
+        InOrder order = inOrder(workspaceMapper, signalMapper, taskService);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, assigneeId);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, USER_ID);
+        order.verify(signalMapper).getActiveForActorForUpdate(
+            WORKSPACE_ID, signal.getId(), USER_ID);
+        order.verify(taskService).create(any(Task.class));
+    }
+
+    @Test
     void warmPathDelegatesAcceptanceAndImmediatelyResolvesTheCanonicalSignal() {
         RelationshipSignal signal = signal("warm_path", evidenceForBridge(22));
         currentPerson(signal.getSubjectId(), "Target");
@@ -417,11 +463,16 @@ class RadarServiceTest {
     }
 
     private void memberLock() {
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, USER_ID))
+            .thenReturn(activeMember(USER_ID));
+    }
+
+    private static WorkspaceMember activeMember(int userId) {
         WorkspaceMember member = new WorkspaceMember();
         member.setWorkspaceId(WORKSPACE_ID);
-        member.setUserId(USER_ID);
+        member.setUserId(userId);
         member.setStatus("active");
-        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, USER_ID)).thenReturn(member);
+        return member;
     }
 
     private static RelationshipSignalFamilyState availableFamily() {

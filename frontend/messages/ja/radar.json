@@ -140,18 +140,29 @@
       "taskCreatedNamed": "{subject} のタスクは作成済みです",
       "createTaskDeniedNamed": "{subject} のタスクを作成する権限がありません",
       "createTaskPermissionUnavailableNamed": "{subject} のタスク作成権限を確認できませんでした",
+      "createWarmPathTaskDeniedNamed": "{subject} のウォームパスからタスクを作成する権限がありません",
+      "createWarmPathTaskPermissionUnavailableNamed": "{subject} のウォームパスタスクに必要な権限を確認できませんでした",
+      "createTaskEvidenceCheckingNamed": "{subject} の関係性エビデンスを更新しています",
+      "createTaskEvidenceUnavailableNamed": "{subject} の関係性エビデンスを更新できませんでした",
       "createTaskStaleNamed": "{subject} のシグナルが古いため、タスクを作成できません",
       "createTaskPathUnavailableNamed": "{subject} の現在の橋渡し役を確認できないため、タスクを作成できません",
       "openContextNamed": "{subject} の参照元レコードを開く",
       "taskPermissionDenied": "タスクを作成する権限がありません。",
       "taskPermissionUnavailable": "タスク権限を確認できませんでした。再試行してからタスクを作成してください。",
+      "warmPathTaskPermissionDenied": "ウォームパスを受け入れるには、タスク作成と連絡先更新の権限が必要です。",
+      "warmPathTaskPermissionUnavailable": "ウォームパスに必要な権限を確認できませんでした。再試行してからタスクを作成してください。",
+      "retryPermissionCheck": "再確認",
+      "taskEvidenceChecking": "タスクを作成する前に関係性エビデンスを更新しています。",
+      "taskEvidenceUnavailable": "関係性エビデンスを更新できませんでした。再試行してからタスクを作成してください。",
+      "retryEvidenceRefresh": "再読み込み",
       "taskStale": "タスクを作成する前に、この古いシグナルを更新してください。",
       "taskPathUnavailable": "現在の橋渡し役を確認できません。更新してからタスクを作成してください。",
       "cancel": "キャンセル",
       "snoozing": "スヌーズ中…"
     },
     "task": {
-      "defaultDescription": "リレーションシップ・レーダーの「{subject}」をフォローアップ"
+      "defaultDescription": "リレーションシップ・レーダーの「{subject}」をフォローアップ",
+      "warmPathDescription": "{bridge} に {subject} への紹介を依頼する"
     },
     "snooze": {
       "title": "シグナルをスヌーズ",

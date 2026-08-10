@@ -70,6 +70,7 @@ type Props = {
     compact?: boolean;
     hideLinks?: boolean;
     failureMessage?: string;
+    draftPersistence?: boolean;
 };
 
 export default function TaskDialog(props: Props) {
@@ -102,6 +103,7 @@ function ScopedTaskDialog({
     compact = false,
     hideLinks = false,
     failureMessage,
+    draftPersistence = true,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityTasksDialog');
@@ -153,7 +155,7 @@ function ScopedTaskDialog({
                         defaultDeal={defaultDeal}
                         defaultDueDate={defaultDueDate}
                         defaultDescription={defaultDescription}
-                        ownsInitialDraft={initialDraftGeneration !== undefined}
+                        ownsInitialDraft={draftPersistence && initialDraftGeneration !== undefined}
                         requestInit={requestInit}
                         createRequest={createRequest}
                         compact={compact}
@@ -163,8 +165,8 @@ function ScopedTaskDialog({
                             submittingRef.current = value;
                         }}
                         onDirtyChange={setIsDirty}
-                        onPersistDraft={draft.persist}
-                        onClearDraft={draft.clear}
+                        onPersistDraft={draftPersistence ? draft.persist : undefined}
+                        onClearDraft={draftPersistence ? draft.clear : undefined}
                         onCancel={guard.requestClose}
                         onClose={() => onOpenChange(false)}
                     />
@@ -174,7 +176,7 @@ function ScopedTaskDialog({
                 open={guard.confirm.open}
                 onKeepEditing={guard.confirm.onKeepEditing}
                 onDiscard={() => {
-                    draft.clear();
+                    if (draftPersistence) draft.clear();
                     guard.confirm.onDiscard();
                 }}
             />
