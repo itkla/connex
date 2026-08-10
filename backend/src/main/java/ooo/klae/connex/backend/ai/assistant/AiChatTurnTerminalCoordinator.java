@@ -46,12 +46,15 @@ public class AiChatTurnTerminalCoordinator {
         complete(turn, AiGenerationTaskResult.Outcome.FAILED, "restrictions_changed");
     }
 
-    private void complete(
+    private boolean complete(
             AiChatQueuedTurn turn,
             AiGenerationTaskResult.Outcome outcome,
             String reason) {
         if (outcome == AiGenerationTaskResult.Outcome.RESOLVED) {
-            return;
+            publish(turn.userId(), new AiChatStepFrameDto(
+                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                    0, "terminal", null, "resolved", null));
+            return true;
         }
         String status = outcome == AiGenerationTaskResult.Outcome.TIMED_OUT
                 ? "timed_out"
@@ -59,13 +62,13 @@ public class AiChatTurnTerminalCoordinator {
         String stableReason = stableReason(outcome, reason);
         boolean changed = tenantWorkScope.inWorkspace(
                 turn.workspaceId(),
-                () -> persistenceService.markTerminal(
-                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                        status, stableReason));
+                () -> persistenceService.markTerminal(turn, status, stableReason));
         if (changed) {
             publish(turn.userId(), new AiChatStepFrameDto(
-                    turn.turnId(), 0, "terminal", null, status, stableReason));
+                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                    0, "terminal", null, status, stableReason));
         }
+        return changed;
     }
 
     private static String stableReason(

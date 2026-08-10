@@ -11,7 +11,9 @@ public record AiChatQueuedTurn(
         int sessionId,
         int turnId,
         int userMessageId,
+        int userMessageSeq,
         long restrictionEpoch,
+        boolean includePrivateNotes,
         List<AiChatPageContextDto> pageContext) {
 
     public AiChatQueuedTurn {

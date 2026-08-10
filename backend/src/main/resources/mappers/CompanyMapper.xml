@@ -770,6 +770,17 @@
     LIMIT 10
   </select>
 
+  <select id="findMentionedNames" resultType="string">
+    SELECT c.name
+    FROM company c
+    WHERE <include refid="visible"/>
+      AND c.name IS NOT NULL
+      AND c.name != ''
+      AND LOCATE(c.name, #{text}) &gt; 0
+    ORDER BY CHAR_LENGTH(c.name) DESC, c.id
+    LIMIT #{limit}
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url, created_at)
     VALUES (#{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{website}, #{industry},

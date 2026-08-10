@@ -11,14 +11,20 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.SearchResultsDto;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
@@ -39,6 +45,9 @@ class AiAssistantToolExecutorTest {
     private TaskService taskService;
     private ScoringService scoringService;
     private WorkspaceService workspaceService;
+    private PersonMapper personMapper;
+    private CompanyMapper companyMapper;
+    private DealMapper dealMapper;
     private AiAssistantToolExecutor executor;
 
     @BeforeEach
@@ -51,9 +60,13 @@ class AiAssistantToolExecutorTest {
         taskService = mock(TaskService.class);
         scoringService = mock(ScoringService.class);
         workspaceService = mock(WorkspaceService.class);
+        personMapper = mock(PersonMapper.class);
+        companyMapper = mock(CompanyMapper.class);
+        dealMapper = mock(DealMapper.class);
         executor = new AiAssistantToolExecutor(
                 new AiAssistantToolCatalog(), searchService, personService, companyService,
-                dealService, activityService, taskService, scoringService, workspaceService);
+                dealService, activityService, taskService, scoringService, workspaceService,
+                personMapper, companyMapper, dealMapper);
     }
 
     @Test
@@ -63,7 +76,7 @@ class AiAssistantToolExecutorTest {
         AiAssistantLoopException failure = assertThrows(
                 AiAssistantLoopException.class,
                 () -> executor.execute(
-                        "get_record", objectMapper.readTree("{\"handle\":\"r9\"}"), resources));
+                        "get_record", objectMapper.readTree("{\"handle\":\"r9\"}"), resources, true));
 
         assertEquals("unknown_handle", failure.detailReason());
         verifyNoInteractions(
@@ -84,11 +97,12 @@ class AiAssistantToolExecutorTest {
                         objectMapper.readTree(
                                 "{\"handle\":\"r1\",\"start\":\"2026-08-10T09:00:00Z\","
                                         + "\"end\":\"2026-08-10T10:00:00Z\"}"),
-                        resources));
+                        resources,
+                        true));
         AiAssistantLoopException brief = assertThrows(
                 AiAssistantLoopException.class,
                 () -> executor.execute(
-                        "get_deal_brief", objectMapper.readTree("{\"handle\":\"r2\"}"), resources));
+                        "get_deal_brief", objectMapper.readTree("{\"handle\":\"r2\"}"), resources, true));
 
         assertEquals("schedule_conflicts_unavailable", schedule.detailReason());
         assertEquals("deal_brief_nested_generation_unavailable", brief.detailReason());
@@ -114,7 +128,8 @@ class AiAssistantToolExecutorTest {
         AiAssistantToolResult search = executor.execute(
                 "search_records",
                 objectMapper.readTree("{\"query\":\"Restricted\",\"kinds\":[\"person\"]}"),
-                resources);
+                resources,
+                true);
         assertEquals(List.of(), search.data().get("records"));
         assertEquals(
                 List.of(),
@@ -122,16 +137,64 @@ class AiAssistantToolExecutorTest {
                         List.of(new AiChatPageContextDto("person", 17)), resources)
                         .data().get("records"));
         assertThrows(AiAssistantLoopException.class, () -> executor.execute(
-                "get_record", objectMapper.readTree("{\"handle\":\"r1\"}"), resources));
+                "get_record", objectMapper.readTree("{\"handle\":\"r1\"}"), resources, true));
         clearInvocations(activityService, taskService);
         assertThrows(AiAssistantLoopException.class, () -> executor.execute(
                 "list_activities",
-                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"), resources));
+                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"), resources, true));
         assertThrows(AiAssistantLoopException.class, () -> executor.execute(
                 "list_tasks",
-                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"), resources));
+                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"), resources, true));
 
         verify(activityService, never()).getActivitiesByPersonId(17);
         verify(taskService, never()).getTasksByPersonId(17);
+    }
+
+    @Test
+    void sharedSessionRecordReadsExcludePrivateNotesWhilePrivateSessionsKeepThem() throws Exception {
+        Note workspaceNote = new Note();
+        workspaceNote.setVisibility("workspace");
+        workspaceNote.setContent("Visible to the workspace");
+        Note privateNote = new Note();
+        privateNote.setVisibility("private");
+        privateNote.setContent("Owner only");
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        person.setNotes(new Note[] {workspaceNote, privateNote});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+
+        AiAssistantToolResult shared = executor.execute(
+                "get_record", objectMapper.readTree("{\"handle\":\"r1\"}"), resources, false);
+        AiAssistantToolResult privateResult = executor.execute(
+                "get_record", objectMapper.readTree("{\"handle\":\"r1\"}"), resources, true);
+
+        assertEquals(
+                List.of(Map.of("content", "Visible to the workspace")),
+                shared.data().get("notes"));
+        assertEquals(
+                List.of(
+                        Map.of("content", "Visible to the workspace"),
+                        Map.of("content", "Owner only")),
+                privateResult.data().get("notes"));
+    }
+
+    @Test
+    void replayContextUsesOneBoundedBatchInsteadOfHydratingEachPerson() {
+        List<Integer> ids = IntStream.rangeClosed(1, 50).boxed().toList();
+        List<AiChatPageContextDto> context = ids.stream()
+                .map(id -> new AiChatPageContextDto("person", id))
+                .toList();
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(personMapper.getByIds(7, ids)).thenReturn(List.of());
+
+        AiAssistantToolResult result = executor.pageContext(
+                context, new AiChatResourceRegistry());
+
+        assertEquals(List.of(), result.data().get("records"));
+        verify(personMapper).getByIds(7, ids);
+        verifyNoInteractions(personService, companyService, dealService);
     }
 }

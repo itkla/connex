@@ -185,6 +185,13 @@
     )
   </select>
 
+  <select id="countParticipants" resultType="int">
+    SELECT COUNT(*)
+    FROM ai_chat_session_participant
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+  </select>
+
   <select id="nextMessageSequence" resultType="int">
     SELECT COALESCE(MAX(seq), 0) + 1
     FROM ai_chat_message
@@ -232,6 +239,7 @@
       FROM ai_chat_message
       WHERE workspace_id = #{workspaceId}
         AND session_id = #{sessionId}
+        AND seq &lt;= #{maxSeq}
       ORDER BY seq DESC
       LIMIT #{limit}
     ) recent

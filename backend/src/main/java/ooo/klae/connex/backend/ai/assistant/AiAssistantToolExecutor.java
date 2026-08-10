@@ -23,6 +23,9 @@ import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.SearchResultsDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
@@ -51,10 +54,16 @@ public class AiAssistantToolExecutor {
     private final TaskService taskService;
     private final ScoringService scoringService;
     private final WorkspaceService workspaceService;
+    private final PersonMapper personMapper;
+    private final CompanyMapper companyMapper;
+    private final DealMapper dealMapper;
 
     /** Executes one validated, enabled tool call. */
     public AiAssistantToolResult execute(
-            String name, JsonNode args, AiChatResourceRegistry resources) {
+            String name,
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            boolean includePrivateNotes) {
         validateReferences(name, args, resources);
         if (!toolCatalog.isExecutable(name)) {
             throw AiAssistantLoopException.malformed(toolCatalog.unavailableReason(name));
@@ -62,7 +71,7 @@ public class AiAssistantToolExecutor {
         try {
             return switch (name) {
                 case "search_records" -> search(args, resources);
-                case "get_record" -> getRecord(args, resources);
+                case "get_record" -> getRecord(args, resources, includePrivateNotes);
                 case "list_activities" -> listActivities(args, resources);
                 case "list_tasks" -> listTasks(args, resources);
                 case "aggregate_metric" -> aggregateMetric(args);
@@ -99,6 +108,33 @@ public class AiAssistantToolExecutor {
     /** Resolves authorized page context into handles without placing tenant-local ids in prompt data. */
     public AiAssistantToolResult pageContext(
             List<AiChatPageContextDto> pageContext, AiChatResourceRegistry resources) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> personIds = idsForKind(pageContext, "person");
+        List<Integer> companyIds = idsForKind(pageContext, "company");
+        List<Integer> dealIds = idsForKind(pageContext, "deal");
+        Map<Integer, Person> people = personIds.isEmpty()
+                ? Map.of()
+                : personMapper.getByIds(workspaceId, personIds).stream()
+                        .filter(AiAssistantToolExecutor::isProcessable)
+                        .collect(java.util.stream.Collectors.toMap(Person::getId, person -> person));
+        Map<Integer, Company> companies = companyIds.isEmpty()
+                ? Map.of()
+                : companyMapper.getByIds(workspaceId, companyIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(Company::getId, company -> company));
+        Map<Integer, Deal> deals = dealIds.isEmpty()
+                ? Map.of()
+                : dealMapper.getByIds(workspaceId, dealIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(Deal::getId, deal -> deal));
+        List<Integer> dealCompanyIds = deals.values().stream()
+                .map(Deal::getCompanyId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Integer, Company> dealCompanies = dealCompanyIds.isEmpty()
+                ? Map.of()
+                : companyMapper.getByIds(workspaceId, dealCompanyIds)
+                        .stream()
+                        .collect(java.util.stream.Collectors.toMap(Company::getId, company -> company));
         List<Map<String, Object>> records = new ArrayList<>();
         List<Identifier> identifiers = new ArrayList<>();
         for (AiChatPageContextDto context : pageContext) {
@@ -106,13 +142,24 @@ public class AiAssistantToolExecutor {
                     || !RECORD_KINDS.contains(context.kind()) || context.id() <= 0) {
                 continue;
             }
-            try {
-                RecordResult resolved = readRecord(context.kind(), context.id(), resources, false);
-                records.add(resolved.data());
-                identifiers.addAll(resolved.identifiers());
-            } catch (ResourceNotFoundException | AiAssistantLoopException exception) {
+            RecordResult resolved = switch (context.kind()) {
+                case "person" -> people.containsKey(context.id())
+                        ? personRecord(people.get(context.id()), resources, false)
+                        : null;
+                case "company" -> companies.containsKey(context.id())
+                        ? companyRecord(companies.get(context.id()), resources, false)
+                        : null;
+                case "deal" -> deals.containsKey(context.id())
+                        ? dealRecord(
+                                deals.get(context.id()), resources, false, dealCompanies)
+                        : null;
+                default -> null;
+            };
+            if (resolved == null) {
                 continue;
             }
+            records.add(resolved.data());
+            identifiers.addAll(resolved.identifiers());
         }
         return result(Map.of("records", List.copyOf(records)), identifiers);
     }
@@ -150,9 +197,13 @@ public class AiAssistantToolExecutor {
         return result(Map.of("records", List.copyOf(records)), identifiers);
     }
 
-    private AiAssistantToolResult getRecord(JsonNode args, AiChatResourceRegistry resources) {
+    private AiAssistantToolResult getRecord(
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            boolean includePrivateNotes) {
         ResourceRef resource = resources.resolve(requiredText(args, "handle"), RECORD_KINDS);
-        RecordResult record = readRecord(resource.kind(), resource.id(), resources, true);
+        RecordResult record = readRecord(
+                resource.kind(), resource.id(), resources, true, includePrivateNotes);
         return result(record.data(), record.identifiers());
     }
 
@@ -222,17 +273,35 @@ public class AiAssistantToolExecutor {
     }
 
     private RecordResult readRecord(
-            String kind, int id, AiChatResourceRegistry resources, boolean includeNotes) {
+            String kind,
+            int id,
+            AiChatResourceRegistry resources,
+            boolean includeNotes,
+            boolean includePrivateNotes) {
         return switch (kind) {
-            case "person" -> personRecord(personService.getPersonById(id), resources, includeNotes);
-            case "company" -> companyRecord(companyService.getCompanyById(id), resources, includeNotes);
-            case "deal" -> dealRecord(dealService.getDealById(id), resources, includeNotes);
+            case "person" -> personRecord(
+                    personService.getPersonById(id), resources,
+                    includeNotes, includePrivateNotes);
+            case "company" -> companyRecord(
+                    companyService.getCompanyById(id), resources,
+                    includeNotes, includePrivateNotes);
+            case "deal" -> dealRecord(
+                    dealService.getDealById(id), resources,
+                    includeNotes, includePrivateNotes, null);
             default -> throw AiAssistantLoopException.malformed("unknown_record_kind");
         };
     }
 
     private RecordResult personRecord(
             Person person, AiChatResourceRegistry resources, boolean includeNotes) {
+        return personRecord(person, resources, includeNotes, true);
+    }
+
+    private RecordResult personRecord(
+            Person person,
+            AiChatResourceRegistry resources,
+            boolean includeNotes,
+            boolean includePrivateNotes) {
         requireProcessable(person);
         String handle = resources.register("person", person.getId());
         Map<String, Object> data = baseRecord(handle, "person", person.getName());
@@ -248,26 +317,47 @@ public class AiAssistantToolExecutor {
             identifiers.add(new Identifier("company", person.getCompany().getName()));
         }
         if (includeNotes) {
-            data.put("notes", noteData(person.getNotes()));
+            data.put("notes", noteData(person.getNotes(), includePrivateNotes));
         }
         return new RecordResult(data, identifiers);
     }
 
     private RecordResult companyRecord(
             Company company, AiChatResourceRegistry resources, boolean includeNotes) {
+        return companyRecord(company, resources, includeNotes, true);
+    }
+
+    private RecordResult companyRecord(
+            Company company,
+            AiChatResourceRegistry resources,
+            boolean includeNotes,
+            boolean includePrivateNotes) {
         String handle = resources.register("company", company.getId());
         Map<String, Object> data = baseRecord(handle, "company", company.getName());
         putIfPresent(data, "industry", company.getIndustry());
         if (includeNotes) {
             CompanyService.CompanyTimelineData timeline = companyService.getCompanyTimeline(
                     company.getId(), MAX_NOTES);
-            data.put("notes", noteData(timeline.notes().toArray(Note[]::new)));
+            data.put("notes", noteData(
+                    timeline.notes().toArray(Note[]::new), includePrivateNotes));
         }
         return new RecordResult(data, List.of(new Identifier("company", company.getName())));
     }
 
     private RecordResult dealRecord(
-            Deal deal, AiChatResourceRegistry resources, boolean includeNotes) {
+            Deal deal,
+            AiChatResourceRegistry resources,
+            boolean includeNotes,
+            Map<Integer, Company> prefetchedCompanies) {
+        return dealRecord(deal, resources, includeNotes, true, prefetchedCompanies);
+    }
+
+    private RecordResult dealRecord(
+            Deal deal,
+            AiChatResourceRegistry resources,
+            boolean includeNotes,
+            boolean includePrivateNotes,
+            Map<Integer, Company> prefetchedCompanies) {
         String handle = resources.register("deal", deal.getId());
         Map<String, Object> data = baseRecord(handle, "deal", deal.getName());
         data.put("value", deal.getValue());
@@ -281,7 +371,12 @@ public class AiAssistantToolExecutor {
         identifiers.add(new Identifier("deal", deal.getName()));
         if (deal.getCompanyId() != null) {
             try {
-                Company company = companyService.getCompanyById(deal.getCompanyId());
+                Company company = prefetchedCompanies == null
+                        ? companyService.getCompanyById(deal.getCompanyId())
+                        : prefetchedCompanies.get(deal.getCompanyId());
+                if (company == null) {
+                    throw new ResourceNotFoundException("Company is unavailable");
+                }
                 String companyHandle = resources.register("company", company.getId());
                 data.put("company", Map.of("handle", companyHandle, "name", company.getName()));
                 identifiers.add(new Identifier("company", company.getName()));
@@ -291,7 +386,8 @@ public class AiAssistantToolExecutor {
         }
         if (includeNotes) {
             data.put("notes", noteData(
-                    dealService.getNotesByDealId(deal.getId()).toArray(Note[]::new)));
+                    dealService.getNotesByDealId(deal.getId()).toArray(Note[]::new),
+                    includePrivateNotes));
         }
         return new RecordResult(data, identifiers);
     }
@@ -341,12 +437,14 @@ public class AiAssistantToolExecutor {
         return data;
     }
 
-    private static List<Map<String, Object>> noteData(Note[] notes) {
+    private static List<Map<String, Object>> noteData(
+            Note[] notes, boolean includePrivateNotes) {
         if (notes == null) {
             return List.of();
         }
         return Arrays.stream(notes)
                 .filter(note -> note != null)
+                .filter(note -> includePrivateNotes || "workspace".equals(note.getVisibility()))
                 .limit(MAX_NOTES)
                 .map(note -> {
                     Map<String, Object> data = new LinkedHashMap<>();
@@ -359,10 +457,23 @@ public class AiAssistantToolExecutor {
     }
 
     private static void requireProcessable(Person person) {
-        if (person == null || person.getSuspendedAt() != null
-                || person.getProvisionCeasedAt() != null || person.getArchivedAt() != null) {
+        if (!isProcessable(person)) {
             throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
         }
+    }
+
+    private static boolean isProcessable(Person person) {
+        return person != null && person.getSuspendedAt() == null
+                && person.getProvisionCeasedAt() == null && person.getArchivedAt() == null;
+    }
+
+    private static List<Integer> idsForKind(
+            List<AiChatPageContextDto> pageContext, String kind) {
+        return pageContext.stream()
+                .filter(context -> context != null && kind.equals(context.kind()) && context.id() > 0)
+                .map(AiChatPageContextDto::id)
+                .distinct()
+                .toList();
     }
 
     private static Set<String> requestedKinds(JsonNode node) {

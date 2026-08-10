@@ -4,12 +4,13 @@ package ooo.klae.connex.backend.ai;
 @FunctionalInterface
 public interface AiGenerationTerminalListener {
     /** Listener used by generation callers that do not own a second durable state record. */
-    AiGenerationTerminalListener NO_OP = (outcome, reason) -> {};
+    AiGenerationTerminalListener NO_OP = (outcome, reason) -> true;
 
     /**
-     * Receives the terminal transition after it wins the generation registry race.
+     * Claims the terminal transition while it owns the generation registry race.
      * @param outcome terminal outcome
      * @param reason stable failure or timeout reason, or {@code null} when resolved
+     * @return whether the generation registry may commit the same terminal outcome
      */
-    void onTerminal(AiGenerationTaskResult.Outcome outcome, String reason);
+    boolean onTerminal(AiGenerationTaskResult.Outcome outcome, String reason);
 }

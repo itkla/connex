@@ -74,6 +74,10 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("userId") int userId);
 
+    int countParticipants(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
     int nextMessageSequence(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
@@ -94,6 +98,7 @@ public interface AiChatMapper {
     List<AiChatMessage> listRecentMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
+        @Param("maxSeq") int maxSeq,
         @Param("limit") int limit);
 
     long countMessages(

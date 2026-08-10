@@ -92,7 +92,9 @@ public class AiChatTurnPersistenceService {
         chatMapper.updateLastMessageAt(workspaceId, sessionId);
         return new AiChatQueuedTurn(
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
-                restrictionEpoch, request.pageContext());
+                message.getSeq(), restrictionEpoch,
+                chatMapper.countParticipants(workspaceId, sessionId) == 0,
+                request.pageContext());
     }
 
     /** Returns one authorized durable turn after applying its lazy generation deadline. */
@@ -129,7 +131,8 @@ public class AiChatTurnPersistenceService {
         if (session == null) {
             throw inaccessible();
         }
-        return chatMapper.listRecentMessages(turn.workspaceId(), turn.sessionId(), limit);
+        return chatMapper.listRecentMessages(
+                turn.workspaceId(), turn.sessionId(), turn.userMessageSeq(), limit);
     }
 
     /** Persists a demasked read-tool proposal before execution. */
@@ -166,6 +169,11 @@ public class AiChatTurnPersistenceService {
             int toolCallId,
             String status,
             String resultJson) {
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            throw new AiAssistantLoopException(
+                    "restrictions_changed", "restrictions_changed");
+        }
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
         return chatMapper.updateToolCall(
@@ -179,6 +187,10 @@ public class AiChatTurnPersistenceService {
             AiChatQueuedTurn turn,
             int toolCallId,
             String resultJson) {
+        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        if (!RUNNING.equals(stored.getStatus())) {
+            return false;
+        }
         return chatMapper.updateToolCall(
                 turn.workspaceId(), turn.userMessageId(), toolCallId, "failed",
                 resultJson, turn.userId()) == 1;
@@ -201,6 +213,11 @@ public class AiChatTurnPersistenceService {
             int inputTokens,
             int outputTokens) {
         requireActiveTransaction();
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            throw new AiAssistantLoopException(
+                    "restrictions_changed", "restrictions_changed");
+        }
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
         AiChatMessage message = new AiChatMessage();
@@ -220,24 +237,19 @@ public class AiChatTurnPersistenceService {
             throw new IllegalStateException("Assistant turn resolution lost its durable state");
         }
         chatMapper.updateLastMessageAt(turn.workspaceId(), turn.sessionId());
-        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
-                turn.workspaceId(), turn.restrictionEpoch())) {
-            throw new AiAssistantLoopException(
-                    "restrictions_changed", "restrictions_changed");
-        }
         return true;
     }
 
     /** Applies a generation-owned terminal transition without requiring request-thread state. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public boolean markTerminal(
-            int workspaceId,
-            int sessionId,
-            int turnId,
+            AiChatQueuedTurn turn,
             String status,
             String reason) {
+        lockGenerationOwnedTurn(turn);
         return chatMapper.updateTurnTerminal(
-                workspaceId, sessionId, turnId, status, reason, null, null) == 1;
+                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                status, reason, null, null) == 1;
     }
 
     private static void requireActiveTransaction() {
@@ -278,6 +290,21 @@ public class AiChatTurnPersistenceService {
                 || !Objects.equals(stored.getRequestedByUserId(), turn.userId())
                 || !requiredStatus.equals(stored.getStatus())) {
             throw new ConflictException("Assistant turn is no longer active");
+        }
+        return stored;
+    }
+
+    private AiChatTurn lockGenerationOwnedTurn(AiChatQueuedTurn turn) {
+        AiChatSession session = chatMapper.getSessionByIdForUpdate(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null) {
+            throw inaccessible();
+        }
+        AiChatTurn stored = chatMapper.getTurnByIdForUpdate(
+                turn.workspaceId(), turn.sessionId(), turn.turnId());
+        if (stored == null
+                || !Objects.equals(stored.getRequestedByUserId(), turn.userId())) {
+            throw inaccessible();
         }
         return stored;
     }

@@ -14,6 +14,7 @@ import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import ooo.klae.connex.backend.ai.AiFeature;
@@ -30,6 +31,7 @@ import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
     private static final String STALE_TIMESTAMP = "2000-01-01 00:00:00.000000";
 

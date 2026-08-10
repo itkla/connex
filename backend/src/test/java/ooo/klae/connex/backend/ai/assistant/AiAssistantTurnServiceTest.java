@@ -31,7 +31,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 
 class AiAssistantTurnServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 23, List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of());
 
     private WorkspaceService workspaceService;
     private AiRestrictionEpoch restrictionEpoch;
@@ -55,7 +55,7 @@ class AiAssistantTurnServiceTest {
         when(persistenceService.queue(
                 eq(TURN.sessionId()), any(AiChatTurnCreateRequest.class),
                 eq(TURN.restrictionEpoch()))).thenReturn(TURN);
-        when(terminalCoordinator.listener(TURN)).thenReturn((outcome, reason) -> {});
+        when(terminalCoordinator.listener(TURN)).thenReturn((outcome, reason) -> true);
     }
 
     @Test

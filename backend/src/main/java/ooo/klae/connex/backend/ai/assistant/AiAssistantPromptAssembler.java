@@ -83,7 +83,8 @@ public class AiAssistantPromptAssembler {
 
     /** Serializes final citation metadata, including server-only resolution for later authorization. */
     public String finalMetadata(
-            List<String> citations, Map<String, AiChatResourceRegistry.ResourceRef> resources) {
+            List<String> citations,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources) {
         List<Map<String, Object>> resolved = new ArrayList<>();
         for (String handle : citations) {
             AiChatResourceRegistry.ResourceRef resource = resources.get(handle);
@@ -266,7 +267,7 @@ public class AiAssistantPromptAssembler {
         }
         if (node.isString()) {
             return objectMapper.getNodeFactory().textNode(
-                    MaskingEngine.maskFreeText(node.asString(), context));
+                    MaskingEngine.maskTemporal(node.asString(), context));
         }
         if (node instanceof ObjectNode object) {
             ObjectNode masked = objectMapper.createObjectNode();

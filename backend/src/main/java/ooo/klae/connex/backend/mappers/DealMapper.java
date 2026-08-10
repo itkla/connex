@@ -309,6 +309,10 @@ public interface DealMapper {
     /** Deals are owned-only already; mirrors the person/company method so bulk write-scoping is uniform. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Deal> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<String> findMentionedNames(
+            @Param("workspaceId") int workspaceId,
+            @Param("text") String text,
+            @Param("limit") int limit);
     /** id + name + company for every deal in the workspace; for import dedup (normalized in the service). */
     List<Deal> getDealsForDedup(int workspaceId);
     /** Deals in the workspace with the given ids (workspace-scoped); for export of a selected view. */

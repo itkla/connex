@@ -206,11 +206,10 @@ public class TenantScopeInterceptor implements Interceptor {
      * offboarding flows. Workflow discovery is likewise bound to the departing
      * user across workflow, immutable-version, and linked-rule creator/run-as
      * columns; subsequent locks and writes use exact workspace-scoped keys. The
-     * AI-output-cache purge (issue #221 cease-of-use) is
-     * org-scoped: restricting a contact removes its cached AI outputs across every
-     * workspace in the contact's organization (including same-org grantee
-     * workspaces it was shared into), org-anchored via a {@code workspace} join
-     * rather than a single {@code workspace_id} predicate.
+     * AI-output-cache and generated-chat purges are org-scoped: restricting a contact removes
+     * retained AI outputs across every workspace in the contact's organization, including same-org
+     * grantee workspaces it was shared into. The generated-chat purge receives the bounded
+     * workspace set resolved by the service from the current workspace's organization.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",

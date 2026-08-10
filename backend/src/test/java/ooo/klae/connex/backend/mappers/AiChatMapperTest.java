@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import tools.jackson.databind.json.JsonMapper;
 
 class AiChatMapperTest extends AbstractMapperTest {
 
@@ -120,7 +121,24 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void durableTurnToolAndStructuredMessageStateRoundTripsWithinWorkspace() {
+    void recentReplayStopsAtTheQueuedMessageSequence() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Bounded replay", "shared");
+        message(session, owner, 1, "before");
+        message(session, owner, 2, "queued request");
+        message(session, owner, 3, "later participant message");
+
+        List<AiChatMessage> replay = chatMapper.listRecentMessages(
+                workspace.getId(), session.getId(), 2, 50);
+        List<AiChatMessage> latestAtBoundary = chatMapper.listRecentMessages(
+                workspace.getId(), session.getId(), 2, 1);
+
+        assertEquals(List.of(1, 2), replay.stream().map(AiChatMessage::getSeq).toList());
+        assertEquals(List.of(2), latestAtBoundary.stream().map(AiChatMessage::getSeq).toList());
+    }
+
+    @Test
+    void durableTurnToolAndStructuredMessageStateRoundTripsWithinWorkspace() throws Exception {
         User owner = newUser();
         AiChatSession session = session(workspace, owner, "Agent loop", "private");
         AiChatMessage userMessage = message(session, owner, 1, "Investigate");
@@ -169,7 +187,9 @@ class AiChatMapperTest extends AbstractMapperTest {
                 workspace.getId(), session.getId(), answer.getId());
         AiChatTurn storedTurn = chatMapper.getTurnById(
                 workspace.getId(), session.getId(), turn.getId());
-        assertEquals("{\"citations\":[]}", storedAnswer.getStructuredJson());
+        assertEquals(
+                JsonMapper.builder().build().readTree("{\"citations\":[]}"),
+                JsonMapper.builder().build().readTree(storedAnswer.getStructuredJson()));
         assertEquals(21, storedAnswer.getInputTokens());
         assertEquals(8, storedAnswer.getOutputTokens());
         assertEquals("failed", storedTurn.getStatus());

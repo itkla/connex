@@ -30,6 +30,9 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -39,7 +42,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AiChatAgentLoopServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 23, List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of());
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiInvocationService invocationService;
@@ -58,12 +61,14 @@ class AiChatAgentLoopServiceTest {
         workspaceService = mock(WorkspaceService.class);
         var catalog = new AiAssistantToolCatalog();
         var promptAssembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        var identifierResolver = mock(AiAssistantIdentifierResolver.class);
         var publishers = new StaticListableBeanFactory()
                 .getBeanProvider(AiChatRealtimePublisher.class);
         service = new AiChatAgentLoopService(
                 invocationService,
                 new AiAssistantStepGuard(catalog),
                 toolExecutor,
+                identifierResolver,
                 promptAssembler,
                 persistenceService,
                 restrictionEpoch,
@@ -71,13 +76,14 @@ class AiChatAgentLoopServiceTest {
                 objectMapper,
                 publishers);
         AiChatMessage userMessage = new AiChatMessage();
+        userMessage.setId(TURN.userMessageId());
         userMessage.setAuthorKind("user");
         userMessage.setContent("Summarize my pipeline");
         when(persistenceService.markRunning(TURN)).thenReturn(true);
         when(persistenceService.loadHistory(TURN, 50)).thenReturn(List.of(userMessage));
         when(toolExecutor.pageContext(any(), any())).thenReturn(
                 new AiAssistantToolResult(Map.of(), List.of()));
-        when(toolExecutor.execute(any(), any(), any())).thenReturn(
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class))).thenReturn(
                 new AiAssistantToolResult(Map.of("records", List.of()), List.of()));
         when(persistenceService.proposeTool(eq(TURN), anyInt(), any(), any())).thenReturn(29);
         when(persistenceService.finishTool(eq(TURN), anyInt(), any(), any())).thenReturn(true);
@@ -101,7 +107,8 @@ class AiChatAgentLoopServiceTest {
         assertEquals("step_cap_exceeded", result.reason());
         verify(invocationService, times(6)).completeStructured(
                 any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class));
-        verify(toolExecutor, times(6)).execute(eq("search_records"), any(JsonNode.class), any());
+        verify(toolExecutor, times(6)).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true));
         verify(persistenceService, never()).resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt());
     }
@@ -174,7 +181,7 @@ class AiChatAgentLoopServiceTest {
 
         assertTerminal("internal_error");
 
-        verify(toolExecutor, never()).execute(any(), any(), any());
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class));
     }
 
     @Test
@@ -187,7 +194,7 @@ class AiChatAgentLoopServiceTest {
         when(invocationService.completeStructured(
                 any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
                 .thenReturn(parsed(toolStep));
-        when(toolExecutor.execute(any(), any(), any()))
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class)))
                 .thenThrow(new IllegalStateException("database unavailable"));
 
         assertTerminal("internal_error");
@@ -242,11 +249,15 @@ class AiChatAgentLoopServiceTest {
                 mock(ooo.klae.connex.backend.services.ActivityService.class),
                 mock(ooo.klae.connex.backend.services.TaskService.class),
                 mock(ooo.klae.connex.backend.services.ScoringService.class),
-                workspaceService);
+                workspaceService,
+                mock(PersonMapper.class),
+                mock(CompanyMapper.class),
+                mock(DealMapper.class));
         service = new AiChatAgentLoopService(
                 invocationService,
                 new AiAssistantStepGuard(new AiAssistantToolCatalog()),
                 realExecutor,
+                mock(AiAssistantIdentifierResolver.class),
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
                 persistenceService,
                 restrictionEpoch,
@@ -265,6 +276,22 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), any(), any());
     }
 
+    @Test
+    void historyCharacterBudgetKeepsNewestUserMessageWholeAndTruncatesTheOldestBoundary() {
+        AiChatMessage oldest = message(1, "a".repeat(60_000));
+        AiChatMessage recent = message(2, "b".repeat(20_000));
+        AiChatMessage initiating = message(TURN.userMessageId(), "c".repeat(16_000));
+
+        List<AiChatMessage> bounded = AiChatAgentLoopService.boundedHistory(
+                List.of(oldest, recent, initiating), TURN);
+
+        assertEquals(3, bounded.size());
+        assertEquals(64_000, bounded.stream().mapToInt(message -> message.getContent().length()).sum());
+        assertEquals("a".repeat(28_000), bounded.get(0).getContent());
+        assertEquals(recent.getContent(), bounded.get(1).getContent());
+        assertEquals(initiating.getContent(), bounded.get(2).getContent());
+    }
+
     private void assertTerminal(String reason) {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
@@ -273,5 +300,13 @@ class AiChatAgentLoopServiceTest {
 
     private static AiStructuredOutcome<AiAssistantStep> parsed(AiAssistantStep step) {
         return new AiStructuredOutcome.Parsed<>(step, 0, 3, 5, "stop");
+    }
+
+    private static AiChatMessage message(int id, String content) {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(id);
+        message.setAuthorKind("user");
+        message.setContent(content);
+        return message;
     }
 }

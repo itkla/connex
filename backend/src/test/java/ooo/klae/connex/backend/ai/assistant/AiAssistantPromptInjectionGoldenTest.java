@@ -33,6 +33,9 @@ import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
@@ -47,6 +50,42 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiAssistantPromptInjectionGoldenTest {
+    @Test
+    void locallyResolvedNameWithoutPageContextOrToolResultNeverLeavesTheMaskedPrompt() throws Exception {
+        ObjectMapper objectMapper = JsonMapper.builder().build();
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(personMapper.findMentionedNames(7, "What is happening with Kenji Sato?", 21))
+                .thenReturn(List.of("Kenji Sato"));
+        when(companyMapper.findMentionedNames(7, "What is happening with Kenji Sato?", 21))
+                .thenReturn(List.of());
+        when(dealMapper.findMentionedNames(7, "What is happening with Kenji Sato?", 21))
+                .thenReturn(List.of());
+        MaskingContext context = new MaskingContext();
+        new AiAssistantIdentifierResolver(
+                personMapper, companyMapper, dealMapper, workspaceService)
+                .seed("What is happening with Kenji Sato?", context);
+        AiChatMessage userRequest = new AiChatMessage();
+        userRequest.setAuthorKind("user");
+        userRequest.setContent("What is happening with Kenji Sato?");
+
+        String serialized = objectMapper.writeValueAsString(
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog())
+                        .assemble(
+                                List.of(userRequest),
+                                new AiAssistantToolResult(Map.of(), List.of()),
+                                List.of(),
+                                context,
+                                new AiChatResourceRegistry())
+                        .getMessages());
+
+        assertFalse(serialized.contains("Kenji Sato"));
+        assertTrue(serialized.contains("{{P1}}"));
+    }
+
     @Test
     void untrustedCrmPayloadsCannotBypassMaskingOrProposeRawRecordIds() {
         ObjectMapper objectMapper = JsonMapper.builder().build();
@@ -140,9 +179,12 @@ class AiAssistantPromptInjectionGoldenTest {
                 activityService,
                 taskService,
                 scoringService,
-                workspaceService);
+                workspaceService,
+                mock(PersonMapper.class),
+                mock(CompanyMapper.class),
+                mock(DealMapper.class));
         assertThrows(AiAssistantLoopException.class, () ->
-                executor.execute(parsed.tool().name(), parsed.tool().args(), resources));
+                executor.execute(parsed.tool().name(), parsed.tool().args(), resources, true));
         verifyNoInteractions(
                 searchService,
                 personService,

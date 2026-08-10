@@ -385,6 +385,9 @@ public class AiGenerationService {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
+            if (!claimTerminal(state, AiGenerationTaskResult.Outcome.RESOLVED, null)) {
+                return;
+            }
             retainedResultBytes -= state.retainedResultBytes - result.bytes();
             state.retainedResultBytes = result.bytes();
             state.status = Status.RESOLVED;
@@ -393,7 +396,6 @@ public class AiGenerationService {
             timeout = finishLocked(state);
         }
         cancelTimer(timeout);
-        notifyTerminal(state, AiGenerationTaskResult.Outcome.RESOLVED, null);
     }
 
     private void fail(GenerationState state, String reason) {
@@ -402,13 +404,17 @@ public class AiGenerationService {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
+            String stableReason = stableReason(reason, "generation_failed");
+            if (!claimTerminal(
+                    state, AiGenerationTaskResult.Outcome.FAILED, stableReason)) {
+                return;
+            }
             state.status = Status.FAILED;
-            state.reason = stableReason(reason, "generation_failed");
+            state.reason = stableReason;
             releaseResultCapacityLocked(state);
             timeout = finishLocked(state);
         }
         cancelTimer(timeout);
-        notifyTerminal(state, AiGenerationTaskResult.Outcome.FAILED, state.reason);
     }
 
     private void timeOut(GenerationState state) {
@@ -421,8 +427,13 @@ public class AiGenerationService {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
+            String stableReason = stableReason(reason, "generation_timeout");
+            if (!claimTerminal(
+                    state, AiGenerationTaskResult.Outcome.TIMED_OUT, stableReason)) {
+                return;
+            }
             state.status = Status.TIMED_OUT;
-            state.reason = stableReason(reason, "generation_timeout");
+            state.reason = stableReason;
             releaseResultCapacityLocked(state);
             finishLocked(state);
             future = state.future;
@@ -430,17 +441,16 @@ public class AiGenerationService {
         if (future != null) {
             future.cancel(true);
         }
-        notifyTerminal(state, AiGenerationTaskResult.Outcome.TIMED_OUT, state.reason);
     }
 
-    private void notifyTerminal(
+    private boolean claimTerminal(
             GenerationState state,
             AiGenerationTaskResult.Outcome outcome,
             String reason) {
         try {
-            state.terminalListener.onTerminal(outcome, reason);
+            return state.terminalListener.onTerminal(outcome, reason);
         } catch (RuntimeException exception) {
-            return;
+            return false;
         }
     }
 
@@ -474,7 +484,7 @@ public class AiGenerationService {
         }
         cancelTimer(timeout);
         if (active) {
-            notifyTerminal(
+            claimTerminal(
                     state, AiGenerationTaskResult.Outcome.FAILED,
                     stableReason(reason, "access_revoked"));
         }

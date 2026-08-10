@@ -36,6 +36,7 @@ public class AiChatAgentLoopService {
     static final int MAX_STEPS = 6;
     private static final String INTERNAL_ERROR = "internal_error";
     private static final int MAX_HISTORY_MESSAGES = 50;
+    private static final int MAX_HISTORY_CHARS = 64_000;
     private static final int MAX_OUTPUT_TOKENS = 1200;
     private static final int MAX_FINAL_CHARS = 16_000;
     private static final double TEMPERATURE = 0.1;
@@ -43,6 +44,7 @@ public class AiChatAgentLoopService {
     private final AiInvocationService invocationService;
     private final AiAssistantStepGuard stepGuard;
     private final AiAssistantToolExecutor toolExecutor;
+    private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiChatTurnPersistenceService persistenceService;
     private final AiRestrictionEpoch restrictionEpoch;
@@ -63,11 +65,18 @@ public class AiChatAgentLoopService {
                 return AiGenerationTaskResult.failed(INTERNAL_ERROR);
             }
             publish(turn.userId(), new AiChatStepFrameDto(
-                    turn.turnId(), 0, "state", null, "running", null));
-            List<AiChatMessage> history =
-                    persistenceService.loadHistory(turn, MAX_HISTORY_MESSAGES);
+                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                    0, "state", null, "running", null));
+            List<AiChatMessage> history = boundedHistory(
+                    persistenceService.loadHistory(turn, MAX_HISTORY_MESSAGES), turn);
             AiChatResourceRegistry resources = new AiChatResourceRegistry();
             MaskingContext maskingContext = new MaskingContext();
+            AiChatMessage initiatingMessage = history.stream()
+                    .filter(message -> message.getId() == turn.userMessageId())
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Assistant initiating message is unavailable"));
+            identifierResolver.seed(initiatingMessage.getContent(), maskingContext);
             List<AiChatPageContextDto> promptContext =
                     new ArrayList<>(turn.pageContext());
             promptContext.addAll(promptAssembler.replayPageContext(history));
@@ -107,12 +116,14 @@ public class AiChatAgentLoopService {
                     int toolCallId = persistenceService.proposeTool(
                             turn, stepNumber, step.tool().name(), argumentsJson);
                     publish(turn.userId(), new AiChatStepFrameDto(
-                            turn.turnId(), stepNumber, "step", step.tool().name(),
+                            turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                            stepNumber, "step", step.tool().name(),
                             "proposed", null));
                     try {
                         requireCurrentToolExecution(turn);
                         AiAssistantToolResult toolResult = toolExecutor.execute(
-                                step.tool().name(), step.tool().args(), resources);
+                                step.tool().name(), step.tool().args(), resources,
+                                turn.includePrivateNotes());
                         String resultJson = promptAssembler.durableToolResult(toolResult);
                         if (!persistenceService.finishTool(
                                 turn, toolCallId, "executed", resultJson)) {
@@ -120,20 +131,23 @@ public class AiChatAgentLoopService {
                             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
                         }
                         publish(turn.userId(), new AiChatStepFrameDto(
-                                turn.turnId(), stepNumber, "step", step.tool().name(),
+                                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                stepNumber, "step", step.tool().name(),
                                 "executed", null));
                         toolTurns.add(new ToolTurn(stepNumber, step.tool().name(), toolResult));
                     } catch (AiAssistantLoopException exception) {
                         failTool(turn, toolCallId, exception.detailReason());
                         publish(turn.userId(), new AiChatStepFrameDto(
-                                turn.turnId(), stepNumber, "step", step.tool().name(),
+                                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
                         return AiGenerationTaskResult.failed(exception.terminalReason());
                     } catch (RuntimeException exception) {
                         String reason = toolFailureReason(exception);
                         failTool(turn, toolCallId, reason);
                         publish(turn.userId(), new AiChatStepFrameDto(
-                                turn.turnId(), stepNumber, "step", step.tool().name(),
+                                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                stepNumber, "step", step.tool().name(),
                                 "failed", reason));
                         return AiGenerationTaskResult.failed(reason);
                     }
@@ -152,8 +166,6 @@ public class AiChatAgentLoopService {
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, finalAnswer.text(), metadata, inputTokens, outputTokens);
-                publish(turn.userId(), new AiChatStepFrameDto(
-                        turn.turnId(), stepNumber, "terminal", null, "resolved", null));
                 return AiGenerationTaskResult.resolved(
                         new AiChatTurnGenerationResult(turn.turnId(), "resolved"));
             }
@@ -258,5 +270,54 @@ public class AiChatAgentLoopService {
         return additional > Integer.MAX_VALUE - current
                 ? Integer.MAX_VALUE
                 : current + additional;
+    }
+
+    static List<AiChatMessage> boundedHistory(
+            List<AiChatMessage> history, AiChatQueuedTurn turn) {
+        AiChatMessage initiatingMessage = history.stream()
+                .filter(message -> message.getId() == turn.userMessageId())
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Assistant initiating message is unavailable"));
+        int remaining = Math.max(
+                0, MAX_HISTORY_CHARS - initiatingMessage.getContent().length());
+        List<AiChatMessage> selected = new ArrayList<>();
+        for (int index = history.size() - 1; index >= 0; index--) {
+            AiChatMessage message = history.get(index);
+            if (message.getId() == turn.userMessageId()) {
+                selected.add(message);
+                continue;
+            }
+            if (remaining == 0) {
+                continue;
+            }
+            String content = message.getContent();
+            if (content.length() <= remaining) {
+                selected.add(message);
+                remaining -= content.length();
+                continue;
+            }
+            selected.add(copyWithContent(
+                    message, content.substring(content.length() - remaining)));
+            remaining = 0;
+        }
+        java.util.Collections.reverse(selected);
+        return List.copyOf(selected);
+    }
+
+    private static AiChatMessage copyWithContent(AiChatMessage source, String content) {
+        AiChatMessage copy = new AiChatMessage();
+        copy.setId(source.getId());
+        copy.setWorkspaceId(source.getWorkspaceId());
+        copy.setSessionId(source.getSessionId());
+        copy.setSeq(source.getSeq());
+        copy.setAuthorKind(source.getAuthorKind());
+        copy.setAuthorUserId(source.getAuthorUserId());
+        copy.setContent(content);
+        copy.setStructuredJson(source.getStructuredJson());
+        copy.setInputTokens(source.getInputTokens());
+        copy.setOutputTokens(source.getOutputTokens());
+        copy.setCreatedAt(source.getCreatedAt());
+        return copy;
     }
 }

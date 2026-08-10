@@ -195,6 +195,7 @@ class AiGenerationServiceTest {
                     callbacks.incrementAndGet();
                     terminal.set(outcome);
                     reason.set(stableReason);
+                    return true;
                 });
 
         assertTrue(running.await(2, TimeUnit.SECONDS));
@@ -203,6 +204,47 @@ class AiGenerationServiceTest {
         assertEquals(1, callbacks.get());
         assertEquals(AiGenerationTaskResult.Outcome.TIMED_OUT, terminal.get());
         assertEquals("generation_timeout", reason.get());
+    }
+
+    @Test
+    void rejectedTimeoutClaimLeavesTheHandleActiveForTheDurablyResolvedWinner() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch timeoutAttempted = new CountDownLatch(1);
+        AtomicInteger timeoutClaims = new AtomicInteger();
+        AtomicInteger resolvedClaims = new AtomicInteger();
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "turn-20-race",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    await(timeoutAttempted);
+                    return AiGenerationTaskResult.resolved("durably-resolved");
+                },
+                restrictionEpoch.get(),
+                (outcome, stableReason) -> {
+                    if (outcome == AiGenerationTaskResult.Outcome.TIMED_OUT) {
+                        timeoutClaims.incrementAndGet();
+                        timeoutAttempted.countDown();
+                        return false;
+                    }
+                    resolvedClaims.incrementAndGet();
+                    return true;
+                });
+
+        AiGenerationStatusDto resolved = awaitStatus(accepted.handle(), "resolved");
+
+        assertEquals("durably-resolved", resolved.result().asString());
+        assertEquals(1, timeoutClaims.get());
+        assertEquals(1, resolvedClaims.get());
     }
 
     @Test
@@ -225,6 +267,7 @@ class AiGenerationServiceTest {
                 (outcome, stableReason) -> {
                     callbacks.incrementAndGet();
                     reason.set(stableReason);
+                    return true;
                 });
         assertTrue(running.await(2, TimeUnit.SECONDS));
         permissions.set(Set.of(Permission.REPORT_READ));

@@ -21,7 +21,7 @@ class SimpAiChatRealtimePublisherTest {
         user.setUsername("initiator");
         when(userMapper.getUserById(17)).thenReturn(user);
         var publisher = new SimpAiChatRealtimePublisher(messagingTemplate, userMapper);
-        var frame = new AiChatStepFrameDto(31, 2, "step", "get_record", "executed", null);
+        var frame = new AiChatStepFrameDto(7, 13, 31, 2, "step", "get_record", "executed", null);
 
         publisher.send(17, frame);
 
@@ -34,7 +34,8 @@ class SimpAiChatRealtimePublisherTest {
         UserMapper userMapper = mock(UserMapper.class);
         var publisher = new SimpAiChatRealtimePublisher(messagingTemplate, userMapper);
 
-        publisher.send(17, new AiChatStepFrameDto(31, 0, "terminal", null, "failed", "provider_error"));
+        publisher.send(17, new AiChatStepFrameDto(
+                7, 13, 31, 0, "terminal", null, "failed", "provider_error"));
 
         verifyNoInteractions(messagingTemplate);
     }

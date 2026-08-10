@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
@@ -45,6 +46,7 @@ public class AiAssistantService {
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
+    private final AiChatCitationProjector citationProjector;
 
     /** Returns an ordered page of caller-owned and explicitly shared sessions. */
     @Transactional(readOnly = true)
@@ -86,9 +88,12 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
-        List<AiChatMessageDto> messages = chatMapper.listMessages(
-            workspaceId, id, messageSize, offset).stream()
-            .map(AiChatMessageDto::from)
+        List<AiChatMessage> storedMessages = chatMapper.listMessages(
+            workspaceId, id, messageSize, offset);
+        var citations = citationProjector.project(workspaceId, storedMessages);
+        List<AiChatMessageDto> messages = storedMessages.stream()
+            .map(message -> AiChatMessageDto.from(
+                    message, citations.getOrDefault(message.getId(), List.of())))
             .toList();
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),

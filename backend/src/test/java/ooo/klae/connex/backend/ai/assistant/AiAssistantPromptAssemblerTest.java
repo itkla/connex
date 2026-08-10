@@ -67,6 +67,27 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
+    void exactIsoDueDatesSurviveStructuredPromptMasking() throws Exception {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("When is this due?");
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("tasks", List.of(Map.of("dueDate", "2026-08-10"))),
+                List.of());
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, "list_tasks", toolResult)),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        assertTrue(serialized.contains("2026-08-10"));
+        assertFalse(serialized.contains("[redacted]"));
+    }
+
+    @Test
     void durableResourceMetadataRehydratesFreshReplayMaskingWithoutPromptingRawIds() throws Exception {
         Map<String, AiChatResourceRegistry.ResourceRef> resources = new LinkedHashMap<>();
         resources.put("r1", new AiChatResourceRegistry.ResourceRef("person", 71));
