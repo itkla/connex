@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -27,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -283,6 +285,51 @@ class InteractionHistoryImportServiceTest {
         assertEquals("needs_review", preview.rows().get(5).status());
         assertEquals("ready", preview.rows().get(6).status());
         assertEquals("needs_review", preview.rows().get(7).status());
+    }
+
+    @Test
+    void commitAuditsInvalidAndReviewRowsAsDistinctExactOutcomes() {
+        HistoryImportRequest valid = activityRequest(
+            "audit-ready", "Ready row", "2026-01-01T00:00:00Z");
+        Map<String, String> review = new LinkedHashMap<>(valid.getRows().getFirst());
+        review.put("source", "audit-review");
+        review.put("subject", "Review row");
+        Map<String, String> invalid = new LinkedHashMap<>(valid.getRows().getFirst());
+        invalid.put("source", "audit-invalid");
+        invalid.put("when", "not-a-timestamp");
+        HistoryImportRequest request = new HistoryImportRequest(
+            List.of(valid.getRows().getFirst(), review, invalid),
+            valid.getMapping(),
+            null,
+            PROOF);
+        queueCommit(List.of(
+            strongResponse(PERSON_ID),
+            response(List.of(), false)));
+
+        HistoryImportResult result = service.commitActivities(request);
+
+        assertEquals(1, result.created());
+        assertEquals(0, result.skipped());
+        assertEquals(2, result.failed().size());
+        verify(auditService).record(
+            eq("import.history.activity"),
+            eq("activity"),
+            isNull(),
+            eq("CSV history import"),
+            eq("Imported historical activity rows: 1 created, 0 skipped, 1 failed, 1 remained for review"),
+            org.mockito.ArgumentMatchers.argThat(changes ->
+                changes instanceof Map<?, ?> outcomes
+                    && outcomes.keySet().equals(Set.of(
+                        "created",
+                        "skipped",
+                        "failed",
+                        "remainedForReview",
+                        "sourceSystem"))
+                    && Integer.valueOf(1).equals(outcomes.get("created"))
+                    && Integer.valueOf(0).equals(outcomes.get("skipped"))
+                    && Integer.valueOf(1).equals(outcomes.get("failed"))
+                    && Integer.valueOf(1).equals(outcomes.get("remainedForReview"))
+                    && "csv".equals(outcomes.get("sourceSystem"))));
     }
 
     @Test

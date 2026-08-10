@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiChatMapper">
+
+  <resultMap id="sessionResult" type="AiChatSession">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="createdByUserId" column="created_by_user_id"/>
+    <result property="title" column="title"/>
+    <result property="visibility" column="visibility"/>
+    <result property="status" column="status"/>
+    <result property="ownedByCurrentUser" column="owned_by_current_user"/>
+    <result property="lastMessageAt" column="last_message_at"/>
+    <result property="archivedAt" column="archived_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="messageResult" type="AiChatMessage">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="sessionId" column="session_id"/>
+    <result property="seq" column="seq"/>
+    <result property="authorKind" column="author_kind"/>
+    <result property="authorUserId" column="author_user_id"/>
+    <result property="content" column="content"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <sql id="sessionColumns">
+    s.id, s.workspace_id, s.created_by_user_id, s.title, s.visibility, s.status,
+    CASE WHEN s.created_by_user_id = #{userId} THEN TRUE ELSE FALSE END AS owned_by_current_user,
+    s.last_message_at, s.archived_at, s.created_at, s.updated_at
+  </sql>
+
+  <sql id="accessibleSession">
+    (s.created_by_user_id = #{userId}
+      OR (s.visibility = 'shared' AND EXISTS (
+        SELECT 1
+        FROM ai_chat_session_participant p
+        WHERE p.workspace_id = #{workspaceId}
+          AND p.session_id = s.id
+          AND p.user_id = #{userId}
+      )))
+  </sql>
+
+  <select id="listAccessibleSessions" resultMap="sessionResult">
+    SELECT <include refid="sessionColumns"/>
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND <include refid="accessibleSession"/>
+    ORDER BY s.last_message_at DESC, s.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countAccessibleSessions" resultType="long">
+    SELECT COUNT(*)
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND <include refid="accessibleSession"/>
+  </select>
+
+  <select id="getAccessibleSessionById" resultMap="sessionResult">
+    SELECT <include refid="sessionColumns"/>
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.id = #{id}
+      AND <include refid="accessibleSession"/>
+  </select>
+
+  <select id="getSessionById" resultMap="sessionResult">
+    SELECT <include refid="sessionColumns"/>
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.id = #{id}
+  </select>
+
+  <select id="getSessionByIdForUpdate" resultMap="sessionResult">
+    SELECT <include refid="sessionColumns"/>
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.id = #{id}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertSession" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO ai_chat_session
+      (workspace_id, created_by_user_id, title, visibility, status)
+    VALUES
+      (#{workspaceId}, #{createdByUserId}, #{title}, #{visibility}, #{status})
+  </insert>
+
+  <update id="updateSession">
+    UPDATE ai_chat_session
+    <set>
+      <if test="title != null">title = #{title},</if>
+      <if test="status != null">
+        status = #{status},
+        archived_at = CASE WHEN #{status} = 'archived' THEN COALESCE(archived_at, CURRENT_TIMESTAMP(6)) ELSE NULL END,
+      </if>
+    </set>
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+  </update>
+
+  <insert id="insertParticipant">
+    INSERT INTO ai_chat_session_participant
+      (workspace_id, session_id, user_id)
+    VALUES
+      (#{workspaceId}, #{sessionId}, #{userId})
+  </insert>
+
+  <delete id="deleteParticipantsForUser">
+    DELETE FROM ai_chat_session_participant
+    WHERE workspace_id = #{workspaceId}
+      AND user_id = #{userId}
+  </delete>
+
+  <delete id="deleteParticipantsForUserAnywhere">
+    DELETE FROM ai_chat_session_participant
+    WHERE user_id = #{userId}
+  </delete>
+
+  <update id="clearSessionCreatorsAnywhere">
+    UPDATE ai_chat_session
+    SET created_by_user_id = NULL
+    WHERE created_by_user_id = #{userId}
+  </update>
+
+  <update id="clearMessageAuthorsAnywhere">
+    UPDATE ai_chat_message
+    SET author_user_id = NULL
+    WHERE author_user_id = #{userId}
+  </update>
+
+  <update id="clearToolCallExecutorsAnywhere">
+    UPDATE ai_chat_tool_call
+    SET executed_by_user_id = NULL
+    WHERE executed_by_user_id = #{userId}
+  </update>
+
+  <update id="clearTurnRequestersAnywhere">
+    UPDATE ai_chat_turn
+    SET requested_by_user_id = NULL
+    WHERE requested_by_user_id = #{userId}
+  </update>
+
+  <select id="isParticipant" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM ai_chat_session_participant
+      WHERE workspace_id = #{workspaceId}
+        AND session_id = #{sessionId}
+        AND user_id = #{userId}
+    )
+  </select>
+
+  <select id="nextMessageSequence" resultType="int">
+    SELECT COALESCE(MAX(seq), 0) + 1
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+  </select>
+
+  <insert id="insertMessage" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO ai_chat_message
+      (workspace_id, session_id, seq, author_kind, author_user_id, content)
+    VALUES
+      (#{workspaceId}, #{sessionId}, #{seq}, #{authorKind}, #{authorUserId}, #{content})
+  </insert>
+
+  <select id="getMessageById" resultMap="messageResult">
+    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content, created_at
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+  </select>
+
+  <select id="listMessages" resultMap="messageResult">
+    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content, created_at
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+    ORDER BY seq ASC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countMessages" resultType="long">
+    SELECT COUNT(*)
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+  </select>
+
+  <update id="updateLastMessageAt">
+    UPDATE ai_chat_session
+    SET last_message_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+  </update>
+
+</mapper>

@@ -220,8 +220,13 @@ public class InteractionHistoryImportService {
                 after,
                 scope,
                 importRunId(request.getDuplicateReviewProof()));
-            audit(kind, writes.size(), alreadyImportedCount(plan), failedRows(plan).size());
         }
+        audit(
+            kind,
+            writes.size(),
+            alreadyImportedCount(plan),
+            count(plan, INVALID),
+            count(plan, NEEDS_REVIEW));
         return new HistoryImportResult(
             writes.size(),
             alreadyImportedCount(plan),
@@ -841,17 +846,24 @@ public class InteractionHistoryImportService {
             Kind kind,
             int created,
             int skipped,
-            int failed) {
+            int failed,
+            int remainedForReview) {
+        if (created + skipped + failed + remainedForReview == 0) {
+            return;
+        }
         auditService.record(
             "import.history." + kind.entityType,
             kind.entityType,
             null,
             "CSV history import",
-            "Imported historical " + kind.entityType + " rows",
+            "Imported historical " + kind.entityType + " rows: " + created
+                + " created, " + skipped + " skipped, " + failed + " failed, "
+                + remainedForReview + " remained for review",
             Map.of(
                 "created", created,
                 "skipped", skipped,
                 "failed", failed,
+                "remainedForReview", remainedForReview,
                 "sourceSystem", SOURCE_SYSTEM));
     }
 

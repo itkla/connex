@@ -155,6 +155,9 @@ This repo uses **pnpm** — don't run `npm install` or reintroduce `package-lock
 - Add a package: `pnpm add <pkg>` — **then always `pnpm audit`** and resolve/flag findings before continuing.
 - Dev: `pnpm dev`
 - Build: `pnpm build`
+- Production start: `pnpm start`. In ordinary checkouts this runs `next start`; on the staging
+  checkout, `.staging/frontend-release` makes the staging launcher execute that sha's sealed
+  standalone runtime instead. See `../docs/STAGING_DEPLOY.md`.
 - Verify a production build's assets: `node ci/verify_build_chunks.mjs .next`
 - Lint: `pnpm lint`
 - Typecheck: `pnpm exec tsc --noEmit`
@@ -167,10 +170,12 @@ Unit tests cover pure logic only; the browser verification in the Definition of 
 
 `ci/verify_build_chunks.mjs` reads every route's `*_client-reference-manifest.js` under `<dist>/server/app` and asserts that each JS chunk and each non-inlined `entryCSSFiles` stylesheet the route declares was actually emitted. A route that names an asset the build never wrote serves fine until a browser requests it — the page then 404s a chunk or renders unstyled — so no amount of fetching one page catches it. That is how #972 shipped.
 
-It runs in three places, and **any change to how the frontend is built must keep all three fed a real production build directory**:
+It runs in four places, and **any change to how the frontend is built must keep all four fed a real production build directory**:
 
 1. after `next build` in CI's e2e job, against `.next`;
 2. inside the deployable image in `ci/smoke_image.sh`, against `/app/.next`;
 3. against the exact release candidate digest in `release.yml`, via the same smoke script.
+4. inside the staging release builder, against the isolated target commit's `.next-new` before
+   its standalone runtime is sealed and before either live service is changed.
 
 It takes the build directory as its one argument and defaults to `.next`. Point it at `NEXT_DIST_DIR` instead if you build elsewhere. It needs `server/app` **and** `static/` present: in a standalone image those arrive from two different `COPY` layers, so verify against the assembled `/app/.next`, not the `standalone/` subtree alone.

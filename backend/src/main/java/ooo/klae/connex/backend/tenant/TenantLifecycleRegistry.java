@@ -294,6 +294,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("company_share", 440));
         raw.add(direct("company", 450));
         raw.add(direct("attachment", 460));
+        raw.add(direct("ai_chat_session", 465));
         raw.add(direct("ai_output_cache", 470));
         raw.add(direct("approval_policy", 480));
         raw.add(direct("business_card_import_request", 490));
@@ -338,6 +339,18 @@ public final class TenantLifecycleRegistry {
         raw.add(cascade("relationship_signal_state", "relationship_signal",
             "fk_relationship_signal_state_signal",
             link("workspace_id", "workspace_id"), link("signal_id", "id")));
+        raw.add(cascade("ai_chat_session_participant", "ai_chat_session",
+            "fk_ai_chat_session_participant_session",
+            link("workspace_id", "workspace_id"), link("session_id", "id")));
+        raw.add(cascade("ai_chat_message", "ai_chat_session",
+            "fk_ai_chat_message_session",
+            link("workspace_id", "workspace_id"), link("session_id", "id")));
+        raw.add(cascade("ai_chat_tool_call", "ai_chat_message",
+            "fk_ai_chat_tool_call_message",
+            link("workspace_id", "workspace_id"), link("message_id", "id")));
+        raw.add(cascade("ai_chat_turn", "ai_chat_session",
+            "fk_ai_chat_turn_session",
+            link("workspace_id", "workspace_id"), link("session_id", "id")));
 
         Map<String, TableLifecycle> byTable = new LinkedHashMap<>();
         for (TableLifecycle declaration : raw) {

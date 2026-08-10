@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
     BoltIcon,
@@ -90,9 +90,9 @@ export default function WorkflowInspector({
     );
     const indexedDiagnostics = nodeDiagnostics.map((diagnostic, index) => ({ diagnostic, index }));
 
-    useEffect(() => {
-        if (!focusFieldPath || !selectedNodeId) return;
-        requestAnimationFrame(() => {
+    useLayoutEffect(() => {
+        if (!focusFieldPath || !selectedNodeId || readOnly) return;
+        const focusFrame = requestAnimationFrame(() => {
             let path = focusFieldPath;
             let field: HTMLElement | null = null;
             while (path && !field) {
@@ -104,7 +104,8 @@ export default function WorkflowInspector({
             }
             field?.focus();
         });
-    }, [focusFieldPath, focusRequestId, selectedNodeId]);
+        return () => cancelAnimationFrame(focusFrame);
+    }, [focusFieldPath, focusRequestId, readOnly, selectedNodeId]);
 
     if (!node) {
         return (

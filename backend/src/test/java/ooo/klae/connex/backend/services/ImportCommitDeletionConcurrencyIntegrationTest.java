@@ -52,6 +52,7 @@ class ImportCommitDeletionConcurrencyIntegrationTest extends AbstractServiceTest
     private String referencedCompanyName;
     private String tagName;
     private String customFieldKey;
+    private Integer retainedPersonId;
 
     @AfterEach
     void cleanUpCommittedFixtures() {
@@ -74,6 +75,12 @@ class ImportCommitDeletionConcurrencyIntegrationTest extends AbstractServiceTest
                     "DELETE FROM company WHERE workspace_id = ? AND name = ?",
                     workspace.getId(),
                     referencedCompanyName);
+            }
+            if (retainedPersonId != null) {
+                jdbcTemplate.update(
+                    "DELETE FROM person WHERE workspace_id = ? AND id = ?",
+                    workspace.getId(),
+                    retainedPersonId);
             }
         }
         if (workspace != null && currentUser != null) {
@@ -223,6 +230,93 @@ class ImportCommitDeletionConcurrencyIntegrationTest extends AbstractServiceTest
             rowCount(
                 "SELECT COUNT(*) FROM audit_log "
                     + "WHERE workspace_id = ? AND action LIKE 'import.%'",
+                workspaceId));
+    }
+
+    @Test
+    void vanishedTargetMixedWithNoOpMatchStillWritesExactFailureAudit()
+            throws Exception {
+        int workspaceId = workspace.getId();
+        Person vanishedTarget = new Person();
+        vanishedTarget.setWorkspaceId(workspaceId);
+        vanishedTarget.setOwnerId(currentUser.getId());
+        vanishedTarget.setName("Mixed vanished " + unique());
+        personMapper.insert(vanishedTarget);
+        Person unchangedTarget = new Person();
+        unchangedTarget.setWorkspaceId(workspaceId);
+        unchangedTarget.setOwnerId(currentUser.getId());
+        unchangedTarget.setName("Mixed unchanged " + unique());
+        personMapper.insert(unchangedTarget);
+        retainedPersonId = unchangedTarget.getId();
+        int auditCountBefore = rowCount(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE workspace_id = ? AND action = 'import.person'",
+            workspaceId);
+        CountDownLatch lockRequested = new CountDownLatch(1);
+        CountDownLatch deletionCommitted = new CountDownLatch(1);
+        PersonMapper realPersonMapper =
+            sqlSessionTemplate.getMapper(PersonMapper.class);
+        doAnswer(invocation -> {
+            lockRequested.countDown();
+            assertTrue(deletionCommitted.await(20, TimeUnit.SECONDS));
+            return realPersonMapper.getOwnedPersonByIdForUpdate(
+                workspaceId, vanishedTarget.getId());
+        }).when(personMapperSpy).getOwnedPersonByIdForUpdate(
+            workspaceId, vanishedTarget.getId());
+        ImportRequest request = new ImportRequest(
+            List.of(
+                Map.of("Name", "Mixed vanished update"),
+                Map.of("Name", unchangedTarget.getName())),
+            List.of(new ColumnMapping("Name", "name", null, null, null)),
+            "overwrite",
+            Map.of(
+                0, vanishedTarget.getId(),
+                1, unchangedTarget.getId()));
+        request.setDuplicateReviewProof(
+            importService.previewPersons(request).getDuplicateReviewProof());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<ImportResult> commit = executor.submit(
+                () -> commitAsCurrentUser(
+                    workspaceId,
+                    () -> importService.commitPersons(request)));
+            assertTrue(lockRequested.await(10, TimeUnit.SECONDS));
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    "DELETE FROM person WHERE workspace_id = ? AND id = ?",
+                    workspaceId,
+                    vanishedTarget.getId()));
+            deletionCommitted.countDown();
+
+            ImportResult result = commit.get(20, TimeUnit.SECONDS);
+            assertEquals(0, result.getCreated());
+            assertEquals(0, result.getUpdated());
+            assertEquals(0, result.getSkipped());
+            assertEquals(1, result.getFailed().size());
+        } finally {
+            deletionCommitted.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals(
+            auditCountBefore + 1,
+            rowCount(
+                "SELECT COUNT(*) FROM audit_log "
+                    + "WHERE workspace_id = ? AND action = 'import.person'",
+                workspaceId));
+        assertEquals(
+            "0,0,0,1",
+            jdbcTemplate.queryForObject(
+                "SELECT CONCAT(JSON_UNQUOTE(JSON_EXTRACT(changes, '$.created')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.updated')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.skipped')), ',', "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(changes, '$.failed'))) "
+                    + "FROM audit_log WHERE workspace_id = ? "
+                    + "AND action = 'import.person' ORDER BY id DESC LIMIT 1",
+                String.class,
                 workspaceId));
     }
 
