@@ -27,6 +27,10 @@ public interface PersonEdgeMapper {
     List<PersonEdge> getAllEdges(
             @Param("workspaceId") int workspaceId,
             @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
+    List<Integer> getVisibleEdgeIds(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+            @Param("edgeIds") List<Integer> edgeIds);
     List<PersonEdge> getEdgesForNetworkReport(
             @Param("workspaceId") int workspaceId,
             @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,

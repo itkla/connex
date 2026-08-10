@@ -115,7 +115,7 @@ public class WarmPathService {
      * off the request thread, mirroring {@code IntroductionService.computeSuggestions}.
      */
     public List<WarmPathDto> computePaths(int workspaceId, int limit) {
-        return computePaths(workspaceId, limit, null);
+        return computePaths(workspaceId, limit, null, null);
     }
 
     /**
@@ -124,6 +124,14 @@ public class WarmPathService {
      */
     public List<WarmPathDto> computePaths(
             int workspaceId, int limit, Map<Integer, RelationshipTemperatureDto> temperatures) {
+        return computePaths(workspaceId, limit, temperatures, null);
+    }
+
+    List<WarmPathDto> computePaths(
+            int workspaceId,
+            int limit,
+            Map<Integer, RelationshipTemperatureDto> temperatures,
+            Map<Integer, String> contactSourceStateHashes) {
         if (limit <= 0) {
             return List.of();
         }
@@ -143,7 +151,14 @@ public class WarmPathService {
                 warmth.put(temperature.getId(), temperature);
             }
         }
-        return rankPaths(candidates, edges, employment, dismissals, warmth, limit);
+        return rankPaths(
+            candidates,
+            edges,
+            employment,
+            dismissals,
+            warmth,
+            contactSourceStateHashes,
+            limit);
     }
 
     /** Classifies why the active workspace has no warm paths without weakening policy filters. */
@@ -168,7 +183,14 @@ public class WarmPathService {
             return IntroductionService.EMPTY_INSUFFICIENT_PATH_STRENGTH;
         }
         List<WarmPathDto> beforePathPolicy =
-            rankPaths(candidates, edges, employment, List.of(), temperatures, Integer.MAX_VALUE);
+            rankPaths(
+                candidates,
+                edges,
+                employment,
+                List.of(),
+                temperatures,
+                null,
+                Integer.MAX_VALUE);
         if (!beforePathPolicy.isEmpty() && !dismissals.isEmpty()) {
             return IntroductionService.EMPTY_POLICY_EXCLUSION;
         }
@@ -236,6 +258,17 @@ public class WarmPathService {
             List<WarmPathDismissal> dismissals,
             Map<Integer, RelationshipTemperatureDto> temperatures,
             int limit) {
+        return rankPaths(candidates, edges, employment, dismissals, temperatures, null, limit);
+    }
+
+    static List<WarmPathDto> rankPaths(
+            List<IntroCandidatePerson> candidates,
+            List<PersonEdge> edges,
+            List<IntroEmploymentRow> employment,
+            List<WarmPathDismissal> dismissals,
+            Map<Integer, RelationshipTemperatureDto> temperatures,
+            Map<Integer, String> contactSourceStateHashes,
+            int limit) {
         if (limit <= 0 || candidates.size() < 2) {
             return List.of();
         }
@@ -263,6 +296,8 @@ public class WarmPathService {
         if (evidence.isEmpty()) {
             return List.of();
         }
+        Map<Integer, List<String>> sourceStateByTarget = sourceStateByTarget(
+            byId.keySet(), evidence, dismissals, contactSourceStateHashes);
 
         Set<Integer> dismissedTargets = new HashSet<>();
         Set<Long> dismissedPaths = new HashSet<>();
@@ -290,7 +325,11 @@ public class WarmPathService {
             ranked.sort(Comparator
                 .comparingInt(WarmPathBridgeDto::getScore).reversed()
                 .thenComparingInt(WarmPathBridgeDto::getPersonId));
-            rows.add(row(byId.get(entry.getKey()), temperatures, ranked));
+            rows.add(row(
+                byId.get(entry.getKey()),
+                temperatures,
+                ranked,
+                sourceStateByTarget.getOrDefault(entry.getKey(), List.of())));
         }
         rows.sort(ROW_ORDER);
 
@@ -381,7 +420,8 @@ public class WarmPathService {
     private static WarmPathDto row(
             IntroCandidatePerson target,
             Map<Integer, RelationshipTemperatureDto> temperatures,
-            List<WarmPathBridgeDto> rankedBridges) {
+            List<WarmPathBridgeDto> rankedBridges,
+            List<String> sourceState) {
         RelationshipTemperatureDto temperature = temperatures.get(target.getId());
         WarmPathDto dto = new WarmPathDto();
         dto.setTargetId(target.getId());
@@ -394,7 +434,64 @@ public class WarmPathService {
         dto.setReachType(neverEngaged(temperature) ? REACH_NEW : REACH_REWARM);
         dto.setScore(rankedBridges.get(0).getScore());
         dto.setBridges(rankedBridges);
+        dto.setSourceState(sourceState);
         return dto;
+    }
+
+    private static Map<Integer, List<String>> sourceStateByTarget(
+            Set<Integer> candidateIds,
+            Map<Long, Evidence> evidence,
+            List<WarmPathDismissal> dismissals,
+            Map<Integer, String> contactSourceStateHashes) {
+        Map<Integer, List<String>> values = new HashMap<>();
+        for (Integer candidateId : candidateIds) {
+            values.computeIfAbsent(candidateId, key -> new ArrayList<>()).add(
+                personSourceState(candidateId, contactSourceStateHashes));
+        }
+        for (Map.Entry<Long, Evidence> entry : evidence.entrySet()) {
+            int personX = (int) (entry.getKey() >> 32);
+            int personY = (int) (entry.getKey() & 0xffffffffL);
+            values.computeIfAbsent(personX, key -> new ArrayList<>()).add(
+                relationshipSourceState(personY, entry.getValue(), contactSourceStateHashes));
+            values.computeIfAbsent(personY, key -> new ArrayList<>()).add(
+                relationshipSourceState(personX, entry.getValue(), contactSourceStateHashes));
+        }
+        for (WarmPathDismissal dismissal : dismissals) {
+            Integer bridgePersonId = dismissal.getBridgePersonId();
+            int targetPersonId = dismissal.getTargetPersonId();
+            if (bridgePersonId != null
+                    && candidateIds.contains(targetPersonId)
+                    && candidateIds.contains(bridgePersonId)
+                    && evidence.containsKey(pairKey(targetPersonId, bridgePersonId))) {
+                values.computeIfAbsent(targetPersonId, key -> new ArrayList<>()).add(
+                    sourceState(
+                        "dismissal",
+                        Integer.toString(targetPersonId),
+                        Integer.toString(bridgePersonId)));
+            }
+        }
+        values.values().forEach(list -> list.sort(Comparator.naturalOrder()));
+        return values;
+    }
+
+    private static String personSourceState(
+            int personId, Map<Integer, String> contactSourceStateHashes) {
+        String hash = contactSourceStateHashes == null
+            ? ScoringService.emptyContactSourceStateHash()
+            : contactSourceStateHashes.getOrDefault(
+                personId, ScoringService.emptyContactSourceStateHash());
+        return sourceState("person", Integer.toString(personId), hash);
+    }
+
+    private static String relationshipSourceState(
+            int relatedPersonId,
+            Evidence evidence,
+            Map<Integer, String> contactSourceStateHashes) {
+        return sourceState(
+            "relationship",
+            Integer.toString(relatedPersonId),
+            personSourceState(relatedPersonId, contactSourceStateHashes),
+            evidence.sourceState());
     }
 
     /**
@@ -417,7 +514,12 @@ public class WarmPathService {
             }
             evidence.merge(pairKey(edge.getSourcePersonId(), edge.getTargetPersonId()),
                 new Evidence(EVIDENCE_CONNECTION, edgeConfidence(edge.getStrength()), null,
-                    null, null, edge.getId() > 0 ? edge.getId() : null),
+                    null, null, edge.getId() > 0 ? edge.getId() : null,
+                    sourceState(
+                        "edge",
+                        Integer.toString(edge.getId()),
+                        edge.getType(),
+                        Integer.toString(edge.getStrength()))),
                 Evidence::strongest);
         }
 
@@ -427,7 +529,8 @@ public class WarmPathService {
                 byCompany.computeIfAbsent(candidate.getCompanyId(), key -> new ArrayList<>()).add(candidate);
             }
         }
-        for (List<IntroCandidatePerson> group : byCompany.values()) {
+        for (Map.Entry<Integer, List<IntroCandidatePerson>> entry : byCompany.entrySet()) {
+            List<IntroCandidatePerson> group = entry.getValue();
             if (group.size() < 2 || group.size() > MAX_COMPANY_FANOUT) {
                 continue;
             }
@@ -437,7 +540,7 @@ public class WarmPathService {
                 for (int j = i + 1; j < group.size(); j++) {
                     evidence.merge(pairKey(group.get(i).getId(), group.get(j).getId()),
                         new Evidence(EVIDENCE_COLLEAGUES, CONF_COLLEAGUES, company, null, null,
-                            null),
+                            null, sourceState("company", Integer.toString(entry.getKey()))),
                         Evidence::strongest);
                 }
             }
@@ -459,7 +562,8 @@ public class WarmPathService {
                 stints.add(stint);
             }
         }
-        for (Map<Integer, List<IntroEmploymentRow>> group : byEmployer.values()) {
+        for (Map.Entry<String, Map<Integer, List<IntroEmploymentRow>>> entry : byEmployer.entrySet()) {
+            Map<Integer, List<IntroEmploymentRow>> group = entry.getValue();
             if (group.size() < 2 || group.size() > MAX_COMPANY_FANOUT) {
                 continue;
             }
@@ -467,7 +571,8 @@ public class WarmPathService {
             people.sort(Comparator.naturalOrder());
             for (int i = 0; i < people.size(); i++) {
                 for (int j = i + 1; j < people.size(); j++) {
-                    Evidence overlap = firstOverlap(group.get(people.get(i)), group.get(people.get(j)));
+                    Evidence overlap = firstOverlap(
+                        entry.getKey(), group.get(people.get(i)), group.get(people.get(j)));
                     if (overlap != null) {
                         evidence.merge(pairKey(people.get(i), people.get(j)), overlap, Evidence::strongest);
                     }
@@ -488,7 +593,10 @@ public class WarmPathService {
     }
 
     /** The first overlapping stint pair between two people at a shared employer, or {@code null}. */
-    private static Evidence firstOverlap(List<IntroEmploymentRow> stintsA, List<IntroEmploymentRow> stintsB) {
+    private static Evidence firstOverlap(
+            String employerIdentity,
+            List<IntroEmploymentRow> stintsA,
+            List<IntroEmploymentRow> stintsB) {
         for (IntroEmploymentRow a : stintsA) {
             for (IntroEmploymentRow b : stintsB) {
                 if (!overlaps(a, b)) {
@@ -497,10 +605,36 @@ public class WarmPathService {
                 String company = notBlank(a.getCompanyName()) ? a.getCompanyName().trim()
                     : (notBlank(b.getCompanyName()) ? b.getCompanyName().trim() : null);
                 return new Evidence(EVIDENCE_FORMER_COLLEAGUES, CONF_FORMER_COLLEAGUES, company,
-                    overlapStartYear(a, b), overlapEndYear(a, b), null);
+                    overlapStartYear(a, b), overlapEndYear(a, b), null,
+                    employmentSourceState(employerIdentity, a, b));
             }
         }
         return null;
+    }
+
+    private static String employmentSourceState(
+            String employerIdentity, IntroEmploymentRow a, IntroEmploymentRow b) {
+        return sourceState(
+            "employment",
+            employerIdentity,
+            Integer.toString(a.getPersonId()),
+            a.getStartedAt(),
+            a.getEndedAt(),
+            Integer.toString(b.getPersonId()),
+            b.getStartedAt(),
+            b.getEndedAt());
+    }
+
+    private static String sourceState(String... values) {
+        StringBuilder state = new StringBuilder();
+        for (String value : values) {
+            if (value == null) {
+                state.append("-1:");
+            } else {
+                state.append(value.length()).append(':').append(value);
+            }
+        }
+        return state.toString();
     }
 
     /** Records a warm-path dismissal: per avenue with a bridge, or for every path to the target. */
@@ -717,7 +851,7 @@ public class WarmPathService {
     /** One tier of bridge-to-target evidence; {@code strongest} keeps the higher-confidence tier. */
     record Evidence(String type, double confidence, String company,
                     Integer overlapStartYear, Integer overlapEndYear,
-                    Integer edgeId) {
+                    Integer edgeId, String sourceState) {
         static Evidence strongest(Evidence a, Evidence b) {
             return b.confidence > a.confidence ? b : a;
         }

@@ -29,6 +29,11 @@ export function dealOutcome(won?: boolean | null): DealOutcome {
     return won ? 'won' : 'lost';
 }
 
+/** Returns the persisted and displayed actual value allowed by a deal outcome. */
+export function actualValueForOutcome(won: boolean | null | undefined, actualValue: number): number {
+    return won === false ? 0 : actualValue;
+}
+
 /**
  * Whether a deal is closed (won or lost). A deal is closed exactly when it has an
  * explicit outcome: the DB enforces `(won IS NULL) = (closed_at IS NULL)`, so `won`

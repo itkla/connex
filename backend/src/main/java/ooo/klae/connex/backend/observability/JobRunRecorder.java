@@ -34,6 +34,8 @@ public class JobRunRecorder {
     public static final String PROVIDER_CAPTURE = "provider_capture";
     public static final String OBJECT_DELETION_RETRY = "object_deletion_retry";
     public static final String WORKFLOW_RUNTIME = "workflow_runtime";
+    public static final String RELATIONSHIP_SIGNAL_RECONCILIATION =
+        "relationship_signal_reconciliation";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**
@@ -58,7 +60,8 @@ public class JobRunRecorder {
         BUSINESS_CARD_IMPORT_CLEANUP,
         PROVIDER_CAPTURE,
         OBJECT_DELETION_RETRY,
-        WORKFLOW_RUNTIME);
+        WORKFLOW_RUNTIME,
+        RELATIONSHIP_SIGNAL_RECONCILIATION);
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",

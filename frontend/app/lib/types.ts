@@ -671,6 +671,88 @@ export type IntroOverview = {
     pathsEmptyReason?: IntroEmptyReason | null;
 };
 
+export type RadarFamily = 'relationship_decay' | 'deal_risk' | 'warm_path';
+
+export type RadarSubjectType = 'person' | 'company' | 'deal';
+
+export type RadarPriority = 'high' | 'medium' | 'cooling' | 'opportunity';
+
+export type RadarLifecycleState = 'active' | 'followed' | 'snoozed' | 'dismissed';
+
+export type RadarFamilyStatus = 'available' | 'unavailable';
+
+export type RadarSubject = {
+    type: RadarSubjectType;
+    id: number;
+    label: string;
+};
+
+export type RadarEvidenceReference = {
+    type: string;
+    id: number;
+};
+
+export type RadarEvidence = {
+    type: string;
+    parameters: Record<string, unknown>;
+    references: RadarEvidenceReference[];
+};
+
+export type RadarRankFactor = {
+    key: string;
+    direction: string;
+    value: unknown;
+};
+
+export type RadarRank = {
+    position: number;
+    rule: string;
+    factors: RadarRankFactor[];
+};
+
+export type RadarSignal = {
+    id: number;
+    family: RadarFamily;
+    subject: RadarSubject;
+    priority: RadarPriority;
+    state: RadarLifecycleState;
+    snoozeUntil?: string | null;
+    taskId?: number | null;
+    version: string;
+    evidenceAsOf: string;
+    stale: boolean;
+    evidence: RadarEvidence[];
+    rank: RadarRank;
+};
+
+export type RadarFamilyState = {
+    family: RadarFamily;
+    status: RadarFamilyStatus;
+    lastAttemptAt?: string | null;
+    lastSuccessAt?: string | null;
+    evidenceAsOf?: string | null;
+    errorCode?: string | null;
+};
+
+export type RadarCounts = Record<string, number>;
+
+export type RadarPayload = {
+    items: RadarSignal[];
+    families: RadarFamilyState[];
+    counts: RadarCounts;
+    asOf: string;
+    partialFailure: boolean;
+};
+
+export type RadarTaskPayload = CreateTaskPayload & { bridgePersonId?: number };
+
+export type RadarContext = {
+    type: RadarSubjectType;
+    id: number;
+    label: string;
+    href: string;
+};
+
 export type User = {
     id: number;
     username: string;

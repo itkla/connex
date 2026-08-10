@@ -117,6 +117,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ShareMapper",
         MAPPERS + "AiOutputCacheMapper",
         MAPPERS + "ReportMapper",
+        MAPPERS + "RelationshipSignalMapper",
         MAPPERS + "GoalMapper",
         MAPPERS + "ScheduleMapper",
         MAPPERS + "TenantLifecycleMapper"
@@ -218,6 +219,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AuditLogMapper.findRecentByOrg",
         MAPPERS + "AuditLogMapper.findOrgExport",
         MAPPERS + "AuditLogMapper.findOrgSupportSlice",
+        MAPPERS + "RelationshipSignalMapper.deleteActorState",
+        MAPPERS + "RelationshipSignalMapper.deleteActorStateAnywhere",
         MAPPERS + "RoleMapper.findPermissions",
         MAPPERS + "NoteMapper.countAuthoredAnywhere",
         MAPPERS + "ActivityMapper.countCreatedAnywhere",
