@@ -54,6 +54,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
 
 /** Verifies detector reads remain one real MySQL snapshot across concurrent mutations. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -189,7 +190,11 @@ class RelationshipSignalDetectorSnapshotIntegrationTest {
                     () -> detector.detectDealRisk(workspace.getId(), "snapshot")));
             assertTrue(firstReadCompleted.await(20, TimeUnit.SECONDS));
             tenantWorkScope.inWorkspace(workspace.getId(), () ->
-                dealMapper.updateName(workspace.getId(), deal.getId(), "After concurrent mutation"));
+                dealMapper.updateName(
+                    workspace.getId(),
+                    deal.getId(),
+                    "After concurrent mutation",
+                    CanonicalNameNormalizer.normalize("After concurrent mutation").orElse(null)));
             releaseDetector.countDown();
 
             assertEquals(

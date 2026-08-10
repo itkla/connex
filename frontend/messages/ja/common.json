@@ -216,7 +216,8 @@
       "PHONE": "電話番号が一致",
       "DOMAIN": "ドメインが一致",
       "EXTERNAL_ID": "外部IDが一致",
-      "NAME": "正規化した名前が一致"
+      "NAME": "正規化した名前が一致",
+      "DEAL_KEY": "案件名と紐づく会社が一致"
     }
   },
   "CommonSearchBar": {

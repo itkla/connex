@@ -216,7 +216,8 @@
       "PHONE": "Same phone",
       "DOMAIN": "Same domain",
       "EXTERNAL_ID": "Same external ID",
-      "NAME": "Same normalized name"
+      "NAME": "Same normalized name",
+      "DEAL_KEY": "Same deal name and company"
     }
   },
   "CommonSearchBar": {

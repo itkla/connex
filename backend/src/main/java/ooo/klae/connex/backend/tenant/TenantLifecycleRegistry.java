@@ -247,6 +247,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("deal_line_item", 130));
         raw.add(direct("deal_stage_history", 140));
         raw.add(direct("deal_collaborator", 150));
+        raw.add(direct("deal_duplicate_review_proof", 155));
         raw.add(direct("deal", 160));
         raw.add(direct("stage", 170));
         raw.add(direct("pipeline_share", 180));

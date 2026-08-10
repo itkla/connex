@@ -114,6 +114,7 @@ public final class TablePlaneRegistry {
         "deal",
         "deal_collaborator",
         "deal_document",
+        "deal_duplicate_review_proof",
         "deal_line_item",
         "deal_person",
         "deal_stage_history",

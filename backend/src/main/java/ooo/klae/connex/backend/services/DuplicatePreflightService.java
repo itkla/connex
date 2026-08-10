@@ -20,12 +20,16 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
+import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicateCandidateDto;
 import ooo.klae.connex.backend.dto.DuplicateCandidateRow;
 import ooo.klae.connex.backend.dto.DuplicateIdentityKey;
@@ -38,6 +42,8 @@ import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -58,6 +64,7 @@ public class DuplicatePreflightService {
 
     private static final int MAX_IDENTITY_VALUES = 16;
     private static final int PUBLIC_CANDIDATE_LIMIT = 50;
+    private static final int PUBLIC_CANDIDATE_QUERY_LIMIT = PUBLIC_CANDIDATE_LIMIT + 1;
     private static final int IMPORT_CANDIDATE_LIMIT = 8;
     private static final int IMPORT_AGGREGATE_CANDIDATE_LIMIT = 1_000;
     private static final int IMPORT_REQUEST_LIMIT = 5_000;
@@ -67,11 +74,14 @@ public class DuplicatePreflightService {
     private static final int LOOKUPS_PER_WORK_UNIT = 250;
 
     private final IdentityMapper identityMapper;
+    private final DealMapper dealMapper;
+    private final CompanyMapper companyMapper;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final MatchingService matchingService;
     private final WorkspaceService workspaceService;
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final DuplicatePreflightRateLimiter rateLimiter;
+    private final DealDuplicateReviewProofService dealReviewProofService;
 
     /**
      * Checks one proposed person using {@code PERSON_CREATE}.
@@ -105,6 +115,38 @@ public class DuplicatePreflightService {
             Admission.INTERACTIVE,
             null,
             null).responses().getFirst();
+    }
+
+    /**
+     * Checks one proposed deal using {@code DEAL_CREATE}.
+     *
+     * @param request exact proposed deal identity
+     * @return ranked owned candidates and an opaque one-use review token
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.DEAL_CREATE)
+    public DuplicatePreflightResponse preflightDeal(DealDuplicatePreflightRequest request) {
+        NormalizedDealRequest normalized = normalizeDeal(
+            Objects.requireNonNull(request, "request"));
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String workflowFingerprint = dealWorkflowFingerprint(workspaceId, normalized);
+        rateLimiter.requireAllowed(1);
+        duplicateDecisionLockService.lockCurrentOrganization();
+        DealMatch match = matchDeal(workspaceId, normalized, workflowFingerprint);
+        String acknowledgedReviewToken = request.reviewToken();
+        String reviewToken = dealReviewProofService.isConsumable(
+                acknowledgedReviewToken,
+                workflowFingerprint,
+                match.resultFingerprint())
+            ? Objects.requireNonNull(acknowledgedReviewToken)
+            : dealReviewProofService.issue(
+                workflowFingerprint,
+                match.resultFingerprint());
+        return new DuplicatePreflightResponse(
+            "deal",
+            match.candidates(),
+            match.truncated(),
+            reviewToken);
     }
 
     /**
@@ -194,6 +236,32 @@ public class DuplicatePreflightService {
             identityMapper::findVisibleCompanyIdentityMatches,
             identityMapper::findVisibleCompanyNameMatches).getFirst();
         requireReviewed(response, duplicateReviewToken);
+    }
+
+    /**
+     * Rechecks a reviewed deal immediately before interactive creation.
+     *
+     * @param request exact values about to be created
+     * @param duplicateReviewToken token from the exact accepted duplicate review
+     */
+    public void requireReviewedDealCreation(
+            DealDuplicatePreflightRequest request,
+            String duplicateReviewToken) {
+        NormalizedDealRequest normalized = normalizeDeal(
+            Objects.requireNonNull(request, "request"));
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String workflowFingerprint = dealWorkflowFingerprint(workspaceId, normalized);
+        rateLimiter.requireAllowed(1);
+        duplicateDecisionLockService.lockCurrentOrganization();
+        DealMatch match = matchDeal(workspaceId, normalized, workflowFingerprint);
+        boolean reviewed = dealReviewProofService.consume(
+            duplicateReviewToken,
+            workflowFingerprint,
+            match.resultFingerprint());
+        if (match.truncated() || !reviewed) {
+            throw new ConflictException(
+                "Deal duplicate review is missing, expired, or changed; review duplicates again");
+        }
     }
 
     /**
@@ -520,6 +588,97 @@ public class DuplicatePreflightService {
         }
     }
 
+    private DealMatch matchDeal(
+            int workspaceId,
+            NormalizedDealRequest request,
+            String workflowFingerprint) {
+        String requestedKey = DealDuplicateKey.of(
+            request.normalizedName(),
+            request.companyId());
+        List<Deal> queried = dealMapper.findDuplicatePreflightCandidates(
+            workspaceId,
+            request.normalizedName(),
+            request.companyId(),
+            PUBLIC_CANDIDATE_QUERY_LIMIT);
+        List<Deal> matched = queried.stream()
+            .filter(deal -> matchingService.normalizeName(deal.getName())
+                .map(normalizedName -> DealDuplicateKey.of(
+                    normalizedName,
+                    deal.getCompanyId()))
+                .filter(requestedKey::equals)
+                .isPresent())
+            .sorted(Comparator.comparingInt(Deal::getId))
+            .toList();
+        boolean truncated = queried.size() >= PUBLIC_CANDIDATE_QUERY_LIMIT
+            || matched.size() > PUBLIC_CANDIDATE_LIMIT;
+        Company company = request.companyId() == null
+            ? null
+            : companyMapper.getCompanyById(workspaceId, request.companyId());
+        String companyName = company == null ? null : company.getName();
+        DuplicateMatchEvidenceDto evidence = new DuplicateMatchEvidenceDto(
+            DuplicateMatchKind.DEAL_KEY,
+            requestedKey,
+            DuplicateMatchStrength.WEAK);
+        List<DuplicateCandidateDto> candidates = matched.stream()
+            .limit(PUBLIC_CANDIDATE_LIMIT)
+            .map(deal -> new DuplicateCandidateDto(
+                deal.getId(),
+                "deal",
+                deal.getName(),
+                companyName,
+                null,
+                null,
+                null,
+                true,
+                DuplicateMatchStrength.WEAK,
+                List.of(evidence)))
+            .toList();
+        return new DealMatch(
+            candidates,
+            truncated,
+            dealResultFingerprint(workflowFingerprint, candidates, truncated));
+    }
+
+    private NormalizedDealRequest normalizeDeal(DealDuplicatePreflightRequest request) {
+        if (request.companyId() != null && request.companyId() <= 0) {
+            throw new BadRequestException("Deal company id must be positive");
+        }
+        String normalizedName = matchingService.normalizeName(request.name())
+            .orElseThrow(() -> new BadRequestException("A valid deal name is required"));
+        return new NormalizedDealRequest(
+            request.name(),
+            normalizedName,
+            request.companyId());
+    }
+
+    private static String dealWorkflowFingerprint(
+            int workspaceId,
+            NormalizedDealRequest request) {
+        MessageDigest digest = sha256();
+        updateDigest(digest, "connex-interactive-deal-review-v1");
+        updateDigest(digest, Integer.toString(workspaceId));
+        updateDigest(digest, request.rawName());
+        updateDigest(digest, request.normalizedName());
+        updateDigest(
+            digest,
+            request.companyId() == null ? null : request.companyId().toString());
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static String dealResultFingerprint(
+            String workflowFingerprint,
+            List<DuplicateCandidateDto> candidates,
+            boolean truncated) {
+        MessageDigest digest = sha256();
+        updateDigest(digest, "connex-interactive-deal-result-v1");
+        updateDigest(digest, workflowFingerprint);
+        updateDigest(digest, Boolean.toString(truncated));
+        for (DuplicateCandidateDto candidate : candidates) {
+            updateCandidateDigest(digest, candidate);
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
     private static boolean isExactOwnedStrongPerson(
             DuplicatePreflightResponse response,
             int personId) {
@@ -761,12 +920,7 @@ public class DuplicatePreflightService {
             NormalizedRequest request,
             List<DuplicateCandidateDto> candidates,
             boolean truncated) {
-        MessageDigest digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
+        MessageDigest digest = sha256();
         updateDigest(digest, Integer.toString(workspaceId));
         updateDigest(digest, recordType);
         updateDigest(digest, Boolean.toString(truncated));
@@ -777,20 +931,7 @@ public class DuplicatePreflightService {
         updateDigest(digest, Boolean.toString(request.normalizedName().isPresent()));
         updateDigest(digest, request.normalizedName().orElse(""));
         for (DuplicateCandidateDto candidate : candidates) {
-            updateDigest(digest, Integer.toString(candidate.recordId()));
-            updateDigest(digest, candidate.recordType());
-            updateDigest(digest, candidate.name());
-            updateDigest(digest, candidate.companyName());
-            updateDigest(digest, candidate.title());
-            updateDigest(digest, candidate.website());
-            updateDigest(digest, candidate.industry());
-            updateDigest(digest, Boolean.toString(candidate.ownedByActiveWorkspace()));
-            updateDigest(digest, candidate.strength().name());
-            for (DuplicateMatchEvidenceDto evidence : candidate.matches()) {
-                updateDigest(digest, evidence.kind().name());
-                updateDigest(digest, evidence.normalizedValue());
-                updateDigest(digest, evidence.strength().name());
-            }
+            updateCandidateDigest(digest, candidate);
         }
         return HexFormat.of().formatHex(digest.digest());
     }
@@ -798,18 +939,32 @@ public class DuplicatePreflightService {
     private static String resultFingerprint(
             List<DuplicatePreflightResponse> responses,
             String decisionFingerprint) {
-        MessageDigest digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
+        MessageDigest digest = sha256();
         updateDigest(digest, Integer.toString(responses.size()));
         for (DuplicatePreflightResponse response : responses) {
             updateDigest(digest, response.reviewToken());
         }
         updateDigest(digest, decisionFingerprint);
         return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static void updateCandidateDigest(
+            MessageDigest digest,
+            DuplicateCandidateDto candidate) {
+        updateDigest(digest, Integer.toString(candidate.recordId()));
+        updateDigest(digest, candidate.recordType());
+        updateDigest(digest, candidate.name());
+        updateDigest(digest, candidate.companyName());
+        updateDigest(digest, candidate.title());
+        updateDigest(digest, candidate.website());
+        updateDigest(digest, candidate.industry());
+        updateDigest(digest, Boolean.toString(candidate.ownedByActiveWorkspace()));
+        updateDigest(digest, candidate.strength().name());
+        for (DuplicateMatchEvidenceDto evidence : candidate.matches()) {
+            updateDigest(digest, evidence.kind().name());
+            updateDigest(digest, evidence.normalizedValue());
+            updateDigest(digest, evidence.strength().name());
+        }
     }
 
     private static void lockIdentityGroups(
@@ -953,12 +1108,7 @@ public class DuplicatePreflightService {
             String recordType,
             List<NormalizedRequest> requests,
             String reviewContext) {
-        MessageDigest digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
+        MessageDigest digest = sha256();
         updateDigest(digest, recordType);
         updateDigest(digest, reviewContext);
         updateDigest(digest, Integer.toString(requests.size()));
@@ -977,17 +1127,20 @@ public class DuplicatePreflightService {
             List<NormalizedRequest> persons,
             List<NormalizedRequest> companies,
             String reviewContext) {
-        MessageDigest digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
+        MessageDigest digest = sha256();
         updateDigest(digest, "connex-import-duplicate-review-v1");
         updateDigest(digest, reviewContext);
         updateDigest(digest, workflowFingerprint("person", persons, reviewContext));
         updateDigest(digest, workflowFingerprint("company", companies, reviewContext));
         return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static MessageDigest sha256() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private static void updateDigest(MessageDigest digest, String value) {
@@ -1063,6 +1216,18 @@ public class DuplicatePreflightService {
     private record NormalizedRequest(
             List<DuplicateIdentityKey> identityKeys,
             Optional<String> normalizedName) {
+    }
+
+    private record NormalizedDealRequest(
+            String rawName,
+            String normalizedName,
+            Integer companyId) {
+    }
+
+    private record DealMatch(
+            List<DuplicateCandidateDto> candidates,
+            boolean truncated,
+            String resultFingerprint) {
     }
 
     private record AdmissionContext(

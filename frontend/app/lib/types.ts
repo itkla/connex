@@ -86,7 +86,7 @@ export type ImportRequest = {
 
 export type ImportRowStatus = 'create' | 'match' | 'skip' | 'invalid';
 
-export type DuplicateMatchKind = 'EMAIL' | 'PHONE' | 'DOMAIN' | 'EXTERNAL_ID' | 'NAME';
+export type DuplicateMatchKind = 'EMAIL' | 'PHONE' | 'DOMAIN' | 'EXTERNAL_ID' | 'NAME' | 'DEAL_KEY';
 export type DuplicateMatchStrength = 'STRONG' | 'WEAK';
 
 export type DuplicateMatchEvidence = {
@@ -97,7 +97,7 @@ export type DuplicateMatchEvidence = {
 
 export type DuplicateCandidate = {
     recordId: number;
-    recordType: 'person' | 'company';
+    recordType: 'person' | 'company' | 'deal';
     name: string;
     companyName?: string | null;
     title?: string | null;
@@ -109,7 +109,7 @@ export type DuplicateCandidate = {
 };
 
 export type DuplicatePreflightResponse = {
-    recordType: 'person' | 'company';
+    recordType: 'person' | 'company' | 'deal';
     candidates: DuplicateCandidate[];
     truncated: boolean;
     reviewToken: string;
@@ -125,6 +125,12 @@ export type CompanyDuplicatePreflightRequest = {
     name?: string | null;
     websites: string[];
     phones: string[];
+};
+
+export type DealDuplicatePreflightRequest = {
+    name: string;
+    companyId?: number | null;
+    reviewToken?: string;
 };
 
 export type ImportRowAnalysis = {
@@ -1243,6 +1249,7 @@ export type CreateDealPayload = {
     pipeline: number | null;
     stage: number | null;
     company?: number | null;
+    duplicateReviewToken?: string;
     ownerId?: number | null;
     expectedCloseDate?: string;
     closedAt?: string;
