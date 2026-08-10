@@ -35,6 +35,19 @@ export type RadarTaskSignalStore = {
     refresh: (signal: RadarSignal | undefined, freshnessStatus: RadarFreshnessStatus) => void;
 };
 
+export type ActiveRadarTask = {
+    signalId: number;
+    signalState: RadarTaskSignalStore;
+};
+
+/** Releases an active task only when the closing overlay owns that exact signal-state channel. */
+export function releaseActiveRadarTask(
+    active: ActiveRadarTask | null,
+    signalState: RadarTaskSignalStore,
+): ActiveRadarTask | null {
+    return active?.signalState === signalState ? null : active;
+}
+
 function warmPathBridgePersonId(signal: RadarSignal): number | undefined {
     for (const evidence of signal.evidence) {
         if (evidence.type !== 'warm_path') continue;

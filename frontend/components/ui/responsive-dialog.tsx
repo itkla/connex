@@ -4,6 +4,7 @@ import * as React from "react"
 
 import { useIsMobile } from "@/app/hooks/useIsMobile"
 import { cn } from "@/lib/utils"
+import { createCloseCompletionGate } from "@/lib/overlay-lifecycle"
 import {
   Dialog,
   DialogClose,
@@ -77,19 +78,31 @@ function ResponsiveDialog({ open, onOpenChange, onCloseComplete, children }: Res
   }
 
   const isMobile = presentation.isMobile
-  const contextValue = React.useMemo(
-    () => ({ isMobile, onCloseComplete }),
-    [isMobile, onCloseComplete]
+  const [closeCompletionGate] = React.useState(() =>
+    createCloseCompletionGate(resolvedOpen)
   )
+
+  React.useLayoutEffect(() => {
+    closeCompletionGate.observe(resolvedOpen)
+  }, [closeCompletionGate, resolvedOpen])
 
   const handleOpenChange = (next: boolean) => {
     if (open === undefined) setUncontrolledOpen(next)
     onOpenChange?.(next)
   }
 
+  const handleCloseComplete = React.useCallback(() => {
+    if (closeCompletionGate.consume()) onCloseComplete?.()
+  }, [closeCompletionGate, onCloseComplete])
+
   const handleOpenChangeComplete = (next: boolean) => {
-    if (!next) onCloseComplete?.()
+    if (!next) handleCloseComplete()
   }
+
+  const contextValue = React.useMemo(
+    () => ({ isMobile, onCloseComplete: handleCloseComplete }),
+    [handleCloseComplete, isMobile]
+  )
 
   return (
     <ResponsiveDialogContext.Provider value={contextValue}>

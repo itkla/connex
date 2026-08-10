@@ -116,6 +116,10 @@ function acceptRegistration(
     return accepted;
 }
 
+function notifyRadarTaskClosed(request: OverlayRequest): void {
+    if (request.kind === "create-task") request.radarTask?.onClosed();
+}
+
 /**
  * Provides the shared application action registry to the authenticated app shell. One action
  * definition can be surfaced from menus, the command palette, record menus, empty states, and
@@ -148,6 +152,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
         controller: AbortController;
         generation: number;
         identity: string;
+        request: OverlayRequest;
     } | null>(null);
     const lastInvokerRef = useRef<HTMLElement | null>(null);
 
@@ -157,14 +162,18 @@ export function ActionProvider({ user, children }: { user: User | null; children
     }
 
     useLayoutEffect(() => {
-        if (liveOverlayRef.current?.identity === activeIdentity) return;
-        liveOverlayRef.current?.controller.abort();
+        const liveOverlay = liveOverlayRef.current;
+        if (liveOverlay?.identity === activeIdentity) return;
+        liveOverlay?.controller.abort();
+        if (liveOverlay) notifyRadarTaskClosed(liveOverlay.request);
         liveOverlayRef.current = null;
         lastInvokerRef.current = null;
     }, [activeIdentity]);
 
     useLayoutEffect(() => () => {
-        liveOverlayRef.current?.controller.abort();
+        const liveOverlay = liveOverlayRef.current;
+        liveOverlay?.controller.abort();
+        if (liveOverlay) notifyRadarTaskClosed(liveOverlay.request);
         liveOverlayRef.current = null;
         lastInvokerRef.current = null;
     }, []);
@@ -219,9 +228,11 @@ export function ActionProvider({ user, children }: { user: User | null; children
         const controller = new AbortController();
         const generation = nextOverlayGenerationRef.current + 1;
         nextOverlayGenerationRef.current = generation;
-        liveOverlayRef.current?.controller.abort();
+        const previousOverlay = liveOverlayRef.current;
+        previousOverlay?.controller.abort();
+        if (previousOverlay) notifyRadarTaskClosed(previousOverlay.request);
         lastInvokerRef.current = active instanceof HTMLElement ? active : null;
-        liveOverlayRef.current = { controller, generation, identity: activeIdentity };
+        liveOverlayRef.current = { controller, generation, identity: activeIdentity, request };
         setOverlay({
             controller,
             generation,
@@ -232,8 +243,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
         });
     }, [activeIdentity, activeUserId, activeWorkspaceId]);
     const closeOverlayGeneration = useCallback((generation: number) => {
-        if (liveOverlayRef.current?.generation !== generation) return;
-        liveOverlayRef.current.controller.abort();
+        const liveOverlay = liveOverlayRef.current;
+        if (liveOverlay?.generation !== generation) return;
+        liveOverlay.controller.abort();
+        notifyRadarTaskClosed(liveOverlay.request);
         liveOverlayRef.current = null;
         setOverlay((current) => (current?.generation === generation ? null : current));
         const invoker = lastInvokerRef.current;

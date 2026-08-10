@@ -2,8 +2,25 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import {
+    releaseActiveRadarTask,
+    type RadarTaskSignalStore,
+} from '@/app/lib/radar';
+import {
+    createCloseCompletionGate,
+    reduceOverlayRetention,
+} from '@/lib/overlay-lifecycle';
+
 function source(path: string): string {
     return readFileSync(resolve(process.cwd(), path), 'utf8');
+}
+
+function taskSignalStore(): RadarTaskSignalStore {
+    return {
+        getSnapshot: () => ({ status: 'changed' }),
+        subscribe: () => () => undefined,
+        refresh: () => undefined,
+    };
 }
 
 describe('Radar action integration', () => {
@@ -66,17 +83,65 @@ describe('Radar action integration', () => {
         expect(board).toContain('refreshSessionRef.current = null;');
     });
 
-    it('releases the Radar task subscription on close and its retained request after exit', () => {
-        const overlay = source('app/components/actions/ActionOverlayHost.tsx');
-        const dialog = source('app/components/activity/tasks/TaskDialog.tsx');
-        const responsiveDialog = source('components/ui/responsive-dialog.tsx');
+    it('releases a task request cancelled before its dialog mounts', () => {
+        const request = { kind: 'create-task' };
+        const opened = reduceOverlayRetention(null, {
+            type: 'opened',
+            generation: 7,
+            value: request,
+            releaseBeforeMount: true,
+        });
 
-        expect(overlay).toContain('const subscribedRadarTask = visible ? radarTask : undefined;');
-        expect(overlay).toContain('subscribedRadarTask?.signalState.subscribe');
-        expect(overlay).toContain('current?.generation === generation ? null : current');
-        expect(overlay).toContain('onCloseComplete={() => handleRenderedCloseComplete(rendered.generation)}');
-        expect(dialog).toContain('onCloseComplete={onCloseComplete}');
-        expect(responsiveDialog).toContain('onOpenChangeComplete={handleOpenChangeComplete}');
-        expect(responsiveDialog).toContain('onCloseAutoFocus={onCloseComplete}');
+        const cancelled = reduceOverlayRetention(opened, {
+            type: 'cancelled',
+            generation: 7,
+        });
+
+        expect(cancelled).toBeNull();
+    });
+
+    it('keeps a mounted task request through exit and releases it on close completion', () => {
+        const request = { kind: 'create-task' };
+        const opened = reduceOverlayRetention(null, {
+            type: 'opened',
+            generation: 8,
+            value: request,
+            releaseBeforeMount: true,
+        });
+        const mounted = reduceOverlayRetention(opened, {
+            type: 'mounted',
+            generation: 8,
+        });
+        const cancelled = reduceOverlayRetention(mounted, {
+            type: 'cancelled',
+            generation: 8,
+        });
+
+        expect(cancelled?.open).toBe(false);
+        expect(cancelled?.value).toBe(request);
+        expect(reduceOverlayRetention(cancelled, {
+            type: 'close-completed',
+            generation: 8,
+        })).toBeNull();
+    });
+
+    it('completes close once only after an observed open-to-closed transition', () => {
+        const gate = createCloseCompletionGate(true);
+
+        expect(gate.consume()).toBe(false);
+        gate.observe(true);
+        expect(gate.consume()).toBe(false);
+        gate.observe(false);
+        expect(gate.consume()).toBe(true);
+        expect(gate.consume()).toBe(false);
+    });
+
+    it('clears only the active Radar task that owns the closing signal store', () => {
+        const activeSignalState = taskSignalStore();
+        const otherSignalState = taskSignalStore();
+        const activeTask = { signalId: 42, signalState: activeSignalState };
+
+        expect(releaseActiveRadarTask(activeTask, otherSignalState)).toBe(activeTask);
+        expect(releaseActiveRadarTask(activeTask, activeSignalState)).toBeNull();
     });
 });

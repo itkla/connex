@@ -24,12 +24,13 @@ import {
     isRadarFamilyFilter,
     isRadarStateFilter,
     radarEvidenceRefreshDelay,
+    releaseActiveRadarTask,
     replaceRadarSignal,
     unavailableRadarFamilies,
+    type ActiveRadarTask,
     type RadarFreshnessStatus,
     type RadarFamilyFilter,
     type RadarStateFilter,
-    type RadarTaskSignalStore,
 } from '@/app/lib/radar';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { RadarPayload, RadarSignal } from '@/app/lib/types';
@@ -102,10 +103,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const refreshRadarRef = useRef<() => void>(() => undefined);
     const refreshSessionRef = useRef<RadarRefreshSession | null>(null);
     const radarTaskDraftsRef = useRef(new Map<number, TaskDraft>());
-    const activeRadarTaskRef = useRef<{
-        signalId: number;
-        signalState: RadarTaskSignalStore;
-    } | null>(null);
+    const activeRadarTaskRef = useRef<ActiveRadarTask | null>(null);
 
     const requestRadar = useCallback(async (session: RadarRefreshSession) => {
         while (true) {
@@ -304,19 +302,27 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                 },
                 onCreated: (updated) => {
                     radarTaskDraftsRef.current.delete(signal.id);
-                    if (activeRadarTaskRef.current?.signalState === signalState) {
-                        activeRadarTaskRef.current = null;
-                    }
+                    activeRadarTaskRef.current = releaseActiveRadarTask(
+                        activeRadarTaskRef.current,
+                        signalState,
+                    );
                     const message = t('feedback.taskCreated', { subject: signal.subject.label });
                     if (signal.family === 'warm_path') resolveWarmPathSignal(updated, message);
                     else updateSignal(updated, message, undefined, false);
                 },
+                onClosed: () => {
+                    activeRadarTaskRef.current = releaseActiveRadarTask(
+                        activeRadarTaskRef.current,
+                        signalState,
+                    );
+                },
             },
         });
         if (result.status !== 'completed') {
-            if (activeRadarTaskRef.current?.signalState === signalState) {
-                activeRadarTaskRef.current = null;
-            }
+            activeRadarTaskRef.current = releaseActiveRadarTask(
+                activeRadarTaskRef.current,
+                signalState,
+            );
             const message = t('feedback.actionFailed', { subject: signal.subject.label });
             setAnnouncement(message);
             if (result.status !== 'failed') toastError(message);

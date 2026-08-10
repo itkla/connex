@@ -132,6 +132,7 @@ export type RadarTaskInvocation = {
     onDraftChange: (draft: TaskDraft) => void;
     onDraftClear: () => void;
     onCreated: (signal: RadarSignal) => void;
+    onClosed: () => void;
 };
 
 /** A shell-owned overlay an action can open. The union is closed; later work extends it additively. */

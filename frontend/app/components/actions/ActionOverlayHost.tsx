@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -14,6 +14,7 @@ import { submitRadarTaskWithCurrentSignal, type RadarTaskSignalSnapshot } from "
 import { toastError, toastWarn } from "@/app/lib/toast";
 import { draftKey, getDraftKeyGeneration, subscribeDraftChanges } from "@/app/lib/formDrafts";
 import ImportDialog from "@/app/components/import/LazyImportDialog";
+import { reduceOverlayRetention } from "@/lib/overlay-lifecycle";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -44,6 +45,13 @@ function getInactiveRadarTaskSnapshot(): RadarTaskSignalSnapshot {
 type RestoredDraftMount = {
     accept: (overlayGeneration: number) => void;
     isAccepted: (overlayGeneration: number | undefined) => boolean;
+};
+
+type RenderedOverlay = {
+    generation: number;
+    originWorkspaceId: number | null;
+    request: OverlayRequest;
+    signal: AbortSignal | null;
 };
 
 function createRestoredDraftMount(): RestoredDraftMount {
@@ -142,26 +150,38 @@ export default function ActionOverlayHost({
     const t = useTranslations("Actions");
     const router = useRouter();
 
-    const [rendered, setRendered] = useState<{
-        generation: number;
-        originWorkspaceId: number | null;
-        request: OverlayRequest;
-        signal: AbortSignal | null;
-    } | null>(() => overlay && overlayGeneration !== null ? {
-        generation: overlayGeneration,
-        originWorkspaceId,
-        request: overlay,
-        signal: requestSignal,
-    } : null);
-    if (overlay && overlayGeneration !== null && overlayGeneration !== rendered?.generation) {
-        setRendered({
+    const [retainedOverlay, dispatchRetention] = useReducer(
+        reduceOverlayRetention<RenderedOverlay>,
+        overlay && overlayGeneration !== null ? {
             generation: overlayGeneration,
-            originWorkspaceId,
-            request: overlay,
-            signal: requestSignal,
+            value: {
+                generation: overlayGeneration,
+                originWorkspaceId,
+                request: overlay,
+                signal: requestSignal,
+            },
+            open: true,
+            mounted: false,
+            releaseBeforeMount: overlay.kind === "create-task",
+        } : null,
+    );
+    if (overlay && overlayGeneration !== null && overlayGeneration !== retainedOverlay?.generation) {
+        dispatchRetention({
+            type: "opened",
+            generation: overlayGeneration,
+            value: {
+                generation: overlayGeneration,
+                originWorkspaceId,
+                request: overlay,
+                signal: requestSignal,
+            },
+            releaseBeforeMount: overlay.kind === "create-task",
         });
+    } else if (!overlay && retainedOverlay?.open) {
+        dispatchRetention({ type: "cancelled", generation: retainedOverlay.generation });
     }
-    const visible = overlay != null;
+    const rendered = retainedOverlay?.value ?? null;
+    const visible = retainedOverlay?.open ?? false;
     const requestInit = useMemo<RequestInit>(() => ({
         ...(rendered?.signal ? { signal: rendered.signal } : {}),
         ...(rendered?.originWorkspaceId !== null && rendered?.originWorkspaceId !== undefined
@@ -257,6 +277,11 @@ export default function ActionOverlayHost({
         }
         restoredDraftMount.accept(rendered.generation);
     }, [onClose, rendered, restoredDraftGeneration, restoredDraftKey, restoredDraftMount]);
+    const handleTaskDialogMounted = useCallback(() => {
+        if (rendered === null) return;
+        dispatchRetention({ type: "mounted", generation: rendered.generation });
+        if (rosterOnly) handleRestoredDraftMounted();
+    }, [handleRestoredDraftMounted, rendered, rosterOnly]);
 
     useEffect(() => {
         if (!referenceKey) return;
@@ -385,7 +410,7 @@ export default function ActionOverlayHost({
         if (!open) onClose();
     };
     const handleRenderedCloseComplete = (generation: number) => {
-        setRendered((current) => current?.generation === generation ? null : current);
+        dispatchRetention({ type: "close-completed", generation });
     };
 
     const handleCompaniesImported = () => {
@@ -475,7 +500,7 @@ export default function ActionOverlayHost({
                         defaultDueDate={taskDraft?.dueDate ?? ""}
                         defaultDescription={taskDraft?.description ?? ""}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
-                        onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
+                        onDraftMounted={handleTaskDialogMounted}
                         requestInit={requestInit}
                         createRequest={taskCreateRequest}
                         compact={radarTask?.mode === 'warm_path'}
