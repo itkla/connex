@@ -51,9 +51,20 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
 
-    void deleteOwnedSessionsForUser(
-        @Param("workspaceId") int workspaceId,
-        @Param("userId") int userId);
+    /** Deletes a user's participant grants across every workspace during account erasure. */
+    void deleteParticipantsForUserAnywhere(@Param("userId") int userId);
+
+    /** Clears session provenance for a permanently erased account across every workspace. */
+    void clearSessionCreatorsAnywhere(@Param("userId") int userId);
+
+    /** Clears message provenance for a permanently erased account across every workspace. */
+    void clearMessageAuthorsAnywhere(@Param("userId") int userId);
+
+    /** Clears tool-call provenance for a permanently erased account across every workspace. */
+    void clearToolCallExecutorsAnywhere(@Param("userId") int userId);
+
+    /** Clears turn provenance for a permanently erased account across every workspace. */
+    void clearTurnRequestersAnywhere(@Param("userId") int userId);
 
     boolean isParticipant(
         @Param("workspaceId") int workspaceId,

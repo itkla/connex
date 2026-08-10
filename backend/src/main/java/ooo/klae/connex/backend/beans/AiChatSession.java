@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 public class AiChatSession {
     private int id;
     private int workspaceId;
-    private int createdByUserId;
+    private Integer createdByUserId;
     private String title;
     private String visibility;
     private String status;
