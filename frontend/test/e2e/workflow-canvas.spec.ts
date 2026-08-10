@@ -21,6 +21,46 @@ function workflowRevision(value: unknown): number {
     return value.draftRevision;
 }
 
+function editableWorkflowDocument(name: string) {
+    return {
+        name,
+        description: null,
+        recordType: "deal",
+        executionMode: "user",
+        definition: {
+            schemaVersion: 1,
+            entryNodeId: "trigger",
+            nodes: [
+                { id: "trigger", type: "TRIGGER", config: { type: "entity_change", events: ["deal.updated"] } },
+                { id: "end", type: "END" },
+            ],
+            edges: [{ id: "edge", sourceNodeId: "trigger", targetNodeId: "end", outcome: "next" }],
+        },
+        canvas: {
+            positions: { trigger: { x: 80, y: 40 }, end: { x: 80, y: 280 } },
+            viewport: { x: 0, y: 0, zoom: 1 },
+        },
+    };
+}
+
+async function createEditableWorkflow(
+    page: Page,
+    workspaceId: number,
+    csrf: { headerName: string; token: string },
+    name: string,
+): Promise<{ created: unknown; document: ReturnType<typeof editableWorkflowDocument> }> {
+    const document = editableWorkflowDocument(name);
+    const response = await page.request.post("/api/workflows", {
+        headers: {
+            "X-Workspace-Id": String(workspaceId),
+            [csrf.headerName]: csrf.token,
+        },
+        data: document,
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return { created: await response.json(), document };
+}
+
 function workflowDefinition(value: unknown): Record<string, unknown> {
     if (!isRecord(value) || !isRecord(value.definition)) {
         throw new Error("Workflow response is missing its definition");
@@ -307,34 +347,12 @@ test.describe("workflow canvas", () => {
     test("keeps edits made while recovering from a stale revision", async ({ page }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
         const csrf = await csrfBootstrap(page.request);
-        const initialDocument = {
-            name: `Conflict recovery ${testInfo.retry}`,
-            description: null,
-            recordType: "deal",
-            executionMode: "user",
-            definition: {
-                schemaVersion: 1,
-                entryNodeId: "trigger",
-                nodes: [
-                    { id: "trigger", type: "TRIGGER", config: { type: "entity_change", events: ["deal.updated"] } },
-                    { id: "end", type: "END" },
-                ],
-                edges: [{ id: "edge", sourceNodeId: "trigger", targetNodeId: "end", outcome: "next" }],
-            },
-            canvas: {
-                positions: { trigger: { x: 80, y: 40 }, end: { x: 80, y: 280 } },
-                viewport: { x: 0, y: 0, zoom: 1 },
-            },
-        };
-        const createdResponse = await page.request.post("/api/workflows", {
-            headers: {
-                "X-Workspace-Id": String(fixture.workspaceId),
-                [csrf.headerName]: csrf.token,
-            },
-            data: initialDocument,
-        });
-        expect(createdResponse.status(), await createdResponse.text()).toBe(201);
-        const created: unknown = await createdResponse.json();
+        const { created, document: initialDocument } = await createEditableWorkflow(
+            page,
+            fixture.workspaceId,
+            csrf,
+            `Conflict recovery ${testInfo.retry}`,
+        );
         const id = workflowId(created);
         let releaseSave: () => void = () => undefined;
         const saveReleased = new Promise<void>((resolve) => {
@@ -377,6 +395,210 @@ test.describe("workflow canvas", () => {
 
         await expect(name).toHaveValue("Edited during conflict recovery");
         await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
+    });
+
+    test("ignores an older conflict recovery that finishes after a newer one", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const csrf = await csrfBootstrap(page.request);
+        const { created, document } = await createEditableWorkflow(
+            page,
+            fixture.workspaceId,
+            csrf,
+            `Ordered conflict recovery ${testInfo.retry}`,
+        );
+        const id = workflowId(created);
+        await page.goto(`/workflows/${id}`);
+
+        const olderServerResponse = await page.request.put(`/api/workflows/${id}/draft`, {
+            headers: {
+                "X-Workspace-Id": String(fixture.workspaceId),
+                [csrf.headerName]: csrf.token,
+            },
+            data: {
+                ...document,
+                name: "Older server name",
+                expectedRevision: workflowRevision(created),
+            },
+        });
+        expect(olderServerResponse.status(), await olderServerResponse.text()).toBe(200);
+        const olderServerWorkflow: unknown = await olderServerResponse.json();
+        const name = page.getByLabel("Workflow name");
+        await name.fill("Local conflict name");
+        await name.blur();
+        await page.getByRole("button", { name: "Save draft" }).click();
+        await expect(page.getByText("Older server name", { exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Keep editing locally" }).click();
+
+        let recoveryCount = 0;
+        let releaseOlderRecovery: () => void = () => undefined;
+        const olderRecoveryReleased = new Promise<void>((resolve) => {
+            releaseOlderRecovery = resolve;
+        });
+        let markOlderRecoveryPending: () => void = () => undefined;
+        const olderRecoveryPending = new Promise<void>((resolve) => {
+            markOlderRecoveryPending = resolve;
+        });
+        let markOlderRecoveryCompleted: () => void = () => undefined;
+        const olderRecoveryCompleted = new Promise<void>((resolve) => {
+            markOlderRecoveryCompleted = resolve;
+        });
+        await page.route(`**/api/workflows/${id}`, async (route) => {
+            if (route.request().method() !== "GET") {
+                await route.continue();
+                return;
+            }
+            const recoveryIndex = ++recoveryCount;
+            const response = await route.fetch();
+            if (recoveryIndex === 1) {
+                markOlderRecoveryPending();
+                await olderRecoveryReleased;
+            }
+            await route.fulfill({ response });
+            if (recoveryIndex === 1) markOlderRecoveryCompleted();
+        });
+
+        const save = page.getByRole("button", { name: "Save draft" });
+        await save.click();
+        await olderRecoveryPending;
+        try {
+            const newerServerResponse = await page.request.put(`/api/workflows/${id}/draft`, {
+                headers: {
+                    "X-Workspace-Id": String(fixture.workspaceId),
+                    [csrf.headerName]: csrf.token,
+                },
+                data: {
+                    ...document,
+                    name: "Newer server name",
+                    expectedRevision: workflowRevision(olderServerWorkflow),
+                },
+            });
+            expect(newerServerResponse.status(), await newerServerResponse.text()).toBe(200);
+            await save.click();
+            await expect(page.getByText("Newer server name", { exact: true })).toBeVisible();
+        } finally {
+            releaseOlderRecovery();
+        }
+        await olderRecoveryCompleted;
+        await settleBrowserTasks(page);
+        await expect(page.getByText("Newer server name", { exact: true })).toBeVisible();
+        await expect(page.getByText("Older server name", { exact: true })).toHaveCount(0);
+    });
+
+    test("discards validation that finishes after an edit", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const csrf = await csrfBootstrap(page.request);
+        const { created } = await createEditableWorkflow(
+            page,
+            fixture.workspaceId,
+            csrf,
+            `Stale validation ${testInfo.retry}`,
+        );
+        const id = workflowId(created);
+        await page.goto(`/workflows/${id}`);
+
+        let releaseValidation: () => void = () => undefined;
+        const validationReleased = new Promise<void>((resolve) => {
+            releaseValidation = resolve;
+        });
+        let markValidationPending: () => void = () => undefined;
+        const validationPending = new Promise<void>((resolve) => {
+            markValidationPending = resolve;
+        });
+        let markValidationCompleted: () => void = () => undefined;
+        const validationCompleted = new Promise<void>((resolve) => {
+            markValidationCompleted = resolve;
+        });
+        let validationValid: boolean | null = null;
+        await page.route(`**/api/workflows/${id}/validate`, async (route) => {
+            const response = await route.fetch();
+            const result: unknown = await response.json();
+            if (!isRecord(result) || typeof result.valid !== "boolean") {
+                throw new Error("Workflow validation response is missing its valid flag");
+            }
+            validationValid = result.valid;
+            markValidationPending();
+            await validationReleased;
+            await route.fulfill({ response });
+            markValidationCompleted();
+        });
+
+        await page.getByRole("button", { name: "Validate" }).click();
+        await validationPending;
+        try {
+            const name = page.getByLabel("Workflow name");
+            await name.fill("Edited after validation started");
+            await name.blur();
+        } finally {
+            releaseValidation();
+        }
+        await validationCompleted;
+        await settleBrowserTasks(page);
+
+        if (validationValid === null) throw new Error("Workflow validation did not complete");
+        if (validationValid) {
+            await expect(page.getByText("Validation passed. This saved revision is ready to publish.", { exact: true })).toHaveCount(0);
+        } else {
+            await expect(page.locator("#workflow-validation-title")).toHaveCount(0);
+        }
+        await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
+    });
+
+    test("discards simulation that finishes after an edit is saved", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const csrf = await csrfBootstrap(page.request);
+        const { created } = await createEditableWorkflow(
+            page,
+            fixture.workspaceId,
+            csrf,
+            `Stale simulation ${testInfo.retry}`,
+        );
+        const id = workflowId(created);
+        await page.goto(`/workflows/${id}`);
+
+        let releaseSimulation: () => void = () => undefined;
+        const simulationReleased = new Promise<void>((resolve) => {
+            releaseSimulation = resolve;
+        });
+        let markSimulationPending: () => void = () => undefined;
+        const simulationPending = new Promise<void>((resolve) => {
+            markSimulationPending = resolve;
+        });
+        let markSimulationCompleted: () => void = () => undefined;
+        const simulationCompleted = new Promise<void>((resolve) => {
+            markSimulationCompleted = resolve;
+        });
+        await page.route(`**/api/workflows/${id}/simulate`, async (route) => {
+            const response = await route.fetch();
+            markSimulationPending();
+            await simulationReleased;
+            await route.fulfill({ response });
+            markSimulationCompleted();
+        });
+
+        await page.getByRole("button", { name: "Preview" }).click();
+        const record = page.getByLabel("Record to preview");
+        await record.fill(fixture.deals.primary.name);
+        await page.getByRole("option", { name: fixture.deals.primary.name, exact: true }).click();
+        await page.getByRole("button", { name: "Preview path" }).click();
+        await simulationPending;
+        try {
+            await page.getByRole("button", { name: "Close" }).click();
+            const name = page.getByLabel("Workflow name");
+            await name.fill("Edited and saved after simulation started");
+            await name.blur();
+            await page.getByRole("button", { name: "Save draft" }).click();
+            await expect(page.getByText("Unpublished changes", { exact: true })).toHaveCount(0);
+        } finally {
+            releaseSimulation();
+        }
+        await simulationCompleted;
+        await settleBrowserTasks(page);
+
+        await page.getByRole("button", { name: "Preview" }).click();
+        const dialog = page.getByRole("dialog", { name: "Preview a workflow path" });
+        for (const result of ["Would complete", "Would not enroll", "Would wait here", "Blocked"]) {
+            await expect(dialog.getByText(result, { exact: true })).toHaveCount(0);
+        }
     });
 
     test("creates deterministic connections and inserts at the invoked canvas position", async ({ page }, testInfo) => {
