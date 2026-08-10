@@ -152,6 +152,75 @@ systemctl_active_stub() {
     esac
 }
 
+process_systemd_control_group() {
+    local pid="$1"
+    awk -F: '
+        $1 == "0" && $2 == "" { print $3; found = 1; exit }
+        index("," $2 ",", ",name=systemd,") { print $3; found = 1; exit }
+        END { if (!found) exit 1 }
+    ' "/proc/$pid/cgroup"
+}
+
+make_wrapper_boundary_shims() {
+    local fake_bin="$1"
+    mkdir -p "$fake_bin"
+    {
+        printf '#!/bin/bash\n'
+        printf 'set -eu\n'
+        printf 'case "${1:-}" in\n'
+        printf '    fetch)\n'
+        printf '        count=0\n'
+        printf '        if [ -f "$MOCK_FETCH_STATE" ]; then count="$(sed -n "1p" "$MOCK_FETCH_STATE")"; fi\n'
+        printf '        count=$((count + 1))\n'
+        printf '        printf "%%s\\n" "$count" > "$MOCK_FETCH_STATE"\n'
+        printf '        ;;\n'
+        printf '    rev-parse)\n'
+        printf '        count="$(sed -n "1p" "$MOCK_FETCH_STATE")"\n'
+        printf '        if [ "$count" -eq 1 ]; then printf "%%s\\n" "$MOCK_SELECTED_SHA"; else printf "%%s\\n" "$MOCK_ADVANCED_SHA"; fi\n'
+        printf '        ;;\n'
+        printf '    show)\n'
+        printf '        case "${2:-}" in\n'
+        printf '            "$MOCK_SELECTED_SHA:deploy/staging/connex-staging-deploy.sh"|"$MOCK_ADVANCED_SHA:deploy/staging/connex-staging-deploy.sh") ;;\n'
+        printf '            *) exit 2 ;;\n'
+        printf '        esac\n'
+        printf '        printf "%%s\\n" "$2" >> "$MOCK_SHOW_LOG"\n'
+        printf '        /bin/cat "$MOCK_DEPLOY_SOURCE"\n'
+        printf '        ;;\n'
+        printf '    cat-file)\n'
+        printf '        [ "${2:-}" = "-e" ]\n'
+        printf '        case "${3:-}" in\n'
+        printf '            "$MOCK_SELECTED_SHA^{commit}"|"$MOCK_ADVANCED_SHA^{commit}") ;;\n'
+        printf '            *) exit 2 ;;\n'
+        printf '        esac\n'
+        printf '        ;;\n'
+        printf '    *)\n'
+        printf '        printf "unexpected git call: %%s\\n" "$*" >&2\n'
+        printf '        exit 2\n'
+        printf '        ;;\n'
+        printf 'esac\n'
+    } > "$fake_bin/git"
+    {
+        printf '#!/bin/bash\n'
+        printf 'case "${1:-}" in\n'
+        printf '    is-active) exit 0 ;;\n'
+        printf '    show)\n'
+        printf '        case "$*" in\n'
+        printf '            *ControlGroup*) printf "%%s\\n" "$MOCK_FRONTEND_CONTROL_GROUP" ;;\n'
+        printf '            *MainPID*) printf "%%s\\n" "$MOCK_FRONTEND_PID" ;;\n'
+        printf '            *) exit 2 ;;\n'
+        printf '        esac\n'
+        printf '        ;;\n'
+        printf '    *) exit 2 ;;\n'
+        printf 'esac\n'
+    } > "$fake_bin/systemctl"
+    {
+        printf '#!/bin/bash\n'
+        printf 'served_sha="${MOCK_SERVED_SHA:-$MOCK_SELECTED_SHA}"\n'
+        printf 'printf '\''{"gitSha":"%%s"}\\n'\'' "$served_sha"\n'
+    } > "$fake_bin/curl"
+    chmod 0755 "$fake_bin/git" "$fake_bin/systemctl" "$fake_bin/curl"
+}
+
 case_mixed_live_release_refused() (
     local root="$SANDBOX/mixed" previous target
     previous=1111111111111111111111111111111111111111
@@ -199,6 +268,33 @@ case_failed_identity_probe_output_is_rejected() (
     live_frontend_sha() { builtin printf '%s\n' "$expected"; return 1; }
     validate_live_components "$expected" 0 >/dev/null 2>&1
     assert_status failed_frontend_probe_refused 1 "$?" || return 1
+)
+
+case_frontend_attestation_requires_current_unit_lineage() (
+    local root="$SANDBOX/frontend-lineage" sha recorded_pid sibling_pid mock_control_group record
+    sha=2424242424242424242424242424242424242424
+    load_deploy "$root"
+    mkdir -p "$RELEASES_DIR/$sha/frontend"
+    (
+        cd "$RELEASES_DIR/$sha/frontend" || exit 1
+        exec sleep 300
+    ) &
+    recorded_pid=$!
+    sleep 300 &
+    sibling_pid=$!
+    trap 'kill "$recorded_pid" "$sibling_pid" 2>/dev/null || true; wait "$recorded_pid" "$sibling_pid" 2>/dev/null || true' EXIT
+    printf '%s\t%s\n' "$sha" "$recorded_pid" > "$FRONTEND_RUNNING_MARKER"
+    mock_control_group="$(process_systemd_control_group "$recorded_pid")" || return 1
+    frontend_control_group() { printf '%s\n' "$mock_control_group"; }
+
+    frontend_pid() { printf '%s\n' "$sibling_pid"; }
+    read_frontend_running >/dev/null 2>&1
+    assert_status stale_sibling_cannot_attest_runtime 1 "$?" || return 1
+
+    frontend_pid() { printf '%s\n' "$$"; }
+    record="$(read_frontend_running)"
+    assert_status current_unit_ancestor_attests_runtime 0 "$?" || return 1
+    assert_equals attested_sha_and_pid "$sha"$'\t'"$recorded_pid" "$record" || return 1
 )
 
 case_complete_pair_integrity_and_tamper_refusal() (
@@ -273,6 +369,145 @@ case_prune_aborts_when_protected_marker_read_fails() (
     done
 )
 
+case_consecutive_prunes_preserve_recorded_serving_release() (
+    local root="$SANDBOX/consecutive-prune" deployed rollback serving serving_pid orphan_pid status output
+    local first_extra second_extra third_extra fourth_extra mock_unit_pid mock_control_group
+    local mock_cgroup_root
+    deployed=4242424242424242424242424242424242424242
+    rollback=4343434343434343434343434343434343434343
+    serving=4444444444444444444444444444444444444444
+    first_extra=4545454545454545454545454545454545454545
+    second_extra=4646464646464646464646464646464646464646
+    third_extra=4747474747474747474747474747474747474747
+    fourth_extra=4848484848484848484848484848484848484848
+    load_deploy "$root"
+    mkdir -p \
+        "$RELEASES_DIR/$deployed" \
+        "$RELEASES_DIR/$rollback" \
+        "$RELEASES_DIR/$serving/frontend" \
+        "$RELEASES_DIR/$first_extra" \
+        "$RELEASES_DIR/$second_extra"
+    touch -d @10 "$RELEASES_DIR/$deployed"
+    touch -d @20 "$RELEASES_DIR/$rollback"
+    touch -d @100 "$RELEASES_DIR/$serving"
+    touch -d @200 "$RELEASES_DIR/$first_extra"
+    touch -d @300 "$RELEASES_DIR/$second_extra"
+    printf '%s\n' "$deployed" > "$MARKER"
+    printf '%s\n' "$rollback" > "$ROLLBACK_MARKER"
+    (
+        cd "$RELEASES_DIR/$serving/frontend" || exit 1
+        exec sleep 300
+    ) &
+    serving_pid=$!
+    trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
+    printf '%s\t%s\n' "$serving" "$serving_pid" > "$FRONTEND_RUNNING_MARKER"
+    mock_unit_pid=$$
+    mock_control_group="$(process_systemd_control_group "$serving_pid")" || return 1
+    mock_cgroup_root="$root/cgroup"
+    mkdir -p "$mock_cgroup_root$mock_control_group"
+    printf '%s\n' "$serving_pid" > "$mock_cgroup_root$mock_control_group/cgroup.procs"
+
+    prune_cycle() (
+        load_deploy "$root"
+        CGROUP_ROOT="$mock_cgroup_root"
+        frontend_pid() { printf '%s\n' "$mock_unit_pid"; }
+        frontend_control_group() { printf '%s\n' "$mock_control_group"; }
+        prune_releases
+    )
+
+    output="$(prune_cycle 2>&1)"
+    status=$?
+    assert_status first_run_refuses_uncertain_serving_state 1 "$status" || return 1
+    assert_contains first_run_reports_refusal 'Release pruning refused' <(printf '%s\n' "$output") || return 1
+    assert_file_exists first_run_preserves_serving_tree "$RELEASES_DIR/$serving" || return 1
+
+    mkdir -p "$RELEASES_DIR/$third_extra" "$RELEASES_DIR/$fourth_extra"
+    touch -d @400 "$RELEASES_DIR/$third_extra"
+    touch -d @500 "$RELEASES_DIR/$fourth_extra"
+    output="$(prune_cycle 2>&1)"
+    status=$?
+    assert_status second_run_refuses_uncertain_serving_state 1 "$status" || return 1
+    assert_contains second_run_reports_refusal 'Release pruning refused' <(printf '%s\n' "$output") || return 1
+    assert_file_exists second_run_preserves_serving_tree "$RELEASES_DIR/$serving" || return 1
+    assert_file_exists refused_run_does_not_partially_prune "$RELEASES_DIR/$first_extra" || return 1
+
+    printf '%s\n' "$serving" > "$MARKER"
+    (
+        cd "$RELEASES_DIR/$first_extra" || exit 1
+        exec sleep 300
+    ) &
+    orphan_pid=$!
+    printf '%s\n' "$serving_pid" "$orphan_pid" \
+        > "$mock_cgroup_root$mock_control_group/cgroup.procs"
+    trap 'kill "$serving_pid" "$orphan_pid" 2>/dev/null || true; wait "$serving_pid" "$orphan_pid" 2>/dev/null || true' EXIT
+    output="$(prune_cycle 2>&1)"
+    status=$?
+    assert_status detached_process_blocks_prune 1 "$status" || return 1
+    assert_contains detached_process_reports_refusal 'a process still uses' <(printf '%s\n' "$output") || return 1
+    assert_file_exists detached_process_tree_preserved "$RELEASES_DIR/$first_extra" || return 1
+    kill "$orphan_pid" || return 1
+    wait "$orphan_pid" 2>/dev/null || true
+    trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
+
+    prune_cycle >/dev/null 2>&1
+    assert_status reconciled_state_allows_prune 0 "$?" || return 1
+    assert_file_exists reconciled_prune_preserves_serving_tree "$RELEASES_DIR/$serving" || return 1
+    assert_file_missing reconciled_prune_removes_old_candidate "$RELEASES_DIR/$first_extra" || return 1
+)
+
+case_prune_refuses_unknown_deploy_process_state() (
+    local root="$SANDBOX/prune-unknown-process" deployed rollback candidate sha serving_pid mock_unit_pid
+    local fake_proc fake_cgroup unknown_pid status
+    deployed=5656565656565656565656565656565656565656
+    rollback=5757575757575757575757575757575757575757
+    candidate=5858585858585858585858585858585858585858
+    load_deploy "$root"
+    for sha in \
+        "$deployed" \
+        "$rollback" \
+        5959595959595959595959595959595959595959 \
+        6060606060606060606060606060606060606060 \
+        6161616161616161616161616161616161616161 \
+        "$candidate"; do
+        mkdir -p "$RELEASES_DIR/$sha"
+    done
+    mkdir -p "$RELEASES_DIR/$deployed/frontend"
+    touch -d @10 "$RELEASES_DIR/$candidate"
+    printf '%s\n' "$deployed" > "$MARKER"
+    printf '%s\n' "$rollback" > "$ROLLBACK_MARKER"
+    (
+        cd "$RELEASES_DIR/$deployed/frontend" || exit 1
+        exec sleep 300
+    ) &
+    serving_pid=$!
+    trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
+    printf '%s\t%s\n' "$deployed" "$serving_pid" > "$FRONTEND_RUNNING_MARKER"
+
+    fake_proc="$root/proc"
+    unknown_pid=99999999
+    mkdir -p "$fake_proc/$serving_pid" "$fake_proc/$unknown_pid"
+    ln -s "$RELEASES_DIR/$deployed/frontend" "$fake_proc/$serving_pid/cwd"
+    ln -s "$root/missing-parent/indeterminate-cwd" "$fake_proc/$unknown_pid/cwd"
+    printf '0::/test-frontend\n' > "$fake_proc/$serving_pid/cgroup"
+    PROC_ROOT="$fake_proc"
+    fake_cgroup="$root/cgroup"
+    mkdir -p "$fake_cgroup/test-frontend"
+    printf '%s\n' "$serving_pid" > "$fake_cgroup/test-frontend/cgroup.procs"
+    CGROUP_ROOT="$fake_cgroup"
+    mock_unit_pid=$$
+    printf 'Name:\ttest\nPPid:\t%s\n' "$mock_unit_pid" > "$fake_proc/$serving_pid/status"
+    frontend_pid() { printf '%s\n' "$mock_unit_pid"; }
+    frontend_control_group() { printf '/test-frontend\n'; }
+
+    release_tree_in_use "$RELEASES_DIR/$candidate" /test-frontend
+    status=$?
+    assert_status unreadable_deploy_process_is_indeterminate 2 "$status" || return 1
+    prune_releases >/dev/null 2>&1
+    status=$?
+    assert_status unknown_deploy_process_refuses_prune 1 "$status" || return 1
+    assert_file_exists unknown_process_preserves_candidate "$RELEASES_DIR/$candidate" || return 1
+)
+
 case_isolated_frontend_build_preserves_working_directory() (
     local root="$SANDBOX/isolated-build" sha source_root runtime before after node_log
     local mock_pnpm mock_node_bin
@@ -309,6 +544,141 @@ case_isolated_frontend_build_preserves_working_directory() (
     assert_equals working_directory_preserved "$before" "$after" || return 1
     assert_contains target_verifier "$source_root/frontend/ci/verify_build_chunks.mjs" "$node_log" || return 1
     assert_file_exists complete_runtime "$runtime/.next-new/static/app.js" || return 1
+)
+
+case_first_transactional_run_preserves_live_legacy_trees() (
+    local root="$SANDBOX/legacy-migration" previous target fixture fake_bin reset_log
+    local legacy_pid target_pid path
+    previous=6565656565656565656565656565656565656565
+    target=6666666666666666666666666666666666666666
+    load_deploy "$root"
+    fixture="$root/fixture"
+    fake_bin="$root/bin"
+    reset_log="$root/reset.log"
+    mkdir -p \
+        "$fixture/frontend/ci" \
+        "$fixture/frontend/public" \
+        "$fixture/backend" \
+        "$fake_bin" \
+        "$STAGING_DIR/frontend/.next" \
+        "$STAGING_DIR/frontend/.next-new" \
+        "$STAGING_DIR/frontend/.next-old" \
+        "$STAGING_DIR/deploy/staging"
+    printf '{}\n' > "$fixture/frontend/tsconfig.json"
+    printf 'public\n' > "$fixture/frontend/public/favicon.ico"
+    printf 'verifier\n' > "$fixture/frontend/ci/verify_build_chunks.mjs"
+    for path in .next .next-new .next-old; do
+        printf 'legacy-%s\n' "$path" > "$STAGING_DIR/frontend/$path/live-sentinel"
+    done
+    printf 'launcher\n' > "$STAGING_DIR/deploy/staging/connex-frontend-start.sh"
+    {
+        printf '#!/bin/bash\n'
+        printf 'set -eu\n'
+        printf 'sha=\n'
+        printf 'for argument in "$@"; do case "$argument" in -PgitSha=*) sha="${argument#-PgitSha=}" ;; esac; done\n'
+        printf '[ -n "$sha" ]\n'
+        printf 'jar_root=build/jar-root\n'
+        printf 'rm -rf "$jar_root"\n'
+        printf 'mkdir -p "$jar_root/BOOT-INF/classes/META-INF" build/libs\n'
+        printf 'printf "build.gitSha=%%s\\n" "$sha" > "$jar_root/BOOT-INF/classes/META-INF/build-info.properties"\n'
+        printf '(cd "$jar_root" && zip -q -r ../libs/backend-0.0.1-SNAPSHOT.jar BOOT-INF)\n'
+    } > "$fixture/backend/gradlew"
+    {
+        printf '#!/bin/bash\n'
+        printf 'if [ "${1:-}" = "build" ]; then\n'
+        printf '    mkdir -p "$NEXT_DIST_DIR/standalone/$NEXT_DIST_DIR/server" "$NEXT_DIST_DIR/static"\n'
+        printf '    printf "server\\n" > "$NEXT_DIST_DIR/standalone/server.js"\n'
+        printf '    printf "route\\n" > "$NEXT_DIST_DIR/standalone/$NEXT_DIST_DIR/server/app.js"\n'
+        printf '    printf "asset\\n" > "$NEXT_DIST_DIR/static/app.js"\n'
+        printf 'fi\n'
+    } > "$fake_bin/pnpm"
+    {
+        printf '#!/bin/bash\n'
+        printf 'exit 0\n'
+    } > "$fake_bin/node"
+    chmod 0755 "$fixture/backend/gradlew" "$fake_bin/pnpm" "$fake_bin/node"
+    PNPM="$fake_bin/pnpm"
+    NODE_BIN="$fake_bin"
+    load_frontend_environment() { return 0; }
+    git() {
+        case "$*" in
+            "-C $STAGING_DIR archive $target") tar -C "$fixture" -cf - . ;;
+            "-C $STAGING_DIR show $target:frontend/package.json")
+                printf '{"scripts":{"start":"bash ../deploy/staging/connex-frontend-start.sh"}}\n'
+                ;;
+            "-C $STAGING_DIR cat-file -e $target:deploy/staging/connex-frontend-start.sh") return 0 ;;
+            "-C $STAGING_DIR reset --hard $target --quiet")
+                for path in .next .next-new .next-old; do
+                    [ -f "$STAGING_DIR/frontend/$path/live-sentinel" ] || return 1
+                done
+                printf '%s\n' "$*" > "$reset_log"
+                ;;
+            "-C $STAGING_DIR diff --quiet $target -- frontend/package.json deploy/staging/connex-frontend-start.sh")
+                return 0
+                ;;
+            *) return 2 ;;
+        esac
+    }
+
+    make_bundle "$root" "$previous" rebuilt-from-marker-commit
+    (
+        cd "$STAGING_DIR/frontend/.next-new" || exit 1
+        exec sleep 300
+    ) &
+    legacy_pid=$!
+    target_pid=0
+    trap '
+        if [ "$legacy_pid" -ne 0 ]; then kill "$legacy_pid" 2>/dev/null || true; wait "$legacy_pid" 2>/dev/null || true; fi
+        if [ "$target_pid" -ne 0 ]; then kill "$target_pid" 2>/dev/null || true; wait "$target_pid" 2>/dev/null || true; fi
+    ' EXIT
+
+    build_target_release "$target"
+    assert_status target_built_while_legacy_process_served 0 "$?" || return 1
+    for path in .next .next-new .next-old; do
+        assert_file_exists "build_preserves_$path" "$STAGING_DIR/frontend/$path/live-sentinel" || return 1
+    done
+
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$previous"
+    write_transaction prepared || return 1
+    sudo() {
+        case "$*" in
+            "systemctl stop connex-staging-frontend")
+                kill -0 "$legacy_pid" || return 1
+                for path in .next .next-new .next-old; do
+                    [ -f "$STAGING_DIR/frontend/$path/live-sentinel" ] || return 1
+                done
+                kill "$legacy_pid" || return 1
+                wait "$legacy_pid" 2>/dev/null || true
+                legacy_pid=0
+                ;;
+            "systemctl restart connex-staging-frontend")
+                (
+                    cd "$RELEASES_DIR/$target/frontend" || exit 1
+                    exec sleep 300
+                ) &
+                target_pid=$!
+                printf '%s\t%s\n' "$target" "$target_pid" > "$FRONTEND_RUNNING_MARKER"
+                ;;
+            *) return 2 ;;
+        esac
+    }
+    quiesce_frontend_and_switch_checkout "$target"
+    assert_status legacy_frontend_quiesced_before_checkout 0 "$?" || return 1
+    assert_contains checkout_switched_after_stop "reset --hard $target --quiet" "$reset_log" || return 1
+
+    wait_for_frontend() { return 0; }
+    frontend_pid() { printf '%s\n' "$$"; }
+    frontend_control_group() { process_systemd_control_group "$target_pid"; }
+    systemctl() { systemctl_active_stub "$@"; }
+    activate_frontend "$target"
+    assert_status sealed_frontend_activated 0 "$?" || return 1
+    for path in .next .next-new .next-old; do
+        assert_file_exists "activation_preserves_$path" "$STAGING_DIR/frontend/$path/live-sentinel" || return 1
+    done
+    frontend_runtime_matches "$target"
+    assert_status sealed_runtime_attested_after_migration 0 "$?" || return 1
 )
 
 case_backend_activation_never_skips_target() (
@@ -478,6 +848,117 @@ case_stale_installed_wrapper_restores_prior_checkout() (
     assert_status stale_wrapper_refused 1 "$?" || return 1
     assert_contains prior_checkout_restored "reset --hard $previous --quiet" "$reset_log" || return 1
     assert_equals prior_recorded "$previous" "$DEPLOY_PREVIOUS" || return 1
+)
+
+case_wrapper_selected_commit_survives_remote_advance() (
+    local root="$SANDBOX/wrapper-pin" selected advanced retained fake_bin fetch_state output status
+    local serving_pid
+    selected=5151515151515151515151515151515151515151
+    advanced=5252525252525252525252525252525252525252
+    retained=5353535353535353535353535353535353535353
+    load_deploy "$root"
+    make_bundle "$root" "$selected"
+    make_bundle "$root" "$retained" rebuilt-from-marker-commit
+    cp "$RELEASES_DIR/$selected/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$selected" > "$MARKER"
+    printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$selected" > "$FRONTEND_RELEASE_MARKER"
+    (
+        cd "$RELEASES_DIR/$selected/frontend" || exit 1
+        exec sleep 300
+    ) &
+    serving_pid=$!
+    trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
+    printf '%s\t%s\n' "$selected" "$serving_pid" > "$FRONTEND_RUNNING_MARKER"
+
+    fake_bin="$root/bin"
+    fetch_state="$root/fetch-count"
+    make_wrapper_boundary_shims "$fake_bin"
+
+    unset CONNEX_DEPLOY_TARGET
+    output="$(
+        PATH="$fake_bin:$PATH" \
+        MOCK_FETCH_STATE="$fetch_state" \
+        MOCK_SELECTED_SHA="$selected" \
+        MOCK_ADVANCED_SHA="$advanced" \
+        MOCK_DEPLOY_SOURCE="$STAGING_DEPLOY_DIR/connex-staging-deploy.sh" \
+        MOCK_SHOW_LOG="$root/show.log" \
+        MOCK_FRONTEND_PID="$$" \
+        MOCK_FRONTEND_CONTROL_GROUP="$(process_systemd_control_group "$serving_pid")" \
+        CONNEX_STAGING_DIR="$STAGING_DIR" \
+        CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+        bash "$STAGING_DEPLOY_DIR/connex-staging-deploy-wrapper.sh" 2>&1
+    )"
+    status=$?
+    assert_status wrapper_and_inner_accept_selected_commit 0 "$status" || {
+        printf '%s\n' "$output"
+        return 1
+    }
+    assert_equals exactly_one_fetch 1 "$(sed -n '1p' "$fetch_state")" || return 1
+    assert_contains selected_logic_loaded \
+        "$selected:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
+    assert_absent advanced_logic_not_loaded \
+        "$advanced:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
+    assert_equals selected_commit_remains_deployed "$selected" "$(read_sha_file "$MARKER")" || return 1
+    assert_file_exists selected_runtime_survives "$RELEASES_DIR/$selected/frontend" || return 1
+)
+
+case_transaction_target_reexecs_recorded_logic() (
+    local root="$SANDBOX/transaction-pin" selected recorded prior fake_bin fetch_state output status
+    local serving_pid control_group
+    selected=6262626262626262626262626262626262626262
+    recorded=6363636363636363636363636363636363636363
+    prior=6464646464646464646464646464646464646464
+    load_deploy "$root"
+    make_bundle "$root" "$prior" rebuilt-from-marker-commit
+    make_bundle "$root" "$recorded"
+    cp "$RELEASES_DIR/$prior/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$prior" > "$MARKER"
+    printf '%s\n' "$prior" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$prior" > "$FRONTEND_RELEASE_MARKER"
+    (
+        cd "$RELEASES_DIR/$prior/frontend" || exit 1
+        exec sleep 300
+    ) &
+    serving_pid=$!
+    trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
+    printf '%s\t%s\n' "$prior" "$serving_pid" > "$FRONTEND_RUNNING_MARKER"
+    DEPLOY_PREVIOUS="$prior"
+    DEPLOY_TARGET="$recorded"
+    DEPLOY_RETAINED="$prior"
+    write_transaction prepared || return 1
+
+    fake_bin="$root/bin"
+    fetch_state="$root/fetch-count"
+    control_group="$(process_systemd_control_group "$serving_pid")" || return 1
+    make_wrapper_boundary_shims "$fake_bin"
+    unset CONNEX_DEPLOY_TARGET
+    output="$(
+        PATH="$fake_bin:$PATH" \
+        MOCK_FETCH_STATE="$fetch_state" \
+        MOCK_SELECTED_SHA="$selected" \
+        MOCK_ADVANCED_SHA="$recorded" \
+        MOCK_DEPLOY_SOURCE="$STAGING_DEPLOY_DIR/connex-staging-deploy.sh" \
+        MOCK_SHOW_LOG="$root/show.log" \
+        MOCK_FRONTEND_PID="$$" \
+        MOCK_FRONTEND_CONTROL_GROUP="$control_group" \
+        MOCK_SERVED_SHA="$prior" \
+        CONNEX_STAGING_DIR="$STAGING_DIR" \
+        CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+        bash "$STAGING_DEPLOY_DIR/connex-staging-deploy-wrapper.sh" 2>&1
+    )"
+    status=$?
+    assert_status interrupted_transaction_reports_retry 1 "$status" || {
+        printf '%s\n' "$output"
+        return 1
+    }
+    assert_equals recovery_does_not_refetch 1 "$(sed -n '1p' "$fetch_state")" || return 1
+    assert_contains wrapper_selected_logic \
+        "$selected:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
+    assert_contains recorded_recovery_logic \
+        "$recorded:deploy/staging/connex-staging-deploy.sh" "$root/show.log" || return 1
+    assert_equals interrupted_recovery_keeps_prior_marker "$prior" "$(read_sha_file "$MARKER")" || return 1
+    assert_file_missing prepared_transaction_consumed "$TRANSACTION_FILE" || return 1
 )
 
 case_pair_rollback_restores_exact_artifacts() (
@@ -987,10 +1468,14 @@ run_case() {
 
 run_case case_mixed_live_release_refused
 run_case case_failed_identity_probe_output_is_rejected
+run_case case_frontend_attestation_requires_current_unit_lineage
 run_case case_complete_pair_integrity_and_tamper_refusal
 run_case case_no_change_requires_valid_retained_pair
 run_case case_prune_aborts_when_protected_marker_read_fails
+run_case case_consecutive_prunes_preserve_recorded_serving_release
+run_case case_prune_refuses_unknown_deploy_process_state
 run_case case_isolated_frontend_build_preserves_working_directory
+run_case case_first_transactional_run_preserves_live_legacy_trees
 run_case case_backend_activation_never_skips_target
 run_case case_denied_frontend_stop_prevents_checkout_switch
 run_case case_failed_transaction_write_is_rejected
@@ -998,6 +1483,8 @@ run_case case_failed_sha_read_is_rejected
 run_case case_failed_marker_write_keeps_rollback_armed
 run_case case_failed_committed_transaction_restores_release_markers
 run_case case_stale_installed_wrapper_restores_prior_checkout
+run_case case_wrapper_selected_commit_survives_remote_advance
+run_case case_transaction_target_reexecs_recorded_logic
 run_case case_pair_rollback_restores_exact_artifacts
 run_case case_smoke_credentials_require_safe_exact_schema
 run_case case_post_deploy_smoke_covers_all_gates

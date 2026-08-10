@@ -24,7 +24,10 @@ documented separately in [DEPLOYMENT.md](DEPLOYMENT.md).
 `/usr/local/bin/connex-staging-deploy` is a root-installed thin wrapper
 ([`deploy/staging/connex-staging-deploy-wrapper.sh`](../deploy/staging/connex-staging-deploy-wrapper.sh)):
 it takes the deploy lock, fetches the candidate script from `origin/main` into a temporary file
-without changing the live checkout, and hands off to that reviewed script. The candidate
+without changing the live checkout, and hands off to that reviewed script. The wrapper pins the
+same fetched commit as the deploy target; the candidate script does not fetch again. If `main`
+advances after that selection, the newer commit waits for the next timer run instead of being
+deployed by logic loaded from the older commit. The candidate
 [`deploy/staging/connex-staging-deploy.sh`](../deploy/staging/connex-staging-deploy.sh), which:
 
 1. **Validates the live release before doing work.** The committed sha lives in
@@ -45,7 +48,12 @@ without changing the live checkout, and hands off to that reviewed script. The c
    requires the manifest sha, both SHA-256 digests, the JAR's embedded `build.gitSha`, and the
    frontend's release identity to agree. A partial or corrupt directory is never overwritten or
    activated. The first transactional run rebuilds the marker commit's frontend from Git into the
-   same standalone format; it does not label the unversioned legacy `.next` tree as proven.
+   same standalone format; it does not label the unversioned legacy `.next` tree as proven. It
+   never removes legacy `.next`, `.next-new`, or `.next-old` directories: it builds elsewhere,
+   stops the legacy frontend before switching the checkout, and leaves those ignored trees on disk
+   for deliberate operator cleanup after the sealed runtime is verified live. This also makes a
+   first transactional run safe when an interrupted legacy deploy is still serving from one of
+   those trees.
    These co-located hashes detect partial writes and accidental corruption; they are not a trust
    boundary against a process already running as the deploy user. Such a process can rewrite the
    artifacts, embedded identities, and writable manifest together and recompute the hashes. Strong
@@ -58,7 +66,9 @@ without changing the live checkout, and hands off to that reviewed script. The c
    reinstalls and health-gates both target artifacts before re-smoking them, or restores the exact
    prior pair. Recovery never trusts a running backend response without also reinstalling the
    target JAR, so an interrupted rollback cannot later boot a stale artifact. An invalid recovery
-   record fails closed by stopping the frontend and alerting.
+   record fails closed by stopping the frontend and alerting. When the recorded transaction target
+   differs from the wrapper's newly selected commit, recovery is handed to the deploy script from
+   the recorded target; parsed logic from one commit never activates another commit.
 5. **Quiesces before activation.** After both bundles verify, the deploy stops the frontend, then
    and only then resets the checkout. It always installs and restarts the target backend, waits up
    to 900 seconds for the exact `/api/version` sha plus readiness, and rechecks the same PID after
@@ -82,7 +92,14 @@ without changing the live checkout, and hands off to that reviewed script. The c
    launcher as deployment control plane, then restores both artifacts from the verified prior
    bundle. It requires the exact rollback backend sha/readiness/stable PID plus frontend release,
    process-directory, PID, and HTTP health; leaves `deployed-sha` unchanged; and exits nonzero.
-   This is application rollback only; Flyway schema migrations remain forward-only.
+   Before pruning older immutable releases, the script requires the durable frontend SHA/PID
+   record to identify a live descendant of the frontend unit's `pnpm` MainPID in the same systemd
+   control group, with the sealed runtime as its working directory and the same release as
+   `deployed-sha`. A missing, stale, orphaned, or cross-release record aborts pruning before any
+   tree is removed, so recovery state remains protective across timer and process restarts. It also
+   checks every deletion candidate against live deploy-user process working directories and treats
+   unreadable relevant process state as indeterminate rather than safe to delete. This is
+   application rollback only; Flyway schema migrations remain forward-only.
 8. **Emits a sanitized failure alert.** The stderr `ALERT` record includes only allow-listed gate,
    component and rollback state values plus validated target, marker, backend, frontend, and
    rollback shas. It never interpolates response bodies, command output, environment values,
@@ -136,7 +153,7 @@ Git, a command line, the frontend environment, or systemd logs.
 
 ```bash
 ssh -i ~/.ssh/connex_target dev@192.168.0.141
-curl -s http://127.0.0.1:8081/api/version        # gitSha must equal origin/main HEAD
+curl -s http://127.0.0.1:8081/api/version        # gitSha must equal deployed-sha
 curl -s http://127.0.0.1:8081/api/health/ready   # 200 {"status":"UP",...} when serving traffic
 cat /opt/connex-staging/.staging/deployed-sha
 cat /opt/connex-staging/.staging/frontend-release

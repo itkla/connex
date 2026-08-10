@@ -15,6 +15,8 @@ NODE_BIN=/home/dev/.nvm/versions/node/v24.18.0/bin
 PNPM="$NODE_BIN/pnpm"
 LOG_TAG="connex-staging-deploy"
 LOCK_FILE=/tmp/connex-staging-deploy.lock
+PROC_ROOT=/proc
+CGROUP_ROOT=/sys/fs/cgroup
 
 STATE_DIR="$STAGING_DIR/.staging"
 RELEASES_DIR="$STATE_DIR/releases"
@@ -116,6 +118,10 @@ backend_pid() {
 
 frontend_pid() {
     systemctl show -p MainPID --value connex-staging-frontend
+}
+
+frontend_control_group() {
+    systemctl show -p ControlGroup --value connex-staging-frontend
 }
 
 served_git_sha() {
@@ -591,15 +597,58 @@ ensure_frontend_launcher() {
             frontend/package.json deploy/staging/connex-frontend-start.sh
 }
 
-frontend_runtime_matches() {
-    local sha="$1" running_sha pid extra expected actual
+pid_in_control_group() {
+    local pid="$1" wanted="$2" hierarchy controllers member
+    [ -n "$wanted" ] && [ -r "$PROC_ROOT/$pid/cgroup" ] || return 1
+    while IFS=: read -r hierarchy controllers member; do
+        if [ "$member" != "$wanted" ] && [[ "$member" != "$wanted/"* ]]; then
+            continue
+        fi
+        if { [ "$hierarchy" = "0" ] && [ -z "$controllers" ]; } \
+            || [[ ",$controllers," = *,name=systemd,* ]]; then
+            return 0
+        fi
+    done < "$PROC_ROOT/$pid/cgroup"
+    return 1
+}
+
+pid_descends_from() {
+    local pid="$1" ancestor="$2" parent depth=0
+    while [ "$pid" != "$ancestor" ]; do
+        [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ "$pid" != "1" ] || return 1
+        parent="$(sed -n 's/^PPid:[[:space:]]*//p' "$PROC_ROOT/$pid/status" 2>/dev/null)" \
+            || return 1
+        [[ "$parent" =~ ^[1-9][0-9]*$ ]] || return 1
+        pid="$parent"
+        depth=$((depth + 1))
+        [ "$depth" -le 64 ] || return 1
+    done
+}
+
+read_frontend_running() {
+    local running_sha pid extra unit_pid control_group expected actual
     [ -f "$FRONTEND_RUNNING_MARKER" ] && [ ! -L "$FRONTEND_RUNNING_MARKER" ] || return 1
     IFS=$'\t' read -r running_sha pid extra < "$FRONTEND_RUNNING_MARKER" || return 1
-    [ "$running_sha" = "$sha" ] && [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -z "$extra" ] || return 1
+    is_git_sha "$running_sha" && [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -z "$extra" ] || return 1
+    unit_pid="$(frontend_pid)" || return 1
+    [[ "$unit_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    kill -0 "$unit_pid" 2>/dev/null || return 1
+    control_group="$(frontend_control_group)" || return 1
+    [[ "$control_group" = /* ]] || return 1
+    pid_in_control_group "$pid" "$control_group" || return 1
+    pid_descends_from "$pid" "$unit_pid" || return 1
     kill -0 "$pid" 2>/dev/null || return 1
-    expected="$(readlink -f "$RELEASES_DIR/$sha/frontend")" || return 1
-    actual="$(readlink -f "/proc/$pid/cwd")" || return 1
-    [ "$actual" = "$expected" ]
+    expected="$(readlink -f "$RELEASES_DIR/$running_sha/frontend")" || return 1
+    actual="$(readlink -f "$PROC_ROOT/$pid/cwd")" || return 1
+    [ "$actual" = "$expected" ] || return 1
+    printf '%s\t%s\n' "$running_sha" "$pid"
+}
+
+frontend_runtime_matches() {
+    local sha="$1" running running_sha pid extra
+    running="$(read_frontend_running)" || return 1
+    IFS=$'\t' read -r running_sha pid extra <<< "$running"
+    [ "$running_sha" = "$sha" ] && [ -n "$pid" ] && [ -z "$extra" ]
 }
 
 activate_frontend() {
@@ -839,10 +888,65 @@ post_deploy_smoke() {
     cleanup_smoke_work || return 1
 }
 
+process_uses_release_tree() {
+    local pid="$1" resolved="$2" cwd
+    if ! cwd="$(readlink -f "$PROC_ROOT/$pid/cwd" 2>/dev/null)"; then
+        [ ! -d "$PROC_ROOT/$pid" ] && return 1
+        return 2
+    fi
+    if [ "$cwd" = "$resolved" ] || [[ "$cwd" = "$resolved/"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
+release_tree_in_use() {
+    local release="$1" control_group="$2" deploy_uid resolved cgroup_procs pid usage
+    local process_dir process_uid
+    deploy_uid="$(id -u)" || return 2
+    resolved="$(readlink -f "$release")" || return 2
+    cgroup_procs="$CGROUP_ROOT$control_group/cgroup.procs"
+    [ -r "$cgroup_procs" ] || return 2
+    while IFS= read -r pid; do
+        [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+        usage=0
+        process_uses_release_tree "$pid" "$resolved" || usage=$?
+        [ "$usage" -ne 0 ] || return 0
+        [ "$usage" -eq 1 ] || return 2
+    done < "$cgroup_procs"
+    for process_dir in "$PROC_ROOT"/[0-9]*; do
+        if ! process_uid="$(stat -c '%u' "$process_dir" 2>/dev/null)"; then
+            [ ! -d "$process_dir" ] || return 2
+            continue
+        fi
+        [ "$process_uid" = "$deploy_uid" ] || continue
+        pid="${process_dir##*/}"
+        usage=0
+        process_uses_release_tree "$pid" "$resolved" || usage=$?
+        [ "$usage" -ne 0 ] || return 0
+        [ "$usage" -eq 1 ] || return 2
+    done
+    return 1
+}
+
 prune_releases() {
-    local deployed rollback paths path sha kept=0
+    local deployed rollback running running_sha running_pid extra control_group paths path sha usage kept=0
     deployed="$(read_sha_file "$MARKER" 2>/dev/null)" || return 1
     rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)" || return 1
+    # A release tree is removable only after the launcher's durable PID/SHA record,
+    # systemd cgroup membership, and live process cwd prove which tree is serving.
+    # Refuse the entire prune before touching disk when recovery state is uncertain.
+    if ! running="$(read_frontend_running)"; then
+        log "Release pruning refused: frontend serving state is missing or inconsistent"
+        return 1
+    fi
+    IFS=$'\t' read -r running_sha running_pid extra <<< "$running"
+    if [ "$running_sha" != "$deployed" ] || [ -z "$running_pid" ] || [ -n "$extra" ]; then
+        log "Release pruning refused: attested frontend does not match the committed release"
+        return 1
+    fi
+    control_group="$(frontend_control_group)" || return 1
+    [[ "$control_group" = /* ]] || return 1
     paths="$(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -printf '%T@ %p\n' \
         | sort -rn | cut -d' ' -f2-)" || return 1
     while IFS= read -r path; do
@@ -851,11 +955,24 @@ prune_releases() {
         if ! is_git_sha "$sha"; then
             continue
         fi
-        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ]; then
+        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] || [ "$sha" = "$running_sha" ]; then
             continue
         fi
         kept=$((kept + 1))
         if [ "$kept" -gt 3 ]; then
+            # The launcher contract keeps every staging Node process rooted in its
+            # immutable runtime. This catches an escaped or detached process even
+            # when it is no longer the PID recorded by systemd.
+            usage=0
+            release_tree_in_use "$path" "$control_group" || usage=$?
+            if [ "$usage" -eq 0 ]; then
+                log "Release pruning refused: a process still uses $sha"
+                return 1
+            fi
+            if [ "$usage" -ne 1 ]; then
+                log "Release pruning refused: could not resolve candidate $sha"
+                return 1
+            fi
             rm -rf "$path" || return 1
         fi
     done <<< "$paths"
@@ -982,7 +1099,8 @@ recover_transaction() {
 }
 
 main() {
-    local pinned_target="${CONNEX_DEPLOY_TARGET:-}"
+    local pinned_target="${CONNEX_DEPLOY_TARGET:-}" transaction_record transaction_target
+    local recovery_script recovery_status
     arm_global_cleanup
     set_failure_context bootstrap release "Deploy FAILED during bootstrap"
     if [ "${CONNEX_DEPLOY_LOCK_HELD:-0}" != "1" ]; then
@@ -1003,14 +1121,40 @@ main() {
     else
         pinned_target="$(git rev-parse origin/main)"
     fi
+    DEPLOY_TARGET="$pinned_target"
     mkdir -p "$STATE_DIR" "$RELEASES_DIR"
 
     if [ -e "$TRANSACTION_FILE" ]; then
+        if transaction_record="$(read_transaction 2>/dev/null)"; then
+            IFS=$'\t' read -r _ transaction_target _ <<< "$transaction_record"
+            if [ "$transaction_target" != "$pinned_target" ]; then
+                # Recovery must run under the deployment logic from the commit that
+                # created the durable transaction. Otherwise script A can activate
+                # recorded target B after the wrapper selected A.
+                set_failure_context recovery release "Deploy recovery handoff FAILED"
+                recovery_script="$(mktemp /tmp/connex-staging-recovery.XXXXXX)" || return 1
+                if ! git show "$transaction_target:deploy/staging/connex-staging-deploy.sh" \
+                    > "$recovery_script"; then
+                    rm -f "$recovery_script" || log "Recovery script cleanup FAILED"
+                    return 1
+                fi
+                log "Handing recovery for ${transaction_target:0:8} to its pinned deployment logic"
+                trap - EXIT INT TERM
+                recovery_status=0
+                CONNEX_DEPLOY_TARGET="$transaction_target" bash "$recovery_script" "$@" \
+                    || recovery_status=$?
+                if ! rm -f "$recovery_script"; then
+                    arm_global_cleanup
+                    set_failure_context recovery release "Recovery script cleanup FAILED"
+                    return 1
+                fi
+                exit "$recovery_status"
+            fi
+        fi
         recover_transaction
         return $?
     fi
 
-    DEPLOY_TARGET="$pinned_target"
     if ! DEPLOY_PREVIOUS="$(read_sha_file "$MARKER" 2>/dev/null)"; then DEPLOY_PREVIOUS=; fi
     if ! is_git_sha "$DEPLOY_TARGET" || ! is_git_sha "$DEPLOY_PREVIOUS"; then
         set_failure_context preflight release "Deploy refused: target or deployed marker is not a full git sha"
@@ -1070,8 +1214,9 @@ main() {
 
     set_failure_context marker release "Deploy components passed smoke but release markers could not be committed"
     commit_release_markers "$DEPLOY_PREVIOUS" "$DEPLOY_TARGET" || return 1
-    rm -f "$TRANSACTION_FILE"
-    prune_releases
+    set_failure_context recovery release "Release committed but transaction cleanup or safe release pruning FAILED"
+    rm -f "$TRANSACTION_FILE" || return 1
+    prune_releases || return 1
     FAILURE_ACTIVE=0
     log "Done — release ${DEPLOY_TARGET:0:8} live as one verified frontend/backend unit"
 }
