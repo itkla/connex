@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -9,6 +10,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +23,9 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.SsoConnection;
@@ -53,6 +59,8 @@ class SsoLifecycleFenceUnitTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private OrgAllowedDomainService allowedDomainService;
     @Mock private SsoUserProvisioner userProvisioner;
+    @Mock private FreshMembershipTransaction freshMembershipTransaction;
+    @Mock private TransactionTemplate transactionTemplate;
 
     private SsoLinkService linkService;
     private SsoLoginService loginService;
@@ -77,7 +85,9 @@ class SsoLifecycleFenceUnitTest {
             workspaceService,
             allowedDomainService,
             userProvisioner,
-            auditService);
+            auditService,
+            freshMembershipTransaction,
+            transactionTemplate);
         when(lifecycleMapper.lockActiveOrganizationForShare(ORG_ID)).thenReturn(null);
     }
 
@@ -203,6 +213,8 @@ class SsoLifecycleFenceUnitTest {
         when(domainMapper.findOrgByDomain("example.test")).thenReturn(ORG_ID);
         when(allowedDomainService.isJoinAllowed(ORG_ID, "user@example.test")).thenReturn(true);
         when(connectionMapper.findByOrg(ORG_ID)).thenReturn(connection);
+        when(freshMembershipTransaction.execute(eq(9), any())).thenAnswer(invocation ->
+            ((Supplier<?>) invocation.getArgument(1)).get());
         when(lifecycleMapper.lockWorkspaceForShare(9)).thenReturn(
             new WorkspaceLifecycleRef(9, ORG_ID, "JIT", "jit", "active"));
 
@@ -247,6 +259,9 @@ class SsoLifecycleFenceUnitTest {
                 "subject"))
             .thenReturn(identity);
         when(userMapper.getUserByIdForShare(USER_ID)).thenReturn(user);
+        when(transactionTemplate.execute(any())).thenAnswer(invocation ->
+            ((TransactionCallback<?>) invocation.getArgument(0))
+                .doInTransaction(new SimpleTransactionStatus()));
 
         assertThrows(
             ForbiddenException.class,

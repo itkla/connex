@@ -5,7 +5,6 @@ import java.util.Base64;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -47,6 +46,7 @@ public class InviteService {
     private final InviteEmailService inviteEmailService;
     private final SessionSecurityService sessionSecurityService;
     private final NotificationStateVersionService notificationStateVersionService;
+    private final FreshMembershipTransaction freshMembershipTransaction;
 
     /**
      * Invites someone to a workspace by email. An address that already belongs to
@@ -54,8 +54,16 @@ public class InviteService {
      * from Settings); any other address gets an emailed token invite. Either way,
      * an earlier pending invite for the same email is superseded.
      */
-    @Transactional
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
+        workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actor.getId());
+        return freshMembershipTransaction.execute(
+            workspaceId,
+            () -> createInviteInWorkspace(workspaceId, actor, emailRaw, roleRaw));
+    }
+
+    private InviteResultDto createInviteInWorkspace(
+            int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actor.getId());
         String email = normalizeEmail(emailRaw);
@@ -131,8 +139,17 @@ public class InviteService {
     }
 
     /** Redeems an invite for the authenticated user whose email it targets. */
-    @Transactional
     public WorkspaceMembershipDto acceptInvite(String token, User user) {
+        WorkspaceInvite target = inviteMapper.findByToken(token);
+        if (target == null) {
+            throw new ResourceNotFoundException("Invite not found");
+        }
+        return freshMembershipTransaction.execute(
+            target.getWorkspaceId(),
+            () -> acceptInviteInWorkspace(token, user));
+    }
+
+    private WorkspaceMembershipDto acceptInviteInWorkspace(String token, User user) {
         WorkspaceInvite invite = inviteMapper.findByToken(token);
         if (invite == null) {
             throw new ResourceNotFoundException("Invite not found");
@@ -181,6 +198,15 @@ public class InviteService {
 
     /** Invites an existing Connex user to the workspace by email; they join after accepting. */
     public MemberDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
+        workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        return freshMembershipTransaction.execute(
+            workspaceId,
+            () -> addExistingMemberInWorkspace(workspaceId, actorId, emailRaw, roleRaw));
+    }
+
+    private MemberDto addExistingMemberInWorkspace(
+            int workspaceId, int actorId, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         String email = normalizeEmail(emailRaw);

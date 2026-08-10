@@ -187,22 +187,13 @@ public class TenantScopeInterceptor implements Interceptor {
      * during self-serve account deletion, which is identity-scoped
      * ({@code requireSelf}) and deliberately spans every workspace — including
      * ones the user has left, where no tenant context could be resolved. The
-     * recipient-scoped notification delete and the deal-collaborator ghost clean
-     * back invitation decline and the fresh-membership ghost clean (registration,
-     * invites, invite links, SSO JIT provisioning — see
-     * {@code UserOffboardingService.prepareFreshMembership}), all of which a user
-     * with no active workspace may reach. The fresh-membership saved-view
-     * and assistant-chat cleanup follows the same workspace-and-user-bound policy.
-     * These statements anchor {@code workspace_id} and the user id in SQL.
-     *
-     * <p>The workspace-scoped provider-capture purge belongs to that same
-     * fresh-membership flow and is listed for the same reason. Only the
-     * {@code *Anywhere} variants were exempt when connected capture landed, but
-     * {@code prepareFreshMembership} calls the workspace-scoped ones — so a
-     * first-time invitee, and every SSO JIT provisioning, ran them with no
-     * resolved context and failed (#1011). Each binds {@code workspace_id} and
-     * the user id in SQL exactly as its {@code *Anywhere} sibling binds the user
-     * id, so exempting them narrows nothing. The recipient
+     * recipient-scoped notification deletes back invitation decline, which a user
+     * with no active workspace may reach. Fresh-membership cleanup instead installs
+     * its target workspace scope before calling tenant mappers, so its dedicated
+     * saved-view statements are not exempt. Its provider-capture purge, assistant-chat,
+     * notification, and deal-collaborator statements remain exempt because member
+     * detachment and invitation decline also reach them without installing a target
+     * workspace scope. The recipient
      * membership lock, actor-recipient projection and per-recipient
      * state-version bump are identity-scoped coordination writes for those same
      * offboarding flows. Workflow discovery is likewise bound to the departing
@@ -230,7 +221,6 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ProviderCaptureMapper.deleteSyncStatesAnywhere",
         MAPPERS + "ProviderCaptureMapper.deleteUserPolicyAnywhere",
         MAPPERS + "ProviderCaptureMapper.deleteDecisionsAnywhere",
-        MAPPERS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
         MAPPERS + "ProviderCaptureMapper.deleteProviderActivities",
         MAPPERS + "ProviderCaptureMapper.deleteInteractions",
         MAPPERS + "ProviderCaptureMapper.deleteSyncStates",
@@ -272,10 +262,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ShareMapper.clearCompanyShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPersonShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",
-        MAPPERS + "SavedViewMapper.deleteForFreshMembership",
         MAPPERS + "SavedViewMapper.deleteForUserAnywhere",
-        MAPPERS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
-        MAPPERS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
         MAPPERS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere",
         MAPPERS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere",
         MAPPERS + "UserDashboardMapper.deleteForUserAnywhere",

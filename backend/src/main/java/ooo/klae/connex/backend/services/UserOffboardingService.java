@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
 
@@ -32,6 +34,8 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
+import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 
@@ -88,6 +92,8 @@ public class UserOffboardingService {
     private final NotificationStateVersionService notificationStateVersionService;
     private final WorkflowOffboardingService workflowOffboardingService;
     private final ProviderCapturePurgeService providerCapturePurgeService;
+    private final TenantWorkScope tenantWorkScope;
+    private final TenantContext tenantContext;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -134,12 +140,22 @@ public class UserOffboardingService {
      * membership row exists, so a pending invitee's legitimate data is never
      * touched and a stale repeatable-read snapshot cannot skip cleanup. Called
      * by every fresh-membership path: invites, invite links, and SSO JIT
-     * provisioning.
+     * provisioning. The cleanup installs the target workspace's placement and
+     * tenant context because those paths can run before the caller has a
+     * resolvable workspace of their own.
      *
      * @param workspaceId the workspace being joined
      * @param userId the joining user
      */
     public void prepareFreshMembership(int workspaceId, int userId) {
+        tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, catalog) ->
+            withTenantContext(workspaceId, orgId, userId, catalog, () -> {
+                prepareFreshMembershipInWorkspace(workspaceId, userId);
+                return null;
+            }));
+    }
+
+    private void prepareFreshMembershipInWorkspace(int workspaceId, int userId) {
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
             providerCapturePurgeService.purge(
                 workspaceId, userId, ConnectedAccountProviders.GOOGLE);
@@ -155,6 +171,43 @@ public class UserOffboardingService {
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
             dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
             relationshipSignalMapper.deleteActorState(workspaceId, userId);
+        }
+    }
+
+    private <T> T withTenantContext(
+            int workspaceId,
+            int orgId,
+            int userId,
+            String catalog,
+            Supplier<T> work) {
+        boolean hadTenant = tenantContext.isResolved();
+        int previousWorkspace = hadTenant
+            ? Objects.requireNonNull(tenantContext.getWorkspaceId(), "previousWorkspace")
+            : 0;
+        int previousOrg = hadTenant
+            ? Objects.requireNonNull(tenantContext.getOrgId(), "previousOrg")
+            : 0;
+        int previousUser = hadTenant
+            ? Objects.requireNonNull(tenantContext.getUserId(), "previousUser")
+            : 0;
+        String previousRole = hadTenant
+            ? Objects.requireNonNull(tenantContext.getRole(), "previousRole")
+            : null;
+        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
+        tenantContext.set(workspaceId, orgId, userId, "member", catalog);
+        try {
+            return work.get();
+        } finally {
+            if (hadTenant) {
+                tenantContext.set(
+                    previousWorkspace,
+                    previousOrg,
+                    previousUser,
+                    previousRole,
+                    previousCatalog);
+            } else {
+                tenantContext.clear();
+            }
         }
     }
 
