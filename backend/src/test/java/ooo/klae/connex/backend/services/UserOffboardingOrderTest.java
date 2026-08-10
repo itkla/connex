@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.function.BiFunction;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -83,8 +84,14 @@ class UserOffboardingOrderTest {
 
     @InjectMocks private UserOffboardingService service;
 
+    @AfterEach
+    void clearTenantContext() {
+        tenantContext.clear();
+    }
+
     @Test
     void freshMembershipScopesWholeCleanupBeforeLockAndPreservesPurgeOrder() {
+        installPreviousTenantContext();
         when(tenantWorkScope.withWorkspacePlacement(eq(7), any())).thenAnswer(invocation -> {
             BiFunction<Integer, String, Object> work = invocation.getArgument(1);
             return work.apply(13, "cnx_target");
@@ -116,7 +123,24 @@ class UserOffboardingOrderTest {
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
-        assertFalse(tenantContext.isResolved());
+        assertPreviousTenantContext();
+    }
+
+    @Test
+    void freshMembershipRestoresExistingScopeAfterFailure() {
+        installPreviousTenantContext();
+        when(tenantWorkScope.withWorkspacePlacement(eq(7), any())).thenAnswer(invocation -> {
+            BiFunction<Integer, String, Object> work = invocation.getArgument(1);
+            return work.apply(13, "cnx_target");
+        });
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenAnswer(invocation -> {
+            assertFreshMembershipScope();
+            throw new IllegalStateException("cleanup failed");
+        });
+
+        assertThrows(IllegalStateException.class, () -> service.prepareFreshMembership(7, 9));
+
+        assertPreviousTenantContext();
     }
 
     private void assertFreshMembershipScope() {
@@ -125,6 +149,20 @@ class UserOffboardingOrderTest {
         assertEquals(13, tenantContext.getOrgId());
         assertEquals(9, tenantContext.getUserId());
         assertEquals("cnx_target", tenantContext.getCatalog());
+    }
+
+    private void installPreviousTenantContext() {
+        tenantContext.set(3, 5, 11, "owner", "cnx_previous");
+    }
+
+    private void assertPreviousTenantContext() {
+        assertTrue(tenantContext.isResolved());
+        assertEquals(3, tenantContext.getWorkspaceId());
+        assertEquals(5, tenantContext.getOrgId());
+        assertEquals(11, tenantContext.getUserId());
+        assertEquals("owner", tenantContext.getRole());
+        assertEquals("cnx_previous", tenantContext.getScopeCatalog());
+        assertEquals("cnx_previous", tenantContext.getCatalog());
     }
 
     @Test

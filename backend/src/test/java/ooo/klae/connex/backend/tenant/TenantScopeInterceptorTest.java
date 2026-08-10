@@ -129,6 +129,7 @@ class TenantScopeInterceptorTest {
     void freshMembershipCleanupRemovesOnlyExemptionsWhoseCallersAreAllScoped() {
         bindRequest();
         for (String id : new String[] {
+            NS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
             NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
             NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
             NS + "SavedViewMapper.deleteForFreshMembership",

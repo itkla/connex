@@ -188,7 +188,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * recipient-scoped notification deletes back invitation decline, which a user
      * with no active workspace may reach. Fresh-membership cleanup instead installs
      * its target workspace scope before calling tenant mappers, so its dedicated
-     * saved-view statements are not exempt. Its provider-capture, assistant-chat,
+     * saved-view statements are not exempt. Its provider-capture purge, assistant-chat,
      * notification, and deal-collaborator statements remain exempt because member
      * detachment and invitation decline also reach them without installing a target
      * workspace scope. The recipient
@@ -217,7 +217,6 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ProviderCaptureMapper.deleteSyncStatesAnywhere",
         MAPPERS + "ProviderCaptureMapper.deleteUserPolicyAnywhere",
         MAPPERS + "ProviderCaptureMapper.deleteDecisionsAnywhere",
-        MAPPERS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
         MAPPERS + "ProviderCaptureMapper.deleteProviderActivities",
         MAPPERS + "ProviderCaptureMapper.deleteInteractions",
         MAPPERS + "ProviderCaptureMapper.deleteSyncStates",
