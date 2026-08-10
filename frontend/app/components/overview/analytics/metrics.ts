@@ -270,12 +270,15 @@ export function analyticsWindowDays(window: AnalyticsWindow): number {
     return Math.floor((to.getTime() - from.getTime()) / DAY) + 1;
 }
 
+/** Longest custom window the backend accepts, in inclusive calendar days. */
+export const MAX_CUSTOM_RANGE_DAYS = 731;
+
 /** Parses a complete, ordered custom range within the backend's 731-day window limit. */
 export function parseCustomAnalyticsWindow(from: string | null, to: string | null): AnalyticsWindow | null {
     if (!from || !to) return null;
     const window = { from, to };
     const days = analyticsWindowDays(window);
-    return days >= 1 && days <= 731 ? window : null;
+    return days >= 1 && days <= MAX_CUSTOM_RANGE_DAYS ? window : null;
 }
 
 function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
