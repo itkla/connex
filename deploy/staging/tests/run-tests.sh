@@ -271,7 +271,8 @@ case_failed_identity_probe_output_is_rejected() (
 )
 
 case_frontend_attestation_requires_current_unit_lineage() (
-    local root="$SANDBOX/frontend-lineage" sha recorded_pid sibling_pid mock_control_group record
+    local root="$SANDBOX/frontend-lineage" sha recorded_pid sibling_pid mock_unit_pid record
+    local fake_proc mock_control_group
     sha=2424242424242424242424242424242424242424
     load_deploy "$root"
     mkdir -p "$RELEASES_DIR/$sha/frontend"
@@ -284,14 +285,21 @@ case_frontend_attestation_requires_current_unit_lineage() (
     sibling_pid=$!
     trap 'kill "$recorded_pid" "$sibling_pid" 2>/dev/null || true; wait "$recorded_pid" "$sibling_pid" 2>/dev/null || true' EXIT
     printf '%s\t%s\n' "$sha" "$recorded_pid" > "$FRONTEND_RUNNING_MARKER"
-    mock_control_group="$(process_systemd_control_group "$recorded_pid")" || return 1
+    mock_unit_pid=$$
+    mock_control_group=/test-frontend
+    fake_proc="$root/proc"
+    mkdir -p "$fake_proc/$recorded_pid"
+    ln -s "$RELEASES_DIR/$sha/frontend" "$fake_proc/$recorded_pid/cwd"
+    printf '0::%s\n' "$mock_control_group" > "$fake_proc/$recorded_pid/cgroup"
+    printf 'Name:\ttest\nPPid:\t%s\n' "$mock_unit_pid" > "$fake_proc/$recorded_pid/status"
+    PROC_ROOT="$fake_proc"
     frontend_control_group() { printf '%s\n' "$mock_control_group"; }
 
     frontend_pid() { printf '%s\n' "$sibling_pid"; }
     read_frontend_running >/dev/null 2>&1
     assert_status stale_sibling_cannot_attest_runtime 1 "$?" || return 1
 
-    frontend_pid() { printf '%s\n' "$$"; }
+    frontend_pid() { printf '%s\n' "$mock_unit_pid"; }
     record="$(read_frontend_running)"
     assert_status current_unit_ancestor_attests_runtime 0 "$?" || return 1
     assert_equals attested_sha_and_pid "$sha"$'\t'"$recorded_pid" "$record" || return 1
@@ -372,7 +380,7 @@ case_prune_aborts_when_protected_marker_read_fails() (
 case_consecutive_prunes_preserve_recorded_serving_release() (
     local root="$SANDBOX/consecutive-prune" deployed rollback serving serving_pid orphan_pid status output
     local first_extra second_extra third_extra fourth_extra mock_unit_pid mock_control_group
-    local mock_cgroup_root
+    local mock_proc_root mock_cgroup_root
     deployed=4242424242424242424242424242424242424242
     rollback=4343434343434343434343434343434343434343
     serving=4444444444444444444444444444444444444444
@@ -402,13 +410,21 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
     printf '%s\t%s\n' "$serving" "$serving_pid" > "$FRONTEND_RUNNING_MARKER"
     mock_unit_pid=$$
-    mock_control_group="$(process_systemd_control_group "$serving_pid")" || return 1
+    mock_control_group=/test-frontend
+    # Successful pruning must depend only on fixture-owned process state. Sampling
+    # host /proc makes unrelated same-UID processes with unreadable cwd indeterminate.
+    mock_proc_root="$root/proc"
+    mkdir -p "$mock_proc_root/$serving_pid"
+    ln -s "$RELEASES_DIR/$serving/frontend" "$mock_proc_root/$serving_pid/cwd"
+    printf '0::%s\n' "$mock_control_group" > "$mock_proc_root/$serving_pid/cgroup"
+    printf 'Name:\ttest\nPPid:\t%s\n' "$mock_unit_pid" > "$mock_proc_root/$serving_pid/status"
     mock_cgroup_root="$root/cgroup"
     mkdir -p "$mock_cgroup_root$mock_control_group"
     printf '%s\n' "$serving_pid" > "$mock_cgroup_root$mock_control_group/cgroup.procs"
 
     prune_cycle() (
         load_deploy "$root"
+        PROC_ROOT="$mock_proc_root"
         CGROUP_ROOT="$mock_cgroup_root"
         frontend_pid() { printf '%s\n' "$mock_unit_pid"; }
         frontend_control_group() { printf '%s\n' "$mock_control_group"; }
@@ -418,7 +434,9 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     output="$(prune_cycle 2>&1)"
     status=$?
     assert_status first_run_refuses_uncertain_serving_state 1 "$status" || return 1
-    assert_contains first_run_reports_refusal 'Release pruning refused' <(printf '%s\n' "$output") || return 1
+    assert_contains first_run_reports_attested_mismatch \
+        'Release pruning refused: attested frontend does not match the committed release' \
+        <(printf '%s\n' "$output") || return 1
     assert_file_exists first_run_preserves_serving_tree "$RELEASES_DIR/$serving" || return 1
 
     mkdir -p "$RELEASES_DIR/$third_extra" "$RELEASES_DIR/$fourth_extra"
@@ -427,7 +445,9 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     output="$(prune_cycle 2>&1)"
     status=$?
     assert_status second_run_refuses_uncertain_serving_state 1 "$status" || return 1
-    assert_contains second_run_reports_refusal 'Release pruning refused' <(printf '%s\n' "$output") || return 1
+    assert_contains second_run_reports_attested_mismatch \
+        'Release pruning refused: attested frontend does not match the committed release' \
+        <(printf '%s\n' "$output") || return 1
     assert_file_exists second_run_preserves_serving_tree "$RELEASES_DIR/$serving" || return 1
     assert_file_exists refused_run_does_not_partially_prune "$RELEASES_DIR/$first_extra" || return 1
 
@@ -437,6 +457,8 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
         exec sleep 300
     ) &
     orphan_pid=$!
+    mkdir -p "$mock_proc_root/$orphan_pid"
+    ln -s "$RELEASES_DIR/$first_extra" "$mock_proc_root/$orphan_pid/cwd"
     printf '%s\n' "$serving_pid" "$orphan_pid" \
         > "$mock_cgroup_root$mock_control_group/cgroup.procs"
     trap 'kill "$serving_pid" "$orphan_pid" 2>/dev/null || true; wait "$serving_pid" "$orphan_pid" 2>/dev/null || true' EXIT
@@ -447,6 +469,8 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
     assert_file_exists detached_process_tree_preserved "$RELEASES_DIR/$first_extra" || return 1
     kill "$orphan_pid" || return 1
     wait "$orphan_pid" 2>/dev/null || true
+    rm -rf "$mock_proc_root/${orphan_pid:?}"
+    printf '%s\n' "$serving_pid" > "$mock_cgroup_root$mock_control_group/cgroup.procs"
     trap 'kill "$serving_pid" 2>/dev/null || true; wait "$serving_pid" 2>/dev/null || true' EXIT
 
     prune_cycle >/dev/null 2>&1
@@ -457,7 +481,7 @@ case_consecutive_prunes_preserve_recorded_serving_release() (
 
 case_prune_refuses_unknown_deploy_process_state() (
     local root="$SANDBOX/prune-unknown-process" deployed rollback candidate sha serving_pid mock_unit_pid
-    local fake_proc fake_cgroup unknown_pid status
+    local fake_proc fake_cgroup unknown_pid status output
     deployed=5656565656565656565656565656565656565656
     rollback=5757575757575757575757575757575757575757
     candidate=5858585858585858585858585858585858585858
@@ -502,9 +526,12 @@ case_prune_refuses_unknown_deploy_process_state() (
     release_tree_in_use "$RELEASES_DIR/$candidate" /test-frontend
     status=$?
     assert_status unreadable_deploy_process_is_indeterminate 2 "$status" || return 1
-    prune_releases >/dev/null 2>&1
+    output="$(prune_releases 2>&1)"
     status=$?
     assert_status unknown_deploy_process_refuses_prune 1 "$status" || return 1
+    assert_contains unknown_process_reports_indeterminate_candidate \
+        "Release pruning refused: could not resolve candidate $candidate" \
+        <(printf '%s\n' "$output") || return 1
     assert_file_exists unknown_process_preserves_candidate "$RELEASES_DIR/$candidate" || return 1
 )
 
