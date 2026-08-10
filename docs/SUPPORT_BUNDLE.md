@@ -24,13 +24,14 @@ order, under what deployment posture*. It never answers *what the record said*.
 | `migrations.json` | Flyway history: version, description, success, installed-on. |
 | `audit-slice.csv` | The audit events for the requested window, organization-plane always, workspace record events only under an entity filter. |
 | `client-errors.json` | Redacted client-error metadata: id, workspace id, client-asserted correlation HMAC, closed-vocabulary route template, and report time. |
+| `journal-slice.jsonl` | Optional operator-side projection of dedicated tenant request-completion events. It uses the same organization-scoped disclosure-HMAC derivation as current audit and client-error rows, never the raw client assertion. Present only when `collect.sh --include-journal` succeeds. |
 | `job-runs.json` | Not produced in this release — see [Declared omissions](#declared-omissions). |
 
 ### Filters
 
 | Parameter | Contract |
 |---|---|
-| `correlationId` | Server-side lookup input. The raw client assertion is never written into a new audit/client-error row or returned in the bundle — see [Request ids](#request-ids). |
+| `correlationId` | Raw, client-asserted collection-time lookup input. The backend matches its storage-domain HMAC (plus legacy raw rows), returns only the disclosure-domain HMAC, and never matches or aliases `serverMintedRequestId`. The journal projector receives that disclosure HMAC from the verified manifest and never serializes the raw value. See [Request ids](#request-ids). |
 | `entityType` + `entityId` | Legal only together. Unlocks workspace record events for that one record. |
 | `since` | Defaults to 7 days before generation; 30 days is the maximum. Older or future values are rejected. |
 
@@ -41,9 +42,14 @@ When a source is unavailable or cannot be proven safe, the bundle **says so** in
 
 | Omission | Meaning |
 |---|---|
+| `readiness.json`, `config.json`, `migrations.json`, `audit-slice.csv`, or `client-errors.json`: `source_failed` | That backend source failed. The corresponding file is absent; slice counts are `null` when their source failed. |
 | `job-runs.json: job_run_not_available` | This deployment predates the job-run table. |
 
-An absent file therefore never means "no problem found". It means "this source
+The optional `journal-slice.jsonl` is different: when journal collection was not requested, the file
+is absent and `journalSlice` is missing or `null`, rather than declared as an omission. Once it is
+requested, any journal-stage failure exits `68` and publishes no archive.
+
+An absent required backend file therefore never means "no problem found". It means "this source
 was not collected, and here is why".
 
 ## What is never collected
@@ -64,7 +70,7 @@ may contain:
 - client error messages, framework digests, or stack traces;
 - job-run `detail` payloads;
 - personal names, email addresses, or any record field values;
-- raw journald messages or stack traces (no log content is collected at all);
+- raw journald messages, log messages, exception text, or stack traces;
 - IP addresses, user agents, or session identifiers.
 
 ## Redaction contract
@@ -147,16 +153,23 @@ cannot safely be inferred from syntax.
 
 - `serverMintedRequestId` is the unchanged, non-spoofable `audit_log.request_id`. It groups audit
   events emitted during one server request and remains the trustworthy audit pivot.
-- `untrustedClientAssertedCorrelationHmac` is an organization-scoped, domain-separated HMAC derived from the
-  client-settable `X-Correlation-Id`. It remains useful for joining bundle rows without disclosing
-  the raw caller value and is still not proof that two requests share an origin.
+- `untrustedClientAssertedCorrelationHmac` is an organization-scoped, domain-separated HMAC derived
+  from the client-settable `X-Correlation-Id`. It remains useful for joining bundle rows without
+  disclosing the raw caller value and is still not proof that two requests share an origin.
 
 The server accepts the raw `correlationId` only as a lookup input, applies the same storage-domain
 HMAC, and matches both new pseudonymized rows and legacy raw rows. The bundle carries only a
-separately domain-separated, organization-scoped disclosure HMAC; the manifest never repeats the raw input. The filter
-never changes or aliases the server-minted audit id. Organization and workspace predicates are
-applied independently, so choosing a value used in another tenant cannot pull that tenant's row
-into the bundle.
+separately domain-separated, organization-scoped disclosure HMAC in its backend-produced audit and
+client-error entries; the manifest never repeats the raw input. The filter never changes or aliases
+the server-minted audit id. Organization and workspace predicates are applied independently, so
+choosing a value used in another tenant cannot pull that tenant's row into the bundle.
+
+The optional journal projection uses the same
+`untrustedClientAssertedCorrelationHmac` representation. The dedicated completion event replaces
+the raw MDC value with the organization-scoped disclosure HMAC before it is written, and the
+collector checks the exact organization integer before reading or comparing it. The HMAC remains
+only a secondary lookup aid within that already scoped projection, never a tenant boundary, proof
+of request identity, or substitute for `serverMintedRequestId`.
 
 The client-correlation lookup column deliberately stays outside the existing audit-row HMAC payload so old
 and new binaries can verify the same chain during a rolling deployment or rollback. It is not
@@ -174,29 +187,46 @@ The audit and client-error slices are capped, and a saturated window is never si
 indistinguishable from a complete one. Each query asks for one row beyond its cap and never emits
 the extra row. The manifest records `auditSliceRowCount`, `auditSliceTruncated`,
 `auditSliceLimit`, `clientErrorSliceRowCount`, `clientErrorSliceTruncated`, and
-`clientErrorSliceLimit`. When truncation is reported, narrow `since` or add an entity filter and
-collect again.
+`clientErrorSliceLimit`. Narrow `since` for either slice. An entity filter narrows only the audit
+slice; use a collection-time correlation filter to narrow both audit and client-error rows.
 
 A request need not emit an audit row, and a client-asserted id is not authoritative. An empty audit
 slice under a correlation filter therefore means "no permitted audit rows carried this untrusted
 value", not "nothing happened". The manifest records `auditSliceInconclusive: true` for exactly
 that case so an empty slice is not misread as evidence of absence.
 
-### Why there is no journal slice
+### Optional journal slice
 
-The backend never reads logs from disk, and the operator tooling no longer collects them either.
+The backend never reads logs from disk. An operator on the deployment host can opt in to a bounded
+journal projection with `collect.sh --include-journal`; the downloaded backend bundle is verified
+first, then the collector appends `journal-slice.jsonl`, updates the manifest inventory, repacks,
+and verifies the finished archive before publishing it.
 
-A systemd unit's journal cannot be scoped to one organization: on a multi-tenant unit, collecting
-a time window would append other tenants' correlation ids, request paths, statuses, and event
-classes into an artifact designed to travel to support. A filter that cannot be proven exact is
-not a filter, and a bundle that silently mixes tenants is worse than one with no log slice at all.
+The appended manifest's `journalSlice` object records the unit, organization id, organization
+discriminator, projection version, and redactor version. It does not add journal row counts or a
+truncation flag; the closed projection instead fails if it exceeds its fixed input or row bounds.
 
-It was ineffective as well as unsafe. In the production logging configuration Spring writes ECS
-JSON to the console and journald stores that record in `MESSAGE`, so nothing emits the native
-structured fields the projection read.
+This is not a general log export. `TenantResolutionInterceptor` emits one dedicated `INFO`
+completion event only for explicitly allowlisted current-tenant controllers. Its numeric
+`connexOrganizationId` comes from the server-resolved workspace membership and tenant context,
+not a copied header or route parameter; any requested workspace is membership-validated before
+the server looks up its organization. The request path is Spring's matched route template, never
+the raw URI or query string. Requests without a resolved organization, async and background work,
+pre-auth traffic, and handlers with explicit organization or workspace targets are omitted rather
+than guessed.
 
-Re-introducing it requires a trustworthy per-record organization discriminator to filter on
-exactly. Until then, correlate against the deployment's own logs directly.
+Production journald stores Spring's ECS JSON record inside `MESSAGE`, so the collector parses that
+string with recursive duplicate-key rejection. It checks the organization integer exactly before
+reading any projectable field, then constructs a new object containing only timestamp, level,
+logger, `untrustedClientAssertedCorrelationHmac`, method, redacted route template, status, and fixed
+event class. Unknown ECS keys, raw `MESSAGE`, messages, stack traces, headers, hosts, and query
+strings are never copied. A missing, malformed, ambiguous, or other-organization discriminator drops
+the record. Any failure of journal collection, projection, repack, or pre-publication post-repack
+verification aborts publication with exit code `68`.
+
+Because the marker is deliberately narrow, absence from the slice is not evidence that no request
+occurred. For client-error digests, messages, and stacks, and for non-allowlisted handlers, use the
+deployment's own logs locally.
 
 ## Access control
 
@@ -228,12 +258,13 @@ the async writer, monotonic deadline, and cancellation machinery that the tenant
 for unbounded workspace data — and an async writer would run on a thread where the tenant routing
 and security context the queries depend on are not installed.
 
-The size is bounded by construction. The audit slice dominates it and is capped at 10,000 rows of
-bounded columns — roughly 300 bytes each, so about 3 MB uncompressed before compression, with the
-other entries measured in kilobytes. Assembly refuses to exceed a 64 MB uncompressed ceiling, checked **before** each entry is added
-rather than after, and a 30-second wall-clock budget checked between sources. Both fail closed
-with `413` and a message telling the operator to narrow `since` or add an entity filter, rather
-than returning a bundle that looks complete but is not.
+The size is bounded by construction. The backend caps both the audit and client-error slices at
+10,000 rows, and the optional journal projector caps its output at 50,000 rows. Backend assembly
+refuses to exceed a 64 MB uncompressed ceiling, checked **before** each entry is added rather than
+after, and a 30-second wall-clock budget checked between sources. Both fail closed with `413` and a
+message telling the operator to narrow `since` or add an entity filter, rather than returning a
+bundle that looks complete but is not. The journal append independently rechecks the same 64 MB
+ceiling and fails with `68` before publication if it would cross it.
 
 The two collection queries additionally carry a 20-second **statement** timeout, so a pathological
 query is cancelled at the database rather than merely noticed afterwards — the wall-clock budget
@@ -268,7 +299,9 @@ and no SSH.
        --base-url https://connex.example.com \
        --org-id 3 --cookie-file /etc/connex-support/cookies.txt \
        --workspace-id 7 --entity-type person --entity-id 412 \
-       --since 2026-07-24T05:00:00Z --output /var/tmp/bundle.zip
+       --since 2026-07-24T05:00:00Z \
+       --include-journal --journal-unit connex-backend.service \
+       --output /var/tmp/bundle.zip
    ```
 
    The bundle is verified against its manifest before it is published.
@@ -312,6 +345,12 @@ Treat a match on `untrustedClientAssertedCorrelationHmac` as a lookup aid, never
 identity. Use `serverMintedRequestId` for the trustworthy within-audit pivot, and retain the entity,
 workspace, organization, and time predicates when answering the ticket.
 
+The optional journal slice uses the same `untrustedClientAssertedCorrelationHmac` field and
+derivation as current audit and client-error rows, so those rows join on the disclosed value. A
+correlation-filtered slice normalizes matched legacy rows to that value; unfiltered legacy rows
+remain independently pseudonymized. The HMAC still proves neither request identity nor a link to
+`serverMintedRequestId`.
+
 A framework `Reference:` can still help a deployment operator find the local structured error
 report, but it is not exported because the server cannot prove the caller did not choose it.
 
@@ -326,10 +365,8 @@ report, but it is not exported because the server cannot prove the caller did no
 | 65 | Authentication, organization authorization, step-up failure, or a `404` from the endpoint. |
 | 66 | API transport failure, including `400`, `429`, other `5xx`, and any non-2xx that is not an authorization outcome. |
 | 67 | Bundle integrity: unreadable or missing archive, ZIP structure, manifest schema, inventory coverage, byte length, or SHA-256 mismatch. |
-| 69 | Reader rendering or filtering failure. |
-
-`68` is unallocated: it belonged to the removed journal-collection step and is left free so the
-other codes stay stable for existing automation.
+| 68 | Optional journal collection, closed projection, repack, or pre-publication post-repack verification failure. No output archive is published. |
+| 69 | Reader rendering failure. |
 
 Note that `EXIT_INTEGRITY` is `67` here while `deploy/backup` uses `69` for its own integrity
 class; the two catalogs are independent and both export their constants, so do not source the two

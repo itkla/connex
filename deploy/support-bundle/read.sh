@@ -14,7 +14,7 @@
 # recreate the facts the bundle reports; see README.md.
 #
 # Exit codes: 64 usage/configuration/dependency, 67 bundle integrity,
-# 69 rendering or filtering failure.
+# 69 rendering failure.
 #
 # Usage: deploy/support-bundle/read.sh --archive PATH [--section SECTION]
 
@@ -54,7 +54,7 @@ support_bundle_parse_arguments() {
         return "$EXIT_USAGE"
     fi
     case "$SECTION" in
-        all|manifest|readiness|config|migrations|job-runs|client-errors|audit)
+        all|manifest|readiness|config|migrations|job-runs|client-errors|audit|journal)
             ;;
         *)
             support_bundle_log error config_error reason invalid_section section "$SECTION"
@@ -107,7 +107,7 @@ support_bundle_render_manifest() {
          auditSliceIdentifiers, auditSliceCorrelationFilterField,
          auditSliceRowCount, auditSliceTruncated, auditSliceLimit, auditSliceInconclusive,
          clientErrorSliceRowCount, clientErrorSliceTruncated, clientErrorSliceLimit,
-         omissions}' "$manifest" \
+         omissions, journalSlice}' "$manifest" \
         | support_bundle_sanitize_output || return "$EXIT_READ"
     support_bundle_heading "Inventory (verified)"
     jq -r '.files[] | "\(.path)\t\(.byteLength) bytes\t\(.sha256[0:16])..."' "$manifest" \
@@ -120,6 +120,30 @@ support_bundle_render_manifest() {
         jq -r '.omissions | to_entries[] | "\(.key): \(.value)"' "$manifest" \
             | support_bundle_sanitize_output || return "$EXIT_READ"
     fi
+}
+
+support_bundle_render_journal() {
+    local directory="$1"
+    local slice="$directory/journal-slice.jsonl"
+    if [ ! -f "$slice" ] || [ -L "$slice" ]; then
+        return 0
+    fi
+    support_bundle_heading "Journal slice"
+    local rows
+    if ! rows="$(jq -r \
+        '[.timestamp, .level, .logger, .untrustedClientAssertedCorrelationHmac, .method, .path, (.status | tostring), .eventClass] | @tsv' \
+        "$slice")"; then
+        support_bundle_log error render_failed entry journal-slice.jsonl
+        return "$EXIT_READ"
+    fi
+    {
+        printf 'timestamp\tlevel\tlogger\tuntrustedClientAssertedCorrelationHmac\tmethod\tpath\tstatus\teventClass\n'
+        if [ -n "$rows" ]; then
+            printf '%s\n' "$rows"
+        else
+            printf '(no matching records)\n'
+        fi
+    } | support_bundle_sanitize_output | column -t -s $'\t' || return "$EXIT_READ"
 }
 
 support_bundle_render_audit() {
@@ -184,6 +208,9 @@ main() {
         fi
         if [ "$exit_code" -eq 0 ] && support_bundle_section_wanted audit; then
             support_bundle_render_audit "$WORK_DIR" || exit_code=$?
+        fi
+        if [ "$exit_code" -eq 0 ] && support_bundle_section_wanted journal; then
+            support_bundle_render_journal "$WORK_DIR" || exit_code=$?
         fi
     } || exit_code=$?
 

@@ -526,9 +526,22 @@ user-data-bearing lines do not belong in an artefact sent to support.
 support bundle from `GET /api/orgs/{orgId}/support-bundle` and hand it to a support engineer, so a
 ticket can be diagnosed without database or SSH access. The bundle carries readiness, allowlisted
 configuration, migration history, redacted client-error metadata, and a windowed audit slice — and
-never carries secrets, hosts, record values, or personal names. The audit slice carries both a
-server-minted request id and an unmistakably labelled HMAC of the client-asserted correlation id;
-`SUPPORT_BUNDLE.md` explains the correlation boundary. Collect and read it with
+never carries secrets, hosts, record values, or personal names. The audit slice labels its
+non-spoofable `serverMintedRequestId` separately from
+`untrustedClientAssertedCorrelationHmac`, which is only an organization-scoped lookup aid and never
+proof of request identity.
+
+On a systemd deployment, the host operator can add the optional closed-field request-completion
+slice with `collect.sh --include-journal --journal-unit <unit>`. Those records are filtered first by
+the server-resolved organization integer; missing, malformed, ambiguous, and other-organization
+records are dropped, and raw journald `MESSAGE`, exception text, stacks, headers, hosts, and query
+strings are never copied. The dedicated record and bundle carry only
+`untrustedClientAssertedCorrelationHmac`, using the same organization-scoped disclosure-HMAC
+derivation as current audit and client-error rows, never the raw caller value. It is only a secondary
+lookup aid after organization scoping, not a substitute for `serverMintedRequestId`. Async request
+completions are omitted because tenant resolution can change before redispatch. A journal collection,
+projection, repack, or pre-publication post-repack verification failure uses exit code `68` and
+publishes no archive. `SUPPORT_BUNDLE.md` explains the correlation boundary. Collect and read it with
 [`deploy/support-bundle/`](../deploy/support-bundle/README.md); the full contents, redaction
 contract, and a worked "a contact vanished" investigation are in
 [`SUPPORT_BUNDLE.md`](SUPPORT_BUNDLE.md).

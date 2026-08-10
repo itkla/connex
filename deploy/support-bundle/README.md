@@ -7,23 +7,23 @@ The bundle itself is produced by the backend at
 `GET /api/orgs/{orgId}/support-bundle`. What it contains, what it never
 contains, and the full redaction contract are documented in
 [`docs/SUPPORT_BUNDLE.md`](../../docs/SUPPORT_BUNDLE.md). Read that first — these
-scripts are transport and verification only, and they cannot widen what a bundle
-holds.
+scripts download and verify the backend bundle; `collect.sh` can also append the
+strictly bounded journal projection documented below.
 
 ## Commands
 
 | Script | Purpose |
 |---|---|
 | `collect.sh` | Downloads a bundle for one organization, verifies it, and publishes it atomically. Optionally appends a closed-field journal projection. |
-| `read.sh` | Verifies a bundle's manifest and hashes, then renders it and filters client errors plus the explicitly untrusted client-asserted audit column by correlation ID. |
+| `read.sh` | Verifies a bundle's manifest and hashes, then renders the already-filtered redacted contents. |
 | `support-bundle-lib.sh` | Shared logging, validation, and integrity primitives. Not run directly. |
 | `tests/run-tests.sh` | Offline regression tests. No network, backend, Docker, root, or systemd. |
 
 ## Requirements
 
-`curl`, `jq`, `unzip`, `zipinfo`, `sha256sum`, `column`, and `python3` (used to parse CSV
-correctly, so a comma inside a quoted field cannot shift values under the wrong header). Missing
-dependencies exit 64.
+`curl`, `jq`, `unzip`, `zipinfo`, `sha256sum`, `column`, and `python3` (used for closed JSON and CSV
+parsing). Journal collection additionally requires `journalctl` and `zip`. Missing dependencies
+exit 64.
 
 ## Authentication
 
@@ -70,6 +70,19 @@ deploy/support-bundle/collect.sh \
     --output /var/tmp/bundle.zip
 ```
 
+On the deployment host, add the optional organization-scoped journal projection:
+
+```bash
+deploy/support-bundle/collect.sh \
+    --base-url https://connex.example.com \
+    --org-id 3 \
+    --cookie-file /etc/connex-support/cookies.txt \
+    --since 2026-07-24T05:00:00Z \
+    --include-journal \
+    --journal-unit connex-backend.service \
+    --output /var/tmp/bundle.zip
+```
+
 `--entity-type` and `--entity-id` are only legal together, and they require
 `--workspace-id`. That trio is what unlocks workspace record events; the backend
 additionally requires `AUDIT_READ` in the resolved workspace, so organization
@@ -81,13 +94,17 @@ Read a bundle:
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section audit
 deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section client-errors
+deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip --section journal
 ```
 
 Apply `--correlation-id` to `collect.sh`, not `read.sh`. The server transforms that lookup input and
-the archive contains only the organization-scoped `untrustedClientAssertedCorrelationHmac`; the raw client assertion never leaves
-the deployment. Use `serverMintedRequestId` for the non-spoofable within-audit pivot. Framework
-digests are omitted because their shape does not establish their provenance; use a quoted digest
-only with deployment-local structured logs.
+the archive contains only the organization-scoped `untrustedClientAssertedCorrelationHmac`; the raw
+client assertion never leaves the deployment. The same disclosure HMAC joins current audit,
+client-error, and optional journal rows; a correlation-filtered slice also normalizes matched legacy
+rows to that value. Unfiltered legacy rows remain independently pseudonymized. Use
+`serverMintedRequestId` for the non-spoofable within-audit pivot. Framework digests are omitted
+because their shape does not establish their provenance; use a quoted digest only with
+deployment-local structured logs.
 
 Nothing is rendered until the archive has passed verification in full: safe
 entry names, every inventory entry matched to its recorded byte length and
@@ -95,21 +112,29 @@ SHA-256, and every extracted file present in the inventory. A bundle whose
 manifest is missing — the shape a truncated backend stream produces — is refused
 rather than partially displayed.
 
-## Why there is no journal slice
+## Optional journal slice
 
-An earlier revision could append a projection of the systemd journal. It was removed, because a
-unit's journal cannot be scoped to one organization from here: on a multi-tenant backend unit,
-collecting the time window would append other tenants' correlation ids, request paths, statuses,
-and event classes to an artifact built specifically to leave the deployment. That is the exact
-failure this feature exists to prevent.
+`--include-journal` is a closed projection, not a general log export. The backend emits a dedicated
+request-completion event only for allowlisted current-tenant handlers. Its
+`connexOrganizationId` is derived from the authenticated, server-resolved workspace membership;
+the matched Spring route template replaces the raw URI. Unauthenticated traffic, background work,
+async requests, and handlers whose explicit organization or workspace target could differ from the
+active context do not emit this event.
 
-It was also ineffective. In the production logging configuration Spring writes ECS JSON to the
-console and journald stores that whole record in `MESSAGE`; nothing emits the native structured
-fields the projection read, so every projected record would have been empty anyway.
+Journald stores Spring's ECS JSON inside `MESSAGE`. The collector rejects duplicate JSON keys,
+requires the organization discriminator to be an exact positive integer match before inspecting
+the rest of the record, and then constructs a fresh eight-field projection: timestamp, level,
+logger, `untrustedClientAssertedCorrelationHmac`, method, redacted route template, status, and fixed
+event class. It never copies the raw caller correlation value, raw `MESSAGE`, messages, stacks,
+headers, hosts, query strings, or unknown future fields. Missing, malformed, ambiguous, and
+other-organization records are dropped.
 
-Re-introducing it needs a trustworthy per-record organization discriminator to filter on exactly.
-Until then, correlate against the deployment's own logs directly, as
-[`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) describes.
+The downloaded backend bundle is verified before journal collection. After adding the slice, the collector
+updates the manifest inventory, repacks, and verifies the complete archive again before publishing
+it atomically. Any journal collection, projection, repack, or pre-publication post-repack
+verification failure exits `68` and leaves the requested output unpublished. An empty slice is
+valid and does not prove that no request occurred, because the backend event allowlist is
+deliberately narrow.
 
 ## Exit codes
 
@@ -120,7 +145,8 @@ Until then, correlate against the deployment's own logs directly, as
 | 65 | Authentication, organization authorization, or step-up failure. |
 | 66 | API transport failure, including 400 and 429. |
 | 67 | Bundle integrity: ZIP structure, manifest schema, inventory coverage, or SHA-256 mismatch. |
-| 69 | Reader extraction, rendering, or filtering failure. |
+| 68 | Optional journal collection, projection, repack, or post-repack verification failure. |
+| 69 | Reader rendering failure. |
 
 Every run emits single-line structured events (`ts=… level=… event=… key=value`)
 and one final `support_bundle_collect_summary` or `support_bundle_read_summary`

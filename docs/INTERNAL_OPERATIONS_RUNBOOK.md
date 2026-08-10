@@ -622,8 +622,12 @@ deploy/support-bundle/read.sh --archive /var/tmp/bundle.zip
 ```
 
 The server transforms the raw correlation lookup before comparing it with new HMAC rows and legacy
-raw rows. The bundle and its manifest carry only `untrustedClientAssertedCorrelationHmac`; `read.sh` therefore
-does not accept a raw offline filter. Use `serverMintedRequestId` only as the trustworthy
+raw rows. The backend-produced audit and client-error entries, plus the manifest filter, carry only
+`untrustedClientAssertedCorrelationHmac`; `read.sh` therefore does not accept a raw offline filter.
+The optional journal slice uses the same disclosure-HMAC derivation as current rows: the dedicated
+event removes the raw MDC value before it is written, and the collector admits the HMAC only after
+exact organization scoping. Correlation-filtered legacy rows normalize to that value; unfiltered
+legacy rows remain independently pseudonymized. Use `serverMintedRequestId` only as the trustworthy
 within-audit request pivot. A quoted framework digest can be searched only in deployment-local logs;
 those user-data-bearing lines must not be copied into a support artefact.
 
@@ -731,23 +735,30 @@ not truncations, so a `413` means the request was too broad — shorten `since` 
 The statement timeout is enforced at the database, so a runaway collection query is cancelled rather
 than merely noticed.
 
-**There is no journal or log slice, deliberately.** A systemd unit's journal cannot be scoped to one
-tenant, so journal collection was removed rather than shipped unsafe; the requirements for a correct
-implementation are tracked in [#970](https://github.com/itkla/connex/issues/970). **Do not improvise
-one by collecting logs ad hoc** — deployment logs contain tenant-identifying data, and that is exactly
-the collection the bundle refuses to make. If you genuinely need log content, agree the scope in
-writing first.
+**Use only the optional closed journal projection; never improvise a log export.** On the deployment
+host, `collect.sh --include-journal --journal-unit <unit>` admits only the backend's dedicated
+current-tenant request-completion event, checks the server-resolved organization integer before any
+secondary correlation filter, and constructs a fresh eight-field record. It never copies raw
+`MESSAGE`, messages, stacks, headers, hosts, query strings, or unknown fields. Missing, malformed,
+ambiguous, other-tenant, background, pre-auth, and non-allowlisted records are omitted. Exit `68`
+means the journal step failed and no output archive was published. Async request completions are
+also omitted because tenant resolution can change before redispatch.
 
 **The two audit identifiers have different trust.** `audit-slice.csv` carries
 `serverMintedRequestId`, the non-spoofable within-audit pivot, and
-`untrustedClientAssertedCorrelationHmac`, an organization-scoped, domain-separated HMAC of the client-settable value. The manifest
-repeats those provenance labels and never carries the raw assertion. A digest from a broken page is
-not exported because the service cannot authenticate its framework provenance.
+`untrustedClientAssertedCorrelationHmac`, an organization-scoped, domain-separated HMAC of the
+client-settable value. The manifest repeats those provenance labels and never carries the raw
+assertion. The optional journal slice uses the same derivation as current and correlation-filtered
+legacy rows after exact organization scoping; it is never proof of request identity or a substitute
+for `serverMintedRequestId`. A digest from a broken page is not exported because the service cannot
+authenticate its framework provenance.
 
 The audit slice carries `actorId` only and no display names, marks truncation explicitly
-(`auditSliceTruncated` with a row count), and ships a declared-omissions map so a missing file is
-visibly a decision rather than a gap. `client-errors.json` now ships its closed metadata projection
-or declares `source_failed`; it never contains digest, message, detail, or stack.
+(`auditSliceTruncated` with a row count), and ships a declared-omissions map so a missing required
+backend file is visibly a decision rather than a gap. `client-errors.json` now ships its closed
+metadata projection or declares `source_failed`; it never contains digest, message, detail, or
+stack. An absent journal slice instead means it was not requested; a requested journal-stage failure
+exits `68` and publishes no archive.
 
 ## Access boundaries
 
