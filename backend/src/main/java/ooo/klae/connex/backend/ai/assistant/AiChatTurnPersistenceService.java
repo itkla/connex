@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
@@ -38,6 +39,7 @@ public class AiChatTurnPersistenceService {
     private static final String RESOLVED = "resolved";
     private static final String TIMED_OUT = "timed_out";
     private static final String GENERATION_TIMEOUT = "generation_timeout";
+    private static final int RESOLVE_TIMEOUT_SECONDS = 30;
     private static final String USER = "user";
     private static final String ASSISTANT = "assistant";
     private static final String PROPOSED = "proposed";
@@ -182,14 +184,23 @@ public class AiChatTurnPersistenceService {
                 resultJson, turn.userId()) == 1;
     }
 
-    /** Atomically appends the demasked assistant answer and resolves the locked turn. */
-    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    /**
+     * Atomically appends the demasked assistant answer and resolves the locked turn.
+     * Bounded by an explicit timeout because this transaction retains the restriction-epoch read
+     * fence through completion; an unbounded hold would delay an APPI cease-of-use mutation for
+     * every workspace sharing the fence stripe.
+     */
+    @Transactional(
+        isolation = Isolation.READ_COMMITTED,
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = RESOLVE_TIMEOUT_SECONDS)
     public boolean resolve(
             AiChatQueuedTurn turn,
             String content,
             String structuredJson,
             int inputTokens,
             int outputTokens) {
+        requireActiveTransaction();
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
         AiChatMessage message = new AiChatMessage();
@@ -227,6 +238,14 @@ public class AiChatTurnPersistenceService {
             String reason) {
         return chatMapper.updateTurnTerminal(
                 workspaceId, sessionId, turnId, status, reason, null, null) == 1;
+    }
+
+    private static void requireActiveTransaction() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException(
+                "Assistant answer persistence requires an active transaction");
+        }
     }
 
     private void requireCurrentActor(AiChatQueuedTurn turn) {
