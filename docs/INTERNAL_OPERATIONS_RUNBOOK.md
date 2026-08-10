@@ -728,17 +728,20 @@ not truncations, so a `413` means the request was too broad — shorten `since` 
 The statement timeout is enforced at the database, so a runaway collection query is cancelled rather
 than merely noticed.
 
-**There is no journal or log slice, deliberately.** A systemd unit's journal cannot be scoped to one
-tenant, so journal collection was removed rather than shipped unsafe; the requirements for a correct
-implementation are tracked in [#970](https://github.com/itkla/connex/issues/970). **Do not improvise
-one by collecting logs ad hoc** — deployment logs contain tenant-identifying data, and that is exactly
-the collection the bundle refuses to make. If you genuinely need log content, agree the scope in
-writing first.
+**Use only the optional closed journal projection; never improvise a log export.** On the deployment
+host, `collect.sh --include-journal --journal-unit <unit>` admits only the backend's dedicated
+current-tenant request-completion event, checks the server-resolved organization integer before any
+secondary correlation filter, and constructs a fresh eight-field record. It never copies raw
+`MESSAGE`, messages, stacks, headers, hosts, query strings, or unknown fields. Missing, malformed,
+ambiguous, other-tenant, background, pre-auth, and non-allowlisted records are omitted. Exit `68`
+means the journal step failed and no output archive was published. Async request completions are
+also omitted because tenant resolution can change before redispatch.
 
 **The bundle's request id is not the id your user quoted.** `audit-slice.csv` carries a
 **server-minted** `requestId`, deliberately distinct from the `X-Correlation-Id` a caller can supply.
-Do not expect a user's reference to appear in a bundle; use the bundle for state and the deployment's
-own logs for that lookup.
+Do not expect a user's reference to appear in the audit slice. If the optional journal slice was
+included, the user-quoted id can narrow its allowlisted completion records only after tenant
+scoping; otherwise use the bundle for state and the deployment's own logs for that lookup.
 
 The audit slice carries `actorId` only and no display names, marks truncation explicitly
 (`auditSliceTruncated` with a row count), and ships a declared-omissions map so a missing file is

@@ -3,16 +3,24 @@ package ooo.klae.connex.backend.tenant;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import java.util.Set;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
+import org.springframework.web.servlet.HandlerMapping;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -50,10 +58,18 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Component
 @RequiredArgsConstructor
 public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
+    static final String ASYNC_JOURNAL_EXCLUDED_ATTRIBUTE =
+        TenantResolutionInterceptor.class.getName() + ".ASYNC_JOURNAL_EXCLUDED";
+    static final String ORGANIZATION_ID_ATTRIBUTE = TenantResolutionInterceptor.class.getName() + ".ORGANIZATION_ID";
+    static final String JOURNAL_EVENT_CLASS = "http.request.completed";
+
     private static final Pattern WORKSPACE_LIFECYCLE_PATH = Pattern.compile(
         "/api/orgs/\\d+/workspaces/\\d+");
     private static final Pattern ORGANIZATION_LIFECYCLE_PATH = Pattern.compile(
         "/api/orgs/\\d+");
+    private static final Set<String> JOURNAL_METHODS = Set.of(
+        "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT");
+    private static final Logger log = LoggerFactory.getLogger(TenantResolutionInterceptor.class);
 
     private final WorkspaceService workspaceService;
     private final TenantContext tenantContext;
@@ -68,6 +84,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        request.removeAttribute(ORGANIZATION_ID_ATTRIBUTE);
         tenantContext.clear();
         if (isLifecycleRequest(request)) {
             return true;
@@ -105,6 +122,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         int orgId = workspaceService.getOrgId(candidate);
         String catalog = tenantCatalogResolver.resolveCatalog(orgId);
         tenantContext.set(candidate, orgId, user.getId(), role, catalog);
+        request.setAttribute(ORGANIZATION_ID_ATTRIBUTE, orgId);
         return true;
     }
 
@@ -122,7 +140,11 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
-        tenantContext.clear();
+        try {
+            emitJournalRecord(request, response, handler);
+        } finally {
+            tenantContext.clear();
+        }
     }
 
     /**
@@ -139,7 +161,41 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     @Override
     public void afterConcurrentHandlingStarted(
             HttpServletRequest request, HttpServletResponse response, Object handler) {
+        request.setAttribute(ASYNC_JOURNAL_EXCLUDED_ATTRIBUTE, Boolean.TRUE);
         tenantContext.clear();
+    }
+
+    private static void emitJournalRecord(
+            HttpServletRequest request, HttpServletResponse response, Object handler) {
+        if (!(handler instanceof HandlerMethod handlerMethod)
+                || !journalAttributable(handlerMethod)
+                || Boolean.TRUE.equals(request.getAttribute(ASYNC_JOURNAL_EXCLUDED_ATTRIBUTE))
+                || !(request.getAttribute(ORGANIZATION_ID_ATTRIBUTE) instanceof Integer orgId)
+                || orgId <= 0
+                || !(request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE) instanceof String path)
+                || path.isBlank()
+                || path.length() > 512
+                || !JOURNAL_METHODS.contains(request.getMethod())
+                || response.getStatus() < 100
+                || response.getStatus() > 599) {
+            return;
+        }
+        String correlationId = MDC.get(CorrelationIds.MDC_KEY);
+        if (!CorrelationIds.isValid(correlationId)) {
+            return;
+        }
+        log.atInfo()
+            .addKeyValue("connexOrganizationId", orgId)
+            .addKeyValue("requestMethod", request.getMethod())
+            .addKeyValue("requestPath", path)
+            .addKeyValue("responseStatus", response.getStatus())
+            .addKeyValue("eventClass", JOURNAL_EVENT_CLASS)
+            .log("Tenant request completed");
+    }
+
+    private static boolean journalAttributable(HandlerMethod handler) {
+        return handler.hasMethodAnnotation(TenantJournalAttributable.class)
+            || AnnotatedElementUtils.hasAnnotation(handler.getBeanType(), TenantJournalAttributable.class);
     }
 
 }

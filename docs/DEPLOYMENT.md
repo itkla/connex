@@ -527,9 +527,17 @@ own logs — that pairing is the support path for deployments Connex does not op
 support bundle from `GET /api/orgs/{orgId}/support-bundle` and hand it to a support engineer, so a
 ticket can be diagnosed without database or SSH access. The bundle carries readiness, allowlisted
 configuration, migration history, and a windowed audit slice — and never carries secrets, hosts,
-record values, or personal names. Note that the audit slice is keyed by a server-minted request
-id, not by the `X-Correlation-Id` a user can quote; the two are deliberately separate and
-`SUPPORT_BUNDLE.md` explains how to pivot. Collect and read it with
+record values, or personal names. On a systemd deployment, the host operator can add the optional
+closed-field request-completion slice with `collect.sh --include-journal --journal-unit <unit>`.
+Those records are filtered first by the server-resolved organization integer; missing, malformed,
+ambiguous, and other-organization records are dropped, and raw journald `MESSAGE`, exception text,
+stacks, headers, hosts, and query strings are never copied. Async request completions are omitted
+because tenant resolution can change before redispatch. A journal collection, projection, repack,
+or pre-publication post-repack verification failure uses exit code `68` and publishes no archive.
+Note that the audit slice is keyed by a server-minted
+request id, not by the `X-Correlation-Id` a user can quote; the two are deliberately separate, while
+the optional journal projection may use the quoted id only as a secondary filter after organization
+scoping. `SUPPORT_BUNDLE.md` explains how to pivot. Collect and read it with
 [`deploy/support-bundle/`](../deploy/support-bundle/README.md); the full contents, redaction
 contract, and a worked "a contact vanished" investigation are in
 [`SUPPORT_BUNDLE.md`](SUPPORT_BUNDLE.md).

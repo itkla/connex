@@ -21,8 +21,11 @@ BUNDLE_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 SANDBOX_PARENT="${CONNEX_SUPPORT_BUNDLE_TEST_ROOT:-/var/tmp/connex-support-bundle-tests}"
 FAILURES=0
 
-if ! command -v jq >/dev/null 2>&1 || ! command -v zip >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
-    printf 'harness error: jq, zip and unzip are required\n' >&2
+if ! command -v jq >/dev/null 2>&1 \
+    || ! command -v python3 >/dev/null 2>&1 \
+    || ! command -v zip >/dev/null 2>&1 \
+    || ! command -v unzip >/dev/null 2>&1; then
+    printf 'harness error: jq, python3, zip and unzip are required\n' >&2
     exit 1
 fi
 
@@ -170,12 +173,11 @@ case_summary_lines() (
 case_exit_code_catalog() (
     # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
-    # 68 is deliberately absent: it belonged to the removed journal-collection step and is left
-    # unallocated so the surrounding codes stay stable for operators' automation.
     assert_equals exit_codes '64
 65
 66
 67
+68
 69' "$(support_bundle_exit_code_catalog)" || return 1
 )
 
@@ -1062,15 +1064,177 @@ case_verify_requires_each_core_entry_present_or_declared() (
     assert_contains core_entry_reason 'reason=required_entry_absent' <(printf '%s\n' "$output") || return 1
 )
 
-case_collect_has_no_journal_option() (
-    if grep -q -- '--include-journal' "$BUNDLE_DIR/collect.sh"; then
-        printf 'the journal option is still present; it cannot be scoped to one organization\n'
+case_journal_projection_filters_organization_before_projection() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    WORK_DIR="$SANDBOX/journal-cross-tenant"
+    JOURNAL_UNIT=connex-backend.service
+    CORRELATION_ID=shared_correlation_123
+    mkdir -p "$WORK_DIR"
+    journalctl() {
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:06.123Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"message":"SENTINEL_RAW_MESSAGE","connexOrganizationId":3,"correlationId":"shared_correlation_123","requestMethod":"GET","requestPath":"/api/persons/{id}","responseStatus":200,"eventClass":"http.request.completed","futureSecret":"SENTINEL_FUTURE_SECRET","error":{"stack_trace":"SENTINEL_STACK_TRACE"}}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:07Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":4,"correlationId":"shared_correlation_123","requestMethod":"DELETE","requestPath":"/api/companies/{id}","responseStatus":204,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:08Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"correlationId":"shared_correlation_123","requestMethod":"GET","requestPath":"/api/deals/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:09Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":"3","correlationId":"shared_correlation_123","requestMethod":"GET","requestPath":"/api/tasks/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:10Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"connexOrganizationId":3,"correlationId":"shared_correlation_123","requestMethod":"GET","requestPath":"/api/notes/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:11Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"correlationId":"shared_correlation_123","requestMethod":"GET","requestPath":"/api/search?email=SENTINEL_QUERY_SECRET","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:12Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"correlationId":"shared_correlation_123","requestMethod":"GET","requestPath":"/api/search#SENTINEL_FRAGMENT_SECRET","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+    }
+    local output="$WORK_DIR/journal-slice.jsonl"
+    local status=0
+    support_bundle_journal_projection \
+        2026-07-31T04:00:00Z 2026-07-31T05:00:00Z 3 "$output" || status=$?
+    assert_status journal_projection_status 0 "$status" || return 1
+    assert_equals journal_projection_count 1 "$(wc -l < "$output")" || return 1
+    assert_contains journal_target_path '"path":"/api/persons/{id}"' "$output" || return 1
+    assert_contains journal_shared_correlation '"correlationId":"shared_correlation_123"' "$output" || return 1
+    assert_absent journal_other_tenant '/api/companies/{id}' "$output" || return 1
+    assert_absent journal_unattributed '/api/deals/{id}' "$output" || return 1
+    assert_absent journal_string_org '/api/tasks/{id}' "$output" || return 1
+    assert_absent journal_duplicate_org '/api/notes/{id}' "$output" || return 1
+    assert_absent journal_raw_message SENTINEL_RAW_MESSAGE "$output" || return 1
+    assert_absent journal_future_field SENTINEL_FUTURE_SECRET "$output" || return 1
+    assert_absent journal_stack_trace SENTINEL_STACK_TRACE "$output" || return 1
+    assert_absent journal_query_string SENTINEL_QUERY_SECRET "$output" || return 1
+    assert_absent journal_fragment SENTINEL_FRAGMENT_SECRET "$output" || return 1
+    assert_absent journal_discriminator connexOrganizationId "$output" || return 1
+    jq -e 'length == 8 and (keys == ["correlationId", "eventClass", "level", "logger", "method", "path", "status", "timestamp"])' \
+        "$output" >/dev/null || return 1
+)
+
+case_journal_append_updates_inventory_and_closed_schema() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    local work="$SANDBOX/journal-append"
+    WORK_DIR="$work/work"
+    JOURNAL_UNIT=connex-backend.service
+    CORRELATION_ID=abcd1234efgh
+    ORG_ID=3
+    mkdir -p "$WORK_DIR"
+    make_bundle "$work/staging" ""
+    journalctl() {
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:06Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"correlationId":"abcd1234efgh","requestMethod":"GET","requestPath":"/api/persons/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+    }
+    local status=0
+    support_bundle_append_journal "$work/staging" >/dev/null || status=$?
+    assert_status journal_append_status 0 "$status" || return 1
+    support_bundle_verify_inventory "$work/staging" >/dev/null || return 1
+    support_bundle_verify_journal_slice "$work/staging" >/dev/null || return 1
+    assert_equals journal_manifest_org 3 \
+        "$(jq -r '.journalSlice.organizationId' "$work/staging/manifest.json")" || return 1
+    assert_equals journal_manifest_discriminator connexOrganizationId \
+        "$(jq -r '.journalSlice.organizationDiscriminator' "$work/staging/manifest.json")" || return 1
+    jq -c '.futureSecret = "SENTINEL_FUTURE_SECRET"' "$work/staging/journal-slice.jsonl" \
+        > "$work/staging/journal.new"
+    mv "$work/staging/journal.new" "$work/staging/journal-slice.jsonl"
+    status=0
+    support_bundle_verify_journal_slice "$work/staging" >/dev/null 2>&1 || status=$?
+    assert_status journal_closed_schema 67 "$status" || return 1
+)
+
+case_journal_collection_failure_uses_exit_68() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    WORK_DIR="$SANDBOX/journal-failure"
+    JOURNAL_UNIT=connex-backend.service
+    CORRELATION_ID=
+    mkdir -p "$WORK_DIR"
+    journalctl() {
         return 1
-    fi
-    local output
-    output="$(bash "$BUNDLE_DIR/collect.sh" --base-url https://connex.example.com --org-id 3 \
-        --cookie-file /dev/null --include-journal 2>&1 || true)"
-    assert_contains journal_option_rejected 'unknown_argument' <(printf '%s\n' "$output") || return 1
+    }
+    local status=0
+    support_bundle_journal_projection \
+        2026-07-31T04:00:00Z 2026-07-31T05:00:00Z 3 "$WORK_DIR/out.jsonl" \
+        >/dev/null 2>&1 || status=$?
+    assert_status journal_failure_exit_code 68 "$status" || return 1
+)
+
+case_collect_accepts_journal_arguments() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    support_bundle_parse_arguments \
+        --base-url https://connex.example.com \
+        --org-id 3 \
+        --cookie-file /secure/cookies.txt \
+        --include-journal \
+        --journal-unit connex@blue.service || return 1
+    assert_equals journal_enabled true "$INCLUDE_JOURNAL" || return 1
+    assert_equals journal_unit connex@blue.service "$JOURNAL_UNIT" || return 1
+)
+
+case_collect_journal_end_to_end() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    local work="$SANDBOX/journal-end-to-end"
+    local backend_archive="$work/backend.zip"
+    local cookie="$work/cookies.txt"
+    local published="$work/published.zip"
+    mkdir -p "$work"
+    make_bundle "$work/backend" "$backend_archive"
+    printf 'session\n' > "$cookie"
+    chmod 0600 "$cookie"
+    curl() {
+        local body="" headers=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --output) body="$2"; shift 2 ;;
+                --dump-header) headers="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        cp "$backend_archive" "$body"
+        printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "$headers"
+        printf '200'
+    }
+    journalctl() {
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:06Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"message":"SENTINEL_RAW_MESSAGE","connexOrganizationId":3,"correlationId":"abcd1234efgh","requestMethod":"GET","requestPath":"/api/persons/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+    }
+
+    local collect_output status=0
+    collect_output="$(
+        main \
+            --base-url https://connex.example.com \
+            --org-id 3 \
+            --cookie-file "$cookie" \
+            --correlation-id abcd1234efgh \
+            --include-journal \
+            --journal-unit connex-backend.service \
+            --output "$published"
+    )" || status=$?
+    assert_status journal_collect_end_to_end 0 "$status" || return 1
+    assert_contains journal_collect_success 'status=success' <(printf '%s\n' "$collect_output") || return 1
+    [ -f "$published" ] || { printf 'journal bundle was not published\n'; return 1; }
+    assert_equals journal_archive_org 3 \
+        "$(unzip -p "$published" manifest.json | jq -r '.journalSlice.organizationId')" || return 1
+
+    local read_output
+    read_output="$(bash "$BUNDLE_DIR/read.sh" \
+        --archive "$published" \
+        --section journal \
+        --correlation-id abcd1234efgh 2>&1)"
+    assert_status journal_read_end_to_end 0 "$?" || return 1
+    assert_contains journal_read_path '/api/persons/{id}' <(printf '%s\n' "$read_output") || return 1
+    assert_absent journal_read_raw_message SENTINEL_RAW_MESSAGE <(printf '%s\n' "$read_output") || return 1
+
+    journalctl() {
+        return 1
+    }
+    local failed="$work/failed.zip"
+    status=0
+    collect_output="$(
+        main \
+            --base-url https://connex.example.com \
+            --org-id 3 \
+            --cookie-file "$cookie" \
+            --correlation-id abcd1234efgh \
+            --include-journal \
+            --journal-unit connex-backend.service \
+            --output "$failed" 2>&1
+    )" || status=$?
+    assert_status journal_collect_failure 68 "$status" || return 1
+    assert_contains journal_collect_failure_summary 'exit_code=68' \
+        <(printf '%s\n' "$collect_output") || return 1
+    [ ! -e "$failed" ] || { printf 'failed journal bundle was published\n'; return 1; }
 )
 
 run_case read_matches_correlation_ids_exactly case_read_matches_correlation_ids_exactly
@@ -1078,7 +1242,11 @@ run_case validate_instant_accepts_fractional_seconds case_validate_instant_accep
 run_case base_url_rejects_query_fragment_and_userinfo case_base_url_rejects_query_fragment_and_userinfo
 run_case verify_requires_the_declared_bundle_entries case_verify_requires_the_declared_bundle_entries
 run_case verify_requires_each_core_entry_present_or_declared case_verify_requires_each_core_entry_present_or_declared
-run_case collect_has_no_journal_option case_collect_has_no_journal_option
+run_case journal_projection_filters_organization_before_projection case_journal_projection_filters_organization_before_projection
+run_case journal_append_updates_inventory_and_closed_schema case_journal_append_updates_inventory_and_closed_schema
+run_case journal_collection_failure_uses_exit_68 case_journal_collection_failure_uses_exit_68
+run_case collect_accepts_journal_arguments case_collect_accepts_journal_arguments
+run_case collect_journal_end_to_end case_collect_journal_end_to_end
 run_case read_parses_quoted_csv_fields case_read_parses_quoted_csv_fields
 run_case extract_refuses_an_oversized_archive case_extract_refuses_an_oversized_archive
 run_case log_escaper_strips_terminal_control_bytes case_log_escaper_strips_terminal_control_bytes

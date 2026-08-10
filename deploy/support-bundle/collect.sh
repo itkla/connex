@@ -10,17 +10,18 @@
 # --cookie-file. The session value is never accepted on the command line, in an
 # environment variable, or in a log field.
 #
-# There is deliberately no journal-collection option. A systemd unit's journal cannot be scoped
-# to one organization from here, so collecting it would append other tenants' activity to an
-# artifact built to leave the deployment. See README.md.
+# With --include-journal the script appends only dedicated, server-attributed request-completion
+# records for the requested organization. It parses Spring's ECS JSON inside journald MESSAGE,
+# filters exactly on the server-owned organization field before projection, and never copies raw
+# messages, stack traces, query strings, headers, hosts, or unknown fields.
 #
 # Exit codes: 64 usage/configuration/dependency, 65 authentication or
-# authorization, 66 API transport, 67 bundle integrity.
+# authorization, 66 API transport, 67 bundle integrity, 68 journal collection.
 #
 # Usage: deploy/support-bundle/collect.sh --base-url URL --org-id ID \
 #            --cookie-file PATH [--output PATH] [--since INSTANT] \
 #            [--correlation-id ID] [--entity-type TYPE --entity-id ID] \
-#            [--workspace-id ID]
+#            [--workspace-id ID] [--include-journal --journal-unit UNIT]
 
 # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/support-bundle-lib.sh"
@@ -34,6 +35,9 @@ CORRELATION_ID=
 ENTITY_TYPE=
 ENTITY_ID=
 WORKSPACE_ID=
+INCLUDE_JOURNAL=false
+JOURNAL_UNIT=connex-backend.service
+JOURNAL_UNIT_SET=false
 
 support_bundle_usage() {
     sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -76,6 +80,15 @@ support_bundle_parse_arguments() {
                 ;;
             --workspace-id)
                 WORKSPACE_ID="${2-}"
+                shift 2 || return "$EXIT_USAGE"
+                ;;
+            --include-journal)
+                INCLUDE_JOURNAL=true
+                shift
+                ;;
+            --journal-unit)
+                JOURNAL_UNIT="${2-}"
+                JOURNAL_UNIT_SET=true
                 shift 2 || return "$EXIT_USAGE"
                 ;;
             --help)
@@ -124,6 +137,17 @@ support_bundle_validate_arguments() {
     if [ -n "$WORKSPACE_ID" ]; then
         support_bundle_validate_positive_integer workspace_id "$WORKSPACE_ID" || return "$EXIT_USAGE"
     fi
+    if [ "$JOURNAL_UNIT_SET" = true ] && [ "$INCLUDE_JOURNAL" != true ]; then
+        support_bundle_log error config_error reason journal_unit_requires_include_journal
+        return "$EXIT_USAGE"
+    fi
+    if [ "$INCLUDE_JOURNAL" = true ]; then
+        if [[ ! "$JOURNAL_UNIT" =~ ^[A-Za-z0-9@._-]+$ ]]; then
+            support_bundle_log error config_error reason invalid_journal_unit unit "$JOURNAL_UNIT"
+            return "$EXIT_USAGE"
+        fi
+        support_bundle_require_commands journalctl zip || return "$EXIT_USAGE"
+    fi
     if [ -z "$OUTPUT" ]; then
         OUTPUT="$PWD/connex-org-${ORG_ID}-support-bundle-$(date -u +%Y%m%dT%H%M%SZ).zip"
     fi
@@ -131,6 +155,216 @@ support_bundle_validate_arguments() {
     if [ -e "$OUTPUT" ]; then
         support_bundle_log error config_error reason output_exists path "$OUTPUT"
         return "$EXIT_USAGE"
+    fi
+}
+
+# journalctl exposes Spring's complete ECS JSON record only as the MESSAGE string. The parser
+# rejects duplicate keys recursively, accepts only the one dedicated tenant-attributed event, and
+# checks the server-owned organization integer before reading any projectable field. Invalid,
+# unattributed, ambiguous, other-tenant, and unrelated records are dropped record-by-record.
+support_bundle_journal_projection() {
+    local since="$1"
+    local until="$2"
+    local organization_id="$3"
+    local destination="$4"
+    local projected="$WORK_DIR/journal-projected.jsonl"
+    local -a journal_arguments=(
+        --unit "$JOURNAL_UNIT"
+        --since "$since"
+        --until "$until"
+        --output json
+        --no-pager
+    )
+    if ! (
+        ulimit -f "$(( SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES / 512 ))" 2>/dev/null
+        journalctl "${journal_arguments[@]}" 2>/dev/null \
+            | SUPPORT_BUNDLE_JOURNAL_ORG_ID="$organization_id" \
+              SUPPORT_BUNDLE_JOURNAL_CORRELATION_ID="$CORRELATION_ID" \
+              python3 -c '
+import json
+import os
+import re
+import sys
+import unicodedata
+
+TARGET_ORG = int(os.environ["SUPPORT_BUNDLE_JOURNAL_ORG_ID"])
+TARGET_CORRELATION = os.environ["SUPPORT_BUNDLE_JOURNAL_CORRELATION_ID"]
+LOGGER = "ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"
+EVENT_CLASS = "http.request.completed"
+METHODS = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
+CORRELATION = re.compile(r"[A-Za-z0-9_-]{8,64}\Z")
+TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z\Z")
+MAX_INPUT_CHARS = 268435456
+MAX_RECORDS = 50000
+
+class DuplicateKey(ValueError):
+    pass
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateKey(key)
+        result[key] = value
+    return result
+
+def safe_path(value):
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 512
+        and value.startswith("/api/")
+        and "?" not in value
+        and "#" not in value
+        and all(unicodedata.category(character) not in {"Cc", "Zl", "Zp"} for character in value)
+    )
+
+input_chars = 0
+matched = 0
+for line in sys.stdin:
+    input_chars += len(line)
+    if input_chars > MAX_INPUT_CHARS:
+        raise ValueError("journal input exceeds the projection bound")
+    if len(line) > 1048576:
+        continue
+    try:
+        journal = json.loads(line, object_pairs_hook=unique_object)
+        if not isinstance(journal, dict) or not isinstance(journal.get("MESSAGE"), str):
+            continue
+        ecs = json.loads(journal["MESSAGE"], object_pairs_hook=unique_object)
+    except (DuplicateKey, json.JSONDecodeError, TypeError, ValueError):
+        continue
+    if not isinstance(ecs, dict):
+        continue
+    organization_id = ecs.get("connexOrganizationId")
+    if (
+        isinstance(organization_id, bool)
+        or not isinstance(organization_id, int)
+        or organization_id <= 0
+        or organization_id != TARGET_ORG
+    ):
+        continue
+    log = ecs.get("log")
+    correlation_id = ecs.get("correlationId")
+    status = ecs.get("responseStatus")
+    if (
+        not isinstance(log, dict)
+        or log.get("level") != "INFO"
+        or log.get("logger") != LOGGER
+        or ecs.get("eventClass") != EVENT_CLASS
+        or not isinstance(ecs.get("@timestamp"), str)
+        or TIMESTAMP.fullmatch(ecs["@timestamp"]) is None
+        or not isinstance(correlation_id, str)
+        or CORRELATION.fullmatch(correlation_id) is None
+        or (TARGET_CORRELATION and correlation_id != TARGET_CORRELATION)
+        or ecs.get("requestMethod") not in METHODS
+        or not safe_path(ecs.get("requestPath"))
+        or isinstance(status, bool)
+        or not isinstance(status, int)
+        or status < 100
+        or status > 599
+    ):
+        continue
+    matched += 1
+    if matched > MAX_RECORDS:
+        raise ValueError("journal projection exceeds the record bound")
+    projected = {
+        "timestamp": ecs["@timestamp"],
+        "level": log["level"],
+        "logger": log["logger"],
+        "correlationId": correlation_id,
+        "method": ecs["requestMethod"],
+        "path": ecs["requestPath"],
+        "status": status,
+        "eventClass": ecs["eventClass"],
+    }
+    sys.stdout.write(json.dumps(projected, ensure_ascii=True, separators=(",", ":")) + "\n")
+' > "$projected"
+    ); then
+        support_bundle_log error journal_failed reason collection_or_projection_failed unit "$JOURNAL_UNIT"
+        return "$EXIT_JOURNAL"
+    fi
+    : > "$destination"
+    local line path redacted
+    while IFS= read -r line; do
+        if ! path="$(printf '%s' "$line" | jq -er '.path | select(type == "string")')"; then
+            support_bundle_log error journal_failed reason projected_path_invalid
+            return "$EXIT_JOURNAL"
+        fi
+        redacted="$(support_bundle_redact_path "$path")"
+        if ! printf '%s' "$line" | jq -c --arg path "$redacted" '.path = $path' >> "$destination"; then
+            support_bundle_log error journal_failed reason path_redaction_failed
+            return "$EXIT_JOURNAL"
+        fi
+    done < "$projected"
+}
+
+support_bundle_append_journal() {
+    local staging="$1"
+    local manifest="$staging/manifest.json"
+    local manifest_org since until manifest_correlation entry_length entry_hash total_length
+    if ! manifest_org="$(jq -er 'select((.orgId | type) == "number" and .orgId > 0 and .orgId == (.orgId | floor)) | .orgId | tostring' "$manifest")" \
+        || [ "$manifest_org" != "$ORG_ID" ]; then
+        support_bundle_log error journal_failed reason manifest_organization_mismatch expected "$ORG_ID"
+        return "$EXIT_JOURNAL"
+    fi
+    if ! since="$(jq -er '.filters.since | select(type == "string")' "$manifest")" \
+        || ! until="$(jq -er '.filters.until | select(type == "string")' "$manifest")"; then
+        support_bundle_log error journal_failed reason manifest_window_missing
+        return "$EXIT_JOURNAL"
+    fi
+    if ! support_bundle_validate_instant manifest_since "$since" \
+        || ! support_bundle_validate_instant manifest_until "$until"; then
+        support_bundle_log error journal_failed reason manifest_window_malformed
+        return "$EXIT_JOURNAL"
+    fi
+    if ! manifest_correlation="$(jq -er '
+        if .filters.correlationId == null then ""
+        elif (.filters.correlationId | type) == "string" then .filters.correlationId
+        else error("invalid correlation filter") end
+    ' "$manifest")" || [ "$manifest_correlation" != "$CORRELATION_ID" ]; then
+        support_bundle_log error journal_failed reason manifest_correlation_mismatch
+        return "$EXIT_JOURNAL"
+    fi
+    support_bundle_journal_projection "$since" "$until" "$manifest_org" \
+        "$staging/journal-slice.jsonl" || return "$EXIT_JOURNAL"
+    entry_length="$(stat -c '%s' "$staging/journal-slice.jsonl")"
+    entry_hash="$(sha256sum "$staging/journal-slice.jsonl" | awk '{print $1}')"
+    if ! jq --arg path journal-slice.jsonl \
+        --arg media_type application/x-ndjson \
+        --argjson byte_length "$entry_length" \
+        --arg sha256 "$entry_hash" \
+        --arg unit "$JOURNAL_UNIT" \
+        --argjson organization_id "$manifest_org" '
+        .files += [{path: $path, mediaType: $media_type, byteLength: $byte_length, sha256: $sha256}]
+        | .files |= sort_by(.path)
+        | .journalSlice = {
+            unit: $unit,
+            organizationId: $organization_id,
+            organizationDiscriminator: "connexOrganizationId",
+            projection: "ecs_message_closed_fields_v1",
+            redactor: "request_path_redactor_v1"
+          }
+    ' "$manifest" > "$manifest.new"; then
+        support_bundle_log error journal_failed reason manifest_update_failed
+        return "$EXIT_JOURNAL"
+    fi
+    mv "$manifest.new" "$manifest"
+    total_length="$(find "$staging" -mindepth 1 -maxdepth 1 -type f -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }')"
+    if [ "$total_length" -gt "$SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES" ]; then
+        support_bundle_log error journal_failed reason uncompressed_size_exceeded \
+            actual "$total_length" limit "$SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES"
+        return "$EXIT_JOURNAL"
+    fi
+    support_bundle_log info journal_appended unit "$JOURNAL_UNIT" org_id "$manifest_org" \
+        bytes "$entry_length" records "$(wc -l < "$staging/journal-slice.jsonl")"
+}
+
+support_bundle_repack() {
+    local staging="$1"
+    local destination="$2"
+    if ! ( cd "$staging" && zip --quiet --no-dir-entries -X "$destination" ./* ); then
+        support_bundle_log error journal_failed reason repack_failed
+        return "$EXIT_JOURNAL"
     fi
 }
 
@@ -237,7 +471,7 @@ main() {
     local exit_code=0
     support_bundle_parse_arguments "$@" || exit "$?"
     SUPPORT_BUNDLE_PHASE=validating
-    support_bundle_require_commands curl jq unzip zipinfo sha256sum || exit "$?"
+    support_bundle_require_commands curl jq unzip zipinfo sha256sum python3 || exit "$?"
     support_bundle_validate_arguments || exit "$?"
 
     WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/connex-support-bundle.XXXXXX")"
@@ -246,7 +480,7 @@ main() {
 
     support_bundle_log info collect_started org_id "$ORG_ID" base_url "$BASE_URL" \
         correlation_id "${CORRELATION_ID:-none}" entity_type "${ENTITY_TYPE:-none}" \
-        entity_id "${ENTITY_ID:-none}" since "${SINCE:-default}"
+        entity_id "${ENTITY_ID:-none}" since "${SINCE:-default}" include_journal "$INCLUDE_JOURNAL"
 
     SUPPORT_BUNDLE_PHASE=downloading
     exit_code=0
@@ -263,6 +497,30 @@ main() {
     if [ "$exit_code" -ne 0 ]; then
         support_bundle_finish "$exit_code" support_bundle_collect_summary org_id "$ORG_ID"
         exit "$exit_code"
+    fi
+
+    if [ "$INCLUDE_JOURNAL" = true ]; then
+        SUPPORT_BUNDLE_PHASE=journal
+        exit_code=0
+        support_bundle_append_journal "$WORK_DIR/staging" || exit_code=$?
+        if [ "$exit_code" -ne 0 ]; then
+            support_bundle_finish "$EXIT_JOURNAL" support_bundle_collect_summary org_id "$ORG_ID"
+            exit "$EXIT_JOURNAL"
+        fi
+        exit_code=0
+        support_bundle_repack "$WORK_DIR/staging" "$WORK_DIR/bundle.repacked" || exit_code=$?
+        if [ "$exit_code" -ne 0 ]; then
+            support_bundle_finish "$EXIT_JOURNAL" support_bundle_collect_summary org_id "$ORG_ID"
+            exit "$EXIT_JOURNAL"
+        fi
+        SUPPORT_BUNDLE_PHASE=reverifying
+        mkdir -p "$WORK_DIR/staging-repacked"
+        if ! support_bundle_verify_archive "$WORK_DIR/bundle.repacked" "$WORK_DIR/staging-repacked"; then
+            support_bundle_log error journal_failed reason repacked_archive_invalid
+            support_bundle_finish "$EXIT_JOURNAL" support_bundle_collect_summary org_id "$ORG_ID"
+            exit "$EXIT_JOURNAL"
+        fi
+        mv "$WORK_DIR/bundle.repacked" "$WORK_DIR/bundle.partial"
     fi
 
     SUPPORT_BUNDLE_PHASE=publishing

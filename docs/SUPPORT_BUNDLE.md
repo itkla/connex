@@ -23,13 +23,14 @@ order, under what deployment posture*. It never answers *what the record said*.
 | `config.json` | Values for an explicit allowlist of configuration keys — nothing else. |
 | `migrations.json` | Flyway history: version, description, success, installed-on. |
 | `audit-slice.csv` | The audit events for the requested window, organization-plane always, workspace record events only under an entity filter. |
+| `journal-slice.jsonl` | Optional operator-side projection of dedicated tenant request-completion events. Present only when `collect.sh --include-journal` succeeds. |
 | `job-runs.json` | Not produced in this release — see [Declared omissions](#declared-omissions). |
 
 ### Filters
 
 | Parameter | Contract |
 |---|---|
-| `correlationId` | Matches the **server-minted** request id on audit rows — see [Request ids](#request-ids). |
+| `correlationId` | Matches the **server-minted** request id on audit rows. When the optional journal slice is requested, the collector also applies it to journal correlation ids, but only after exact organization filtering. See [Request ids](#request-ids). |
 | `entityType` + `entityId` | Legal only together. Unlocks workspace record events for that one record. |
 | `since` | Defaults to 7 days before generation; 30 days is the maximum. Older or future values are rejected. |
 
@@ -64,7 +65,7 @@ may contain:
 - client error messages or stack traces;
 - job-run `detail` payloads;
 - personal names, email addresses, or any record field values;
-- raw journald messages or stack traces (no log content is collected at all);
+- raw journald messages, log messages, exception text, or stack traces;
 - IP addresses, user agents, or session identifiers.
 
 ## Redaction contract
@@ -126,11 +127,10 @@ email addresses, and query strings.
 So there is no safe stored source, and the bundle declares
 `client-errors.json: no_persisted_source` rather than reading logs. Persisting a
 metadata-only projection (correlation id, redacted page path, digest, timestamp)
-is tracked as follow-up work ([#970](https://github.com/itkla/connex/issues/970));
-until it exists, the bundle cannot correlate client errors at all. There is no
-journal slice to fall back on — see [Why there is no journal slice](#why-there-is-no-journal-slice)
-— so this lookup has to be done against the deployment's own logs, outside the
-bundle.
+remains follow-up work. The optional journal slice contains only dedicated HTTP
+completion events, not `CLIENT` error reports, digests, messages, or stacks, so
+client-error lookup still has to be done against the deployment's own logs,
+outside the bundle.
 
 ### Request ids
 
@@ -144,9 +144,10 @@ unrelated requests share one id, or inject rows into an investigator's filtered 
 audit field is minted server-side and cannot be influenced by the caller.
 
 **The practical consequence:** a user-quoted correlation id will *not* find audit rows. Investigate
-by `entityType`/`entityId` and `since` instead, and use the user-quoted id against the deployment's
-own logs — the bundle carries no log content of any kind. Linking the two properly needs a schema
-change and is tracked as follow-up work.
+by `entityType`/`entityId` and `since` instead. If the operator includes the journal slice, the same
+quoted id can narrow its request-completion rows after the organization filter has already succeeded;
+otherwise use the id against the deployment's own logs. The correlation id is a secondary selector,
+never the tenant boundary.
 
 Audit rows written on scheduler and other non-request threads have no request id at all; this is
 long-standing behaviour, not a gap introduced here. Rows written on async or error-dispatch threads
@@ -164,21 +165,33 @@ empty result under that filter means "no rows carried this id", not "nothing hap
 manifest records `auditSliceInconclusive: true` for exactly that case so an empty slice is not
 misread as evidence of absence.
 
-### Why there is no journal slice
+### Optional journal slice
 
-The backend never reads logs from disk, and the operator tooling no longer collects them either.
+The backend never reads logs from disk. An operator on the deployment host can opt in to a bounded
+journal projection with `collect.sh --include-journal`; the downloaded backend bundle is verified
+first, then the collector appends `journal-slice.jsonl`, updates the manifest inventory, repacks,
+and verifies the finished archive before publishing it.
 
-A systemd unit's journal cannot be scoped to one organization: on a multi-tenant unit, collecting
-a time window would append other tenants' correlation ids, request paths, statuses, and event
-classes into an artifact designed to travel to support. A filter that cannot be proven exact is
-not a filter, and a bundle that silently mixes tenants is worse than one with no log slice at all.
+This is not a general log export. `TenantResolutionInterceptor` emits one dedicated `INFO`
+completion event only for explicitly allowlisted current-tenant controllers. Its numeric
+`connexOrganizationId` comes from the server-resolved workspace membership and tenant context,
+not a copied header or route parameter; any requested workspace is membership-validated before
+the server looks up its organization. The request path is Spring's matched route template, never
+the raw URI or query string. Requests without a resolved organization, async and background work,
+pre-auth traffic, and handlers with explicit organization or workspace targets are omitted rather
+than guessed.
 
-It was ineffective as well as unsafe. In the production logging configuration Spring writes ECS
-JSON to the console and journald stores that record in `MESSAGE`, so nothing emits the native
-structured fields the projection read.
+Production journald stores Spring's ECS JSON record inside `MESSAGE`, so the collector parses that
+string with recursive duplicate-key rejection. It checks the organization integer exactly before
+reading any projectable field, then constructs a new object containing only timestamp, level,
+logger, correlation id, method, redacted route template, status, and fixed event class. Unknown ECS
+keys, raw `MESSAGE`, messages, stack traces, headers, hosts, and query strings are never copied. A
+missing, malformed, ambiguous, or other-organization discriminator drops the record. Any failure of
+journal collection, projection, repack, or pre-publication post-repack verification aborts
+publication with exit code `68`.
 
-Re-introducing it requires a trustworthy per-record organization discriminator to filter on
-exactly. Until then, correlate against the deployment's own logs directly.
+Because the marker is deliberately narrow, absence from the slice is not evidence that no request
+occurred. For client errors and non-allowlisted handlers, use the deployment's own logs locally.
 
 ## Access control
 
@@ -250,7 +263,9 @@ and no SSH.
        --base-url https://connex.example.com \
        --org-id 3 --cookie-file /etc/connex-support/cookies.txt \
        --workspace-id 7 --entity-type person --entity-id 412 \
-       --since 2026-07-24T05:00:00Z --output /var/tmp/bundle.zip
+       --since 2026-07-24T05:00:00Z \
+       --include-journal --journal-unit connex-backend.service \
+       --output /var/tmp/bundle.zip
    ```
 
    The bundle is verified against its manifest before it is published.
@@ -283,8 +298,10 @@ and no SSH.
    established entirely from the bundle, with no database and no SSH.
 
 If the user quoted an error id from the UI, note that it will **not** match the audit slice — see
-[Request ids](#request-ids). Narrow with `--entity-type`/`--entity-id` and `--since`, and use the
-quoted id against the deployment's own logs, which the bundle does not collect.
+[Request ids](#request-ids). Narrow with `--entity-type`/`--entity-id` and `--since`; when the
+optional journal slice is present, `read.sh --correlation-id <id>` can show matching allowlisted
+request completions. Client-error digests and stacks remain available only in the deployment's own
+logs.
 
 ### Exit codes
 
@@ -297,10 +314,8 @@ quoted id against the deployment's own logs, which the bundle does not collect.
 | 65 | Authentication, organization authorization, step-up failure, or a `404` from the endpoint. |
 | 66 | API transport failure, including `400`, `429`, other `5xx`, and any non-2xx that is not an authorization outcome. |
 | 67 | Bundle integrity: unreadable or missing archive, ZIP structure, manifest schema, inventory coverage, byte length, or SHA-256 mismatch. |
+| 68 | Optional journal collection, closed projection, repack, or post-repack verification failure. No output archive is published. |
 | 69 | Reader rendering or filtering failure. |
-
-`68` is unallocated: it belonged to the removed journal-collection step and is left free so the
-other codes stay stable for existing automation.
 
 Note that `EXIT_INTEGRITY` is `67` here while `deploy/backup` uses `69` for its own integrity
 class; the two catalogs are independent and both export their constants, so do not source the two
