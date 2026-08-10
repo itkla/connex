@@ -1,9 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Map;
+import java.util.Objects;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.FederatedIdentity;
@@ -46,6 +47,10 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * has no user root to lock, so its stored workspace and organization are pinned before the
  * account is inserted. Every path revalidates its discovered identity or connection after those
  * locks, preventing federation side effects across a lifecycle fence.
+ *
+ * <p>JIT routing is discovered before its transaction opens. The target workspace placement is
+ * then pinned by {@link FreshMembershipTransaction}, so a dedicated-catalog membership cleanup and
+ * the control-plane identity writes share one correctly routed transaction.
  */
 @Service
 @RequiredArgsConstructor
@@ -60,6 +65,8 @@ public class SsoLoginService {
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final SsoUserProvisioner ssoUserProvisioner;
     private final AuditService auditService;
+    private final FreshMembershipTransaction freshMembershipTransaction;
+    private final TransactionTemplate transactionTemplate;
 
     /**
      * Resolves an authenticated IdP identity to a Connex login outcome.
@@ -76,34 +83,51 @@ public class SsoLoginService {
      *         a different organization
      * @throws BadRequestException when the organization has no SSO connection
      */
-    @Transactional
     public SsoLoginResult resolve(String provider, String issuer, String subject, String email,
             boolean emailVerified, int orgId, String displayName) {
+        FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
+                orgId, provider, issuer, subject);
+        if (identity != null) {
+            SsoLoginResult result = transactionTemplate.execute(status ->
+                resolveReturningIdentity(identity, provider, issuer, subject, orgId));
+            return Objects.requireNonNull(result, "returning SSO login result");
+        }
+
+        requireProvisioningAllowed(email, emailVerified, orgId);
+        SsoConnection connection = requireSsoConnection(orgId);
+        int jitWorkspaceId = requireJitWorkspace(connection);
+        return freshMembershipTransaction.execute(
+            jitWorkspaceId,
+            () -> resolveFreshIdentity(
+                provider,
+                issuer,
+                subject,
+                email,
+                emailVerified,
+                orgId,
+                displayName,
+                jitWorkspaceId));
+    }
+
+    private SsoLoginResult resolveFreshIdentity(
+            String provider,
+            String issuer,
+            String subject,
+            String email,
+            boolean emailVerified,
+            int orgId,
+            String displayName,
+            int expectedJitWorkspaceId) {
         FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
                 orgId, provider, issuer, subject);
         if (identity != null) {
             return resolveReturningIdentity(identity, provider, issuer, subject, orgId);
         }
 
-        if (!emailVerified) {
-            throw new ForbiddenException(
-                    "Your identity provider did not assert a verified email address");
-        }
-        if (!isDomainAuthorizedForOrg(email, orgId)) {
-            throw new ForbiddenException(
-                    "Your email domain is not permitted to sign in to this organization");
-        }
-        if (!orgAllowedDomainService.isJoinAllowed(orgId, email)) {
-            throw new ForbiddenException(
-                    "Your email domain is not permitted to sign in to this organization");
-        }
-
-        SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
-        if (connection == null) {
-            throw new BadRequestException("SSO is not configured for this organization");
-        }
-        Integer jitWorkspaceId = connection.getJitWorkspaceId();
-        if (jitWorkspaceId == null) {
+        requireProvisioningAllowed(email, emailVerified, orgId);
+        SsoConnection connection = requireSsoConnection(orgId);
+        int jitWorkspaceId = requireJitWorkspace(connection);
+        if (jitWorkspaceId != expectedJitWorkspaceId) {
             throw new ForbiddenException(
                     "SSO provisioning is unavailable while its target workspace is being removed");
         }
@@ -151,6 +175,38 @@ public class SsoLoginService {
                 "Federated identity linked", Map.of("userId", user.getId(), "provider", provider));
 
         return SsoLoginResult.login(user);
+    }
+
+    private void requireProvisioningAllowed(String email, boolean emailVerified, int orgId) {
+        if (!emailVerified) {
+            throw new ForbiddenException(
+                    "Your identity provider did not assert a verified email address");
+        }
+        if (!isDomainAuthorizedForOrg(email, orgId)) {
+            throw new ForbiddenException(
+                    "Your email domain is not permitted to sign in to this organization");
+        }
+        if (!orgAllowedDomainService.isJoinAllowed(orgId, email)) {
+            throw new ForbiddenException(
+                    "Your email domain is not permitted to sign in to this organization");
+        }
+    }
+
+    private SsoConnection requireSsoConnection(int orgId) {
+        SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
+        if (connection == null) {
+            throw new BadRequestException("SSO is not configured for this organization");
+        }
+        return connection;
+    }
+
+    private int requireJitWorkspace(SsoConnection connection) {
+        Integer jitWorkspaceId = connection.getJitWorkspaceId();
+        if (jitWorkspaceId == null) {
+            throw new ForbiddenException(
+                    "SSO provisioning is unavailable while its target workspace is being removed");
+        }
+        return jitWorkspaceId;
     }
 
     private SsoLoginResult resolveReturningIdentity(

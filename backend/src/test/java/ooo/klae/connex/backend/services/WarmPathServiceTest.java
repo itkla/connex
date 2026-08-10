@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -12,9 +13,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +44,15 @@ class WarmPathServiceTest extends AbstractServiceTest {
     @Autowired private WarmPathService warmPathService;
     @Autowired private PersonEdgeMapper personEdgeMapper;
     @Autowired private IntroductionMapper introductionMapper;
+    @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
+
+    @BeforeEach
+    void setUpWorkspaceScope() {
+        int workspaceId = workspace.getId();
+        when(workspaceScopeControlAccess.getForWorkspace(workspaceId)).thenReturn(
+            new OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
+                workspaceId, List.of(workspaceId), "[" + workspaceId + "]"));
+    }
 
     @Test
     void surfacesPathAndAcceptCreatesTaskAndRetiresTheTarget() {

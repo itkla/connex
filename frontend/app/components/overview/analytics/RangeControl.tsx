@@ -6,6 +6,7 @@ import CustomRangePopover, {
     type CustomRangeLabels,
 } from '@/app/components/overview/analytics/CustomRangePopover';
 import type { AnalyticsWindow } from '@/app/components/overview/analytics/metrics';
+import type { MemberScopeParams } from '@/app/lib/types';
 
 const SEGMENT_CLASS = 'relative rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors duration-150';
 
@@ -29,6 +30,9 @@ export default function RangeControl<K extends string>({
         key: K;
         value: AnalyticsWindow;
         locale: string;
+        today: string;
+        timezone: string;
+        scope: MemberScopeParams;
         labels: CustomRangeLabels;
         onApply: (window: AnalyticsWindow) => void;
     };
@@ -71,6 +75,9 @@ export default function RangeControl<K extends string>({
                     active={customRange.key === value}
                     value={customRange.value}
                     locale={customRange.locale}
+                    today={customRange.today}
+                    timezone={customRange.timezone}
+                    scope={customRange.scope}
                     labels={customRange.labels}
                     className={`${SEGMENT_CLASS} ${
                         customRange.key === value

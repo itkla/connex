@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.ai;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -35,6 +35,7 @@ class AiPropertiesTest {
         assertEquals(16777216, new AiProperties().getGenerationMaxRetainedResultBytesPerUser());
         assertTrue(yaml.contains("enabled: ${CONNEX_AI_ENABLED:false}"));
         assertTrue(yaml.contains("deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}"));
+        assertTrue(yaml.contains("assistant-chat: ${CONNEX_AI_FEATURES_ASSISTANT_CHAT:true}"));
         assertTrue(yaml.contains("nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}"));
         assertTrue(yaml.contains("max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}"));
         assertTrue(yaml.contains(
@@ -68,9 +69,11 @@ class AiPropertiesTest {
         properties.setEnabled(true);
         Map<AiFeature, Boolean> features = new EnumMap<>(AiFeature.class);
         features.put(AiFeature.DEAL_BRIEF, false);
+        features.put(AiFeature.ASSISTANT_CHAT, false);
         properties.setFeatures(features);
 
         assertFalse(properties.isFeatureEnabled(AiFeature.DEAL_BRIEF));
+        assertFalse(properties.isFeatureEnabled(AiFeature.ASSISTANT_CHAT));
         assertTrue(properties.isFeatureEnabled(AiFeature.REPORT_NARRATIVE));
     }
 
@@ -79,6 +82,7 @@ class AiPropertiesTest {
         MockEnvironment environment = new MockEnvironment()
                 .withProperty("connex.ai.enabled", "true")
                 .withProperty("connex.ai.features.deal-brief", "false")
+                .withProperty("connex.ai.features.assistant-chat", "false")
                 .withProperty("connex.ai.invocation-quota-window", "15m");
 
         AiProperties properties = Binder.get(environment)
@@ -86,6 +90,7 @@ class AiPropertiesTest {
                 .orElseThrow(() -> new IllegalStateException("AI properties did not bind"));
 
         assertFalse(properties.isFeatureEnabled(AiFeature.DEAL_BRIEF));
+        assertFalse(properties.isFeatureEnabled(AiFeature.ASSISTANT_CHAT));
         assertTrue(properties.isFeatureEnabled(AiFeature.REPORT_NARRATIVE));
         assertEquals(Duration.ofMinutes(15), properties.getInvocationQuotaWindow());
     }

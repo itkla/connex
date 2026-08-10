@@ -8,5 +8,6 @@ public enum DuplicateMatchKind {
     PHONE,
     DOMAIN,
     EXTERNAL_ID,
-    NAME
+    NAME,
+    DEAL_KEY
 }

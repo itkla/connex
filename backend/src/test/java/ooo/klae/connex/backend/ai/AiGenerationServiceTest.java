@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -16,6 +17,7 @@ import static org.mockito.Mockito.when;
 import java.lang.reflect.Field;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -131,6 +133,149 @@ class AiGenerationServiceTest {
         AiGenerationStatusDto failed = awaitStatus(accepted.handle(), "failed");
 
         assertEquals("provider_error", failed.reason());
+    }
+
+    @Test
+    void legacyNoListenerOverloadsPreserveTheFourExistingGenerationCallers() {
+        for (AiFeature feature : List.of(
+                AiFeature.DEAL_BRIEF,
+                AiFeature.DEAL_RISK_RATIONALE,
+                AiFeature.INTRO_RATIONALE)) {
+            AiGenerationStatusDto accepted = service.start(
+                    feature,
+                    "legacy-" + feature.wireKey(),
+                    Set.of(Permission.AI_USE),
+                    "unavailable",
+                    () -> AiGenerationTaskResult.resolved("ready"));
+            AiGenerationStatusDto resolved = awaitStatus(accepted.handle(), "resolved");
+            assertEquals("ready", resolved.result().asString());
+            assertNull(resolved.reason());
+        }
+
+        AiGenerationStatusDto reportAccepted = service.startAtRestrictionEpoch(
+                AiFeature.REPORT_NARRATIVE,
+                "legacy-report",
+                Set.of(Permission.AI_USE, Permission.REPORT_READ),
+                "unavailable",
+                () -> AiGenerationTaskResult.resolved("ready"),
+                restrictionEpoch.get());
+        AiGenerationStatusDto reportResolved = awaitStatus(reportAccepted.handle(), "resolved");
+        assertEquals("ready", reportResolved.result().asString());
+        assertNull(reportResolved.reason());
+    }
+
+    @Test
+    void terminalListenerReceivesTheWinningTimeoutExactlyOnce() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        AtomicInteger callbacks = new AtomicInteger();
+        AtomicReference<AiGenerationTaskResult.Outcome> terminal = new AtomicReference<>();
+        AtomicReference<String> reason = new AtomicReference<>();
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "turn-19",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    running.countDown();
+                    await(neverReleased);
+                    return AiGenerationTaskResult.timedOut("generation_timeout");
+                },
+                restrictionEpoch.get(),
+                (outcome, stableReason) -> {
+                    callbacks.incrementAndGet();
+                    terminal.set(outcome);
+                    reason.set(stableReason);
+                    return true;
+                });
+
+        assertTrue(running.await(2, TimeUnit.SECONDS));
+        awaitStatus(accepted.handle(), "timed_out");
+
+        assertEquals(1, callbacks.get());
+        assertEquals(AiGenerationTaskResult.Outcome.TIMED_OUT, terminal.get());
+        assertEquals("generation_timeout", reason.get());
+    }
+
+    @Test
+    void rejectedTimeoutClaimLeavesTheHandleActiveForTheDurablyResolvedWinner() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch timeoutAttempted = new CountDownLatch(1);
+        AtomicInteger timeoutClaims = new AtomicInteger();
+        AtomicInteger resolvedClaims = new AtomicInteger();
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "turn-20-race",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    await(timeoutAttempted);
+                    return AiGenerationTaskResult.resolved("durably-resolved");
+                },
+                restrictionEpoch.get(),
+                (outcome, stableReason) -> {
+                    if (outcome == AiGenerationTaskResult.Outcome.TIMED_OUT) {
+                        timeoutClaims.incrementAndGet();
+                        timeoutAttempted.countDown();
+                        return false;
+                    }
+                    resolvedClaims.incrementAndGet();
+                    return true;
+                });
+
+        AiGenerationStatusDto resolved = awaitStatus(accepted.handle(), "resolved");
+
+        assertEquals("durably-resolved", resolved.result().asString());
+        assertEquals(1, timeoutClaims.get());
+        assertEquals(1, resolvedClaims.get());
+    }
+
+    @Test
+    void activePermissionInvalidationNotifiesTheDurableListenerOnce() throws Exception {
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        AtomicInteger callbacks = new AtomicInteger();
+        AtomicReference<String> reason = new AtomicReference<>();
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "turn-20",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    running.countDown();
+                    await(neverReleased);
+                    return AiGenerationTaskResult.resolved("late");
+                },
+                restrictionEpoch.get(),
+                (outcome, stableReason) -> {
+                    callbacks.incrementAndGet();
+                    reason.set(stableReason);
+                    return true;
+                });
+        assertTrue(running.await(2, TimeUnit.SECONDS));
+        permissions.set(Set.of(Permission.REPORT_READ));
+
+        assertThrows(ResourceNotFoundException.class, () -> service.status(accepted.handle()));
+
+        assertEquals(1, callbacks.get());
+        assertEquals("access_revoked", reason.get());
     }
 
     @Test

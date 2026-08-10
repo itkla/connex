@@ -14,10 +14,10 @@ import org.springframework.security.messaging.web.csrf.CsrfChannelInterceptor;
 /**
  * Message-level security for the STOMP inbound channel. The policy is
  * default-deny: authenticated clients may only SUBSCRIBE to their own
- * notification queue ({@code /user/queue/notifications}, which Spring's
- * user-destination resolution scopes to the authenticated principal), frames
- * without a destination (CONNECT, DISCONNECT, UNSUBSCRIBE, heartbeats) require
- * authentication, and everything else — SENDs and subscriptions to raw broker
+ * notification and assistant queues ({@code /user/queue/notifications} and
+ * {@code /user/queue/ai-chat}, which Spring's user-destination resolution scopes to the
+ * authenticated principal), frames without a destination (CONNECT, DISCONNECT, UNSUBSCRIBE,
+ * heartbeats) require authentication, and everything else — SENDs and subscriptions to raw broker
  * destinations — is denied.
  *
  * <p>The CONNECT frame carries the same session CSRF token the SPA already
@@ -41,7 +41,8 @@ public class WebSocketSecurityConfig {
             MessageMatcherDelegatingAuthorizationManager.Builder messages) {
         messages
                 .nullDestMatcher().authenticated()
-                .simpSubscribeDestMatchers("/user/queue/notifications").authenticated()
+                .simpSubscribeDestMatchers(
+                        "/user/queue/notifications", "/user/queue/ai-chat").authenticated()
                 .anyMessage().denyAll();
         return messages.build();
     }

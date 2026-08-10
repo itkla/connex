@@ -21,6 +21,7 @@ import {
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { toastError } from '@/app/lib/toast';
+import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 
 export type DealDraft = {
     name: string;
@@ -116,7 +117,8 @@ export default function QuickEditDealSheet({
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
                 const closedAt = toDatetimeLocalValue(draft.closedAt);
-                const actualValue = draft.actualValue ?? 0;
+                const actualValue = actualValueForOutcome(draft.won, draft.actualValue ?? 0);
+                const isLost = draft.won === false;
 
                 return (
                     <QuickEditRecordCard
@@ -268,7 +270,10 @@ export default function QuickEditDealSheet({
                                                 d.id,
                                                 opt.won === null
                                                     ? { won: null, closedAt: null, closedReason: null }
-                                                    : { won: opt.won, closedAt: draft.closedAt ?? toMysqlDateTime(new Date()) },
+                                                    : {
+                                                        won: opt.won,
+                                                        closedAt: draft.closedAt ?? toMysqlDateTime(new Date()),
+                                                    },
                                             )
                                         }
                                         className={cn(
@@ -314,8 +319,18 @@ export default function QuickEditDealSheet({
                                                 min="0"
                                                 step="0.01"
                                                 value={actualValue}
+                                                disabled={isLost}
+                                                aria-describedby={isLost ? `deal-actual-value-hint-${d.id}` : undefined}
                                                 onChange={(e) => updateDraft(d.id, { actualValue: Number(e.target.value) })}
                                             />
+                                            {isLost ? (
+                                                <p
+                                                    id={`deal-actual-value-hint-${d.id}`}
+                                                    className="mt-1 text-xs text-muted-foreground"
+                                                >
+                                                    {t('actualValueLost')}
+                                                </p>
+                                            ) : null}
                                         </QuickEditField>
                                         <QuickEditField label={t('closedReason')} htmlFor={`deal-closed-reason-${d.id}`}>
                                             <MentionEditor

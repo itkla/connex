@@ -2510,6 +2510,72 @@ export function dismissWarmPath(payload: Types.WarmPathPayload, init: RequestIni
     return postJson<void>(`/api/introductions/paths/dismiss`, payload, init);
 }
 
+export type RadarCookieResult =
+    | { ok: true; data: Types.RadarPayload }
+    | { ok: false; status: number };
+
+/** Reads the canonical relationship-signal feed without collapsing refusal and failure into empty data. */
+export function getRadar(init: RequestInit = {}) {
+    return getJson<Types.RadarPayload>('/api/radar', { cache: 'no-store', ...init });
+}
+
+/** Server-side Radar read that preserves the HTTP status required for honest route states. */
+export async function getRadarResultFromCookie(cookie: string | null): Promise<RadarCookieResult> {
+    if (!cookie) return { ok: false, status: 401 };
+    try {
+        return { ok: true, data: await getRadar({ headers: { cookie }, cache: 'no-store' }) };
+    } catch (error) {
+        return { ok: false, status: error instanceof ApiError ? error.status : 503 };
+    }
+}
+
+function radarVersionInit(version: string, init: RequestInit = {}): RequestInit {
+    const headers = new Headers(init.headers);
+    headers.set('If-Match', `"${version}"`);
+    return { ...init, headers };
+}
+
+export function followRadarSignal(id: number, version: string, init: RequestInit = {}) {
+    return postJson<Types.RadarSignal>(
+        `/api/radar/${id}/follow`,
+        {},
+        radarVersionInit(version, init),
+    );
+}
+
+export function snoozeRadarSignal(id: number, version: string, until: string, init: RequestInit = {}) {
+    return postJson<Types.RadarSignal>(
+        `/api/radar/${id}/snooze`,
+        { until },
+        radarVersionInit(version, init),
+    );
+}
+
+export function dismissRadarSignal(id: number, version: string, init: RequestInit = {}) {
+    return postJson<Types.RadarSignal>(
+        `/api/radar/${id}/dismiss`,
+        {},
+        radarVersionInit(version, init),
+    );
+}
+
+export function createRadarTask(
+    id: number,
+    version: string,
+    payload: Types.RadarTaskPayload,
+    init: RequestInit = {},
+) {
+    return postJson<Types.RadarSignal>(
+        `/api/radar/${id}/tasks`,
+        payload,
+        radarVersionInit(version, init),
+    );
+}
+
+export function getRadarContext(id: number, init: RequestInit = {}) {
+    return getJson<Types.RadarContext>(`/api/radar/${id}/context`, init);
+}
+
 export function createContact(payload: Types.CreateContactPayload, init: RequestInit = {}) {
     return postJson<Types.Contact>(`/api/persons`, payload, init);
 }
@@ -3067,6 +3133,18 @@ export function revokeAiProviderConfig(workspaceId: number) {
 
 export function createDeal(payload: Types.CreateDealPayload, init: RequestInit = {}) {
     return postJson<Types.Deal>(`/api/deals`, payload, init);
+}
+
+/** Checks a proposed deal against the canonical normalized-name and company identity. */
+export function preflightDealDuplicates(
+    payload: Types.DealDuplicatePreflightRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.DuplicatePreflightResponse>(
+        `/api/duplicate-preflight/deals`,
+        payload,
+        init,
+    );
 }
 
 export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
@@ -3803,12 +3881,14 @@ function workspaceSelectionForBrowserCookie(snapshot: Types.MyWorkspaces): Types
  * abandon their prior workspace. Callers must publish the returned snapshot explicitly; refreshed
  * provider props remain unordered.
  * @param notifyTransition - whether this read owns the workspace-transition notification
+ * @param init - request options for the authoritative workspace read
  */
 export async function readAuthoritativeWorkspaceSelection(
     notifyTransition = true,
+    init: RequestInit = {},
 ): Promise<Types.MyWorkspaces> {
     try {
-        const selection = workspaceSelectionForBrowserCookie(await getMyWorkspaces());
+        const selection = workspaceSelectionForBrowserCookie(await getMyWorkspaces(init));
         if (selection) return selection;
         throw new Error("Authoritative workspace selection did not match the browser cookie");
     } finally {

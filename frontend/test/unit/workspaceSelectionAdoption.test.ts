@@ -243,6 +243,66 @@ describe("authoritative workspace selection adoption", () => {
         expect(blockedOperation).toHaveBeenCalledOnce();
     });
 
+    it("does not report a contended selection recovery as unavailable", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const pendingSelection = deferred();
+        const rendered = await renderInteractiveWorkspaceProvider([existing], existing.id);
+        let selectionPromise = Promise.resolve();
+
+        await act(() => {
+            selectionPromise = rendered.readWorkspace().runSelectionChange(
+                async () => pendingSelection.promise,
+            );
+        });
+        await act(async () => {
+            await rendered.readWorkspace().retrySelectionRecovery();
+        });
+
+        pendingSelection.resolve();
+        await act(async () => {
+            await selectionPromise;
+        });
+
+        expect(workspaceUnavailable.renderCount).toBe(0);
+        expect(rendered.readWorkspace().activeWorkspaceId).toBe(existing.id);
+
+        await rendered.unmount();
+    });
+
+    it("preserves a successful in-flight selection after a contended recovery retry", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const selected = workspaceFixture(22, "Selected workspace");
+        const pendingSelection = deferred();
+        const rendered = await renderInteractiveWorkspaceProvider([existing], existing.id);
+        let selectionPromise = Promise.resolve();
+
+        await act(() => {
+            selectionPromise = rendered.readWorkspace().runSelectionChange(async (
+                publishActiveWorkspace,
+                publishWorkspace,
+            ) => {
+                await pendingSelection.promise;
+                publishWorkspace(selected);
+                publishActiveWorkspace(selected.id);
+            });
+        });
+        await act(async () => {
+            await rendered.readWorkspace().retrySelectionRecovery();
+        });
+
+        pendingSelection.resolve();
+        await act(async () => {
+            await selectionPromise;
+        });
+
+        expect(workspaceUnavailable.renderCount).toBe(0);
+        expect(rendered.readWorkspace().activeWorkspaceId).toBe(selected.id);
+        expect(rendered.readWorkspace().activeWorkspace).toEqual(selected);
+        expect(rendered.readWorkspace().switching).toBe(false);
+
+        await rendered.unmount();
+    });
+
     it("does not recover a selection request that failed before response headers", async () => {
         vi.stubGlobal("document", { cookie: "NEXT_LOCALE=en; connex_workspace=7" });
         const fetchMock = vi.fn().mockRejectedValue(new TypeError("Connection failed"));
@@ -529,6 +589,84 @@ describe("authoritative workspace selection adoption", () => {
         expect(provider).toContain("publishActiveWorkspace(null);");
 
         await rendered.unmount();
+    });
+
+    it("times out recovery, aborts its read, and ignores a late stale snapshot", async () => {
+        vi.useFakeTimers();
+        const existing = workspaceFixture(7, "Existing workspace");
+        const stale = workspaceFixture(22, "Stale workspace");
+        const newest = workspaceFixture(22, "Newest workspace");
+        const rendered = await renderInteractiveWorkspaceProvider(
+            [existing],
+            existing.id,
+            "NEXT_LOCALE=en; connex_workspace=22",
+        );
+        let resolveLateResponse: (response: Response) => void = () => {};
+        const lateResponse = new Promise<Response>((resolve) => {
+            resolveLateResponse = resolve;
+        });
+        const recoverySignals: AbortSignal[] = [];
+        let snapshotReads = 0;
+        vi.stubGlobal("fetch", vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                snapshotReads += 1;
+                if (snapshotReads === 1) {
+                    if (init.signal) recoverySignals.push(init.signal);
+                    return lateResponse;
+                }
+                return jsonResponse({ workspaces: [newest], activeWorkspaceId: newest.id });
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        }));
+
+        let firstRetry = Promise.resolve();
+        try {
+            await act(() => {
+                firstRetry = rendered.readWorkspace().retrySelectionRecovery();
+            });
+            let firstRetrySettled = false;
+            void firstRetry.then(() => {
+                firstRetrySettled = true;
+            });
+
+            await act(async () => {
+                await vi.advanceTimersToNextTimerAsync();
+            });
+
+            expect(firstRetrySettled).toBe(true);
+            const firstSignal = recoverySignals[0];
+            if (!firstSignal) throw new Error("Recovery read did not receive an abort signal");
+            expect(firstSignal.aborted).toBe(true);
+            expect(workspaceUnavailable.renderCount).toBeGreaterThan(0);
+
+            const retry = workspaceUnavailable.onRetry;
+            if (!retry) throw new Error("Timed-out recovery did not remain unavailable");
+            await act(async () => {
+                await retry();
+            });
+
+            expect(rendered.readWorkspace().activeWorkspace).toEqual(newest);
+            expect(router.refresh).toHaveBeenCalledOnce();
+
+            await act(async () => {
+                resolveLateResponse(jsonResponse({ workspaces: [stale], activeWorkspaceId: stale.id }));
+                await Promise.resolve();
+            });
+
+            expect(rendered.readWorkspace().activeWorkspace).toEqual(newest);
+            expect(router.refresh).toHaveBeenCalledOnce();
+        } finally {
+            resolveLateResponse(jsonResponse({ workspaces: [stale], activeWorkspaceId: stale.id }));
+            await act(async () => {
+                await firstRetry;
+            });
+            await rendered.unmount();
+            vi.useRealTimers();
+        }
     });
 
     it("forces no-provider completions through a fresh server mount without replay", () => {

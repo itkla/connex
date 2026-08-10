@@ -247,6 +247,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("deal_line_item", 130));
         raw.add(direct("deal_stage_history", 140));
         raw.add(direct("deal_collaborator", 150));
+        raw.add(direct("deal_duplicate_review_proof", 155));
         raw.add(direct("deal", 160));
         raw.add(direct("stage", 170));
         raw.add(direct("pipeline_share", 180));
@@ -304,6 +305,8 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("entity_reference", 530));
         raw.add(direct("historical_notification_baseline", 535));
         raw.add(direct("notification", 540));
+        raw.add(direct("relationship_signal_family_state", 541));
+        raw.add(direct("relationship_signal", 542));
         raw.add(direct("product", 550));
         raw.add(direct("report_goal", 560));
         raw.add(direct("tag", 570));
@@ -334,6 +337,9 @@ public final class TenantLifecycleRegistry {
         raw.add(cascade("company_identity", "company",
             "fk_company_identity_company",
             link("workspace_id", "workspace_id"), link("company_id", "id")));
+        raw.add(cascade("relationship_signal_state", "relationship_signal",
+            "fk_relationship_signal_state_signal",
+            link("workspace_id", "workspace_id"), link("signal_id", "id")));
         raw.add(cascade("ai_chat_session_participant", "ai_chat_session",
             "fk_ai_chat_session_participant_session",
             link("workspace_id", "workspace_id"), link("session_id", "id")));

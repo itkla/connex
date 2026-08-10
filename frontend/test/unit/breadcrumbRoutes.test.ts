@@ -79,6 +79,7 @@ const ROUTE_CASES = [
     ["/overview/reports/goals", "shell"],
     ["/overview/reports/new", "shell"],
     ["/overview/reports", "shell"],
+    ["/radar", "shell"],
     ["/records/approval-policies", "shell"],
     ["/records/companies/1", "shell"],
     ["/records/companies", "shell"],

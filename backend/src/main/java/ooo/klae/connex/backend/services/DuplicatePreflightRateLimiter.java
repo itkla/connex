@@ -69,13 +69,13 @@ public class DuplicatePreflightRateLimiter {
         if (existing != null && existing.minute() == minute && existing.refreshAvailable()) {
             previewCredits.put(key, new PreviewCredit(minute, false));
             trimPreviewCredits(minute);
-            return newReviewProof(key, context);
+            return newReviewProof(key, context, Optional.empty());
         }
         charge(principal, workUnits, minute);
         boolean firstPreviewThisMinute = existing == null || existing.minute() != minute;
         previewCredits.put(key, new PreviewCredit(minute, firstPreviewThisMinute));
         trimPreviewCredits(minute);
-        return newReviewProof(key, context);
+        return newReviewProof(key, context, Optional.empty());
     }
 
     /**
@@ -307,7 +307,8 @@ public class DuplicatePreflightRateLimiter {
 
     private String newReviewProof(
             WorkflowKey workflowKey,
-            String reviewContext) {
+            String reviewContext,
+            Optional<String> resultFingerprint) {
         byte[] bytes = new byte[32];
         String proof;
         do {
@@ -322,7 +323,7 @@ public class DuplicatePreflightRateLimiter {
                     properties.getReviewProofTtl().toSeconds()),
                 workflowKey,
                 reviewContext,
-                Optional.empty()));
+                resultFingerprint));
         trimPreviewCredits(currentMinute());
         return proof;
     }

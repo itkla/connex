@@ -1011,6 +1011,24 @@
     LIMIT 10
   </select>
 
+  <select id="findDuplicatePreflightCandidates" resultMap="DealResult">
+    SELECT id, name, company_id
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
+      <choose>
+        <when test="companyId == null">
+          AND company_id IS NULL
+        </when>
+        <otherwise>
+          AND company_id = #{companyId}
+        </otherwise>
+      </choose>
+      AND (duplicate_normalized_name = #{normalizedName}
+        OR duplicate_normalized_name IS NULL)
+    ORDER BY duplicate_normalized_name IS NULL, id
+    LIMIT #{limit}
+  </select>
+
   <select id="getDealsForDedup" resultMap="DealResult">
     SELECT id, name, company_id FROM deal WHERE workspace_id = #{workspaceId}
   </select>
@@ -1039,11 +1057,11 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
+      workspace_id, owner_id, name, duplicate_normalized_name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won, created_at
     )
     VALUES (
-      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{value,jdbcType=DECIMAL},
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{duplicateNormalizedName,jdbcType=VARCHAR}, #{value,jdbcType=DECIMAL},
       #{actualValue,jdbcType=DECIMAL}, #{valueSource}, #{currency},
       #{pipelineId}, #{stageId}, #{position}, #{companyId}, #{expectedCloseDate}, #{closedAt},
       #{closedReason}, #{won}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
@@ -1052,12 +1070,12 @@
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
+      workspace_id, owner_id, name, duplicate_normalized_name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won
     )
     VALUES
     <foreach collection="list" item="d" separator=",">
-      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name}, #{d.value,jdbcType=DECIMAL},
+      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name}, #{d.duplicateNormalizedName,jdbcType=VARCHAR}, #{d.value,jdbcType=DECIMAL},
        #{d.actualValue,jdbcType=DECIMAL}, #{d.valueSource}, #{d.currency},
        #{d.pipelineId}, #{d.stageId}, #{d.position}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
        #{d.closedReason}, #{d.won})
@@ -1067,6 +1085,8 @@
   <update id="update">
     UPDATE deal
     SET name = #{name},
+        duplicate_normalized_name = #{duplicateNormalizedName,jdbcType=VARCHAR},
+        duplicate_name_revision = duplicate_name_revision + 1,
         currency = #{currency},
         pipeline_id = #{pipelineId},
         stage_id = #{stageId},
@@ -1080,7 +1100,10 @@
   </update>
 
   <update id="updateName">
-    UPDATE deal SET name = #{name}
+    UPDATE deal
+    SET name = #{name},
+        duplicate_normalized_name = #{duplicateNormalizedName,jdbcType=VARCHAR},
+        duplicate_name_revision = duplicate_name_revision + 1
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
@@ -1287,5 +1310,16 @@
   <delete id="removeCollaboratorAnywhere">
     DELETE FROM deal_collaborator WHERE user_id = #{userId}
   </delete>
+
+  <select id="findMentionedNames" resultType="string">
+    SELECT name
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
+      AND name IS NOT NULL
+      AND name != ''
+      AND LOCATE(name, #{text}) &gt; 0
+    ORDER BY CHAR_LENGTH(name) DESC, id
+    LIMIT #{limit}
+  </select>
 
 </mapper>

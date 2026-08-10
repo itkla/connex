@@ -10,6 +10,7 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -44,6 +45,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
@@ -56,6 +58,7 @@ import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
+import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -67,6 +70,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.util.AnalyticsPeriods;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
@@ -76,6 +80,7 @@ class DealServiceTest extends AbstractServiceTest {
     @Autowired DealService dealService;
     @Autowired DealLineItemService dealLineItemService;
     @Autowired BulkOperationService bulkOperationService;
+    @Autowired DuplicatePreflightService duplicatePreflightService;
     @Autowired RuleActionExecutor ruleActionExecutor;
     @Autowired AuditService auditService;
     @Autowired ApplicationEvents applicationEvents;
@@ -83,6 +88,8 @@ class DealServiceTest extends AbstractServiceTest {
     @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
     @MockitoSpyBean DealMapper dealMapperSpy;
+    @MockitoSpyBean NotificationChangePublisher notificationChanges;
+    @MockitoSpyBean RuleTriggerPublisher ruleTriggers;
 
     @Test
     void removeTagIsIdempotentWhenTagNoLongerExists() {
@@ -821,6 +828,137 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void reviewedCreateRejectsMissingAndMismatchedTokensWithoutAnyWriteOrPublication() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal missingTokenDraft = dealDraft(pipeline, stage, company);
+        MutationFootprint beforeMissing = mutationFootprint();
+        clearDealCreationInvocations();
+
+        assertThrows(
+            ConflictException.class,
+            () -> dealService.createReviewed(missingTokenDraft, null));
+
+        assertRejectedDealCreation(beforeMissing);
+
+        Deal reviewedDraft = dealDraft(pipeline, stage, company);
+        DuplicatePreflightResponse reviewed = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(
+                reviewedDraft.getName(),
+                reviewedDraft.getCompanyId(),
+                null));
+        reviewedDraft.setName(reviewedDraft.getName() + " changed");
+        MutationFootprint beforeMismatch = mutationFootprint();
+        clearDealCreationInvocations();
+
+        assertThrows(
+            ConflictException.class,
+            () -> dealService.createReviewed(reviewedDraft, reviewed.reviewToken()));
+
+        assertRejectedDealCreation(beforeMismatch);
+    }
+
+    @Test
+    void reviewedCreateRejectsCandidateSetChangedBetweenAcknowledgementAndSubmit() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal draft = dealDraft(pipeline, stage, company);
+        Deal firstCandidate = dealDraft(pipeline, stage, company);
+        firstCandidate.setWorkspaceId(workspace.getId());
+        firstCandidate.setOwnerId(currentUser.getId());
+        firstCandidate.setName(draft.getName());
+        dealMapper.insert(firstCandidate);
+        DuplicatePreflightResponse reviewed = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                null));
+        assertEquals(
+            List.of(firstCandidate.getId()),
+            reviewed.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        Deal secondCandidate = dealDraft(pipeline, stage, company);
+        secondCandidate.setWorkspaceId(workspace.getId());
+        secondCandidate.setOwnerId(currentUser.getId());
+        secondCandidate.setName(draft.getName());
+        dealMapper.insert(secondCandidate);
+        DuplicatePreflightResponse submitRecheck = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                reviewed.reviewToken()));
+        assertNotEquals(reviewed.reviewToken(), submitRecheck.reviewToken());
+        assertEquals(
+            List.of(firstCandidate.getId(), secondCandidate.getId()),
+            submitRecheck.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        MutationFootprint beforeCreate = mutationFootprint();
+        clearDealCreationInvocations();
+
+        assertThrows(
+            ConflictException.class,
+            () -> dealService.createReviewed(draft, reviewed.reviewToken()));
+
+        assertRejectedDealCreation(beforeCreate);
+    }
+
+    @Test
+    void reviewedCreateAcceptsAcknowledgedExactDuplicateAfterSubmitRecheck() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal draft = dealDraft(pipeline, stage, company);
+        String expectedName = draft.getName();
+        Deal existingCandidate = dealDraft(pipeline, stage, company);
+        existingCandidate.setWorkspaceId(workspace.getId());
+        existingCandidate.setOwnerId(currentUser.getId());
+        existingCandidate.setName(expectedName);
+        dealMapper.insert(existingCandidate);
+        DuplicatePreflightResponse reviewed = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                null));
+        assertEquals(
+            List.of(existingCandidate.getId()),
+            reviewed.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        DuplicatePreflightResponse submitRecheck = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(
+                draft.getName(),
+                draft.getCompanyId(),
+                reviewed.reviewToken()));
+        assertEquals(reviewed.reviewToken(), submitRecheck.reviewToken());
+
+        Deal created = dealService.createReviewed(draft, submitRecheck.reviewToken());
+
+        Deal stored = dealMapper.getDealById(workspace.getId(), created.getId());
+        assertEquals(expectedName, stored.getName());
+        assertEquals(company.getId(), stored.getCompanyId());
+        assertEquals("manual", stored.getValueSource());
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM deal_stage_history WHERE workspace_id = ? AND deal_id = ?",
+            Integer.class,
+            workspace.getId(),
+            created.getId()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'deal.create' AND entity_id = ?",
+            Integer.class,
+            workspace.getId(),
+            created.getId()));
+
+        MutationFootprint beforeReuse = mutationFootprint();
+        clearDealCreationInvocations();
+        Deal reusedDraft = dealDraft(pipeline, stage, company);
+        reusedDraft.setName(expectedName);
+
+        assertThrows(
+            ConflictException.class,
+            () -> dealService.createReviewed(reusedDraft, reviewed.reviewToken()));
+
+        assertRejectedDealCreation(beforeReuse);
+    }
+
+    @Test
     void create_rejectsForeignRelatedRecords() {
         Workspace foreignWorkspace = newWorkspace();
         Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
@@ -913,7 +1051,8 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(deal.getName(), updated.getName());
         assertEquals(auditCount, dealUpdateAuditCount(deal.getId()));
         assertEquals(0, applicationEvents.stream().count());
-        verify(dealMapperSpy, never()).updateName(anyInt(), anyInt(), any(String.class));
+        verify(dealMapperSpy, never()).updateName(
+            anyInt(), anyInt(), any(String.class), any(String.class));
     }
 
     @Test
@@ -1717,6 +1856,33 @@ class DealServiceTest extends AbstractServiceTest {
         dealLineItemService.create(deal.getId(), request);
     }
 
+    private void clearDealCreationInvocations() {
+        clearInvocations(dealMapperSpy, notificationChanges, ruleTriggers);
+    }
+
+    private void assertRejectedDealCreation(MutationFootprint before) {
+        assertEquals(before, mutationFootprint());
+        verify(dealMapperSpy, never()).insert(any(Deal.class));
+        verify(notificationChanges, never()).publish(anyInt(), any(), any());
+        verify(ruleTriggers, never()).publish(anyInt(), any(), anyInt(), any());
+    }
+
+    private MutationFootprint mutationFootprint() {
+        return new MutationFootprint(
+            count("SELECT COUNT(*) FROM deal WHERE workspace_id = ?"),
+            count("SELECT COUNT(*) FROM deal_stage_history WHERE workspace_id = ?"),
+            count("SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?"),
+            count("SELECT COUNT(*) FROM notification WHERE workspace_id = ?"),
+            count("SELECT COUNT(*) FROM entity_reference WHERE workspace_id = ?"),
+            count("SELECT COUNT(*) FROM workflow_trigger_outbox WHERE workspace_id = ?"),
+            jdbcTemplate.queryForObject("SELECT COUNT(*) FROM activity", Integer.class),
+            jdbcTemplate.queryForObject("SELECT COUNT(*) FROM deal_person", Integer.class));
+    }
+
+    private int count(String sql) {
+        return jdbcTemplate.queryForObject(sql, Integer.class, workspace.getId());
+    }
+
     private long dealEventCount(int dealId, String event) {
         return applicationEvents.stream(RuleTriggerEvent.class)
             .filter(trigger -> trigger.workspaceId() == workspace.getId()
@@ -1880,6 +2046,17 @@ class DealServiceTest extends AbstractServiceTest {
         return auditService.forEntity("deal", dealId, 20, 0).stream()
             .filter(entry -> "deal.update".equals(entry.getAction()))
             .count();
+    }
+
+    private record MutationFootprint(
+            int deals,
+            int stageHistory,
+            int audits,
+            int notifications,
+            int references,
+            int workflowTriggers,
+            int activities,
+            int relationships) {
     }
 
     private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {

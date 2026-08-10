@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper">
+
+  <delete id="deleteExpired">
+    DELETE FROM deal_duplicate_review_proof
+    WHERE workspace_id = #{workspaceId}
+      AND expires_at &lt;= CURRENT_TIMESTAMP(6)
+    ORDER BY expires_at
+    LIMIT #{limit}
+  </delete>
+
+  <select id="workspaceIdsWithExpired" resultType="int">
+    SELECT workspace_id
+    FROM deal_duplicate_review_proof
+    WHERE expires_at &lt;= CURRENT_TIMESTAMP(6)
+    GROUP BY workspace_id
+    ORDER BY MIN(expires_at), workspace_id
+    LIMIT #{limit}
+  </select>
+
+  <insert id="insert">
+    INSERT INTO deal_duplicate_review_proof
+      (token_hash, workspace_id, actor_id, workflow_hash, result_hash, expires_at)
+    VALUES
+      (#{tokenHash}, #{workspaceId}, #{actorId}, #{workflowHash}, #{resultHash},
+       TIMESTAMPADD(SECOND, #{ttlSeconds}, CURRENT_TIMESTAMP(6)))
+  </insert>
+
+  <select id="lockConsumable" resultType="java.lang.Integer">
+    SELECT 1
+    FROM deal_duplicate_review_proof
+    WHERE token_hash = #{tokenHash}
+      AND workspace_id = #{workspaceId}
+      AND actor_id = #{actorId}
+      AND workflow_hash = #{workflowHash}
+      AND result_hash = #{resultHash}
+      AND expires_at &gt; CURRENT_TIMESTAMP(6)
+    FOR UPDATE
+  </select>
+
+  <delete id="deleteClaimed">
+    DELETE FROM deal_duplicate_review_proof
+    WHERE token_hash = #{tokenHash}
+      AND workspace_id = #{workspaceId}
+  </delete>
+
+  <delete id="deleteForActor">
+    DELETE FROM deal_duplicate_review_proof
+    WHERE workspace_id = #{workspaceId}
+      AND actor_id = #{actorId}
+  </delete>
+
+  <delete id="deleteForActorAnywhere">
+    DELETE FROM deal_duplicate_review_proof
+    WHERE actor_id = #{actorId}
+  </delete>
+
+</mapper>

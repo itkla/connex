@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
@@ -31,6 +32,15 @@ public class PersonEdgeReadService {
     /** Loads all processable visible edges for graph traversal. */
     public List<PersonEdge> getAllEdges(int workspaceId) {
         return personEdgeMapper.getAllEdges(workspaceId, workspaceIdsJson(workspaceId));
+    }
+
+    /** Resolves a bounded set of currently processable visible edge references. */
+    public Set<Integer> getVisibleEdgeIds(int workspaceId, List<Integer> edgeIds) {
+        if (edgeIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(personEdgeMapper.getVisibleEdgeIds(
+            workspaceId, workspaceIdsJson(workspaceId), edgeIds));
     }
 
     /** Loads the bounded visible edge source for network reports. */

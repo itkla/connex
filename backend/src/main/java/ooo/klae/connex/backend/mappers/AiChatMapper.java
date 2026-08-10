@@ -1,13 +1,16 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AiChatToolCall;
+import ooo.klae.connex.backend.beans.AiChatTurn;
 
-/** Workspace-scoped persistence for assistant sessions, participants, and messages. */
+/** Workspace-scoped persistence for assistant sessions, participants, messages, turns, and tools. */
 public interface AiChatMapper {
     List<AiChatSession> listAccessibleSessions(
         @Param("workspaceId") int workspaceId,
@@ -71,6 +74,10 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("userId") int userId);
 
+    int countParticipants(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
     int nextMessageSequence(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
@@ -88,6 +95,12 @@ public interface AiChatMapper {
         @Param("limit") int limit,
         @Param("offset") int offset);
 
+    List<AiChatMessage> listRecentMessages(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("maxSeq") int maxSeq,
+        @Param("limit") int limit);
+
     long countMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
@@ -95,4 +108,53 @@ public interface AiChatMapper {
     int updateLastMessageAt(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id);
+
+    int countActiveTurns(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
+    int insertTurn(AiChatTurn turn);
+
+    AiChatTurn getTurnById(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id);
+
+    AiChatTurn getTurnByIdForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id);
+
+    List<AiChatTurn> listActiveTurnsBySessionForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
+    int markTurnRunning(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id);
+
+    int updateTurnTerminal(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("status") String status,
+        @Param("terminalReason") String terminalReason,
+        @Param("expectedStatus") String expectedStatus,
+        @Param("createdBefore") LocalDateTime createdBefore);
+
+    int insertToolCall(AiChatToolCall toolCall);
+
+    AiChatToolCall getToolCallById(
+        @Param("workspaceId") int workspaceId,
+        @Param("messageId") int messageId,
+        @Param("id") int id);
+
+    int updateToolCall(
+        @Param("workspaceId") int workspaceId,
+        @Param("messageId") int messageId,
+        @Param("id") int id,
+        @Param("status") String status,
+        @Param("resultJson") String resultJson,
+        @Param("executedByUserId") int executedByUserId);
 }

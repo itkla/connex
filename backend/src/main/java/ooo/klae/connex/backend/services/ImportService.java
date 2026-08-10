@@ -1170,7 +1170,7 @@ public class ImportService {
                     continue;
                 }
                 byNameCompany.computeIfAbsent(
-                    dealKey(normalizedName, existing.getCompanyId()),
+                    DealDuplicateKey.of(normalizedName, existing.getCompanyId()),
                     ignored -> new ArrayList<>()).add(existing.getId());
             }
             Map<Integer, Integer> links =
@@ -1191,7 +1191,7 @@ public class ImportService {
                     row.companyName == null || row.resolvedCompanyId != null;
                 String normalizedName = normName(row.std.get("name"));
                 List<Integer> matchIds = companyKnown && normalizedName != null
-                    ? byNameCompany.get(dealKey(
+                    ? byNameCompany.get(DealDuplicateKey.of(
                         normalizedName,
                         row.resolvedCompanyId))
                     : null;
@@ -1533,10 +1533,6 @@ public class ImportService {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
         digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
         digest.update(bytes);
-    }
-
-    private static String dealKey(String name, Integer companyId) {
-        return name + " " + (companyId == null ? "" : companyId);
     }
 
     private String dealCanonicalKey(PlanRow row) {

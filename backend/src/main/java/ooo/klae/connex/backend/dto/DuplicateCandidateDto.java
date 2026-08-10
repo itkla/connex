@@ -6,9 +6,9 @@ import java.util.List;
  * Visible record that matched candidate creation values.
  *
  * @param recordId visible record id
- * @param recordType person or company
+ * @param recordType person, company, or deal
  * @param name display name
- * @param companyName person's visible company name
+ * @param companyName person's or deal's visible company name
  * @param title person's title
  * @param website company's website
  * @param industry company's industry

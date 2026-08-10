@@ -102,7 +102,7 @@ public class ScoringService {
     /** A single timestamped, intent-weighted interaction. */
     private record Touch(long epochMillis, double weight) {}
 
-    private record ContactSourceTouch(
+    private record SourceTouch(
         String kind,
         int id,
         String timestamp,
@@ -188,14 +188,14 @@ public class ScoringService {
             Set<Integer> excludedActivityIds,
             Set<Integer> excludedNoteIds,
             Set<Integer> excludedTaskIds) {
-        Map<Integer, List<ContactSourceTouch>> touches = new HashMap<>();
+        Map<Integer, List<SourceTouch>> touches = new HashMap<>();
         for (Activity activity : activityMapper.getAllActivities(workspaceId)) {
             Integer personId = personId(activity.getPerson());
             if (personId != null
                     && !excludedActivityIds.contains(activity.getId())
                     && epoch(activity.getTimestamp()) != null) {
                 touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
-                    new ContactSourceTouch(
+                    new SourceTouch(
                         "activity",
                         activity.getId(),
                         activity.getTimestamp(),
@@ -209,7 +209,7 @@ public class ScoringService {
                     && isSharedNote(note)
                     && epoch(note.getCreatedAt()) != null) {
                 touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
-                    new ContactSourceTouch(
+                    new SourceTouch(
                         "note",
                         note.getId(),
                         note.getCreatedAt(),
@@ -222,20 +222,72 @@ public class ScoringService {
                     && !excludedTaskIds.contains(task.getId())
                     && epoch(task.getCreatedAt()) != null) {
                 touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
-                    new ContactSourceTouch(
+                    new SourceTouch(
                         "task",
                         task.getId(),
                         task.getCreatedAt(),
                         Double.toString(WARMTH_MODEL.taskWeight())));
             }
         }
-        Map<Integer, String> hashes = new LinkedHashMap<>();
-        touches.entrySet().stream()
-            .sorted(Map.Entry.comparingByKey())
-            .forEach(entry -> hashes.put(
-                entry.getKey(),
-                contactSourceStateHash(entry.getValue())));
-        return hashes;
+        return sourceStateHashes(touches);
+    }
+
+    /** Returns clock-independent fingerprints of persisted touches attributed to each company. */
+    Map<Integer, String> companySourceStateHashes(int workspaceId) {
+        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
+        Map<Integer, Integer> personCompany = personCompanyMap(persons);
+        Set<Integer> processablePersonIds = personIds(persons);
+        Map<Integer, Integer> dealCompany = dealCompanyMap(dealMapper.getAllDeals(workspaceId));
+        Map<Integer, List<SourceTouch>> touches = new HashMap<>();
+        for (Activity activity : activityMapper.getAllActivities(workspaceId)) {
+            if (epoch(activity.getTimestamp()) != null) {
+                addCompanySourceTouch(
+                    activity.getPerson(),
+                    activity.getDeal(),
+                    new SourceTouch(
+                        "activity",
+                        activity.getId(),
+                        activity.getTimestamp(),
+                        Double.toString(activityWeight(activity.getType()))),
+                    personCompany,
+                    processablePersonIds,
+                    dealCompany,
+                    touches);
+            }
+        }
+        for (Note note : noteMapper.getAllNotes(workspaceId)) {
+            if (isSharedNote(note) && epoch(note.getCreatedAt()) != null) {
+                addCompanySourceTouch(
+                    note.getPerson(),
+                    note.getDeal(),
+                    new SourceTouch(
+                        "note",
+                        note.getId(),
+                        note.getCreatedAt(),
+                        Double.toString(WARMTH_MODEL.noteWeight())),
+                    personCompany,
+                    processablePersonIds,
+                    dealCompany,
+                    touches);
+            }
+        }
+        for (Task task : taskMapper.getAllTasks(workspaceId)) {
+            if (epoch(task.getCreatedAt()) != null) {
+                addCompanySourceTouch(
+                    task.getPerson(),
+                    task.getDeal(),
+                    new SourceTouch(
+                        "task",
+                        task.getId(),
+                        task.getCreatedAt(),
+                        Double.toString(WARMTH_MODEL.taskWeight())),
+                    personCompany,
+                    processablePersonIds,
+                    dealCompany,
+                    touches);
+            }
+        }
+        return sourceStateHashes(touches);
     }
 
     static String emptyContactSourceStateHash() {
@@ -243,15 +295,15 @@ public class ScoringService {
     }
 
     private static String contactSourceStateHash(
-            List<ContactSourceTouch> sourceTouches) {
+            List<SourceTouch> sourceTouches) {
         List<String> values = new ArrayList<>();
         values.add(WARMTH_MODEL.version());
         sourceTouches.stream()
             .sorted(Comparator
-                .comparing(ContactSourceTouch::kind)
-                .thenComparingInt(ContactSourceTouch::id)
-                .thenComparing(ContactSourceTouch::timestamp)
-                .thenComparing(ContactSourceTouch::weight))
+                .comparing(SourceTouch::kind)
+                .thenComparingInt(SourceTouch::id)
+                .thenComparing(SourceTouch::timestamp)
+                .thenComparing(SourceTouch::weight))
             .forEach(touch -> {
                 values.add(touch.kind());
                 values.add(Integer.toString(touch.id()));
@@ -259,6 +311,16 @@ public class ScoringService {
                 values.add(touch.weight());
             });
         return hashValues(values);
+    }
+
+    private static Map<Integer, String> sourceStateHashes(
+            Map<Integer, List<SourceTouch>> touches) {
+        Map<Integer, String> hashes = new LinkedHashMap<>();
+        touches.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> hashes.put(
+                entry.getKey(), contactSourceStateHash(entry.getValue())));
+        return hashes;
     }
 
     private static String hashValues(List<String> values) {
@@ -1089,9 +1151,35 @@ public class ScoringService {
             Map<Integer, Integer> personCompany, Set<Integer> processablePersonIds,
             Map<Integer, Integer> dealCompany,
             Map<Integer, List<Touch>> byCompany) {
+        for (Integer companyId : attributedCompanyIds(
+                person, deal, personCompany, processablePersonIds, dealCompany)) {
+            add(byCompany, companyId, touch);
+        }
+    }
+
+    private void addCompanySourceTouch(
+            Person person,
+            Deal deal,
+            SourceTouch touch,
+            Map<Integer, Integer> personCompany,
+            Set<Integer> processablePersonIds,
+            Map<Integer, Integer> dealCompany,
+            Map<Integer, List<SourceTouch>> byCompany) {
+        for (Integer companyId : attributedCompanyIds(
+                person, deal, personCompany, processablePersonIds, dealCompany)) {
+            byCompany.computeIfAbsent(companyId, key -> new ArrayList<>()).add(touch);
+        }
+    }
+
+    private Set<Integer> attributedCompanyIds(
+            Person person,
+            Deal deal,
+            Map<Integer, Integer> personCompany,
+            Set<Integer> processablePersonIds,
+            Map<Integer, Integer> dealCompany) {
         Set<Integer> companies = new HashSet<>();
         Integer pid = personId(person);
-        if (pid != null && !processablePersonIds.contains(pid)) return;
+        if (pid != null && !processablePersonIds.contains(pid)) return Set.of();
         if (pid != null) {
             Integer cid = personCompany.get(pid);
             if (cid != null) companies.add(cid);
@@ -1101,7 +1189,7 @@ public class ScoringService {
             Integer cid = dealCompany.get(did);
             if (cid != null) companies.add(cid);
         }
-        for (Integer cid : companies) add(byCompany, cid, touch);
+        return companies;
     }
 
     private static void add(Map<Integer, List<Touch>> map, int key, Touch touch) {

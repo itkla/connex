@@ -4,10 +4,12 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
 
 /**
  * Represents a sales opportunity (deal) being tracked in a pipeline.
@@ -25,6 +27,8 @@ public class Deal {
     private int workspaceId;
     private Integer ownerId;
     private String name;
+    @JsonIgnore
+    private String duplicateNormalizedName;
     private BigDecimal value = BigDecimal.ZERO.setScale(2);
     private BigDecimal actualValue = BigDecimal.ZERO.setScale(2);
     private String valueSource = "manual";
@@ -61,6 +65,7 @@ public class Deal {
 
     public void setName(String name) {
         this.name = name;
+        this.duplicateNormalizedName = CanonicalNameNormalizer.normalize(name).orElse(null);
     }
 
     public BigDecimal getValue() {

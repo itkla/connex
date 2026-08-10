@@ -113,11 +113,6 @@ class TenantScopeInterceptorTest {
             NS + "WorkflowVersionMapper.findLockCandidatesByUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "RuleMapper.findLockCandidatesByUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SuppressionMapper.clearCreatorsAnywhere"));
-        assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewMapper.deleteForFreshMembership"));
-        assertFalse(interceptor.requiresResolvedContext(
-            NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership"));
-        assertFalse(interceptor.requiresResolvedContext(
-            NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere"));
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearMemberOwnership"));
@@ -125,21 +120,23 @@ class TenantScopeInterceptorTest {
     }
 
     /**
-     * Every statement {@code UserOffboardingService.prepareFreshMembership} reaches must run
-     * without a resolved context, because a first-time invitee and every SSO JIT provisioning
-     * arrive on a request thread with no workspace to resolve. The provider-capture purge was
-     * added to that flow after its exempt set was curated, so only the {@code *Anywhere} variants
-     * were listed and the workspace-scoped ones it actually calls threw (#1011). The assistant-chat
-     * cleanup repeated that mistake because this guard hardcoded a provider-capture prefix and so
-     * could not observe a new mapper joining the flow.
-     *
-     * <p>The list below is every scoped statement the flow reaches, not a sample. It is still
-     * hand-maintained rather than derived from the service call graph, so a newly added cleanup can
-     * drift out of it; coupling this guard structurally to that call graph is tracked separately.
+     * Fresh-membership-only statements require the target workspace context installed by
+     * {@code UserOffboardingService.prepareFreshMembership}. Statements shared with member
+     * detachment or invitation decline remain exempt until those callers install their own target
+     * workspace scope.
      */
     @Test
-    void freshMembershipScopedCleanupRunsWithoutAResolvedContext() {
+    void freshMembershipCleanupRemovesOnlyExemptionsWhoseCallersAreAllScoped() {
         bindRequest();
+        for (String id : new String[] {
+            NS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
+            NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
+            NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
+            NS + "SavedViewMapper.deleteForFreshMembership",
+        }) {
+            assertTrue(interceptor.requiresResolvedContext(id), id);
+            assertThrows(ForbiddenException.class, () -> interceptor.enforce(id), id);
+        }
         for (String id : new String[] {
             NS + "ProviderCaptureMapper.deleteProviderActivities",
             NS + "ProviderCaptureMapper.deleteInteractions",
@@ -147,11 +144,7 @@ class TenantScopeInterceptorTest {
             NS + "ProviderCaptureMapper.deleteUserPolicy",
             NS + "ProviderCaptureMapper.deleteDecisions",
             NS + "ProviderCaptureMapper.countUserProviderResiduals",
-            NS + "ProviderCaptureMapper.clearWorkspacePolicyUpdater",
             NS + "AiChatMapper.deleteParticipantsForUser",
-            NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
-            NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
-            NS + "SavedViewMapper.deleteForFreshMembership",
             NS + "NotificationMapper.deleteHistoricalNotificationBaselinesForRecipient",
             NS + "NotificationMapper.deleteAllForRecipient",
             NS + "DealMapper.removeCollaboratorFromWorkspace",

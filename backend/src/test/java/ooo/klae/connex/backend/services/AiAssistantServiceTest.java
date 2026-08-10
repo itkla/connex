@@ -21,7 +21,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
+import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
@@ -199,6 +202,50 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void messageResponsesExposeOnlyCitationsStillVisibleToTheViewer() {
+        AiChatSessionDto created = service.create(createRequest("Citations"));
+        Company company = newCompany();
+        Person visible = newPerson(company);
+        Person restricted = newPerson(company);
+        personMapper.updateProcessingRestrictions(
+                workspace.getId(), restricted.getId(), true, false);
+        assistantMessage(
+                created.getId(),
+                1,
+                "Two records",
+                "{\"citations\":["
+                        + "{\"handle\":\"r1\",\"kind\":\"person\",\"id\":"
+                        + visible.getId()
+                        + "},{\"handle\":\"r2\",\"kind\":\"person\",\"id\":"
+                        + restricted.getId()
+                        + "}],\"resources\":[]}");
+
+        AiChatSessionDetailDto detail = service.get(created.getId(), 1, 50);
+
+        assertEquals(1, detail.messages().items().size());
+        assertEquals(1, detail.messages().items().getFirst().getCitations().size());
+        assertEquals("r1", detail.messages().items().getFirst().getCitations().getFirst().handle());
+        assertEquals(visible.getId(),
+                detail.messages().items().getFirst().getCitations().getFirst().id());
+    }
+
+    @Test
+    void ordinaryReadsRetainHistoricalAssistantOutputUntilARestrictionSweepPurgesIt() {
+        AiChatSessionDto created = service.create(createRequest("Historical replay"));
+        service.appendMessage(created.getId(), messageRequest("User request stays"));
+        assistantMessage(
+                created.getId(), 2, "Historical generated answer",
+                "{\"citations\":[],\"resources\":[]}");
+
+        AiChatSessionDetailDto detail = service.get(created.getId(), 1, 50);
+
+        assertEquals(2, detail.messages().total());
+        assertEquals(
+                List.of("User request stays", "Historical generated answer"),
+                detail.messages().items().stream().map(AiChatMessageDto::getContent).toList());
+    }
+
+    @Test
     void paginationRejectsInvalidBounds() {
         assertThrows(BadRequestException.class, () -> service.page(0, 25));
         assertThrows(BadRequestException.class, () -> service.page(1, 0));
@@ -322,4 +369,16 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         request.setContent(content);
         return request;
     }
+
+    private void assistantMessage(int sessionId, int sequence, String content, String metadata) {
+        AiChatMessage message = new AiChatMessage();
+        message.setWorkspaceId(workspace.getId());
+        message.setSessionId(sessionId);
+        message.setSeq(sequence);
+        message.setAuthorKind("assistant");
+        message.setContent(content);
+        message.setStructuredJson(metadata);
+        chatMapper.insertMessage(message);
+    }
+
 }

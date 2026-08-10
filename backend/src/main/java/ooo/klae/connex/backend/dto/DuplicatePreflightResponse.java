@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Ranked visible duplicate candidates for one proposed record.
  *
- * @param recordType person or company
+ * @param recordType person, company, or deal
  * @param candidates ranked candidates
  * @param truncated whether additional visible candidates were omitted
  * @param reviewToken opaque token binding this result to the proposed values and candidates

@@ -15,6 +15,7 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AuditSupportRowDto;
@@ -78,7 +79,7 @@ public class AuditService {
             "azure_openai", "bedrock", "openai_compatible", "vertex", "unresolved");
     private static final Set<String> AI_FEATURES = Set.of(
             "deal.brief", "deal.risk_rationale", "intro.rationale", "report.narrative",
-            "business_card.scan");
+            AiFeature.ASSISTANT_CHAT.wireKey(), "business_card.scan");
     private static final Set<String> AI_OUTCOMES = Set.of("attempt", "success", "failure", "blocked");
     private static final Set<String> AI_REASONS = Set.of(
             "gate", "media_admission", "provider", "provider_capability", "serialization", "leak",

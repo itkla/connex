@@ -4,18 +4,20 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 
 import {
     preflightCompanyDuplicates,
+    preflightDealDuplicates,
     preflightPersonDuplicates,
 } from '@/app/lib/api';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { DuplicatePreflightResponse } from '@/app/lib/types';
 
-export type DuplicatePreflightKind = 'company' | 'person';
+export type DuplicatePreflightKind = 'company' | 'deal' | 'person';
 
 export type DuplicatePreflightValues = {
     name: string;
     email?: string;
     phone?: string;
     website?: string;
+    companyId?: number | null;
 };
 
 export type DuplicatePreflightStatus = 'idle' | 'checking' | 'ready' | 'error';
@@ -42,6 +44,7 @@ function candidateList(value?: string): string[] {
 
 function eligible(kind: DuplicatePreflightKind, values: DuplicatePreflightValues): boolean {
     const nameReady = values.name.trim().length > 0;
+    if (kind === 'deal') return nameReady;
     const phoneReady = (values.phone?.replaceAll(/\D/g, '').length ?? 0) >= 7;
     if (kind === 'person') {
         return nameReady || values.email?.includes('@') === true || phoneReady;
@@ -63,9 +66,11 @@ function fingerprint(
         values.email?.trim() ?? '',
         values.phone?.trim() ?? '',
         values.website?.trim() ?? '',
+        values.companyId ?? null,
     ]);
 }
 
+/** Produces the acknowledgement identity for one exact duplicate-review response. */
 export function duplicatePreflightResponseSignature(
     response: DuplicatePreflightResponse,
 ): string {
@@ -121,23 +126,32 @@ export function useDuplicatePreflight(
         setAcknowledgedResponse(null);
     }, [requestKey]);
 
-    const runCheck = useCallback(async () => {
+    const runCheck = useCallback(async (dealReviewToken?: string) => {
         if (!requestEligible) return null;
         const sequence = requestSequenceRef.current + 1;
         requestSequenceRef.current = sequence;
         setCompleted({ requestKey, status: 'checking', response: null });
         try {
-            const response = kind === 'person'
-                ? await preflightPersonDuplicates({
+            let response: DuplicatePreflightResponse;
+            if (kind === 'person') {
+                response = await preflightPersonDuplicates({
                     name: values.name,
                     emails: candidateList(values.email),
                     phones: candidateList(values.phone),
-                }, requestInit)
-                : await preflightCompanyDuplicates({
+                }, requestInit);
+            } else if (kind === 'company') {
+                response = await preflightCompanyDuplicates({
                     name: values.name,
                     websites: candidateList(values.website),
                     phones: candidateList(values.phone),
                 }, requestInit);
+            } else {
+                response = await preflightDealDuplicates({
+                    name: values.name,
+                    companyId: values.companyId,
+                    reviewToken: dealReviewToken,
+                }, requestInit);
+            }
             if (requestSequenceRef.current === sequence
                     && currentRequestKeyRef.current === requestKey) {
                 setCompleted({ requestKey, status: 'ready', response });
@@ -156,6 +170,7 @@ export function useDuplicatePreflight(
         requestEligible,
         requestKey,
         requestInit,
+        values.companyId,
         values.email,
         values.name,
         values.phone,
@@ -204,7 +219,9 @@ export function useDuplicatePreflight(
                 response: null,
             };
         }
-        const checked = await runCheck();
+        const checked = await runCheck(
+            kind === 'deal' ? response?.reviewToken : undefined,
+        );
         if (!checked || checked.truncated) {
             return {
                 allowed: false,
@@ -219,7 +236,7 @@ export function useDuplicatePreflight(
         if (checked.candidates.length === 0) {
             return {
                 allowed: true,
-                duplicateReviewToken: null,
+                duplicateReviewToken: kind === 'deal' ? checked.reviewToken : null,
                 reviewSignature,
                 response: checked,
             };
@@ -236,7 +253,7 @@ export function useDuplicatePreflight(
             reviewSignature,
             response: checked,
         };
-    }, [acknowledgedResponse, requestEligible, requestKey, runCheck]);
+    }, [acknowledgedResponse, kind, requestEligible, requestKey, response?.reviewToken, runCheck]);
     const checkNow = useCallback(async () => {
         const decision = await reviewNow();
         return decision.allowed;
