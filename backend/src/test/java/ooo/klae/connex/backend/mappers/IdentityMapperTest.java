@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +12,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -84,8 +86,8 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "person@example.com",
                 "person@example.com",
                 "manual"));
-        assertThrows(
-            DataIntegrityViolationException.class,
+        DataAccessException personKindFailure = assertThrows(
+            DataAccessException.class,
             () -> insertPersonIdentity(
                 workspace.getId(),
                 person.getId(),
@@ -93,8 +95,9 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "example.com",
                 "example.com",
                 "manual"));
-        assertThrows(
-            DataIntegrityViolationException.class,
+        assertFalse(personKindFailure instanceof DataIntegrityViolationException);
+        DataAccessException companyKindFailure = assertThrows(
+            DataAccessException.class,
             () -> insertCompanyIdentity(
                 workspace.getId(),
                 company.getId(),
@@ -102,6 +105,7 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "team@example.com",
                 "team@example.com",
                 "manual"));
+        assertFalse(companyKindFailure instanceof DataIntegrityViolationException);
     }
 
     @Test
