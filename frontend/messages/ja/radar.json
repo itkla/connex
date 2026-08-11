@@ -6,7 +6,15 @@
     },
     "title": "リレーションシップ・レーダー",
     "description": "冷え込みつつある関係、案件リスク、ウォームパスを、根拠に基づく一つの優先リストで確認します。",
-    "listLabel": "優先順位順の関係性シグナル",
+    "summary": {
+      "headline": "{count, plural, =0 {対応が必要なシグナルはありません} other {対応が必要なシグナル：#件}}",
+      "headlineFiltered": "{count, plural, =0 {この表示に該当するシグナルはありません} other {この表示のシグナル：#件}}"
+    },
+    "band": {
+      "now": "今日対応",
+      "soon": "冷めかけている",
+      "later": "標準監視"
+    },
     "family": {
       "relationship_decay": "冷え込みつつある関係",
       "deal_risk": "案件リスク",
@@ -28,6 +36,12 @@
       "followed": "フォロー中",
       "snoozed": "スヌーズ中",
       "dismissed": "非表示"
+    },
+    "detail": {
+      "show": "根拠を表示",
+      "hide": "根拠を非表示",
+      "showNamed": "{subject} の根拠を表示",
+      "hideNamed": "{subject} の根拠を非表示"
     },
     "filters": {
       "label": "レーダーの絞り込み",

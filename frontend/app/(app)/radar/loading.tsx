@@ -1,48 +1,69 @@
 import { PageShell } from '@/app/components/PageShell';
 import { Skeleton } from '@/components/ui/skeleton';
 
-function SignalSkeleton() {
+function RowSkeleton() {
     return (
-        <li className="rounded-2xl border border-border bg-card p-5 sm:p-6">
-            <div className="flex flex-col gap-5 xl:grid xl:grid-cols-[minmax(14rem,0.8fr)_minmax(22rem,1.5fr)_minmax(17rem,1fr)] xl:gap-8">
-                <div className="flex gap-3">
-                    <Skeleton className="size-10 shrink-0 rounded-xl" />
-                    <div className="space-y-2">
-                        <Skeleton className="h-3 w-24" />
-                        <Skeleton className="h-5 w-40" />
-                        <Skeleton className="h-3 w-20" />
+        <li className="border-b border-border/60 px-3 py-3 last:border-b-0 sm:px-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                    <Skeleton className="mt-0.5 size-9 shrink-0 rounded-lg" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-3 w-56" />
+                        <Skeleton className="h-4 w-full max-w-lg" />
                     </div>
                 </div>
-                <div className="space-y-3">
-                    <Skeleton className="h-3 w-32" />
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-4/5" />
-                </div>
-                <div className="space-y-3 xl:items-end">
-                    <Skeleton className="h-4 w-32 xl:ml-auto" />
-                    <Skeleton className="h-11 w-full" />
+                <div className="flex shrink-0 items-center gap-1">
+                    <Skeleton className="size-11 rounded-full lg:size-9" />
+                    <Skeleton className="size-11 rounded-full lg:size-9" />
+                    <Skeleton className="size-11 rounded-full lg:size-9" />
+                    <Skeleton className="h-11 w-28 rounded-full lg:h-9" />
+                    <Skeleton className="h-11 w-32 rounded-full lg:h-9" />
+                    <Skeleton className="size-11 rounded-full lg:size-9" />
                 </div>
             </div>
         </li>
     );
 }
 
+function BandSkeleton({ rows }: { rows: number }) {
+    return (
+        <section className="space-y-2">
+            <div className="flex items-baseline gap-3">
+                <Skeleton className="h-4 w-28" />
+                <span className="h-px min-w-0 flex-1 bg-border" aria-hidden />
+            </div>
+            <ol className="rounded-2xl border border-border bg-card">
+                {Array.from({ length: rows }).map((_, index) => <RowSkeleton key={index} />)}
+            </ol>
+        </section>
+    );
+}
+
 export default function RadarLoading() {
     return (
         <PageShell tier="wide">
-            <header className="space-y-2">
+            <header>
                 <Skeleton className="h-10 w-48" />
-                <Skeleton className="h-4 w-full max-w-xl" />
             </header>
             <div className="space-y-8">
-                <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 sm:flex-row">
-                    <Skeleton className="h-11 flex-1" />
-                    <Skeleton className="h-11 w-full sm:w-40" />
-                    <Skeleton className="h-11 w-full sm:w-36" />
+                <div className="space-y-4">
+                    <Skeleton className="h-4 w-64" />
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            <Skeleton className="h-9 w-28 rounded-full" />
+                            <Skeleton className="h-9 w-44 rounded-full" />
+                            <Skeleton className="h-9 w-28 rounded-full" />
+                            <Skeleton className="h-9 w-32 rounded-full" />
+                        </div>
+                        <div className="flex gap-2">
+                            <Skeleton className="h-11 flex-1 lg:h-9 lg:w-64 lg:flex-none" />
+                            <Skeleton className="h-11 w-36 shrink-0 lg:h-9" />
+                        </div>
+                    </div>
                 </div>
-                <ul className="space-y-4">
-                    {Array.from({ length: 3 }).map((_, index) => <SignalSkeleton key={index} />)}
-                </ul>
+                <BandSkeleton rows={2} />
+                <BandSkeleton rows={3} />
             </div>
         </PageShell>
     );
