@@ -34,12 +34,16 @@ jobs:
         id: metadata
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Release tags must use strict vMAJOR.MINOR.PATCH SemVer."
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$ ]]; then
+            echo "::error::Release tags must use vMAJOR.MINOR.PATCH with optional strict SemVer prerelease identifiers."
+            exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          if (( ${#VERSION} > 128 )); then
+            echo "::error::Release version must be 128 characters or fewer to form a valid container tag (received ${#VERSION})."
             exit 1
           fi
           test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
-          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
           BUILD_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
           BUILD_TIME="$(git show -s --format=%cI "$GITHUB_SHA")"
           {
@@ -837,6 +841,10 @@ jobs:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
+          prerelease_flags=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease_flags+=(--prerelease --latest=false)
+          fi
           assets=(
             release-manifest.json
             release-manifest.bundle.json
@@ -856,8 +864,11 @@ jobs:
               --jq '.assets[].name' | sort > /tmp/actual-release-assets
             diff -u /tmp/expected-release-assets /tmp/actual-release-assets
           }
-          if gh release view "$GITHUB_REF_NAME" --json isDraft >/tmp/release-state.json 2>/dev/null; then
+          if gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease >/tmp/release-state.json 2>/dev/null; then
             if [ "$(jq -r '.isDraft' /tmp/release-state.json)" != true ]; then
+              if [[ "$VERSION" == *-* ]]; then
+                test "$(jq -r '.isPrerelease' /tmp/release-state.json)" = true
+              fi
               verify_asset_names
               rm -rf /tmp/published-release
               mkdir /tmp/published-release
@@ -875,6 +886,7 @@ jobs:
               --verify-tag \
               --title "Connex ${VERSION}" \
               --generate-notes \
+              "${prerelease_flags[@]}" \
               --notes "One signed, benchmark-qualified frontend, backend, and OCR image set. Deploy only the immutable digests in release-manifest.json."
           fi
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
@@ -887,5 +899,5 @@ jobs:
               "$(sha256sum "/tmp/draft-release/$asset" | cut -d ' ' -f1)"
           done
           bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+          gh release edit "$GITHUB_REF_NAME" --draft=false "${prerelease_flags[@]}"
           gh release verify "$GITHUB_REF_NAME"
