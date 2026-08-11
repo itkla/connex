@@ -9,10 +9,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,9 +22,11 @@ import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
-import java.util.concurrent.CountDownLatch;
+import java.util.ArrayDeque;
+import java.util.Queue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import javax.imageio.ImageIO;
@@ -56,6 +58,8 @@ class ManagedObjectServiceTest {
 
     private ObjectStorageProperties properties;
     private ManagedObjectService service;
+    private final MutableNanoTime readinessNanoTime = new MutableNanoTime();
+    private final Queue<Runnable> readinessTasks = new ArrayDeque<>();
 
     @BeforeEach
     void setUp() {
@@ -87,7 +91,9 @@ class ManagedObjectServiceTest {
             quotaService,
             userImageAdmissionService,
             new ManagedObjectWriteAdmissionService(configuredProperties),
-            new ManagedObjectReadAdmissionService(configuredProperties, () -> 9));
+            new ManagedObjectReadAdmissionService(configuredProperties, () -> 9),
+            readinessNanoTime,
+            task -> readinessTasks.add(task));
     }
 
     @Test
@@ -517,40 +523,41 @@ class ManagedObjectServiceTest {
     }
 
     @Test
-    void readinessProbeNeverBlocksTheCallerAndCachesItsResult() throws Exception {
-        CountDownLatch probeStarted = new CountDownLatch(1);
-        CountDownLatch releaseProbe = new CountDownLatch(1);
-        when(objectStorage.isReady()).thenAnswer(invocation -> {
-            probeStarted.countDown();
-            assertTrue(releaseProbe.await(5, TimeUnit.SECONDS));
-            return true;
-        });
+    void readinessProbeNeverBlocksTheCallerAndCachesItsResult() {
+        properties.setReadinessCacheTtlMs(1_000);
+        when(objectStorage.isReady()).thenReturn(true);
 
         assertFalse(service.isReady());
-        assertTrue(probeStarted.await(5, TimeUnit.SECONDS));
+        verify(objectStorage, never()).isReady();
+        assertEquals(1, readinessTasks.size());
         assertFalse(service.isReady());
-        releaseProbe.countDown();
-        assertTrue(awaitReady());
+        verify(objectStorage, never()).isReady();
+        assertEquals(1, readinessTasks.size());
+
+        readinessTasks.remove().run();
+        clearInvocations(objectStorage);
+        readinessNanoTime.advanceMillis(999);
 
         assertTrue(service.isReady());
-        verify(objectStorage, times(1)).isReady();
+        verify(objectStorage, never()).isReady();
+        assertTrue(readinessTasks.isEmpty());
     }
 
     @Test
-    void cachedReadinessNeverStartsAnExpiredStorageProbe() throws Exception {
+    void cachedReadinessNeverStartsAnExpiredStorageProbe() {
         properties.setReadinessCacheTtlMs(1);
         when(objectStorage.isReady()).thenReturn(true);
 
         service.run(null);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!service.isReadyCached() && System.nanoTime() < deadline) {
-            Thread.sleep(5);
-        }
+        assertEquals(1, readinessTasks.size());
+        readinessTasks.remove().run();
         assertTrue(service.isReadyCached());
-        Thread.sleep(5);
+        clearInvocations(objectStorage);
+        readinessNanoTime.advanceMillis(1);
 
         assertTrue(service.isReadyCached());
-        verify(objectStorage, times(1)).isReady();
+        verify(objectStorage, never()).isReady();
+        assertTrue(readinessTasks.isEmpty());
     }
 
     @Test
@@ -560,59 +567,58 @@ class ManagedObjectServiceTest {
         assertFalse(service.isReady());
 
         verify(objectStorage, never()).isReady();
+        assertTrue(readinessTasks.isEmpty());
     }
 
     @Test
-    void storageFailureCannotBeOverwrittenByAnOlderReadinessProbe() throws Exception {
+    void storageFailureCannotBeOverwrittenByAnOlderReadinessProbe() {
         properties.setReadinessCacheTtlMs(20);
-        CountDownLatch staleProbeStarted = new CountDownLatch(1);
-        CountDownLatch releaseStaleProbe = new CountDownLatch(1);
-        CountDownLatch staleProbeCompleted = new CountDownLatch(1);
-        AtomicInteger probes = new AtomicInteger();
-        when(objectStorage.isReady()).thenAnswer(invocation -> {
-            int probe = probes.incrementAndGet();
-            if (probe == 1) return true;
-            if (probe == 2) {
-                staleProbeStarted.countDown();
-                assertTrue(releaseStaleProbe.await(5, TimeUnit.SECONDS));
-                staleProbeCompleted.countDown();
-                return true;
-            }
-            return false;
-        });
+        when(objectStorage.isReady()).thenReturn(true, true, false);
         doThrow(new ObjectStorageException("unavailable")).when(objectStorage).put(
             anyString(), any(UploadSource.class), anyString(), any(byte[].class));
 
         assertFalse(service.isReady());
-        assertTrue(awaitReady());
-        Thread.sleep(30);
+        assertEquals(1, readinessTasks.size());
+        readinessTasks.remove().run();
         assertTrue(service.isReady());
-        assertTrue(staleProbeStarted.await(5, TimeUnit.SECONDS));
+        assertTrue(readinessTasks.isEmpty());
+        readinessNanoTime.advanceMillis(20);
+        assertTrue(service.isReady());
+        assertEquals(1, readinessTasks.size());
 
-        assertThrows(ServiceUnavailableException.class, () -> inTransaction(
-            () -> service.storeAttachment(
-                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3})));
-        releaseStaleProbe.countDown();
-        assertTrue(staleProbeCompleted.await(5, TimeUnit.SECONDS));
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (probes.get() < 3 && System.nanoTime() < deadline) {
-            assertFalse(service.isReady());
-            Thread.sleep(5);
-        }
-
-        assertTrue(probes.get() >= 3);
+        readinessNanoTime.beforeNextRead(() -> assertThrows(
+            ServiceUnavailableException.class,
+            () -> inTransaction(() -> service.storeAttachment(
+                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}))));
+        readinessTasks.remove().run();
         assertFalse(service.isReady());
+        assertEquals(1, readinessTasks.size());
+        readinessTasks.remove().run();
+        assertFalse(service.isReady());
+        assertTrue(readinessTasks.isEmpty());
     }
 
-    private boolean awaitReady() throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (System.nanoTime() < deadline) {
-            if (service.isReady()) {
-                return true;
+    private static final class MutableNanoTime implements LongSupplier {
+        private long nanos = Duration.ofHours(1).toNanos();
+        private Runnable beforeNextRead;
+
+        @Override
+        public long getAsLong() {
+            Runnable action = beforeNextRead;
+            beforeNextRead = null;
+            if (action != null) {
+                action.run();
             }
-            Thread.sleep(5);
+            return nanos;
         }
-        return false;
+
+        void advanceMillis(long millis) {
+            nanos += TimeUnit.MILLISECONDS.toNanos(millis);
+        }
+
+        void beforeNextRead(Runnable action) {
+            beforeNextRead = action;
+        }
     }
 
     private static <T> T inTransaction(Supplier<T> work) {

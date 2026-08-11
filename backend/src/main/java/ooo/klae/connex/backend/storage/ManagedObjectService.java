@@ -13,12 +13,15 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
@@ -28,7 +31,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -42,7 +44,6 @@ import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
  * Generates opaque app-relative managed URLs and maps them to private object keys.
  */
 @Service
-@RequiredArgsConstructor
 @Order(Ordered.HIGHEST_PRECEDENCE + 2)
 public class ManagedObjectService implements ApplicationRunner {
     private static final String ATTACHMENT_URL_PREFIX = "/api/attachments/content/";
@@ -59,12 +60,65 @@ public class ManagedObjectService implements ApplicationRunner {
     private final UserImageReplacementAdmissionService userImageAdmissionService;
     private final ManagedObjectWriteAdmissionService writeAdmissionService;
     private final ManagedObjectReadAdmissionService readAdmissionService;
+    private final LongSupplier readinessNanoTime;
+    private final Executor readinessExecutor;
+    private final Object readinessStateLock = new Object();
     private final AtomicBoolean readinessRefreshInFlight = new AtomicBoolean();
     private final AtomicLong readinessGeneration = new AtomicLong();
     private volatile ReadinessSnapshot readinessSnapshot;
 
+    @Autowired
+    public ManagedObjectService(
+            ObjectStorage objectStorage,
+            ObjectDeletionRetryQueue deletionRetryQueue,
+            UploadPolicy uploadPolicy,
+            ImageUploadValidator imageUploadValidator,
+            ObjectStorageProperties properties,
+            WorkspaceObjectStorageQuotaService quotaService,
+            UserImageReplacementAdmissionService userImageAdmissionService,
+            ManagedObjectWriteAdmissionService writeAdmissionService,
+            ManagedObjectReadAdmissionService readAdmissionService) {
+        this(
+            objectStorage,
+            deletionRetryQueue,
+            uploadPolicy,
+            imageUploadValidator,
+            properties,
+            quotaService,
+            userImageAdmissionService,
+            writeAdmissionService,
+            readAdmissionService,
+            System::nanoTime,
+            task -> Thread.startVirtualThread(task));
+    }
+
+    ManagedObjectService(
+            ObjectStorage objectStorage,
+            ObjectDeletionRetryQueue deletionRetryQueue,
+            UploadPolicy uploadPolicy,
+            ImageUploadValidator imageUploadValidator,
+            ObjectStorageProperties properties,
+            WorkspaceObjectStorageQuotaService quotaService,
+            UserImageReplacementAdmissionService userImageAdmissionService,
+            ManagedObjectWriteAdmissionService writeAdmissionService,
+            ManagedObjectReadAdmissionService readAdmissionService,
+            LongSupplier readinessNanoTime,
+            Executor readinessExecutor) {
+        this.objectStorage = objectStorage;
+        this.deletionRetryQueue = deletionRetryQueue;
+        this.uploadPolicy = uploadPolicy;
+        this.imageUploadValidator = imageUploadValidator;
+        this.properties = properties;
+        this.quotaService = quotaService;
+        this.userImageAdmissionService = userImageAdmissionService;
+        this.writeAdmissionService = writeAdmissionService;
+        this.readAdmissionService = readAdmissionService;
+        this.readinessNanoTime = readinessNanoTime;
+        this.readinessExecutor = readinessExecutor;
+    }
+
     public boolean isReady() {
-        long now = System.nanoTime();
+        long now = readinessNanoTime.getAsLong();
         ReadinessSnapshot snapshot = readinessSnapshot;
         long ttl = TimeUnit.MILLISECONDS.toNanos(properties.getReadinessCacheTtlMs());
         if (snapshot == null || now - snapshot.checkedAtNanos() >= ttl) {
@@ -94,7 +148,7 @@ public class ManagedObjectService implements ApplicationRunner {
             return;
         }
         long generation = readinessGeneration.get();
-        Thread.startVirtualThread(() -> {
+        readinessExecutor.execute(() -> {
             boolean ready;
             try {
                 ready = objectStorage.isReady();
@@ -102,8 +156,11 @@ public class ManagedObjectService implements ApplicationRunner {
                 ready = false;
             }
             try {
-                if (readinessGeneration.get() == generation) {
-                    readinessSnapshot = new ReadinessSnapshot(ready, System.nanoTime());
+                long checkedAtNanos = readinessNanoTime.getAsLong();
+                synchronized (readinessStateLock) {
+                    if (readinessGeneration.get() == generation) {
+                        readinessSnapshot = new ReadinessSnapshot(ready, checkedAtNanos);
+                    }
                 }
             } finally {
                 readinessRefreshInFlight.set(false);
@@ -562,8 +619,10 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     private void markUnavailable() {
-        readinessGeneration.incrementAndGet();
-        readinessSnapshot = new ReadinessSnapshot(false, 0);
+        synchronized (readinessStateLock) {
+            readinessGeneration.incrementAndGet();
+            readinessSnapshot = new ReadinessSnapshot(false, 0);
+        }
     }
 
     private void verifyContent(String key, byte[] expectedContent) {
