@@ -10,7 +10,7 @@ public record RecordCommentThreadDto(
         long id,
         String targetType,
         int targetId,
-        int createdByUserId,
+        Integer createdByUserId,
         String state,
         Integer resolvedByUserId,
         LocalDateTime resolvedAt,

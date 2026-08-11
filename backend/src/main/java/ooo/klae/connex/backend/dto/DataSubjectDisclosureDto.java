@@ -20,6 +20,7 @@ public class DataSubjectDisclosureDto {
     private List<ActivityDto> activities;
     private List<ProviderCaptureEvidenceDto> providerCaptureEvidence;
     private List<NoteDto> notes;
+    private List<RecordCommentThreadDisclosureDto> recordCommentThreads;
     private List<TaskDto> tasks;
     private List<AttachmentDto> attachments;
     private List<EmploymentDto> employmentHistory;
@@ -145,6 +146,34 @@ public class DataSubjectDisclosureDto {
         private String visibility;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
+    }
+
+    @Data
+    public static class RecordCommentThreadDisclosureDto {
+        private long id;
+        private int workspaceId;
+        private String targetType;
+        private int targetId;
+        private Integer createdByUserId;
+        private String state;
+        private Integer resolvedByUserId;
+        private LocalDateTime resolvedAt;
+        private int version;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+        private List<RecordCommentDisclosureDto> comments = List.of();
+    }
+
+    @Data
+    public static class RecordCommentDisclosureDto {
+        private long id;
+        private int workspaceId;
+        private long threadId;
+        private Integer authorUserId;
+        private String content;
+        private LocalDateTime createdAt;
+        private LocalDateTime deletedAt;
+        private Integer deletedByUserId;
     }
 
     @Data

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.RecordComment;
 import ooo.klae.connex.backend.beans.RecordCommentThread;
+import ooo.klae.connex.backend.dto.RecordCommentDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -85,6 +86,27 @@ class RecordCommentServiceTest extends AbstractServiceTest {
         assertNull(retained.getContent());
         assertNotNull(retained.getDeletedAt());
         assertEquals(currentUser.getId(), retained.getDeletedByUserId());
+    }
+
+    @Test
+    void missingAuthorRowSerializesAsANullAuthor() {
+        Person person = newPerson(newCompany());
+        RecordCommentThread thread = recordCommentService.createThread(
+            "person", person.getId(), "Root", token());
+        RecordComment missingAuthorComment = new RecordComment();
+        missingAuthorComment.setWorkspaceId(workspace.getId());
+        missingAuthorComment.setThreadId(thread.getId());
+        missingAuthorComment.setAuthorUserId(Integer.MAX_VALUE);
+        missingAuthorComment.setContent("Retained comment");
+        missingAuthorComment.setClientToken(token());
+        recordCommentMapper.insertComment(missingAuthorComment);
+
+        RecordComment loaded = recordCommentService.getThread(thread.getId())
+            .getComments().getLast();
+
+        assertEquals(Integer.MAX_VALUE, loaded.getAuthorUserId());
+        assertNull(loaded.getAuthorDisplayName());
+        assertNull(RecordCommentDto.from(loaded).author());
     }
 
     @Test

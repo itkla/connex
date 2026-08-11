@@ -12,7 +12,7 @@ public class RecordComment {
     private long id;
     private int workspaceId;
     private long threadId;
-    private int authorUserId;
+    private Integer authorUserId;
     private String content;
     private String clientToken;
     private LocalDateTime createdAt;

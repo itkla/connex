@@ -67,4 +67,21 @@ public interface RecordCommentMapper {
     int deleteEmptyThread(
         @Param("workspaceId") int workspaceId,
         @Param("id") long id);
+
+    int deleteThreadsForTarget(
+        @Param("workspaceId") int workspaceId,
+        @Param("targetType") String targetType,
+        @Param("targetId") int targetId);
+
+    /** Clears comment author provenance for a permanently erased account. */
+    void clearAuthorsAnywhere(@Param("userId") int userId);
+
+    /** Clears comment redaction provenance for a permanently erased account. */
+    void clearDeletersAnywhere(@Param("userId") int userId);
+
+    /** Clears thread creator provenance for a permanently erased account. */
+    void clearThreadCreatorsAnywhere(@Param("userId") int userId);
+
+    /** Clears thread resolution provenance for a permanently erased account. */
+    void clearThreadResolversAnywhere(@Param("userId") int userId);
 }

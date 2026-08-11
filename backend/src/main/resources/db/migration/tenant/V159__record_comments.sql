@@ -4,7 +4,7 @@ CREATE TABLE record_comment_thread (
     target_type VARCHAR(16)
         CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
     target_id INT NOT NULL,
-    created_by_user_id INT NOT NULL,
+    created_by_user_id INT NULL,
     state VARCHAR(16)
         CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'open',
     resolved_by_user_id INT NULL,
@@ -22,14 +22,16 @@ CREATE TABLE record_comment_thread (
     CONSTRAINT chk_record_comment_thread_state
         CHECK (state IN ('open', 'resolved')),
     INDEX idx_record_comment_thread_target
-        (workspace_id, target_type, target_id, state, id)
+        (workspace_id, target_type, target_id, state, id),
+    INDEX idx_record_comment_thread_created_by_user (created_by_user_id),
+    INDEX idx_record_comment_thread_resolved_by_user (resolved_by_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE record_comment (
     id BIGINT NOT NULL AUTO_INCREMENT,
     workspace_id INT NOT NULL,
     thread_id BIGINT NOT NULL,
-    author_user_id INT NOT NULL,
+    author_user_id INT NULL,
     content TEXT NULL,
     client_token CHAR(36)
         CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
@@ -45,5 +47,7 @@ CREATE TABLE record_comment (
     CONSTRAINT chk_record_comment_content
         CHECK (content IS NULL OR CHAR_LENGTH(content) BETWEEN 1 AND 5000),
     UNIQUE KEY uq_record_comment_client_token (workspace_id, client_token),
-    INDEX idx_record_comment_thread (workspace_id, thread_id, id)
+    INDEX idx_record_comment_thread (workspace_id, thread_id, id),
+    INDEX idx_record_comment_author_user (author_user_id),
+    INDEX idx_record_comment_deleted_by_user (deleted_by_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

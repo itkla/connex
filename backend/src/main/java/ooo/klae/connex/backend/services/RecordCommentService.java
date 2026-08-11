@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -188,7 +189,7 @@ public class RecordCommentService {
             workspaceId,
             TargetType.parse(initialThread.getTargetType()),
             initialThread.getTargetId());
-        if (initialComment.getAuthorUserId() != actorId) {
+        if (!Objects.equals(initialComment.getAuthorUserId(), actorId)) {
             workspaceService.requirePermission(workspaceId, actorId, Permission.COMMENT_MODERATE);
         }
 
@@ -205,7 +206,7 @@ public class RecordCommentService {
         if (lockedComment == null || lockedComment.getThreadId() != lockedThread.getId()) {
             throw new ResourceNotFoundException("Comment not found with id: " + commentId);
         }
-        if (lockedComment.getAuthorUserId() != actorId) {
+        if (!Objects.equals(lockedComment.getAuthorUserId(), actorId)) {
             workspaceService.requirePermission(workspaceId, actorId, Permission.COMMENT_MODERATE);
         }
         if (lockedComment.getDeletedAt() != null) {
@@ -270,6 +271,7 @@ public class RecordCommentService {
     private void hydrateAuthors(int workspaceId, List<RecordComment> comments) {
         List<Integer> authorIds = comments.stream()
             .map(RecordComment::getAuthorUserId)
+            .filter(Objects::nonNull)
             .distinct()
             .toList();
         if (authorIds.isEmpty()) {

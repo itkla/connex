@@ -16,10 +16,13 @@ public record RecordCommentDto(
 
     /** Maps a persisted comment into its API representation. */
     public static RecordCommentDto from(RecordComment comment) {
-        UserReferenceDto author = new UserReferenceDto(
-            comment.getAuthorUserId(),
-            comment.getAuthorDisplayName(),
-            comment.getAuthorProfilePictureUrl());
+        UserReferenceDto author = comment.getAuthorUserId() == null
+                || comment.getAuthorDisplayName() == null
+            ? null
+            : new UserReferenceDto(
+                comment.getAuthorUserId(),
+                comment.getAuthorDisplayName(),
+                comment.getAuthorProfilePictureUrl());
         return new RecordCommentDto(
             comment.getId(),
             comment.getThreadId(),

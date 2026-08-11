@@ -150,4 +150,35 @@
         WHERE workspace_id = #{workspaceId} AND thread_id = #{id}
       )
   </delete>
+
+  <delete id="deleteThreadsForTarget">
+    DELETE FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId}
+      AND target_type = #{targetType}
+      AND target_id = #{targetId}
+  </delete>
+
+  <update id="clearAuthorsAnywhere">
+    UPDATE record_comment
+    SET author_user_id = NULL
+    WHERE author_user_id = #{userId}
+  </update>
+
+  <update id="clearDeletersAnywhere">
+    UPDATE record_comment
+    SET deleted_by_user_id = NULL
+    WHERE deleted_by_user_id = #{userId}
+  </update>
+
+  <update id="clearThreadCreatorsAnywhere">
+    UPDATE record_comment_thread
+    SET created_by_user_id = NULL
+    WHERE created_by_user_id = #{userId}
+  </update>
+
+  <update id="clearThreadResolversAnywhere">
+    UPDATE record_comment_thread
+    SET resolved_by_user_id = NULL
+    WHERE resolved_by_user_id = #{userId}
+  </update>
 </mapper>

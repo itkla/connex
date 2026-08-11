@@ -71,7 +71,7 @@ class RecordCommentRbacTest extends AbstractServiceTest {
     }
 
     @Test
-    void moderationPermissionIsRecheckedAfterThreadAndCommentLocks() {
+    void erasedAuthorRequiresModerationBeforeAndAfterThreadAndCommentLocks() {
         RecordCommentMapper mapper = mock(RecordCommentMapper.class);
         PersonMapper personMapper = mock(PersonMapper.class);
         CompanyMapper companyMapper = mock(CompanyMapper.class);
@@ -91,7 +91,7 @@ class RecordCommentRbacTest extends AbstractServiceTest {
         comment.setId(5L);
         comment.setWorkspaceId(7);
         comment.setThreadId(3L);
-        comment.setAuthorUserId(77);
+        comment.setAuthorUserId(null);
         RecordCommentThread thread = new RecordCommentThread();
         thread.setId(3L);
         thread.setWorkspaceId(7);

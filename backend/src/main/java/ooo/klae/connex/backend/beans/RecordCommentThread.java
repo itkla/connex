@@ -14,7 +14,7 @@ public class RecordCommentThread {
     private int workspaceId;
     private String targetType;
     private int targetId;
-    private int createdByUserId;
+    private Integer createdByUserId;
     private String state;
     private Integer resolvedByUserId;
     private LocalDateTime resolvedAt;
