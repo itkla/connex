@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -354,6 +355,17 @@ public class CompanyService {
         return company;
     }
 
+    /** Locks one writable company for a mutation that retains a later commit fence. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Company lockOwnedCompanyForUpdate(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company company = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, id);
+        if (company == null) {
+            throw new ResourceNotFoundException("Company not found with id: " + id);
+        }
+        return company;
+    }
+
     /**
      * Creates a new {@code Company} in the active workspace. The ID is auto-generated.
      */
@@ -576,17 +588,21 @@ public class CompanyService {
 
     /**
      * Adds a tag to a company in the active workspace.
+     * @return whether this invocation created the tag association
      */
     @RequirePermission(Permission.COMPANY_UPDATE)
-    public void addTag(int companyId, int tagId) {
+    public boolean addTag(int companyId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
-        companyMapper.addTag(workspaceId, companyId, tagId);
+        if (companyMapper.addTag(workspaceId, companyId, tagId) != 1) {
+            return false;
+        }
         auditService.record("company.addTag", "company", companyId, company.getName(),
             "Tagged " + company.getName() + " with " + tag.getName(),
             auditService.singleChange("tag", null, tag.getName()));
+        return true;
     }
 
     /**

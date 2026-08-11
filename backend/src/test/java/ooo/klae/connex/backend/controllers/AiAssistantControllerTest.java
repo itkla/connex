@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
+import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
@@ -128,6 +129,39 @@ class AiAssistantControllerTest {
         verify(writeToolService).approve(42, 29);
         verify(writeToolService).reject(42, 30);
         verify(writeToolService).undo(42, 31);
+    }
+
+    @Test
+    void proposalListAndDetailExposeOnlyResolvedHumanReviewArguments() throws Exception {
+        JsonMapper objectMapper = JsonMapper.builder().build();
+        AiAssistantToolProposalDto proposal = new AiAssistantToolProposalDto(
+                29,
+                "assign_owner",
+                "confirm",
+                "proposed",
+                new AiAssistantToolProposalDto.Target("person", 31, "Ada Lovelace"),
+                objectMapper.readTree("{\"owner\":\"Grace Hopper\"}"));
+        when(writeToolService.listPendingProposals(42)).thenReturn(List.of(proposal));
+        when(writeToolService.getPendingProposal(42, 29)).thenReturn(proposal);
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].tool").value("assign_owner"))
+            .andExpect(jsonPath("$[0].tier").value("confirm"))
+            .andExpect(jsonPath("$[0].status").value("proposed"))
+            .andExpect(jsonPath("$[0].target.kind").value("person"))
+            .andExpect(jsonPath("$[0].target.id").value(31))
+            .andExpect(jsonPath("$[0].target.name").value("Ada Lovelace"))
+            .andExpect(jsonPath("$[0].arguments.owner").value("Grace Hopper"))
+            .andExpect(jsonPath("$[0].arguments.handle").doesNotExist())
+            .andExpect(jsonPath("$[0].arguments.idempotency_key").doesNotExist());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls/29"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(29))
+            .andExpect(jsonPath("$.arguments.owner").value("Grace Hopper"));
+
+        verify(writeToolService).listPendingProposals(42);
+        verify(writeToolService).getPendingProposal(42, 29);
     }
 
     @Test

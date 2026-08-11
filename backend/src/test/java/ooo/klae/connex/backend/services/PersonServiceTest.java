@@ -72,6 +72,18 @@ class PersonServiceTest extends AbstractServiceTest {
     @MockitoBean NotificationChangePublisher notificationChanges;
 
     @Test
+    void processableMutationLockRejectsAContactRestrictedAfterProposalCreation() {
+        Person person = newPerson(newCompany());
+        jdbcTemplate.update(
+            "UPDATE person SET suspended_at = CURRENT_TIMESTAMP WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), person.getId());
+
+        assertThrows(
+            ResourceNotFoundException.class,
+            () -> personService.lockProcessablePersonForUpdate(person.getId()));
+    }
+
+    @Test
     void removeTagIsIdempotentWhenTagNoLongerExists() {
         Person person = newPerson(newCompany());
         int auditBefore = jdbcTemplate.queryForObject(

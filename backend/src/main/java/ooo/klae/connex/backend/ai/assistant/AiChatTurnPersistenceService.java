@@ -166,11 +166,13 @@ public class AiChatTurnPersistenceService {
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public AiAssistantToolProposal proposeWriteTool(
             AiChatQueuedTurn turn,
+            int stepNumber,
             AiAssistantPreparedWrite write) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
+        String idempotencyKey = turnStepKey(turn.turnId(), stepNumber);
         AiChatToolCall existing = chatMapper.getToolCallByIdempotencyKey(
-                turn.workspaceId(), write.idempotencyKey());
+                turn.workspaceId(), idempotencyKey);
         if (existing != null) {
             if (existing.getSessionId() != turn.sessionId()
                     || !Objects.equals(existing.getRequestedByUserId(), turn.userId())
@@ -187,9 +189,16 @@ public class AiChatTurnPersistenceService {
         toolCall.setToolName(write.toolName());
         toolCall.setStatus(PROPOSED);
         toolCall.setArgumentsJson(write.argumentsJson());
-        toolCall.setIdempotencyKey(write.idempotencyKey());
+        toolCall.setIdempotencyKey(idempotencyKey);
         chatMapper.insertToolCall(toolCall);
         return new AiAssistantToolProposal(toolCall.getId(), PROPOSED, null, true);
+    }
+
+    private static String turnStepKey(int turnId, int stepNumber) {
+        if (turnId <= 0 || stepNumber <= 0 || stepNumber > AiChatAgentLoopService.MAX_STEPS) {
+            throw new IllegalArgumentException("Assistant tool turn and step must be positive");
+        }
+        return "turn-" + turnId + "-step-" + stepNumber;
     }
 
     /** Requires the turn to remain running immediately before a proposed tool executes. */

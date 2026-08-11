@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -22,6 +23,7 @@ import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
@@ -30,6 +32,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
@@ -39,6 +42,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -78,6 +82,7 @@ class AiAssistantWriteToolServiceTest {
     private NoteService noteService;
     private TagService tagService;
     private PipelineService pipelineService;
+    private AiRestrictionEpoch restrictionEpoch;
     private AiAssistantWriteToolService service;
     private AiChatToolCall storedToolCall;
 
@@ -98,7 +103,7 @@ class AiAssistantWriteToolServiceTest {
         noteService = mock(NoteService.class);
         tagService = mock(TagService.class);
         pipelineService = mock(PipelineService.class);
-        AiRestrictionEpoch restrictionEpoch = mock(AiRestrictionEpoch.class);
+        restrictionEpoch = mock(AiRestrictionEpoch.class);
         AuthService authService = mock(AuthService.class);
         User actor = new User();
         actor.setId(TURN.userId());
@@ -110,6 +115,9 @@ class AiAssistantWriteToolServiceTest {
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        PersonMapper personMapper = mock(PersonMapper.class);
+        when(personMapper.getByIds(TURN.workspaceId(), List.of(31)))
+                .thenReturn(List.of(person(31)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
                 mock(SearchService.class),
@@ -120,7 +128,7 @@ class AiAssistantWriteToolServiceTest {
                 taskService,
                 mock(ScoringService.class),
                 workspaceService,
-                mock(PersonMapper.class),
+                personMapper,
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver);
@@ -153,6 +161,8 @@ class AiAssistantWriteToolServiceTest {
         turn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        when(chatMapper.getAccessibleSessionById(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
@@ -162,6 +172,8 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setRequestedByUserId(TURN.userId());
         storedToolCall.setStatus("proposed");
         when(chatMapper.getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
+        when(chatMapper.getToolCallBySession(
                 TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
         when(chatMapper.updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
@@ -185,7 +197,7 @@ class AiAssistantWriteToolServiceTest {
                 "create_activity",
                 "{\"handle\":\"r1\",\"type\":\"meeting\","
                         + "\"subject\":\"Planning\",\"start\":\"9:00am next Thursday\","
-                        + "\"duration_minutes\":60,\"idempotency_key\":\"meeting-replay-1\"}",
+                        + "\"duration_minutes\":60}",
                 "person",
                 31);
         stored(write, 29);
@@ -226,8 +238,7 @@ class AiAssistantWriteToolServiceTest {
         AiAssistantPreparedWrite write = prepared(
                 "create_activity",
                 "{\"handle\":\"r1\",\"type\":\"meeting\","
-                        + "\"subject\":\"Planning\",\"start\":\"9:00am next Thursday\","
-                        + "\"idempotency_key\":\"meeting-replay-2\"}",
+                        + "\"subject\":\"Planning\",\"start\":\"9:00am next Thursday\"}",
                 "person",
                 31);
         stored(write, 29);
@@ -259,8 +270,7 @@ class AiAssistantWriteToolServiceTest {
         AiAssistantPreparedWrite write = prepared(
                 "create_task",
                 "{\"handle\":\"r1\",\"description\":\"Prepare agenda\","
-                        + "\"due_date\":\"2026-03-12\","
-                        + "\"idempotency_key\":\"task-replay-1\"}",
+                        + "\"due_date\":\"2026-03-12\"}",
                 "deal",
                 44);
         stored(write, 29);
@@ -281,8 +291,7 @@ class AiAssistantWriteToolServiceTest {
         AiAssistantPreparedWrite write = prepared(
                 "create_note",
                 "{\"handle\":\"r1\",\"content\":\"Shared follow-up\","
-                        + "\"visibility\":\"workspace\","
-                        + "\"idempotency_key\":\"note-replay-1\"}",
+                        + "\"visibility\":\"workspace\"}",
                 "person",
                 31);
         stored(write, 29);
@@ -293,32 +302,79 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
-    void addTagDelegatesToTheRecordNativeServiceAndOffersOnlyARealInverse() throws Exception {
+    void addTagDelegatesToTheRecordNativeServiceWithoutAdvertisingUnsafeUndo() throws Exception {
         Tag tag = new Tag();
         tag.setId(9);
         tag.setName("Priority");
         when(tagService.getAllTags()).thenReturn(List.of(tag));
-        when(personService.getTagsByPersonId(31)).thenReturn(List.of());
+        when(personService.addTag(31, 9)).thenReturn(true);
         AiAssistantPreparedWrite write = prepared(
                 "add_tag",
-                "{\"handle\":\"r1\",\"tag\":\"Priority\","
-                        + "\"idempotency_key\":\"tag-replay-1\"}",
+                "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
                 "person",
                 31);
         stored(write, 29);
 
         AiAssistantWriteToolService.WriteExecution execution = service.executeAuto(TURN, 29);
 
-        assertTrue(execution.toolCall().undoAvailable());
+        assertFalse(execution.toolCall().undoAvailable());
         verify(personService).addTag(31, 9);
+    }
+
+    @Test
+    void tagUndoRefusesWhenAnotherTransactionOwnedTheConditionalInsert() throws Exception {
+        Tag tag = new Tag();
+        tag.setId(9);
+        tag.setName("Priority");
+        when(tagService.getAllTags()).thenReturn(List.of(tag));
+        when(personService.addTag(31, 9)).thenReturn(false);
+        AiAssistantPreparedWrite write = prepared(
+                "add_tag",
+                "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
+                "person",
+                31);
+        stored(write, 29);
+
+        AiAssistantWriteToolService.WriteExecution execution = service.executeAuto(TURN, 29);
+        storedToolCall.setResultJson(capturedResultJson());
+
+        assertFalse(execution.toolCall().undoAvailable());
+        assertThrows(ConflictException.class, () -> service.undo(TURN.sessionId(), 29));
+        verify(personService, never()).removeTagIfUnchanged(31, 9);
+    }
+
+    @Test
+    void autoWriteLocksTheDomainRowBeforeRetainingTheRestrictionFence() throws Exception {
+        Person person = person(31);
+        when(personService.getPersonById(31)).thenReturn(person);
+        doAnswer(invocation -> {
+            Note created = invocation.getArgument(0);
+            created.setId(75);
+            created.setVisibility("workspace");
+            return created;
+        }).when(noteService).create(any(Note.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_note",
+                "{\"handle\":\"r1\",\"content\":\"Shared follow-up\","
+                        + "\"visibility\":\"workspace\"}",
+                "person",
+                31);
+        stored(write, 29);
+
+        service.executeAuto(TURN, 29);
+
+        InOrder order = inOrder(personService, restrictionEpoch);
+        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(restrictionEpoch)
+                .retainReadFenceUntilTransactionCompletionIfCurrent(
+                        TURN.workspaceId(), TURN.restrictionEpoch());
     }
 
     @Test
     void confirmTierNeverExecutesBeforeApprovalAndDoubleApprovalIsIdempotent() throws Exception {
         AiAssistantPreparedWrite write = prepared(
                 "change_deal_stage",
-                "{\"handle\":\"r1\",\"stage\":\"Proposal\","
-                        + "\"idempotency_key\":\"stage-replay-1\"}",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
                 "deal",
                 44);
         stored(write, 29);
@@ -327,7 +383,8 @@ class AiAssistantWriteToolServiceTest {
         assertEquals(
                 "approval_required",
                 service.proposalResult(write, proposal).data().get("status"));
-        verify(dealService, never()).changeStage(44, 6);
+        verify(dealService, never()).changeStage(
+                any(DealService.LockedStageChange.class));
 
         Deal deal = new Deal();
         deal.setId(44);
@@ -339,21 +396,30 @@ class AiAssistantWriteToolServiceTest {
                 new ooo.klae.connex.backend.beans.Pipeline();
         pipeline.setId(5);
         stage.setPipeline(pipeline);
+        DealService.LockedStageChange lockedStageChange = mock(
+                DealService.LockedStageChange.class);
         when(dealService.getDealById(44)).thenReturn(deal);
         when(pipelineService.getAllStages()).thenReturn(List.of(stage));
-        when(dealService.changeStage(44, 6)).thenReturn(deal);
+        when(dealService.lockStageChangeRowsForUpdate(44, 6))
+                .thenReturn(lockedStageChange);
+        when(dealService.changeStage(lockedStageChange)).thenReturn(deal);
 
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
-        verify(dealService, times(1)).changeStage(44, 6);
+        InOrder order = inOrder(dealService, restrictionEpoch);
+        order.verify(dealService).lockStageChangeRowsForUpdate(44, 6);
+        order.verify(restrictionEpoch)
+                .retainReadFenceUntilTransactionCompletionIfCurrent(
+                        TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(dealService).changeStage(lockedStageChange);
+        verify(dealService, times(1)).changeStage(lockedStageChange);
     }
 
     @Test
     void permissionRevokedAfterProposalBlocksApprovalExecution() throws Exception {
         AiAssistantPreparedWrite write = prepared(
                 "change_deal_stage",
-                "{\"handle\":\"r1\",\"stage\":\"Proposal\","
-                        + "\"idempotency_key\":\"stage-replay-2\"}",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
                 "deal",
                 44);
         stored(write, 29);
@@ -362,7 +428,58 @@ class AiAssistantWriteToolServiceTest {
 
         assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
 
-        verify(dealService, never()).changeStage(44, 6);
+        verify(dealService, never()).changeStage(
+                any(DealService.LockedStageChange.class));
+    }
+
+    @Test
+    void approvalRefusesWhenThePersistedProposalRestrictionEpochAdvanced() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person",
+                31);
+        stored(write, 29);
+        when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(false);
+
+        assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        InOrder order = inOrder(personService, restrictionEpoch);
+        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(restrictionEpoch)
+                .retainReadFenceUntilTransactionCompletionIfCurrent(
+                        TURN.workspaceId(), TURN.restrictionEpoch());
+        verify(personService, never()).updateOwner(31, 21);
+    }
+
+    @Test
+    void approvalRefusesARestrictedTargetEvenWhenThePersistedEpochStillMatches() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person",
+                31);
+        stored(write, 29);
+        when(personService.lockProcessablePersonForUpdate(31))
+                .thenThrow(new ResourceNotFoundException("Person not found"));
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.approve(TURN.sessionId(), 29));
+
+        verify(restrictionEpoch, never())
+                .retainReadFenceUntilTransactionCompletionIfCurrent(
+                        TURN.workspaceId(), TURN.restrictionEpoch());
+        verify(personService, never()).updateOwner(31, 21);
     }
 
     @Test
@@ -373,8 +490,7 @@ class AiAssistantWriteToolServiceTest {
         when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
         AiAssistantPreparedWrite write = prepared(
                 "assign_owner",
-                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\","
-                        + "\"idempotency_key\":\"owner-replay-1\"}",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
                 "company",
                 52);
         stored(write, 29);
@@ -384,6 +500,109 @@ class AiAssistantWriteToolServiceTest {
         verify(companyService).updateOwner(52, 21);
         verify(personService, never()).updateOwner(52, 21);
         verify(dealService, never()).updateOwner(52, 21);
+
+        InOrder lockOrder = inOrder(workspaceService, chatMapper);
+        lockOrder.verify(workspaceService)
+                .lockAndRequireMember(TURN.workspaceId(), TURN.userId());
+        lockOrder.verify(workspaceService).lockAndRequireMember(TURN.workspaceId(), 21);
+        lockOrder.verify(chatMapper).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+    }
+
+    @Test
+    void identicalRequestsFromTwoTurnsBothExecute() throws Exception {
+        Person person = person(31);
+        when(personService.getPersonById(31)).thenReturn(person);
+        doAnswer(invocation -> {
+            Note created = invocation.getArgument(0);
+            created.setId(75);
+            created.setVisibility("workspace");
+            return created;
+        }).when(noteService).create(any(Note.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_note",
+                "{\"handle\":\"r1\",\"content\":\"Same request\","
+                        + "\"visibility\":\"workspace\"}",
+                "person",
+                31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29);
+
+        AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
+                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of());
+        AiChatTurn secondStoredTurn = new AiChatTurn();
+        secondStoredTurn.setId(secondTurn.turnId());
+        secondStoredTurn.setRequestedByUserId(secondTurn.userId());
+        secondStoredTurn.setStatus("running");
+        AiChatToolCall secondToolCall = new AiChatToolCall();
+        secondToolCall.setId(30);
+        secondToolCall.setWorkspaceId(secondTurn.workspaceId());
+        secondToolCall.setMessageId(secondTurn.userMessageId());
+        secondToolCall.setSessionId(secondTurn.sessionId());
+        secondToolCall.setRequestedByUserId(secondTurn.userId());
+        secondToolCall.setToolName(write.toolName());
+        secondToolCall.setStatus("proposed");
+        secondToolCall.setArgumentsJson(write.argumentsJson());
+        secondToolCall.setIdempotencyKey("turn-18-step-1");
+        when(chatMapper.getTurnByIdForUpdate(
+                secondTurn.workspaceId(), secondTurn.sessionId(), secondTurn.turnId()))
+                .thenReturn(secondStoredTurn);
+        when(chatMapper.getToolCallBySessionForUpdate(
+                secondTurn.workspaceId(), secondTurn.sessionId(), 30))
+                .thenReturn(secondToolCall);
+        when(chatMapper.updateToolCall(
+                eq(secondTurn.workspaceId()), eq(secondTurn.userMessageId()), eq(30),
+                eq("executed"), any(), eq(secondTurn.userId()))).thenReturn(1);
+
+        service.executeAuto(secondTurn, 30);
+
+        verify(noteService, times(2)).create(any(Note.class));
+    }
+
+    @Test
+    void proposalReadsReturnOnlyAuthorizedResolvedArguments() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        Company company = new Company();
+        company.setId(52);
+        company.setName("Analytical Engines");
+        when(companyService.getCompanyById(52)).thenReturn(company);
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company",
+                52);
+        stored(write, 29);
+        when(chatMapper.listPendingToolCallsBySession(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of(storedToolCall));
+
+        var listed = service.listPendingProposals(TURN.sessionId());
+        var detail = service.getPendingProposal(TURN.sessionId(), 29);
+
+        assertEquals(1, listed.size());
+        assertEquals("Analytical Engines", detail.target().name());
+        assertEquals("Grace Hopper", detail.arguments().get("owner").asString());
+        assertFalse(detail.arguments().has("handle"));
+        assertFalse(detail.arguments().has("idempotency_key"));
+    }
+
+    @Test
+    void proposalReadsRefuseOtherTenantAndNonParticipantCallers() {
+        when(chatMapper.getAccessibleSessionById(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(null);
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.listPendingProposals(TURN.sessionId()));
+
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(99);
+        when(workspaceService.getCurrentUserId()).thenReturn(77);
+        when(chatMapper.getAccessibleSessionById(99, 77, TURN.sessionId())).thenReturn(null);
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.getPendingProposal(TURN.sessionId(), 29));
     }
 
     @Test
@@ -399,21 +618,23 @@ class AiAssistantWriteToolServiceTest {
         doThrow(new ForbiddenException("revoked")).when(workspaceService)
                 .lockAndRequireMember(99, 77);
         assertThrows(ForbiddenException.class, () -> service.reject(TURN.sessionId(), 29));
-        verify(dealService, never()).changeStage(44, 6);
+        verify(dealService, never()).changeStage(
+                any(DealService.LockedStageChange.class));
     }
 
     private AiAssistantPreparedWrite prepared(
             String tool, String json, String targetKind, int targetId) throws Exception {
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register(targetKind, targetId);
-        return service.prepare(tool, objectMapper.readTree(json), resources);
+        return service.prepare(
+                tool, objectMapper.readTree(json), resources, TURN.restrictionEpoch());
     }
 
     private void stored(AiAssistantPreparedWrite write, int id) {
         storedToolCall.setId(id);
         storedToolCall.setToolName(write.toolName());
         storedToolCall.setArgumentsJson(write.argumentsJson());
-        storedToolCall.setIdempotencyKey(write.idempotencyKey());
+        storedToolCall.setIdempotencyKey("turn-" + TURN.turnId() + "-step-1");
     }
 
     private String capturedResultJson() {

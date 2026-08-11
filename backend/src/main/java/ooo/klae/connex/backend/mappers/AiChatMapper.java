@@ -171,6 +171,15 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("idempotencyKey") String idempotencyKey);
 
+    AiChatToolCall getToolCallBySession(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id);
+
+    List<AiChatToolCall> listPendingToolCallsBySession(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
     AiChatToolCall getToolCallBySessionForUpdate(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

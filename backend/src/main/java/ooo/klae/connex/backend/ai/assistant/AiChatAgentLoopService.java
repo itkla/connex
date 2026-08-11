@@ -116,9 +116,10 @@ public class AiChatAgentLoopService {
                             step.tool().name(), step.tool().args(), resources);
                     if (toolCatalog.isWrite(step.tool().name())) {
                         AiAssistantPreparedWrite write = writeToolService.prepare(
-                                step.tool().name(), step.tool().args(), resources);
+                                step.tool().name(), step.tool().args(), resources,
+                                turn.restrictionEpoch());
                         AiAssistantToolProposal proposal =
-                                persistenceService.proposeWriteTool(turn, write);
+                                persistenceService.proposeWriteTool(turn, stepNumber, write);
                         int toolCallId = proposal.id();
                         publish(turn.userId(), new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),

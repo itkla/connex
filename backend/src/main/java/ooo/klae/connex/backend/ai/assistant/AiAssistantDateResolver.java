@@ -14,6 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAdjusters;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -50,7 +51,7 @@ public class AiAssistantDateResolver {
         String value = expression.trim();
         Instant absolute = absoluteInstant(value);
         if (absolute != null) {
-            return resolution(absolute.atZone(timezone).toLocalDateTime(), timezone);
+            return absoluteResolution(absolute, timezone);
         }
         try {
             return resolution(LocalDateTime.parse(value, DateTimeFormatter.ISO_LOCAL_DATE_TIME), timezone);
@@ -150,7 +151,24 @@ public class AiAssistantDateResolver {
     }
 
     private static ResolvedDateTime resolution(LocalDateTime local, ZoneId timezone) {
-        Instant instant = local.atZone(timezone).toInstant();
+        List<ZoneOffset> validOffsets = timezone.getRules().getValidOffsets(local);
+        if (validOffsets.isEmpty()) {
+            throw new BadRequestException(
+                    "Local activity time does not exist in the authenticated user's timezone");
+        }
+        if (validOffsets.size() != 1) {
+            throw new BadRequestException(
+                    "Local activity time is ambiguous; include an explicit UTC offset");
+        }
+        return resolved(local, local.toInstant(validOffsets.getFirst()), timezone);
+    }
+
+    private static ResolvedDateTime absoluteResolution(Instant instant, ZoneId timezone) {
+        return resolved(instant.atZone(timezone).toLocalDateTime(), instant, timezone);
+    }
+
+    private static ResolvedDateTime resolved(
+            LocalDateTime local, Instant instant, ZoneId timezone) {
         LocalDateTime utc = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
         return new ResolvedDateTime(local, utc, timezone, MYSQL.format(utc));
     }

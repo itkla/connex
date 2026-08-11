@@ -179,31 +179,25 @@ public class AiAssistantToolCatalog {
                 string("subject", true, 1, 255, Set.of()),
                 string("notes", false, 0, 50_000, Set.of()),
                 string("start", true, 1, 80, Set.of()),
-                integer("duration_minutes", false, 1, 1_440),
-                idempotencyKey()));
+                integer("duration_minutes", false, 1, 1_440)));
         add(tools, auto("create_task",
                 handle(),
                 string("description", true, 1, 1_000, Set.of()),
-                string("due_date", false, 0, 32, Set.of()),
-                idempotencyKey()));
+                string("due_date", false, 0, 32, Set.of())));
         add(tools, auto("create_note",
                 handle(),
                 string("content", true, 1, 50_000, Set.of()),
                 string("title", false, 0, 255, Set.of()),
-                string("visibility", false, 1, 9, Set.of("private", "workspace")),
-                idempotencyKey()));
+                string("visibility", false, 1, 9, Set.of("private", "workspace"))));
         add(tools, auto("add_tag",
                 handle(),
-                string("tag", true, 1, 64, Set.of()),
-                idempotencyKey()));
+                string("tag", true, 1, 64, Set.of())));
         add(tools, confirm("change_deal_stage",
                 handle(),
-                string("stage", true, 1, 128, Set.of()),
-                idempotencyKey()));
+                string("stage", true, 1, 128, Set.of())));
         add(tools, confirm("assign_owner",
                 handle(),
-                string("owner", true, 1, 255, Set.of()),
-                idempotencyKey()));
+                string("owner", true, 1, 255, Set.of())));
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
     }
 
@@ -237,10 +231,6 @@ public class AiAssistantToolCatalog {
 
     private static ArgumentSpec handle() {
         return string("handle", true, 2, 16, Set.of());
-    }
-
-    private static ArgumentSpec idempotencyKey() {
-        return string("idempotency_key", true, 8, 64, Set.of());
     }
 
     private static ArgumentSpec string(

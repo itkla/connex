@@ -6,7 +6,6 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 public record AiAssistantPreparedWrite(
         String toolName,
         ToolTier tier,
-        String idempotencyKey,
         String targetKind,
         int targetId,
         String argumentsJson) {

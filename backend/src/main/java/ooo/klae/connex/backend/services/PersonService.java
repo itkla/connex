@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -280,6 +281,20 @@ public class PersonService {
         }
         duplicatePreflightService.requireReviewedBusinessCardPersonReuse(
             request, personId, duplicateReviewToken);
+        return person;
+    }
+
+    /** Locks one currently processable contact for a mutation that retains a later commit fence. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Person lockProcessablePersonForUpdate(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, id);
+        if (person == null
+                || person.getArchivedAt() != null
+                || person.getSuspendedAt() != null
+                || person.getProvisionCeasedAt() != null) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
         return person;
     }
 
@@ -618,17 +633,21 @@ public class PersonService {
 
     /**
      * Adds a tag to a person in the active workspace.
+     * @return whether this invocation created the tag association
      */
     @RequirePermission(Permission.PERSON_UPDATE)
-    public void addTag(int personId, int tagId) {
+    public boolean addTag(int personId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
-        personMapper.addTag(workspaceId, personId, tagId);
+        if (personMapper.addTag(workspaceId, personId, tagId) != 1) {
+            return false;
+        }
         auditService.record("person.addTag", "person", personId, person.getName(),
             "Tagged " + person.getName() + " with " + tag.getName(),
             auditService.singleChange("tag", null, tag.getName()));
+        return true;
     }
 
     /**

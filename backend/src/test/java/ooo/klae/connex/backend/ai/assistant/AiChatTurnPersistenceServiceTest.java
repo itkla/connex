@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.argThat;
 
 import java.time.Clock;
 import java.util.List;
@@ -99,11 +100,10 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
-    void callerRetainedWriteKeyReplaysOnlyTheSameSessionActorAndResolvedArguments() {
+    void durableTurnStepKeyReplaysOnlyTheSameStepAndSeparatesIdenticalTurns() {
         AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
                 "create_note",
                 AiAssistantToolCatalog.ToolTier.AUTO,
-                "note-replay-1",
                 "person",
                 31,
                 "{\"tool\":\"create_note\",\"target\":{\"kind\":\"person\",\"id\":31}}");
@@ -116,17 +116,34 @@ class AiChatTurnPersistenceServiceTest {
         existing.setStatus("executed");
         existing.setResultJson("{\"outcome\":{\"status\":\"executed\"}}");
         when(chatMapper.getToolCallByIdempotencyKey(
-                TURN.workspaceId(), write.idempotencyKey())).thenReturn(existing);
+                TURN.workspaceId(), "turn-17-step-1")).thenReturn(existing);
 
-        AiAssistantToolProposal replay = service.proposeWriteTool(TURN, write);
+        AiAssistantToolProposal replay = service.proposeWriteTool(TURN, 1, write);
 
         assertEquals(47, replay.id());
         assertFalse(replay.created());
         verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
 
         AiAssistantPreparedWrite changed = new AiAssistantPreparedWrite(
-                write.toolName(), write.tier(), write.idempotencyKey(),
+                write.toolName(), write.tier(),
                 write.targetKind(), write.targetId(), "{\"changed\":true}");
-        assertThrows(ConflictException.class, () -> service.proposeWriteTool(TURN, changed));
+        assertThrows(ConflictException.class, () -> service.proposeWriteTool(TURN, 1, changed));
+
+        AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
+                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of());
+        AiChatTurn secondStoredTurn = new AiChatTurn();
+        secondStoredTurn.setId(secondTurn.turnId());
+        secondStoredTurn.setRequestedByUserId(secondTurn.userId());
+        secondStoredTurn.setStatus("running");
+        when(chatMapper.getTurnByIdForUpdate(
+                secondTurn.workspaceId(), secondTurn.sessionId(), secondTurn.turnId()))
+                .thenReturn(secondStoredTurn);
+
+        AiAssistantToolProposal second = service.proposeWriteTool(secondTurn, 1, write);
+
+        assertTrue(second.created());
+        verify(chatMapper).insertToolCall(argThat(toolCall ->
+                "turn-18-step-1".equals(toolCall.getIdempotencyKey())));
     }
 }

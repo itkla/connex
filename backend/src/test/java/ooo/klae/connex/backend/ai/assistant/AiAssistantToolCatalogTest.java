@@ -46,11 +46,11 @@ class AiAssistantToolCatalogTest {
                 objectMapper.readTree("{\"metric\":\"activity_volume\",\"days\":31}")));
         assertTrue(catalog.permitsArguments(
                 "create_note",
-                objectMapper.readTree(
-                        "{\"handle\":\"r1\",\"content\":\"Follow up\","
-                                + "\"idempotency_key\":\"note-replay-1\"}")));
+                objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"Follow up\"}")));
         assertFalse(catalog.permitsArguments(
                 "create_note",
-                objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"Follow up\"}")));
+                objectMapper.readTree(
+                        "{\"handle\":\"r1\",\"content\":\"Follow up\","
+                                + "\"idempotency_key\":\"model-controlled\"}")));
     }
 }

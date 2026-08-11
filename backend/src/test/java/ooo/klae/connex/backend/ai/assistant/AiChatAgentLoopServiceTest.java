@@ -120,8 +120,7 @@ class AiChatAgentLoopServiceTest {
     @Test
     void confirmTierToolPersistsApprovalCardWithoutAutoExecution() throws Exception {
         JsonNode args = objectMapper.readTree(
-                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\","
-                        + "\"idempotency_key\":\"owner-replay-1\"}");
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}");
         AiAssistantStep toolStep = new AiAssistantStep(
                 new AiAssistantStep.Tool("assign_owner", args), null);
         AiAssistantStep finalStep = new AiAssistantStep(
@@ -131,11 +130,13 @@ class AiChatAgentLoopServiceTest {
                 .thenReturn(parsed(toolStep), parsed(finalStep));
         AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
                 "assign_owner", AiAssistantToolCatalog.ToolTier.CONFIRM,
-                "owner-replay-1", "deal", 41, "{\"resolved\":true}");
+                "deal", 41, "{\"resolved\":true}");
         AiAssistantToolProposal proposal =
                 new AiAssistantToolProposal(29, "proposed", null, true);
-        when(writeToolService.prepare(eq("assign_owner"), eq(args), any())).thenReturn(write);
-        when(persistenceService.proposeWriteTool(TURN, write)).thenReturn(proposal);
+        when(writeToolService.prepare(
+                eq("assign_owner"), eq(args), any(), eq(TURN.restrictionEpoch())))
+                .thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 1, write)).thenReturn(proposal);
         when(writeToolService.proposalResult(write, proposal)).thenReturn(
                 new AiAssistantToolResult(
                         Map.of("toolCallId", 29, "status", "approval_required"), List.of()));
@@ -145,7 +146,7 @@ class AiChatAgentLoopServiceTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
-        verify(persistenceService).proposeWriteTool(TURN, write);
+        verify(persistenceService).proposeWriteTool(TURN, 1, write);
         verify(writeToolService, never()).executeAuto(TURN, 29);
     }
 

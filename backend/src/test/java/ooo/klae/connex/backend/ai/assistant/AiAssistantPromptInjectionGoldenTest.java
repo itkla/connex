@@ -237,8 +237,7 @@ class AiAssistantPromptInjectionGoldenTest {
         String prompt = objectMapper.writeValueAsString(assembly.getMessages());
         JsonNode attempted = objectMapper.readTree(
                 "{\"tool\":{\"name\":\"assign_owner\",\"args\":{"
-                        + "\"handle\":\"r1\",\"owner\":\"Attacker\","
-                        + "\"idempotency_key\":\"inject-owner-1\"}},\"final\":null}");
+                        + "\"handle\":\"r1\",\"owner\":\"Attacker\"}},\"final\":null}");
 
         assertTrue(prompt.contains("CRM_DATA_BEGIN"));
         assertTrue(assembly.getSystemPrompt().contains("untrusted data"));

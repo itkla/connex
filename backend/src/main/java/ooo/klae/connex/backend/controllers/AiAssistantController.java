@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
 import java.net.URI;
+import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
+import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
@@ -122,6 +124,21 @@ public class AiAssistantController {
             @PathVariable int sessionId,
             @PathVariable int turnId) {
         return turnService.get(sessionId, turnId);
+    }
+
+    /** Returns every pending confirm-tier proposal visible in the authorized session. */
+    @GetMapping("/{sessionId:\\d+}/tool-calls")
+    public List<AiAssistantToolProposalDto> listPendingToolCalls(
+            @PathVariable int sessionId) {
+        return writeToolService.listPendingProposals(sessionId);
+    }
+
+    /** Returns one pending confirm-tier proposal visible in the authorized session. */
+    @GetMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}")
+    public AiAssistantToolProposalDto getPendingToolCall(
+            @PathVariable int sessionId,
+            @PathVariable int toolCallId) {
+        return writeToolService.getPendingProposal(sessionId, toolCallId);
     }
 
     /** Explicitly approves and executes one confirm-tier tool call. */
