@@ -277,9 +277,9 @@ export default function RadarSignalCard({
                         </span>
                         <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                <h2 className="min-w-0 truncate text-[0.9375rem] leading-tight font-semibold text-foreground">
+                                <h3 className="min-w-0 truncate text-[0.9375rem] leading-tight font-semibold text-foreground">
                                     {signal.subject.label}
-                                </h2>
+                                </h3>
                                 {stale ? (
                                     <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning-foreground">
                                         <ExclamationTriangleIcon aria-hidden />
