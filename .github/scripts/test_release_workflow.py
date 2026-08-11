@@ -122,6 +122,38 @@ class ReleaseWorkflowTest(unittest.TestCase):
             )
             self.assertEqual(expected, result.stdout)
 
+    def test_event_metadata_enforces_container_tag_length_boundary(self) -> None:
+        metadata = self.named_step("metadata", "Resolve release event metadata")
+        validation = metadata["run"].split('test "$(git rev-parse', maxsplit=1)[0]
+
+        for length, expected_returncode in ((128, 0), (129, 1)):
+            version = f"0.0.0-{'a' * (length - len('0.0.0-'))}"
+            result = subprocess.run(
+                ["bash", "-c", validation],
+                env={"GITHUB_REF_NAME": f"v{version}"},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(expected_returncode, result.returncode, result.stderr)
+
+    def test_revalidation_enforces_container_tag_length_boundary(self) -> None:
+        validation = PRECONDITIONS_PATH.read_text(encoding="utf-8").split("REMOTE_REF=", maxsplit=1)[0]
+
+        for length, expected_returncode in ((128, 0), (129, 1)):
+            version = f"0.0.0-{'a' * (length - len('0.0.0-'))}"
+            result = subprocess.run(
+                ["bash", "-c", validation, "_", "0" * 40, f"v{version}"],
+                env={
+                    "CONNEX_RELEASE_ADMIN_TOKEN": "test-token",
+                    "GH_REPO": "example/connex",
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(expected_returncode, result.returncode, result.stderr)
+
     def test_prereleases_are_explicitly_excluded_from_latest(self) -> None:
         publish = self.named_step("release", "Publish the complete verified release atomically")
         flag_setup = publish["run"].split("assets=(", maxsplit=1)[0]

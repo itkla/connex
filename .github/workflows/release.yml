@@ -38,8 +38,12 @@ jobs:
             echo "::error::Release tags must use vMAJOR.MINOR.PATCH with optional strict SemVer prerelease identifiers."
             exit 1
           fi
-          test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
           VERSION="${GITHUB_REF_NAME#v}"
+          if (( ${#VERSION} > 128 )); then
+            echo "::error::Release version must be 128 characters or fewer to form a valid container tag (received ${#VERSION})."
+            exit 1
+          fi
+          test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
           BUILD_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
           BUILD_TIME="$(git show -s --format=%cI "$GITHUB_SHA")"
           {
