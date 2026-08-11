@@ -130,6 +130,7 @@ export function useAskConnex(): AskConnexContextValue {
 /** Owns Ask Connex continuity, transcript, accepted-turn reconciliation, and responsive surfaces. */
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
     const t = useTranslations('AskConnex');
+    const tDisclosure = useTranslations('Assistant.disclosure');
     const { context } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
@@ -561,6 +562,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const labels = useMemo(() => ({
         archive: t('archive'),
         citations: t('citations'),
+        disclosureCreation: tDisclosure('sessionCreation'),
+        disclosureList: tDisclosure('sessionList'),
         citationKind: (kind: AiChatCitation['kind']) =>
             kind === 'person'
                 ? t('citationKindPerson')
@@ -596,7 +599,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnResolved: t('turnResolved'),
         turnTimedOut: t('turnTimedOut'),
         turnWorking: t('turnWorking'),
-    }), [t]);
+    }), [t, tDisclosure]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({ open, working, openDrawer, closeDrawer }),

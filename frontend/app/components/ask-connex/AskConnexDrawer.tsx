@@ -71,6 +71,8 @@ type UnavailableState = {
 type AskConnexDrawerLabels = {
     archive: string;
     citations: string;
+    disclosureCreation: string;
+    disclosureList: string;
     citationKind: (kind: AiChatCitation['kind']) => string;
     close: string;
     composerAria: string;
@@ -392,6 +394,9 @@ export default function AskConnexDrawer({
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start" className="min-w-64">
                                     <DropdownMenuLabel>{labels.recentSessions}</DropdownMenuLabel>
+                                    <p className="px-2 pb-1.5 text-xs leading-relaxed text-muted-foreground">
+                                        {labels.disclosureList}
+                                    </p>
                                     {sessions.length === 0 ? (
                                         <DropdownMenuItem disabled>{labels.noRecentSessions}</DropdownMenuItem>
                                     ) : sessions.map((session) => (
@@ -479,6 +484,9 @@ export default function AskConnexDrawer({
                                                 {prompt}
                                             </Button>
                                         ))}
+                                        <p className="pt-2 text-xs leading-relaxed text-muted-foreground">
+                                            {labels.disclosureCreation}
+                                        </p>
                                     </div>
                                 }
                             />
