@@ -227,10 +227,57 @@ jobs:
           fi
           echo "on-prem correctly refused instance-managed mail at startup"
 
+  source-install:
+    name: Build and boot the stack from source
+    needs: classify
+    if: needs.classify.outputs.compose == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # An operator handed the repository builds the images themselves; nothing else in CI proves
+      # that path works. profile-boot runs a bare WAR under java -jar, and compose-config only
+      # parses. This runs the exact command docs/DEPLOYMENT.md gives a from-source installer.
+      - name: Build and boot from source, then smoke the running stack
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          cp eval.env.example .env
+          sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=/' .env
+          sed -i 's/^CONNEX_BUSINESS_CARD_SCANNING_ENABLED=.*/CONNEX_BUSINESS_CARD_SCANNING_ENABLED=false/' .env
+          sed -i 's/^CONNEX_HTTP_PORT=.*/CONNEX_HTTP_PORT=18099/' .env
+          sed -i 's/^CONNEX_VERSION=.*/CONNEX_VERSION=source-ci/' .env
+          docker compose --env-file .env --env-file source-build.env \
+            -f docker-compose.yml -f docker-compose.build.yml up --build -d
+          BOOTED=0
+          for _ in $(seq 1 90); do
+            if curl -sf http://localhost:18099/api/version > /dev/null 2>&1; then BOOTED=1; break; fi
+            sleep 5
+          done
+          if [ "$BOOTED" != 1 ]; then
+            echo "::error::the from-source stack did not become reachable"
+            docker compose --env-file .env --env-file source-build.env \
+              -f docker-compose.yml -f docker-compose.build.yml ps
+            docker compose --env-file .env --env-file source-build.env \
+              -f docker-compose.yml -f docker-compose.build.yml logs --tail 80
+            exit 1
+          fi
+          curl -sf http://localhost:18099/api/version | jq -e '.version' > /dev/null
+          curl -sf http://localhost:18099/api/capabilities | jq -e 'has("businessCardScanning")' > /dev/null
+          curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:18099/auth/login | grep -qx 200
+
+      - name: Tear down
+        if: always()
+        working-directory: deploy
+        run: |
+          docker compose --env-file .env --env-file source-build.env \
+            -f docker-compose.yml -f docker-compose.build.yml down -v || true
+
   required:
     name: Deploy — required
     if: always()
-    needs: [classify, compose-config, staging-deploy, profile-boot]
+    needs: [classify, compose-config, staging-deploy, profile-boot, source-install]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -240,13 +287,15 @@ jobs:
           COMPOSE_RESULT: ${{ needs.compose-config.result }}
           STAGING_DEPLOY_RESULT: ${{ needs.staging-deploy.result }}
           PROFILE_BOOT_RESULT: ${{ needs.profile-boot.result }}
+          SOURCE_INSTALL_RESULT: ${{ needs.source-install.result }}
         run: |
           set -euo pipefail
           for result in \
             "$CLASSIFY_RESULT" \
             "$COMPOSE_RESULT" \
             "$STAGING_DEPLOY_RESULT" \
-            "$PROFILE_BOOT_RESULT"; do
+            "$PROFILE_BOOT_RESULT" \
+            "$SOURCE_INSTALL_RESULT"; do
             case "$result" in
               success|skipped) ;;
               *) echo "::error::required deployment dependency concluded: $result"; exit 1 ;;
