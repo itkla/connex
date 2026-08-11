@@ -96,7 +96,7 @@ export default function CommentRow({
                                 disabled={!canReact}
                                 onClick={() => onToggleReaction(comment, summary.reaction)}
                                 aria-label={t('reactionLabel', {
-                                    reaction: summary.reaction,
+                                    reaction: t(`reaction_${summary.reaction}`),
                                     count: summary.count,
                                 })}
                                 aria-pressed={summary.reactedByMe}
@@ -120,7 +120,7 @@ export default function CommentRow({
                                             type="button"
                                             aria-label={t('addReaction')}
                                             title={t('addReaction')}
-                                            className="inline-flex cursor-pointer items-center rounded-full p-1 text-muted-foreground transition-[color,background-color,opacity] hover:bg-muted hover:text-foreground focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100"
+                                            className="inline-flex cursor-pointer items-center rounded-full p-2 text-muted-foreground transition-[color,background-color,opacity] hover:bg-muted hover:text-foreground focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100"
                                         >
                                             <FaceSmileIcon className="size-4" />
                                         </button>
@@ -131,12 +131,13 @@ export default function CommentRow({
                                         <button
                                             key={reaction}
                                             type="button"
-                                            aria-label={reaction}
+                                            aria-label={t(`reaction_${reaction}`)}
+                                            title={t(`reaction_${reaction}`)}
                                             onClick={() => {
                                                 setPickerOpen(false);
                                                 onToggleReaction(comment, reaction);
                                             }}
-                                            className="cursor-pointer rounded-md p-1.5 text-base transition-colors hover:bg-muted"
+                                            className="grid size-11 cursor-pointer place-items-center rounded-md text-lg transition-colors hover:bg-muted"
                                         >
                                             {REACTION_EMOJI[reaction]}
                                         </button>

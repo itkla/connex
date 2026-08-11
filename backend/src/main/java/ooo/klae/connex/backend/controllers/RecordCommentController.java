@@ -125,11 +125,22 @@ public class RecordCommentController {
 
     @PutMapping("/comments/{commentId}/reactions/{reaction}")
     @RequirePermission(Permission.COMMENT_CREATE)
-    public List<RecordCommentReactionDto> toggleReaction(
+    public List<RecordCommentReactionDto> addReaction(
             @Positive @PathVariable long commentId,
             @Pattern(regexp = "^(thumbs_up|thumbs_down|heart|celebrate|eyes|laugh)$")
             @PathVariable String reaction) {
-        return recordCommentService.toggleReaction(commentId, reaction).stream()
+        return recordCommentService.addReaction(commentId, reaction).stream()
+            .map(RecordCommentReactionDto::from)
+            .toList();
+    }
+
+    @DeleteMapping("/comments/{commentId}/reactions/{reaction}")
+    @RequirePermission(Permission.COMMENT_CREATE)
+    public List<RecordCommentReactionDto> removeReaction(
+            @Positive @PathVariable long commentId,
+            @Pattern(regexp = "^(thumbs_up|thumbs_down|heart|celebrate|eyes|laugh)$")
+            @PathVariable String reaction) {
+        return recordCommentService.removeReaction(commentId, reaction).stream()
             .map(RecordCommentReactionDto::from)
             .toList();
     }

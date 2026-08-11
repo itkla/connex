@@ -56,7 +56,7 @@ class RecordCommentRbacTest extends AbstractServiceTest {
         assignRole(restricted, List.of());
         authenticateAs(restricted, workspace.getId());
 
-        assertThrows(ForbiddenException.class, () -> recordCommentService.toggleReaction(
+        assertThrows(ForbiddenException.class, () -> recordCommentService.addReaction(
             thread.getComments().getFirst().getId(), "heart"));
     }
 

@@ -58,11 +58,6 @@ public interface RecordCommentMapper {
         @Param("commentIds") List<Long> commentIds,
         @Param("userId") int userId);
 
-    boolean hasReaction(
-        @Param("workspaceId") int workspaceId,
-        @Param("commentId") long commentId,
-        @Param("userId") int userId,
-        @Param("reaction") String reaction);
 
     int insertReaction(
         @Param("workspaceId") int workspaceId,

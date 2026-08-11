@@ -30,15 +30,22 @@ class RecordCommentReactionTest extends AbstractServiceTest {
     @Autowired GlobalExceptionHandler exceptionHandler;
 
     @Test
-    void toggleAddsThenRemovesTheCurrentUsersReaction() {
+    void addAndRemoveAreDeclarativeAndIdempotent() {
         long commentId = newCommentId();
 
-        List<RecordCommentReactionSummary> added = recordCommentService.toggleReaction(
+        List<RecordCommentReactionSummary> added = recordCommentService.addReaction(
             commentId, "thumbs_up");
-        List<RecordCommentReactionSummary> removed = recordCommentService.toggleReaction(
+        List<RecordCommentReactionSummary> repeated = recordCommentService.addReaction(
+            commentId, "thumbs_up");
+        List<RecordCommentReactionSummary> removed = recordCommentService.removeReaction(
+            commentId, "thumbs_up");
+        List<RecordCommentReactionSummary> removedAgain = recordCommentService.removeReaction(
             commentId, "thumbs_up");
 
         assertEquals(1, added.size());
+        assertEquals(1, repeated.size());
+        assertEquals(1, repeated.getFirst().getCount());
+        assertEquals(List.of(), removedAgain);
         assertEquals("thumbs_up", added.getFirst().getReaction());
         assertEquals(1, added.getFirst().getCount());
         assertTrue(added.getFirst().isReactedByMe());
@@ -50,7 +57,7 @@ class RecordCommentReactionTest extends AbstractServiceTest {
     @Test
     void reactionIsUniquePerUserAndReactionKey() {
         long commentId = newCommentId();
-        recordCommentService.toggleReaction(commentId, "heart");
+        recordCommentService.addReaction(commentId, "heart");
 
         assertThrows(DuplicateKeyException.class, () -> recordCommentMapper.insertReaction(
             workspace.getId(), commentId, currentUser.getId(), "heart"));
@@ -63,7 +70,7 @@ class RecordCommentReactionTest extends AbstractServiceTest {
             "thumbs_up", "thumbs_down", "heart", "celebrate", "eyes", "laugh");
 
         for (String reaction : reactions) {
-            recordCommentService.toggleReaction(commentId, reaction);
+            recordCommentService.addReaction(commentId, reaction);
         }
 
         assertEquals(reactions, recordCommentService.getThread(threadId(commentId))
@@ -74,7 +81,7 @@ class RecordCommentReactionTest extends AbstractServiceTest {
             .map(RecordCommentReactionSummary::getReaction)
             .toList());
         BadRequestException exception = assertThrows(BadRequestException.class,
-            () -> recordCommentService.toggleReaction(commentId, "confused"));
+            () -> recordCommentService.addReaction(commentId, "confused"));
         assertEquals(HttpStatus.BAD_REQUEST,
             exceptionHandler.badRequest(exception).getStatusCode());
     }
@@ -82,7 +89,7 @@ class RecordCommentReactionTest extends AbstractServiceTest {
     @Test
     void redactedCommentRetainsExistingSummaryButRejectsNewReactions() {
         long commentId = newCommentId();
-        recordCommentService.toggleReaction(commentId, "eyes");
+        recordCommentService.addReaction(commentId, "eyes");
 
         recordCommentService.deleteComment(commentId);
 
@@ -94,19 +101,19 @@ class RecordCommentReactionTest extends AbstractServiceTest {
             .getFirst();
         assertEquals("eyes", retained.getReaction());
         assertEquals(1, retained.getCount());
-        assertEquals(List.of(), recordCommentService.toggleReaction(commentId, "eyes"));
+        assertEquals(List.of(), recordCommentService.removeReaction(commentId, "eyes"));
         assertThrows(BadRequestException.class,
-            () -> recordCommentService.toggleReaction(commentId, "heart"));
+            () -> recordCommentService.addReaction(commentId, "heart"));
     }
 
     @Test
     void summaryCountsUsersAndMarksOnlyTheCurrentUsersKeys() {
         long commentId = newCommentId();
         User other = newUser();
-        recordCommentService.toggleReaction(commentId, "thumbs_up");
-        recordCommentService.toggleReaction(commentId, "heart");
+        recordCommentService.addReaction(commentId, "thumbs_up");
+        recordCommentService.addReaction(commentId, "heart");
         authenticateAs(other, workspace.getId());
-        recordCommentService.toggleReaction(commentId, "thumbs_up");
+        recordCommentService.addReaction(commentId, "thumbs_up");
 
         Map<String, RecordCommentReactionSummary> summary = recordCommentService
             .getThread(threadId(commentId))
@@ -131,7 +138,7 @@ class RecordCommentReactionTest extends AbstractServiceTest {
             recipient.getId(), null, null, null, null);
         long commentId = newCommentId();
 
-        recordCommentService.toggleReaction(commentId, "celebrate");
+        recordCommentService.addReaction(commentId, "celebrate");
 
         assertEquals(before, notificationMapper.countPage(
             recipient.getId(), null, null, null, null));

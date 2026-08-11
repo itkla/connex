@@ -132,17 +132,6 @@
       FIELD(reaction, 'thumbs_up', 'thumbs_down', 'heart', 'celebrate', 'eyes', 'laugh')
   </select>
 
-  <select id="hasReaction" resultType="boolean">
-    SELECT EXISTS(
-      SELECT 1
-      FROM record_comment_reaction
-      WHERE workspace_id = #{workspaceId}
-        AND comment_id = #{commentId}
-        AND user_id = #{userId}
-        AND reaction = #{reaction}
-    )
-  </select>
-
   <insert id="insertReaction">
     INSERT INTO record_comment_reaction (
       workspace_id, comment_id, user_id, reaction

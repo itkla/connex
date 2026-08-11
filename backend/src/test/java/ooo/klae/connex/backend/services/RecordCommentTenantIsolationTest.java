@@ -101,7 +101,7 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
         RecordCommentThread ownerThread = recordCommentService.createThread(
             "person", person.getId(), "Owner reaction", token());
         long ownerCommentId = ownerThread.getComments().getFirst().getId();
-        recordCommentService.toggleReaction(ownerCommentId, "heart");
+        recordCommentService.addReaction(ownerCommentId, "heart");
 
         authenticateAs(currentUser, grantee.getId());
 
@@ -119,7 +119,7 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
 
         authenticateAs(currentUser, grantee.getId());
         assertThrows(ResourceNotFoundException.class,
-            () -> recordCommentService.toggleReaction(ownerCommentId, "heart"));
+            () -> recordCommentService.addReaction(ownerCommentId, "heart"));
     }
 
     @Test

@@ -3675,10 +3675,10 @@ export function reopenCommentThread(threadId: number, expectedVersion: number, i
 }
 
 /**
- * Toggles the caller's reaction on a comment and returns the comment's updated
- * per-reaction aggregate.
+ * Ensures the caller's reaction is present on a comment; repeating the request
+ * is a no-op. Returns the comment's updated per-reaction aggregate.
  */
-export function toggleCommentReaction(
+export function addCommentReaction(
     commentId: number,
     reaction: Types.RecordCommentReactionKey,
     init: RequestInit = {},
@@ -3686,6 +3686,21 @@ export function toggleCommentReaction(
     return putJson<Types.RecordCommentReactionSummary[]>(
         `/api/comments/${commentId}/reactions/${reaction}`,
         {},
+        init,
+    );
+}
+
+/**
+ * Ensures the caller's reaction is absent from a comment; removing an absent
+ * reaction is a no-op. Returns the comment's updated per-reaction aggregate.
+ */
+export function removeCommentReaction(
+    commentId: number,
+    reaction: Types.RecordCommentReactionKey,
+    init: RequestInit = {},
+) {
+    return deleteJson<Types.RecordCommentReactionSummary[]>(
+        `/api/comments/${commentId}/reactions/${reaction}`,
         init,
     );
 }

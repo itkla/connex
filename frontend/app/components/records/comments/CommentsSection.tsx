@@ -8,14 +8,15 @@ import { LoaderCircle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import {
+    addCommentReaction,
     ApiError,
     createCommentThread,
     deleteRecordComment,
     getCommentThreads,
+    removeCommentReaction,
     reopenCommentThread,
     replyToCommentThread,
     resolveCommentThread,
-    toggleCommentReaction,
 } from '@/app/lib/api';
 import type {
     RecordComment,
@@ -261,10 +262,19 @@ export default function CommentsSection({
         }
     }, [submitting, replyThreadId, replyValue, t]);
 
+    const [reactionBusyIds, setReactionBusyIds] = useState<Set<number>>(new Set());
+
     const handleToggleReaction = useCallback(
         async (comment: RecordComment, reaction: RecordCommentReactionKey) => {
+            if (reactionBusyIds.has(comment.id)) return;
+            setReactionBusyIds((prev) => new Set(prev).add(comment.id));
+            const mine = comment.reactions?.some(
+                (summary) => summary.reaction === reaction && summary.reactedByMe,
+            );
             try {
-                const summary = await toggleCommentReaction(comment.id, reaction);
+                const summary = mine
+                    ? await removeCommentReaction(comment.id, reaction)
+                    : await addCommentReaction(comment.id, reaction);
                 setThreads((prev) =>
                     prev.map((thread) =>
                         thread.id === comment.threadId
@@ -281,9 +291,15 @@ export default function CommentsSection({
                 );
             } catch {
                 toastError(t('reactionFailed'));
+            } finally {
+                setReactionBusyIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(comment.id);
+                    return next;
+                });
             }
         },
-        [t],
+        [reactionBusyIds, t],
     );
 
     const confirmDelete = useCallback(async () => {

@@ -304,12 +304,40 @@ public class RecordCommentService {
             workspaceId, ReferenceService.SOURCE_COMMENT, commentSourceId(commentId));
     }
 
-    /** Toggles one current-user reaction and returns the comment's updated summary. */
+    /** Ensures the caller's reaction is present; repeating the request is a no-op. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
-    public List<RecordCommentReactionSummary> toggleReaction(
-            long commentId,
-            String reactionRaw) {
+    public List<RecordCommentReactionSummary> addReaction(long commentId, String reactionRaw) {
+        ReactionContext context = reactionContext(commentId, reactionRaw);
+        if (context.comment().getDeletedAt() != null) {
+            throw new BadRequestException("Redacted comments cannot receive new reactions");
+        }
+        try {
+            if (recordCommentMapper.insertReaction(
+                    context.workspaceId(), commentId, context.actorId(), context.reaction().wire()) == 0) {
+                RecordComment current = recordCommentMapper.getCommentById(context.workspaceId(), commentId);
+                if (current == null) {
+                    throw new ResourceNotFoundException("Comment not found with id: " + commentId);
+                }
+                throw new BadRequestException("Redacted comments cannot receive new reactions");
+            }
+        } catch (DuplicateKeyException exception) {
+            return reactionSummary(context.workspaceId(), commentId, context.actorId());
+        }
+        return reactionSummary(context.workspaceId(), commentId, context.actorId());
+    }
+
+    /** Ensures the caller's reaction is absent; removing an absent reaction is a no-op. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMMENT_CREATE)
+    public List<RecordCommentReactionSummary> removeReaction(long commentId, String reactionRaw) {
+        ReactionContext context = reactionContext(commentId, reactionRaw);
+        recordCommentMapper.deleteReaction(
+            context.workspaceId(), commentId, context.actorId(), context.reaction().wire());
+        return reactionSummary(context.workspaceId(), commentId, context.actorId());
+    }
+
+    private ReactionContext reactionContext(long commentId, String reactionRaw) {
         requirePositiveId(commentId, "Comment");
         Reaction reaction = Reaction.parse(reactionRaw);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -318,30 +346,14 @@ public class RecordCommentService {
         RecordCommentThread thread = requireThread(workspaceId, comment.getThreadId());
         requireTargetVisible(
             workspaceId, TargetType.parse(thread.getTargetType()), thread.getTargetId());
+        return new ReactionContext(workspaceId, actorId, comment, reaction);
+    }
 
-        if (recordCommentMapper.hasReaction(
-                workspaceId, commentId, actorId, reaction.wire())) {
-            recordCommentMapper.deleteReaction(
-                workspaceId, commentId, actorId, reaction.wire());
-            return reactionSummary(workspaceId, commentId, actorId);
-        }
-        if (comment.getDeletedAt() != null) {
-            throw new BadRequestException("Redacted comments cannot receive new reactions");
-        }
-        try {
-            if (recordCommentMapper.insertReaction(
-                    workspaceId, commentId, actorId, reaction.wire()) == 0) {
-                RecordComment current = recordCommentMapper.getCommentById(workspaceId, commentId);
-                if (current == null) {
-                    throw new ResourceNotFoundException(
-                        "Comment not found with id: " + commentId);
-                }
-                throw new BadRequestException("Redacted comments cannot receive new reactions");
-            }
-        } catch (DuplicateKeyException exception) {
-            return reactionSummary(workspaceId, commentId, actorId);
-        }
-        return reactionSummary(workspaceId, commentId, actorId);
+    private record ReactionContext(
+            int workspaceId,
+            int actorId,
+            RecordComment comment,
+            Reaction reaction) {
     }
 
     /** Resolves an open thread when its optimistic version still matches. */
