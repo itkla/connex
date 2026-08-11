@@ -3627,6 +3627,50 @@ export function getAttachmentsFromCookie(entityType: string, entityId: number, c
 }
 
 /**
+ * Lists comment threads for a record, newest thread first, each thread carrying
+ * its comments in chronological order. The feed is workspace-local: threads
+ * authored in other workspaces of a shared record are never returned.
+ */
+export function getCommentThreads(
+    targetType: Types.RecordCommentTargetType,
+    targetId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.RecordCommentThread[]>(
+        `/api/comment-threads${buildQuery({ targetType, targetId, state: 'all' })}`,
+        init,
+    );
+}
+
+/**
+ * Opens a new comment thread on a record. {@code clientToken} makes retries of
+ * the same submission idempotent.
+ */
+export function createCommentThread(payload: Types.CreateCommentThreadPayload, init: RequestInit = {}) {
+    return postJson<Types.RecordCommentThread>(`/api/comment-threads`, payload, init);
+}
+
+/**
+ * Replies to an existing comment thread. {@code clientToken} makes retries of
+ * the same submission idempotent.
+ */
+export function replyToCommentThread(
+    threadId: number,
+    payload: Types.CreateCommentReplyPayload,
+    init: RequestInit = {},
+) {
+    return postJson<Types.RecordComment>(`/api/comment-threads/${threadId}/comments`, payload, init);
+}
+
+/**
+ * Redacts a comment. The row survives as a tombstone; authors may redact their
+ * own comments, others need the moderate permission.
+ */
+export function deleteRecordComment(commentId: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/comments/${commentId}`, init);
+}
+
+/**
  * Lists every attachment across all entities, each carrying its resolved
  * {@code entityLabel}. Powers the Files library page.
  */

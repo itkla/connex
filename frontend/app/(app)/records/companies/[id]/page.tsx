@@ -23,6 +23,7 @@ import {
     getCompanyTimeline,
     getCompanyEvidence,
     getCurrentUserResultFromCookie,
+    getEffectivePermissionsFromCookie,
     getEntityCustomFieldsFromCookie,
     getTags,
     getUserReferences,
@@ -44,6 +45,7 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/u
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
+import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import TemperatureEvidenceChip from "@/app/components/records/TemperatureEvidenceChip";
@@ -78,6 +80,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         attachments,
         customFields,
         evidence,
+        effectivePermissions,
     ] = await Promise.all([
         getTranslations("CompaniesDetail"),
         getLocale(),
@@ -91,6 +94,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getAttachmentsFromCookie("company", id, cookie),
         getEntityCustomFieldsFromCookie("company", id, cookie),
         getCompanyEvidence(id, init).catch(() => null),
+        getEffectivePermissionsFromCookie(cookie),
     ]);
 
     if (companyAccess.kind === "forbidden") {
@@ -258,6 +262,18 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         </RecordDetailSection>
                     </Rise>
                 </div>
+
+                <Rise delay={0.1}>
+                    <RecordDetailSection recordKind="company" section="comments">
+                        <CommentsSection
+                            targetType="company"
+                            targetId={company.id}
+                            currentUserId={currentUser.id}
+                            canComment={effectivePermissions.includes("COMMENT_CREATE")}
+                            canModerate={effectivePermissions.includes("COMMENT_MODERATE")}
+                        />
+                    </RecordDetailSection>
+                </Rise>
 
                 <Rise delay={0.12}>
                     <RecordDetailSection recordKind="company" section="files">

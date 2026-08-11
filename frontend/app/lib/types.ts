@@ -2730,6 +2730,46 @@ export type CreateAttachmentPayload = {
     size?: number;
 };
 
+export type RecordCommentTargetType = 'person' | 'company' | 'deal';
+
+export type RecordCommentAuthor = {
+    id: number;
+    displayName: string;
+    profileImageUrl?: string | null;
+};
+
+export type RecordComment = {
+    id: number;
+    threadId: number;
+    author: RecordCommentAuthor;
+    /** Null once the comment has been redacted; the row survives as a tombstone. */
+    content: string | null;
+    deleted: boolean;
+    createdAt: string;
+};
+
+export type RecordCommentThread = {
+    id: number;
+    targetType: RecordCommentTargetType;
+    targetId: number;
+    state: 'open' | 'resolved';
+    version: number;
+    createdAt: string;
+    comments: RecordComment[];
+};
+
+export type CreateCommentThreadPayload = {
+    targetType: RecordCommentTargetType;
+    targetId: number;
+    content: string;
+    clientToken: string;
+};
+
+export type CreateCommentReplyPayload = {
+    content: string;
+    clientToken: string;
+};
+
 export type FacetCount = {
     key: string;
     count: number;

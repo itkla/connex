@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -27,6 +27,7 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/u
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
+import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
@@ -54,7 +55,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         redirect('/auth/login');
     }
 
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -71,6 +72,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
         getEntityCustomFieldsFromCookie("person", id, cookie),
         getContactEvidence(id, init).catch(() => null),
+        getEffectivePermissionsFromCookie(cookie),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -365,6 +367,18 @@ export default async function ContactPage({ params }: ContactPageProps) {
                         </RecordDetailSection>
                     </Rise>
                 </div>
+
+                <Rise delay={0.1}>
+                    <RecordDetailSection recordKind="contact" section="comments">
+                        <CommentsSection
+                            targetType="person"
+                            targetId={contact.id}
+                            currentUserId={currentUser.id}
+                            canComment={effectivePermissions.includes("COMMENT_CREATE")}
+                            canModerate={effectivePermissions.includes("COMMENT_MODERATE")}
+                        />
+                    </RecordDetailSection>
+                </Rise>
 
                 <Rise delay={0.12}>
                     <RecordDetailSection recordKind="contact" section="files">
