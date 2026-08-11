@@ -2333,6 +2333,19 @@ export type AiChatSession = {
 };
 
 /** API representation of one ordered assistant chat message. */
+/**
+ * One record an assistant answer cited, projected for the current viewer. Citations the viewer may
+ * not access are omitted by the backend rather than marked, so a shared session can legitimately
+ * show fewer citations to one participant than another. `label` is optional because the backend
+ * projection carries identity only until a viewer-authorized display name is added.
+ */
+export type AiChatCitation = {
+    handle: string;
+    kind: 'person' | 'company' | 'deal';
+    id: number;
+    label?: string | null;
+};
+
 export type AiChatMessage = {
     id: number;
     sessionId: number;
@@ -2341,6 +2354,7 @@ export type AiChatMessage = {
     authorUserId: number | null;
     content: string;
     createdAt: string;
+    citations?: AiChatCitation[] | null;
 };
 
 /** One accessible assistant session and its ordered message page. */

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
     EMPTY_ASK_CONNEX_TURN,
+    askConnexCitationHref,
+    askConnexCitations,
     askConnexMessageContent,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
@@ -100,5 +102,30 @@ describe('Ask Connex turn state reduction', () => {
             .toMatchObject({ phase: 'failed', reason: 'provider_error' });
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'timed_out', reason: 'generation_timeout' }))
             .toMatchObject({ phase: 'timed_out', reason: 'generation_timeout' });
+    });
+});
+
+describe('Ask Connex citations', () => {
+    it('routes each record kind to its records-browser detail path', () => {
+        expect(askConnexCitationHref({ handle: 'r1', kind: 'person', id: 7 })).toBe('/records/contacts/7');
+        expect(askConnexCitationHref({ handle: 'r2', kind: 'company', id: 4 })).toBe('/records/companies/4');
+        expect(askConnexCitationHref({ handle: 'r3', kind: 'deal', id: 9 })).toBe('/records/deals/9');
+    });
+
+    it('de-duplicates by record identity rather than handle', () => {
+        const result = askConnexCitations([
+            { handle: 'r1', kind: 'person', id: 7 },
+            { handle: 'r4', kind: 'person', id: 7 },
+            { handle: 'r2', kind: 'company', id: 7 },
+        ]);
+        expect(result).toHaveLength(2);
+        expect(result.map((c) => c.kind)).toEqual(['person', 'company']);
+    });
+
+    it('caps the rendered list and tolerates a missing projection', () => {
+        const many = Array.from({ length: 20 }, (_, i) => ({ handle: `r${i + 1}`, kind: 'deal' as const, id: i + 1 }));
+        expect(askConnexCitations(many)).toHaveLength(8);
+        expect(askConnexCitations(null)).toEqual([]);
+        expect(askConnexCitations(undefined)).toEqual([]);
     });
 });

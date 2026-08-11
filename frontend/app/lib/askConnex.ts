@@ -1,5 +1,5 @@
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
-import type { AiChatPageContext } from '@/app/lib/types';
+import type { AiChatCitation, AiChatPageContext } from '@/app/lib/types';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -165,4 +165,32 @@ export function reduceAskConnexTurn(
               ? 'timed_out'
               : 'failed';
     return { ...state, phase, reason: event.reason ?? null };
+}
+
+/** Route for one cited record, matching the records browser's detail paths. */
+export function askConnexCitationHref(citation: AiChatCitation): string {
+    if (citation.kind === 'person') return `/records/contacts/${citation.id}`;
+    if (citation.kind === 'company') return `/records/companies/${citation.id}`;
+    return `/records/deals/${citation.id}`;
+}
+
+/**
+ * Citations to render beneath one assistant answer, de-duplicated by record identity and capped so a
+ * long answer cannot flood the transcript.
+ */
+export function askConnexCitations(
+    citations: AiChatCitation[] | null | undefined,
+    limit = 8,
+): AiChatCitation[] {
+    if (!citations?.length) return [];
+    const seen = new Set<string>();
+    const unique: AiChatCitation[] = [];
+    for (const citation of citations) {
+        const key = `${citation.kind}:${citation.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(citation);
+        if (unique.length === limit) break;
+    }
+    return unique;
 }

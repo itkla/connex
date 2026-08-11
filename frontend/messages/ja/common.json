@@ -384,7 +384,11 @@
       "requestFailed": "Ask Connexのリクエストに失敗しました",
       "turnFailed": "Ask Connexはターンを完了できませんでした",
       "turnTimedOut": "Ask Connexがタイムアウトしました"
-    }
+    },
+    "citations": "参照元",
+    "citationKindPerson": "連絡先",
+    "citationKindCompany": "会社",
+    "citationKindDeal": "取引"
   },
   "SearchLayout": {
     "title": "検索",

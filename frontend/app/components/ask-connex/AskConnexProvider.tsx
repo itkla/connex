@@ -49,6 +49,7 @@ import {
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
+    AiChatCitation,
     AiChatMessage,
     AiChatSession,
     AiChatTurn,
@@ -559,6 +560,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     );
     const labels = useMemo(() => ({
         archive: t('archive'),
+        citations: t('citations'),
+        citationKind: (kind: AiChatCitation['kind']) =>
+            kind === 'person'
+                ? t('citationKindPerson')
+                : kind === 'company'
+                    ? t('citationKindCompany')
+                    : t('citationKindDeal'),
         close: t('close'),
         composerAria: t('composerAria'),
         composerHint: t('composerHint'),

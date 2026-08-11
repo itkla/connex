@@ -384,7 +384,11 @@
       "requestFailed": "Ask Connex request failed",
       "turnFailed": "Ask Connex could not complete the turn",
       "turnTimedOut": "Ask Connex timed out"
-    }
+    },
+    "citations": "Sources",
+    "citationKindPerson": "Contact",
+    "citationKindCompany": "Company",
+    "citationKindDeal": "Deal"
   },
   "SearchLayout": {
     "title": "Search",

@@ -7,6 +7,7 @@ import {
     ChevronDownIcon,
     ClockIcon,
     EllipsisHorizontalIcon,
+    LinkIcon,
     MapPinIcon,
     PaperAirplaneIcon,
     PencilSquareIcon,
@@ -14,6 +15,7 @@ import {
     SparklesIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline';
+import Link from 'next/link';
 import { motion, useReducedMotion } from 'motion/react';
 
 import AccessDenied from '@/app/components/AccessDenied';
@@ -21,8 +23,9 @@ import { EmptyState } from '@/app/components/EmptyState';
 import ErrorState from '@/app/components/ErrorState';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import type { AskConnexAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
+import { askConnexCitationHref, askConnexCitations } from '@/app/lib/askConnex';
 import { easeOut, instant } from '@/app/lib/motion';
-import type { AiChatMessage, AiChatSession } from '@/app/lib/types';
+import type { AiChatCitation, AiChatMessage, AiChatSession } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -67,6 +70,8 @@ type UnavailableState = {
 
 type AskConnexDrawerLabels = {
     archive: string;
+    citations: string;
+    citationKind: (kind: AiChatCitation['kind']) => string;
     close: string;
     composerAria: string;
     composerHint: string;
@@ -145,7 +150,42 @@ function TranscriptSkeleton() {
     );
 }
 
-function TranscriptMessage({ message, fresh }: { message: AiChatMessage; fresh: boolean }) {
+function MessageCitations({
+    citations,
+    labels,
+}: {
+    citations: AiChatCitation[] | null | undefined;
+    labels: AskConnexDrawerLabels;
+}) {
+    const visible = askConnexCitations(citations);
+    if (visible.length === 0) return null;
+
+    return (
+        <ul aria-label={labels.citations} className="flex flex-wrap gap-1.5">
+            {visible.map((citation) => (
+                <li key={`${citation.kind}:${citation.id}`}>
+                    <Link
+                        href={askConnexCitationHref(citation)}
+                        className="inline-flex max-w-56 items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                        <LinkIcon className="size-3 shrink-0" />
+                        <span className="truncate">{citation.label ?? labels.citationKind(citation.kind)}</span>
+                    </Link>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
+function TranscriptMessage({
+    message,
+    fresh,
+    labels,
+}: {
+    message: AiChatMessage;
+    fresh: boolean;
+    labels: AskConnexDrawerLabels;
+}) {
     const reduceMotion = useReducedMotion() ?? false;
     const user = message.authorKind === 'user';
 
@@ -161,8 +201,11 @@ function TranscriptMessage({ message, fresh }: { message: AiChatMessage; fresh: 
                     {message.content}
                 </p>
             ) : (
-                <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
-                    {message.content}
+                <div className="space-y-3">
+                    <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
+                        {message.content}
+                    </div>
+                    <MessageCitations citations={message.citations} labels={labels} />
                 </div>
             )}
         </motion.article>
@@ -447,6 +490,7 @@ export default function AskConnexDrawer({
                                         key={message.id}
                                         message={message}
                                         fresh={freshMessageIds.has(message.id)}
+                                        labels={labels}
                                     />
                                 ))}
                             </div>
