@@ -87,7 +87,7 @@ export default function ContentShell({
             </div>
 
             <motion.div
-                className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_0rem]"
+                className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_0rem] grid-rows-[minmax(0,1fr)]"
                 initial={false}
                 animate={{
                     gridTemplateColumns: askConnex.open && !isMobile
