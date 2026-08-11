@@ -187,6 +187,22 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void authorRejoiningDuringTheReadFailsClosedRatherThanDisclosingTheTranscript() {
+        User author = newUser();
+        AiChatSession session = privateSession(author, "Rejoin race");
+        workspaceMapper.removeMember(workspace.getId(), author.getId());
+        assertEquals(session.getId(), service.getRetained(session.getId(), 1, 50).session().getId());
+
+        workspaceMapper.addMember(workspace.getId(), author.getId(), "member");
+
+        ForbiddenException raced = assertThrows(
+            ForbiddenException.class,
+            () -> service.getRetained(session.getId(), 1, 50));
+        assertEquals(INACCESSIBLE, raced.getMessage());
+        assertEquals(0, service.pageRetained(1, 25).total());
+    }
+
+    @Test
     void retainedSessionsAreImmutableEvenForAnAdminParticipant() {
         User author = newUser();
         AiChatSession session = sharedSession(author, "Immutable evidence");

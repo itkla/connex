@@ -72,12 +72,17 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
-        List<AiChatSession> sessions = chatMapper.listRetainedSessions(
+        List<AiChatSession> candidates = chatMapper.listRetainedSessions(
             workspaceId, userId, activeMemberIds, size, offset);
+        List<Integer> revalidatedMemberIds = activeMemberIds(workspaceId, userId);
+        List<AiChatSession> sessions = candidates.stream()
+            .filter(session -> session.getCreatedByUserId() == null
+                || !revalidatedMemberIds.contains(session.getCreatedByUserId()))
+            .toList();
         sessions.forEach(this::auditRetainedRead);
         return new PageResponse<>(
             sessions.stream().map(AiChatSessionDto::from).toList(),
-            chatMapper.countRetainedSessions(workspaceId, activeMemberIds));
+            chatMapper.countRetainedSessions(workspaceId, revalidatedMemberIds));
     }
 
     /** Creates a private active session owned by the authenticated caller. */
@@ -123,8 +128,24 @@ public class AiAssistantService {
         if (session == null) {
             throw inaccessible();
         }
+        requireStillRetained(workspaceId, userId, session);
         auditRetainedRead(session);
         return detail(workspaceId, id, messageSize, offset, session);
+    }
+
+    /**
+     * Re-derives retention from a fresh membership read before any transcript is disclosed. The
+     * first snapshot is taken from the control plane and the session from the tenant plane, so an
+     * author who rejoins between the two reads would otherwise still classify as departed and their
+     * now-private transcript would be returned. Revalidating fails closed on that race.
+     */
+    private void requireStillRetained(int workspaceId, int userId, AiChatSession session) {
+        if (session.getCreatedByUserId() == null) {
+            return;
+        }
+        if (activeMemberIds(workspaceId, userId).contains(session.getCreatedByUserId())) {
+            throw inaccessible();
+        }
     }
 
     private AiChatSessionDetailDto detail(
