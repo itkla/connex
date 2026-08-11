@@ -101,6 +101,18 @@ export function notificationContent(notification: Notification, t: Translator, l
             body: t("noteMentionBody", { actor: notification.actorLabel ?? "" }),
         };
     }
+    if (notification.type === "comment.mention") {
+        return {
+            title: t("commentMentionTitle"),
+            body: t("commentMentionBody", { actor: notification.actorLabel ?? "" }),
+        };
+    }
+    if (notification.type === "comment.reply") {
+        return {
+            title: t("commentReplyTitle"),
+            body: t("commentReplyBody", { actor: notification.actorLabel ?? "" }),
+        };
+    }
     if (notification.type === "task.mention") {
         return {
             title: t("taskMentionTitle"),

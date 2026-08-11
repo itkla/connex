@@ -2732,6 +2732,8 @@ export type CreateAttachmentPayload = {
 
 export type RecordCommentTargetType = 'person' | 'company' | 'deal';
 
+export type RecordCommentStateFilter = 'open' | 'resolved' | 'all';
+
 export type RecordCommentAuthor = {
     id: number;
     displayName: string;
@@ -2748,6 +2750,8 @@ export type RecordComment = {
     createdAt: string;
     deletedAt: string | null;
     deletedByUserId?: number | null;
+    /** Server-authorized @/# references resolved from the content tokens. */
+    references?: NoteReference[];
 };
 
 export type RecordCommentThread = {
