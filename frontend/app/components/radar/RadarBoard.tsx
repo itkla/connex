@@ -7,6 +7,7 @@ import { AdjustmentsHorizontalIcon, MagnifyingGlassIcon, SignalIcon } from '@her
 
 import RadarSignalCard from '@/app/components/radar/RadarSignalCard';
 import { FAMILY_DOTS } from '@/app/components/radar/radarFamilyAccent';
+import { RADAR_FIELD_SURFACE, RADAR_PRESSABLE_SURFACE } from '@/app/components/radar/radarControlSurface';
 import SectionUnavailable from '@/app/components/SectionUnavailable';
 import { EmptyState } from '@/app/components/EmptyState';
 import { useActions } from '@/app/hooks/useActions';
@@ -362,10 +363,10 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                 onClick={() => setFamily(value)}
                                 aria-pressed={family === value}
                                 className={cn(
-                                    'inline-flex min-h-9 shrink-0 items-center gap-2 rounded-full border px-3 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
+                                    'inline-flex min-h-9 shrink-0 items-center gap-2 rounded-full px-3 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
                                     family === value
-                                        ? 'border-foreground bg-foreground text-background'
-                                        : 'border-border bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+                                        ? 'bg-foreground text-background'
+                                        : `${RADAR_PRESSABLE_SURFACE} text-muted-foreground hover:text-foreground`,
                                 )}
                             >
                                 {value === 'all' ? null : (
@@ -387,13 +388,13 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                 onChange={(event) => setQuery(event.target.value)}
                                 placeholder={t('filters.searchPlaceholder')}
                                 aria-label={t('filters.searchLabel')}
-                                className="pl-9"
+                                className={cn('pl-9', RADAR_FIELD_SURFACE)}
                             />
                         </div>
                         <Select value={state} onValueChange={(value) => {
                             if (isRadarStateFilter(value)) setState(value);
                         }}>
-                            <SelectTrigger className="min-h-11 shrink-0 lg:min-h-9" aria-label={t('filters.stateLabel')}>
+                            <SelectTrigger className={cn('min-h-11 shrink-0 lg:min-h-9', RADAR_PRESSABLE_SURFACE)} aria-label={t('filters.stateLabel')}>
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent align="end">

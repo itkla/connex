@@ -20,6 +20,7 @@ import type { PermissionCheck } from '@/app/lib/permissionState';
 import { usePermissionCheck, usePermissionsRefresh } from '@/app/hooks/usePermissions';
 import RadarSnoozeDialog from '@/app/components/radar/RadarSnoozeDialog';
 import { FAMILY_DOTS } from '@/app/components/radar/radarFamilyAccent';
+import { RADAR_PRESSABLE_SURFACE } from '@/app/components/radar/radarControlSurface';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -355,9 +356,9 @@ export default function RadarSignalCard({
                         <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-2 lg:contents">
                             <Button
                                 type="button"
-                                variant="outline"
+                                variant="secondary"
                                 size="sm"
-                                className="min-h-11 lg:min-h-9"
+                                className={cn('min-h-11 lg:min-h-9', RADAR_PRESSABLE_SURFACE)}
                                 onClick={onCreateTask}
                                 disabled={taskDisabled}
                                 aria-label={signal.taskId != null

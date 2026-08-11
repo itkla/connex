@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 
 import type { RadarSignal } from '@/app/lib/types';
+import { RADAR_FIELD_SURFACE } from '@/app/components/radar/radarControlSurface';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -70,6 +71,7 @@ export default function RadarSnoozeDialog({
                             aria-invalid={value.length > 0 && !valid}
                             disabled={busy}
                             autoFocus
+                            className={RADAR_FIELD_SURFACE}
                         />
                         <p
                             id={`radar-snooze-hint-${signal.id}`}
