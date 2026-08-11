@@ -17,11 +17,13 @@ import ConnectionsPanel from "@/app/components/account/ConnectionsPanel";
 import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import ContentShell from "@/app/components/ContentShell";
 import Sidebar from "@/app/components/Sidebar";
+import NavActionsBridge from "@/app/components/actions/NavActionsBridge";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { InstanceCapabilities, MyWorkspaces, User, Workspace } from "@/app/lib/types";
 
-const { redirectMock, routerRefreshMock } = vi.hoisted(() => ({
+const { navActionIdsState, redirectMock, routerRefreshMock } = vi.hoisted(() => ({
+    navActionIdsState: { ids: Array<string>() },
     redirectMock: vi.fn((destination: string): never => {
         throw new Error(`redirect:${destination}`);
     }),
@@ -59,6 +61,17 @@ vi.mock("next-intl", () => ({
     useLocale: () => "en",
     useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
 }));
+
+vi.mock("@/app/hooks/useActions", async () => {
+    const React = await import("react");
+    return {
+        ActionProvider: ({ children }: PropsWithChildren) =>
+            React.createElement(React.Fragment, null, children),
+        useRegisterActions: (actions: readonly { id: string }[]) => {
+            navActionIdsState.ids = actions.map((action) => action.id);
+        },
+    };
+});
 
 vi.mock("motion/react", async () => {
     const React = await import("react");
@@ -237,6 +250,20 @@ const DISABLED_CAPABILITIES = {
     campaignDelivery: false,
 } satisfies InstanceCapabilities;
 
+const CAPTURE_ENABLED_CAPABILITIES = {
+    ...DISABLED_CAPABILITIES,
+    connectedCapture: { google: true, microsoft: false },
+} satisfies InstanceCapabilities;
+
+const BASE_NAV_ACCESS = {
+    goals: false,
+    auditLog: false,
+    captureReviews: "disabled",
+    campaigns: false,
+    workflows: false,
+    diagnostics: false,
+} satisfies NavAccess;
+
 function json(body: unknown): Response {
     return new Response(JSON.stringify(body), {
         status: 200,
@@ -312,6 +339,14 @@ function sidebarFromLayout(rendered: ReactNode): ReactElement {
     return sidebar;
 }
 
+function captureRegisteredNavigationActions(captureReviews: CapabilityAvailability): string[] {
+    navActionIdsState.ids = [];
+    renderToStaticMarkup(createElement(NavActionsBridge, {
+        navAccess: { ...BASE_NAV_ACCESS, captureReviews },
+    }));
+    return navActionIdsState.ids;
+}
+
 afterEach(() => {
     vi.unstubAllGlobals();
     redirectMock.mockClear();
@@ -319,6 +354,19 @@ afterEach(() => {
 });
 
 describe("app-shell capability navigation honesty", () => {
+    it("shows capture reviews without an unavailable marker when capture resolves enabled", async () => {
+        stubAppReads(CAPTURE_ENABLED_CAPABILITIES);
+
+        const rendered = await AppLayout({ children: createElement("p", null, "dashboard") });
+        const sidebar = sidebarFromLayout(rendered);
+        if (!hasSidebarContract(sidebar.props)) throw new Error("Sidebar contract changed");
+        const html = renderToStaticMarkup(sidebar);
+
+        expect(sidebar.props.navAccess.captureReviews).toBe("enabled");
+        expect(html).toContain("/account/connections/reviews");
+        expect(html).not.toContain("CapabilityUnavailable.title");
+    });
+
     it("keeps the capture-review destination visible and marks it unavailable after lookup failure", async () => {
         stubAppReads(null);
 
@@ -348,7 +396,44 @@ describe("app-shell capability navigation honesty", () => {
     });
 });
 
+describe("command navigation capability honesty", () => {
+    it.each([
+        ["enabled", true],
+        ["disabled", false],
+        ["unavailable", true],
+    ] as const)("registers capture reviews for %s availability: %s", (availability, expected) => {
+        const actionIds = captureRegisteredNavigationActions(availability);
+
+        expect(actionIds.includes("navigate.capture-reviews")).toBe(expected);
+    });
+});
+
 describe("connections page capability honesty", () => {
+    it("preserves a provider deep link when the capability lookup fails", async () => {
+        stubAppReads(null);
+
+        const rendered = await AccountConnectionsPage({
+            searchParams: Promise.resolve({ provider: "google" }),
+        });
+
+        expect(findByType(rendered, ConnectionsPanel)).not.toBeNull();
+        expect(redirectMock).not.toHaveBeenCalled();
+    });
+
+    it("preserves a workspace-policy deep link when the capability lookup fails", async () => {
+        stubAppReads(null);
+
+        const rendered = await AccountConnectionsPage({
+            searchParams: Promise.resolve({
+                provider: "google",
+                panel: "workspace-policy",
+            }),
+        });
+
+        expect(findByType(rendered, ConnectionsPanel)).not.toBeNull();
+        expect(redirectMock).not.toHaveBeenCalled();
+    });
+
     it("keeps the connections page mounted and renders a retryable unavailable section after lookup failure", async () => {
         stubAppReads(null);
 

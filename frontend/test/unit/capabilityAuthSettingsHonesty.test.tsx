@@ -1,4 +1,5 @@
 import {
+    act,
     createElement,
     isValidElement,
     type AnchorHTMLAttributes,
@@ -18,12 +19,33 @@ import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePag
 import EmailPanel from "@/app/components/settings/EmailPanel";
 import SettingsTabs from "@/app/components/settings/SettingsTabs";
 import type { InstanceCapabilities } from "@/app/lib/types";
+import {
+    installInteractiveDocument,
+    type InteractiveElement,
+} from "@/test/unit/helpers/interactiveDocument";
 
-const { redirectMock, routerRefreshMock } = vi.hoisted(() => ({
+const {
+    beginPasskeyAuthenticationMock,
+    finishPasskeyAuthenticationMock,
+    loginMock,
+    passkeySupportState,
+    redirectMock,
+    routerPushMock,
+    routerRefreshMock,
+    routerReplaceMock,
+    startAuthenticationMock,
+} = vi.hoisted(() => ({
+    beginPasskeyAuthenticationMock: vi.fn(async () => ({ challenge: "passkey-challenge" })),
+    finishPasskeyAuthenticationMock: vi.fn(async () => {}),
+    loginMock: vi.fn(async () => {}),
+    passkeySupportState: { supported: false },
     redirectMock: vi.fn((destination: string): never => {
         throw new Error(`redirect:${destination}`);
     }),
+    routerPushMock: vi.fn(),
     routerRefreshMock: vi.fn(),
+    routerReplaceMock: vi.fn(),
+    startAuthenticationMock: vi.fn(async () => ({ id: "credential" })),
 }));
 
 vi.mock("next/headers", () => ({
@@ -45,11 +67,29 @@ vi.mock("next/navigation", () => ({
     redirect: redirectMock,
     usePathname: () => "/settings/members",
     useRouter: () => ({
-        push: vi.fn(),
+        push: routerPushMock,
         refresh: routerRefreshMock,
-        replace: vi.fn(),
+        replace: routerReplaceMock,
     }),
 }));
+
+vi.mock("@simplewebauthn/browser", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@simplewebauthn/browser")>();
+    return {
+        ...actual,
+        startAuthentication: startAuthenticationMock,
+    };
+});
+
+vi.mock("@/app/lib/api", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/app/lib/api")>();
+    return {
+        ...actual,
+        beginPasskeyAuthentication: beginPasskeyAuthenticationMock,
+        finishPasskeyAuthentication: finishPasskeyAuthenticationMock,
+        login: loginMock,
+    };
+});
 
 vi.mock("next-intl", () => ({
     useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
@@ -76,7 +116,7 @@ vi.mock("motion/react", async () => {
 });
 
 vi.mock("@/app/hooks/usePasskeySupport", () => ({
-    usePasskeySupport: () => false,
+    usePasskeySupport: () => passkeySupportState.supported,
 }));
 
 vi.mock("@/app/hooks/usePermissions", () => ({
@@ -141,6 +181,16 @@ function containsText(node: ReactNode, text: string): boolean {
     return containsText(node.props.children, text);
 }
 
+function requiredElement(
+    elements: readonly InteractiveElement[],
+    predicate: (element: InteractiveElement) => boolean,
+    label: string,
+): InteractiveElement {
+    const element = elements.find(predicate);
+    if (!element) throw new Error(`${label} did not render`);
+    return element;
+}
+
 function hasSsoAvailability(value: unknown): value is {
     ssoAvailability: "enabled" | "disabled" | "unavailable";
 } {
@@ -165,12 +215,12 @@ function hasMailManagementAvailability(value: unknown): value is {
 
 afterEach(() => {
     vi.unstubAllGlobals();
-    redirectMock.mockClear();
-    routerRefreshMock.mockClear();
+    vi.clearAllMocks();
+    passkeySupportState.supported = false;
 });
 
 describe("login capability honesty", () => {
-    it("keeps password login available and renders a retryable SSO unavailable state after lookup failure", async () => {
+    it("keeps password submission enabled and operational while SSO availability is unavailable", async () => {
         stubCapabilities(null);
 
         const rendered = await LoginPage({ searchParams: Promise.resolve({}) });
@@ -185,6 +235,71 @@ describe("login capability honesty", () => {
         expect(html).toContain("login-password");
         expect(html).toContain("CapabilityUnavailable.title");
         expect(html).toContain("CapabilityUnavailable.retry");
+
+        const interactive = installInteractiveDocument("connex_workspace=7");
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        await act(async () => {
+            root.render(rendered);
+        });
+
+        const form = requiredElement(
+            interactive.elements,
+            (element) => element.tagName === "FORM",
+            "Login form",
+        );
+        const submit = requiredElement(
+            interactive.elements,
+            (element) => element.tagName === "BUTTON" && element.type === "submit",
+            "Password submit button",
+        );
+
+        expect(submit.disabled).not.toBe(true);
+        await act(async () => {
+            interactive.dispatch("submit", form);
+        });
+
+        expect(loginMock).toHaveBeenCalledWith({
+            username: "",
+            password: "",
+        });
+        expect(routerReplaceMock).toHaveBeenCalledWith("/dashboard");
+        await act(async () => root.unmount());
+    });
+
+    it("keeps passkey login visible and operational when the browser supports it during an SSO lookup failure", async () => {
+        passkeySupportState.supported = true;
+        stubCapabilities(null);
+
+        const rendered = await LoginPage({ searchParams: Promise.resolve({}) });
+        if (!isValidElement(rendered) || !hasSsoAvailability(rendered.props)) {
+            throw new Error("Login did not render the expected capability contract");
+        }
+        const interactive = installInteractiveDocument("connex_workspace=7");
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        await act(async () => {
+            root.render(rendered);
+        });
+
+        const passkey = requiredElement(
+            interactive.elements,
+            (element) => element.tagName === "BUTTON"
+                && element.textContent.includes("AuthLogin.passkeyButton"),
+            "Passkey login button",
+        );
+
+        expect(rendered.props.ssoAvailability).toBe("unavailable");
+        expect(passkey.disabled).not.toBe(true);
+        await act(async () => {
+            interactive.dispatch("click", passkey);
+        });
+
+        expect(beginPasskeyAuthenticationMock).toHaveBeenCalledOnce();
+        expect(startAuthenticationMock).toHaveBeenCalledOnce();
+        expect(finishPasskeyAuthenticationMock).toHaveBeenCalledOnce();
+        expect(routerReplaceMock).toHaveBeenCalledWith("/dashboard");
+        await act(async () => root.unmount());
     });
 
     it("keeps a resolved disabled SSO capability distinct from lookup failure", async () => {
