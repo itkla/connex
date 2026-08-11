@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
@@ -60,6 +61,7 @@ class ManagedObjectServiceTest {
     private ManagedObjectService service;
     private final MutableNanoTime readinessNanoTime = new MutableNanoTime();
     private final Queue<Runnable> readinessTasks = new ArrayDeque<>();
+    private Runnable readinessSnapshotPublicationHook = () -> {};
 
     @BeforeEach
     void setUp() {
@@ -93,7 +95,8 @@ class ManagedObjectServiceTest {
             new ManagedObjectWriteAdmissionService(configuredProperties),
             new ManagedObjectReadAdmissionService(configuredProperties, () -> 9),
             readinessNanoTime,
-            task -> readinessTasks.add(task));
+            task -> readinessTasks.add(task),
+            () -> readinessSnapshotPublicationHook.run());
     }
 
     @Test
@@ -586,11 +589,28 @@ class ManagedObjectServiceTest {
         assertTrue(service.isReady());
         assertEquals(1, readinessTasks.size());
 
-        readinessNanoTime.beforeNextRead(() -> assertThrows(
-            ServiceUnavailableException.class,
-            () -> inTransaction(() -> service.storeAttachment(
-                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}))));
-        readinessTasks.remove().run();
+        CompletableFuture<Void> generationConfirmed = new CompletableFuture<>();
+        CompletableFuture<Void> publicationReleased = new CompletableFuture<>();
+        readinessSnapshotPublicationHook = () -> {
+            generationConfirmed.complete(null);
+            publicationReleased.join();
+        };
+        CompletableFuture<Void> probeCompleted = new CompletableFuture<>();
+        startTask(readinessTasks.remove(), probeCompleted);
+        generationConfirmed.join();
+
+        CompletableFuture<Void> storageFailureCompleted = new CompletableFuture<>();
+        Thread storageFailure = startTask(
+            () -> assertThrows(
+                ServiceUnavailableException.class,
+                () -> inTransaction(() -> service.storeAttachment(
+                    12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}))),
+            storageFailureCompleted);
+        waitUntilReadinessInvalidationIsBlockedOrCompleted(storageFailure);
+        publicationReleased.complete(null);
+        probeCompleted.join();
+        storageFailureCompleted.join();
+
         assertFalse(service.isReady());
         assertEquals(1, readinessTasks.size());
         readinessTasks.remove().run();
@@ -600,25 +620,46 @@ class ManagedObjectServiceTest {
 
     private static final class MutableNanoTime implements LongSupplier {
         private long nanos = Duration.ofHours(1).toNanos();
-        private Runnable beforeNextRead;
 
         @Override
         public long getAsLong() {
-            Runnable action = beforeNextRead;
-            beforeNextRead = null;
-            if (action != null) {
-                action.run();
-            }
             return nanos;
         }
 
         void advanceMillis(long millis) {
             nanos += TimeUnit.MILLISECONDS.toNanos(millis);
         }
+    }
 
-        void beforeNextRead(Runnable action) {
-            beforeNextRead = action;
+    private static Thread startTask(Runnable task, CompletableFuture<Void> completion) {
+        return Thread.ofPlatform().start(() -> {
+            try {
+                task.run();
+                completion.complete(null);
+            } catch (Throwable throwable) {
+                completion.completeExceptionally(throwable);
+            }
+        });
+    }
+
+    private static void waitUntilReadinessInvalidationIsBlockedOrCompleted(Thread thread) {
+        while (thread.isAlive()) {
+            if (thread.getState() == Thread.State.BLOCKED
+                    && isExecutingReadinessInvalidation(thread)) {
+                return;
+            }
+            Thread.onSpinWait();
         }
+    }
+
+    private static boolean isExecutingReadinessInvalidation(Thread thread) {
+        for (StackTraceElement frame : thread.getStackTrace()) {
+            if (frame.getClassName().equals(ManagedObjectService.class.getName())
+                    && frame.getMethodName().equals("markUnavailable")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static <T> T inTransaction(Supplier<T> work) {

@@ -62,6 +62,7 @@ public class ManagedObjectService implements ApplicationRunner {
     private final ManagedObjectReadAdmissionService readAdmissionService;
     private final LongSupplier readinessNanoTime;
     private final Executor readinessExecutor;
+    private final Runnable readinessSnapshotPublicationHook;
     private final Object readinessStateLock = new Object();
     private final AtomicBoolean readinessRefreshInFlight = new AtomicBoolean();
     private final AtomicLong readinessGeneration = new AtomicLong();
@@ -89,7 +90,8 @@ public class ManagedObjectService implements ApplicationRunner {
             writeAdmissionService,
             readAdmissionService,
             System::nanoTime,
-            task -> Thread.startVirtualThread(task));
+            task -> Thread.startVirtualThread(task),
+            () -> {});
     }
 
     ManagedObjectService(
@@ -103,7 +105,8 @@ public class ManagedObjectService implements ApplicationRunner {
             ManagedObjectWriteAdmissionService writeAdmissionService,
             ManagedObjectReadAdmissionService readAdmissionService,
             LongSupplier readinessNanoTime,
-            Executor readinessExecutor) {
+            Executor readinessExecutor,
+            Runnable readinessSnapshotPublicationHook) {
         this.objectStorage = objectStorage;
         this.deletionRetryQueue = deletionRetryQueue;
         this.uploadPolicy = uploadPolicy;
@@ -115,6 +118,7 @@ public class ManagedObjectService implements ApplicationRunner {
         this.readAdmissionService = readAdmissionService;
         this.readinessNanoTime = readinessNanoTime;
         this.readinessExecutor = readinessExecutor;
+        this.readinessSnapshotPublicationHook = readinessSnapshotPublicationHook;
     }
 
     public boolean isReady() {
@@ -159,6 +163,7 @@ public class ManagedObjectService implements ApplicationRunner {
                 long checkedAtNanos = readinessNanoTime.getAsLong();
                 synchronized (readinessStateLock) {
                     if (readinessGeneration.get() == generation) {
+                        readinessSnapshotPublicationHook.run();
                         readinessSnapshot = new ReadinessSnapshot(ready, checkedAtNanos);
                     }
                 }
