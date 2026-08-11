@@ -3635,17 +3635,41 @@ export function getAttachmentsFromCookie(entityType: string, entityId: number, c
 export function getCommentThreads(
     targetType: Types.RecordCommentTargetType,
     targetId: number,
-    page: { limit?: number; offset?: number } = {},
+    page: { limit?: number; offset?: number; state?: Types.RecordCommentStateFilter } = {},
     init: RequestInit = {},
 ) {
     return getJson<Types.RecordCommentThread[]>(
         `/api/comment-threads${buildQuery({
             targetType,
             targetId,
-            state: 'all',
+            state: page.state ?? 'all',
             limit: page.limit ?? 10,
             offset: page.offset ?? 0,
         })}`,
+        init,
+    );
+}
+
+/**
+ * Resolves an open comment thread. {@code expectedVersion} must match the
+ * thread's current version or the server answers 409.
+ */
+export function resolveCommentThread(threadId: number, expectedVersion: number, init: RequestInit = {}) {
+    return postJson<Types.RecordCommentThread>(
+        `/api/comment-threads/${threadId}/resolve`,
+        { expectedVersion },
+        init,
+    );
+}
+
+/**
+ * Reopens a resolved comment thread. {@code expectedVersion} must match the
+ * thread's current version or the server answers 409.
+ */
+export function reopenCommentThread(threadId: number, expectedVersion: number, init: RequestInit = {}) {
+    return postJson<Types.RecordCommentThread>(
+        `/api/comment-threads/${threadId}/reopen`,
+        { expectedVersion },
         init,
     );
 }

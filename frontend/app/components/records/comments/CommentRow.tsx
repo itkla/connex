@@ -64,6 +64,7 @@ export default function CommentRow({
                 ) : (
                     <NoteContent
                         content={comment.content ?? ''}
+                        references={comment.references}
                         className="text-sm text-foreground"
                         block
                     />

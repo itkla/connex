@@ -32,6 +32,12 @@ public interface EntityReferenceMapper {
         @Param("sourceId") int sourceId
     );
 
+    int deleteBySourceIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("sourceType") String sourceType,
+        @Param("sourceIds") List<Integer> sourceIds
+    );
+
     int deleteByTarget(
         @Param("workspaceId") int workspaceId,
         @Param("refType") String refType,

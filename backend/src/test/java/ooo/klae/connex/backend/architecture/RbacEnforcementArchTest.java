@@ -61,13 +61,13 @@ class RbacEnforcementArchTest {
         "DocumentTemplateService", "DealDocumentService",
         "ApprovalPolicyService", "DocumentApprovalService",
         "ConnectionService", "CustomFieldDefinitionService", "BulkOperationService",
-        "IntroductionService", "ReportService", "GoalService", "ScheduleService",
+        "IntroductionService", "RecordCommentService", "ReportService", "GoalService", "ScheduleService",
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
         "SuppressionService", "WarmPathService", "InteractionHistoryImportService");
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(
-        "^(create|update|delete|add|remove|replace|close|reopen|complete|commit|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel)[A-Z]?\\w*");
+        "^(create|update|delete|add|remove|replace|close|reopen|resolve|reply|complete|commit|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel)[A-Z]?\\w*");
 
     @Test
     void every_mutating_entity_service_method_is_permission_guarded() throws Exception {

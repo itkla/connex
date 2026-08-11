@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -34,6 +35,7 @@ public class ShareService {
     private final AuthService authService;
     private final AuditService auditService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final NotificationChangePublisher notificationChanges;
 
     public List<ShareDto> listShares(String typeRaw, int entityId) {
         Type type = parseType(typeRaw);
@@ -106,6 +108,10 @@ public class ShareService {
         }
         auditService.record("workspace.unshare", type.name().toLowerCase(), entityId, null,
                 "Stopped sharing with workspace " + targetWorkspaceId, null);
+        if (type != Type.PIPELINE) {
+            notificationChanges.publish(
+                targetWorkspaceId, type.name().toLowerCase(), entityId);
+        }
     }
 
     /**

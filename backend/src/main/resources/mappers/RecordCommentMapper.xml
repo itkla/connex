@@ -141,6 +141,26 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND deleted_at IS NULL
   </update>
 
+  <update id="resolveThread">
+    UPDATE record_comment_thread
+    SET state = 'resolved',
+        resolved_by_user_id = #{resolvedByUserId},
+        resolved_at = UTC_TIMESTAMP(6),
+        version = version + 1,
+        updated_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND state = 'open'
+  </update>
+
+  <update id="reopenThread">
+    UPDATE record_comment_thread
+    SET state = 'open',
+        resolved_by_user_id = NULL,
+        resolved_at = NULL,
+        version = version + 1,
+        updated_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND state = 'resolved'
+  </update>
+
   <delete id="deleteEmptyThread">
     DELETE FROM record_comment_thread
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -181,4 +201,14 @@
     SET resolved_by_user_id = NULL
     WHERE resolved_by_user_id = #{userId}
   </update>
+
+  <select id="getCommentIdsForTarget" resultType="long">
+    SELECT c.id
+    FROM record_comment c
+    JOIN record_comment_thread t
+      ON t.workspace_id = c.workspace_id AND t.id = c.thread_id
+    WHERE c.workspace_id = #{workspaceId}
+      AND t.target_type = #{targetType}
+      AND t.target_id = #{targetId}
+  </select>
 </mapper>

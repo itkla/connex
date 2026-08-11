@@ -64,9 +64,24 @@ public interface RecordCommentMapper {
         @Param("id") long id,
         @Param("deletedByUserId") int deletedByUserId);
 
+    int resolveThread(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("resolvedByUserId") int resolvedByUserId);
+
+    int reopenThread(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id);
+
     int deleteEmptyThread(
         @Param("workspaceId") int workspaceId,
         @Param("id") long id);
+
+    List<Long> getCommentIdsForTarget(
+        @Param("workspaceId") int workspaceId,
+        @Param("targetType") String targetType,
+        @Param("targetId") int targetId
+    );
 
     int deleteThreadsForTarget(
         @Param("workspaceId") int workspaceId,

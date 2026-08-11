@@ -5,20 +5,22 @@ import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 import { LoaderCircle } from 'lucide-react';
-import { ArrowUturnLeftIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import {
+    ApiError,
     createCommentThread,
     deleteRecordComment,
     getCommentThreads,
+    reopenCommentThread,
     replyToCommentThread,
+    resolveCommentThread,
 } from '@/app/lib/api';
 import type { RecordComment, RecordCommentTargetType, RecordCommentThread } from '@/app/lib/types';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import CommentDeleteDialog from '@/app/components/records/comments/CommentDeleteDialog';
-import CommentRow from '@/app/components/records/comments/CommentRow';
+import CommentThreadCard from '@/app/components/records/comments/CommentThreadCard';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -74,13 +76,22 @@ export default function CommentsSection({
     const replyToken = useRef<string | null>(null);
     const highlightRef = useRef<HTMLLIElement | null>(null);
     const highlightScrolled = useRef(false);
+    const fetchGeneration = useRef(0);
+    const stateFilterRef = useRef<'open' | 'all'>('open');
 
     const highlightedCommentId = searchParams.get('comment');
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
+    const [showResolved, setShowResolved] = useState(false);
+    const stateFilter = highlightedCommentId || showResolved ? 'all' : 'open';
+
+    useEffect(() => {
+        stateFilterRef.current = stateFilter;
+    }, [stateFilter]);
 
     useEffect(() => {
         let active = true;
-        getCommentThreads(targetType, targetId, { limit: initialLimit })
+        fetchGeneration.current += 1;
+        getCommentThreads(targetType, targetId, { limit: initialLimit, state: stateFilter })
             .then((data) => {
                 if (!active) return;
                 setThreads(data);
@@ -96,7 +107,7 @@ export default function CommentsSection({
         return () => {
             active = false;
         };
-    }, [targetType, targetId, initialLimit, refreshNonce]);
+    }, [targetType, targetId, initialLimit, stateFilter, refreshNonce]);
 
     useEffect(() => {
         if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
@@ -120,12 +131,15 @@ export default function CommentsSection({
 
     const handleLoadMore = useCallback(async () => {
         if (loadingMore) return;
+        const generation = fetchGeneration.current;
         setLoadingMore(true);
         try {
             const data = await getCommentThreads(targetType, targetId, {
                 limit: PAGE_SIZE,
                 offset: threads.length,
+                state: stateFilter,
             });
+            if (generation !== fetchGeneration.current) return;
             setThreads((prev) => [
                 ...prev,
                 ...data.filter((thread) => !prev.some((existing) => existing.id === thread.id)),
@@ -136,7 +150,46 @@ export default function CommentsSection({
         } finally {
             setLoadingMore(false);
         }
-    }, [loadingMore, targetType, targetId, threads.length, t]);
+    }, [loadingMore, targetType, targetId, threads.length, stateFilter, t]);
+
+    const handleStateTransition = useCallback(
+        async (thread: RecordCommentThread, action: 'resolve' | 'reopen') => {
+            if (submitting) return;
+            setSubmitting(true);
+            try {
+                const updated =
+                    action === 'resolve'
+                        ? await resolveCommentThread(thread.id, thread.version)
+                        : await reopenCommentThread(thread.id, thread.version);
+                setThreads((prev) =>
+                    action === 'resolve' && stateFilterRef.current === 'open'
+                        ? prev.filter((existing) => existing.id !== thread.id)
+                        : prev.map((existing) =>
+                              existing.id === thread.id
+                                  ? {
+                                        ...updated,
+                                        comments: updated.comments.length > 0
+                                            ? updated.comments
+                                            : existing.comments,
+                                    }
+                                  : existing,
+                          ),
+                );
+                toastSuccess(t(action === 'resolve' ? 'resolvedToast' : 'reopenedToast'));
+            } catch (error) {
+                if (error instanceof ApiError && error.status === 409) {
+                    toastError(t('conflict'));
+                    setLoaded(false);
+                    setRefreshNonce((nonce) => nonce + 1);
+                } else {
+                    toastError(t('actionFailed'));
+                }
+            } finally {
+                setSubmitting(false);
+            }
+        },
+        [submitting, t],
+    );
 
     const handlePost = useCallback(async () => {
         if (submitting || !loaded || tokenText(composerValue).length === 0) return;
@@ -186,8 +239,17 @@ export default function CommentsSection({
             setReplyThreadId(null);
             replyToken.current = null;
             toastSuccess(t('posted'));
-        } catch {
-            toastError(t('postFailed'));
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409) {
+                toastError(t('conflict'));
+                setReplyThreadId(null);
+                setReplyValue('');
+                replyToken.current = null;
+                setLoaded(false);
+                setRefreshNonce((nonce) => nonce + 1);
+            } else {
+                toastError(t('postFailed'));
+            }
         } finally {
             setSubmitting(false);
         }
@@ -225,11 +287,23 @@ export default function CommentsSection({
 
     return (
         <div className={cn(className)}>
-            <div className="mb-3 flex h-8 items-center">
+            <div className="mb-3 flex h-8 items-center justify-between">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('title')}
                     {loaded && !loadError ? ` · ${commentCount}` : ''}
                 </h2>
+                {!highlightedCommentId && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setShowResolved((value) => !value);
+                            setLoaded(false);
+                        }}
+                        className="cursor-pointer rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                        {showResolved ? t('hideResolved') : t('showResolved')}
+                    </button>
+                )}
             </div>
 
             <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
@@ -268,72 +342,52 @@ export default function CommentsSection({
                     <p className="px-6 py-6 text-sm text-muted-foreground">{t('empty')}</p>
                 )}
 
+                {loaded &&
+                    !loadError &&
+                    highlightedCommentId != null &&
+                    !threads.some((thread) =>
+                        thread.comments.some(
+                            (comment) => String(comment.id) === highlightedCommentId,
+                        ),
+                    ) && (
+                        <p className="border-b border-border px-6 py-3 text-xs text-muted-foreground">
+                            {t('deepLinkGone')}
+                        </p>
+                    )}
+
                 {loaded && !loadError && threads.length > 0 && (
                     <ul className="divide-y divide-border">
                         {threads.map((thread) => (
-                            <li key={thread.id} className="px-4 py-4">
-                                <ul className="flex flex-col gap-3">
-                                    {thread.comments.map((comment, index) => {
-                                        const highlighted =
-                                            highlightedCommentId === String(comment.id);
-                                        const deleted = comment.deletedAt != null;
-                                        return (
-                                            <CommentRow
-                                                key={comment.id}
-                                                comment={comment}
-                                                indented={index > 0}
-                                                highlighted={highlighted}
-                                                highlightRef={highlighted ? highlightRef : undefined}
-                                                canDelete={
-                                                    !deleted &&
-                                                    (comment.author?.id === currentUserId ||
-                                                        canModerate)
-                                                }
-                                                onDelete={setPendingDelete}
-                                            />
-                                        );
-                                    })}
-                                </ul>
-
-                                {canComment && replyThreadId !== thread.id && (
-                                    <div className="mt-2 ml-11">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setReplyThreadId(thread.id);
-                                                setReplyValue('');
-                                                replyToken.current = null;
-                                            }}
-                                            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                        >
-                                            <ArrowUturnLeftIcon className="size-3.5" />
-                                            {t('reply')}
-                                        </button>
-                                    </div>
-                                )}
-
-                                {canComment && replyThreadId === thread.id && (
-                                    <div className="mt-2 ml-11">
-                                        <CommentComposer
-                                            value={replyValue}
-                                            onChange={(value) => {
-                                                setReplyValue(value);
-                                                replyToken.current = null;
-                                            }}
-                                            onSubmit={handleReply}
-                                            onCancel={() => {
-                                                setReplyThreadId(null);
-                                                setReplyValue('');
-                                            }}
-                                            placeholder={t('replyPlaceholder')}
-                                            submitLabel={t('reply')}
-                                            submitting={submitting}
-                                            canSubmit={tokenText(replyValue).length > 0}
-                                            autoFocus
-                                        />
-                                    </div>
-                                )}
-                            </li>
+                            <CommentThreadCard
+                                key={thread.id}
+                                thread={thread}
+                                currentUserId={currentUserId}
+                                canComment={canComment}
+                                canModerate={canModerate}
+                                highlightedCommentId={highlightedCommentId}
+                                highlightRef={highlightRef}
+                                replyOpen={replyThreadId === thread.id}
+                                replyValue={replyValue}
+                                replyCanSubmit={tokenText(replyValue).length > 0}
+                                submitting={submitting}
+                                onOpenReply={() => {
+                                    setReplyThreadId(thread.id);
+                                    setReplyValue('');
+                                    replyToken.current = null;
+                                }}
+                                onCancelReply={() => {
+                                    setReplyThreadId(null);
+                                    setReplyValue('');
+                                }}
+                                onReplyChange={(value) => {
+                                    setReplyValue(value);
+                                    replyToken.current = null;
+                                }}
+                                onReplySubmit={handleReply}
+                                onDelete={setPendingDelete}
+                                onResolve={() => handleStateTransition(thread, 'resolve')}
+                                onReopen={() => handleStateTransition(thread, 'reopen')}
+                            />
                         ))}
                     </ul>
                 )}

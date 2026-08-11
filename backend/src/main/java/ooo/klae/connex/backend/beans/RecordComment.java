@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -20,4 +21,5 @@ public class RecordComment {
     private Integer deletedByUserId;
     private String authorDisplayName;
     private String authorProfilePictureUrl;
+    private List<EntityReference> references = List.of();
 }
