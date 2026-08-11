@@ -393,13 +393,13 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                 onChange={(event) => setQuery(event.target.value)}
                                 placeholder={t('filters.searchPlaceholder')}
                                 aria-label={t('filters.searchLabel')}
-                                className={cn('pl-9', RADAR_FIELD_SURFACE)}
+                                className={cn('rounded-full pl-9', RADAR_FIELD_SURFACE)}
                             />
                         </div>
                         <Select value={state} onValueChange={(value) => {
                             if (isRadarStateFilter(value)) setState(value);
                         }}>
-                            <SelectTrigger className={cn('min-h-11 shrink-0 lg:min-h-9', RADAR_PRESSABLE_SURFACE)} aria-label={t('filters.stateLabel')}>
+                            <SelectTrigger className={cn('min-h-11 shrink-0 rounded-full lg:min-h-9', RADAR_PRESSABLE_SURFACE)} aria-label={t('filters.stateLabel')}>
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent align="end">
