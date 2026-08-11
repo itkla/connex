@@ -80,6 +80,10 @@ const inFlightReportGenerations = new Map<string, {
     request: Promise<Types.ReportDocument>;
 }>();
 const inFlightReportRequests = new Set<AbortController>();
+const inFlightAssistantTurns = new Map<string, {
+    controller: AbortController;
+    request: Promise<Types.AiChatTurnAccepted>;
+}>();
 const clientRequestIdentityInvalidationListeners = new Set<() => void>();
 
 if (typeof window !== "undefined") {
@@ -156,6 +160,10 @@ function invalidateClientRequestIdentity() {
         controller.abort();
     }
     inFlightReportRequests.clear();
+    for (const turn of inFlightAssistantTurns.values()) {
+        turn.controller.abort();
+    }
+    inFlightAssistantTurns.clear();
     for (const listener of [...clientRequestIdentityInvalidationListeners]) {
         try {
             listener();
@@ -4610,6 +4618,102 @@ export function clearDefaultSavedView(recordType: Types.SavedViewRecordType, ini
 
 export function getDashboardLayout(init: RequestInit = {}) {
     return getJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { cache: "no-store", ...init });
+}
+
+export function getAiChatSessions(
+    params: Pick<Types.PageParams, 'page' | 'size'> = {},
+    init: RequestInit = {},
+) {
+    const query = new URLSearchParams();
+    if (params.page != null) query.set('page', String(params.page));
+    if (params.size != null) query.set('size', String(params.size));
+    const suffix = query.size > 0 ? `?${query}` : '';
+    return getJson<Types.Page<Types.AiChatSession>>(
+        `/api/ai/assistant/sessions${suffix}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function createAiChatSession(title: string, init: RequestInit = {}) {
+    return postJson<Types.AiChatSession>('/api/ai/assistant/sessions', { title }, init);
+}
+
+export function getAiChatSession(
+    id: number,
+    params: Pick<Types.PageParams, 'page' | 'size'> = {},
+    init: RequestInit = {},
+) {
+    const query = new URLSearchParams();
+    if (params.page != null) query.set('page', String(params.page));
+    if (params.size != null) query.set('size', String(params.size));
+    const suffix = query.size > 0 ? `?${query}` : '';
+    return getJson<Types.AiChatSessionDetail>(
+        `/api/ai/assistant/sessions/${id}${suffix}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function updateAiChatSession(
+    id: number,
+    payload: { title?: string; archived?: boolean },
+    init: RequestInit = {},
+) {
+    return patchJson<Types.AiChatSession>(`/api/ai/assistant/sessions/${id}`, payload, init);
+}
+
+export function archiveAiChatSession(id: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/ai/assistant/sessions/${id}`, init);
+}
+
+export async function startAiChatTurn(
+    sessionId: number,
+    payload: Types.AiChatTurnCreateRequest,
+): Promise<Types.AiChatTurnAccepted> {
+    const path = `/api/ai/assistant/sessions/${sessionId}/turns`;
+    if (typeof window === 'undefined') {
+        return postJson<Types.AiChatTurnAccepted>(path, payload);
+    }
+    const identity = await currentClientRequestIdentity();
+    if (identity == null) {
+        return postJson<Types.AiChatTurnAccepted>(path, payload);
+    }
+    const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
+    const existing = inFlightAssistantTurns.get(key);
+    if (existing) return existing.request;
+    const controller = new AbortController();
+    const request = (async () => {
+        const response = await postJson<Types.AiChatTurnAccepted>(path, payload, {
+            signal: controller.signal,
+        });
+        if (await currentClientRequestIdentity() !== identity) {
+            throw new Error('AI request identity changed before turn acceptance');
+        }
+        return response;
+    })().finally(() => {
+        if (inFlightAssistantTurns.get(key)?.request === request) {
+            inFlightAssistantTurns.delete(key);
+        }
+    });
+    inFlightAssistantTurns.set(key, { controller, request });
+    return request;
+}
+
+export function getAiChatTurn(
+    sessionId: number,
+    turnId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.AiChatTurn>(
+        `/api/ai/assistant/sessions/${sessionId}/turns/${turnId}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function getAiGenerationStatus<T>(handle: string, init: RequestInit = {}) {
+    return getJson<Types.AiGenerationStatus<T>>(
+        `/api/ai/generations/${encodeURIComponent(handle)}`,
+        { cache: 'no-store', ...init },
+    );
 }
 
 /**

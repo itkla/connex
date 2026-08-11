@@ -31,6 +31,7 @@ import NavActionsBridge from "@/app/components/actions/NavActionsBridge";
 import { resolveNavAccess } from "@/app/lib/navAccess";
 import { requestNow } from "@/app/lib/requestClock";
 import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
+import AskConnexProvider from "@/app/components/ask-connex/AskConnexProvider";
 
 const SIDEBAR_SURFACE_CLASS = "bg-sidebar h-full rounded-xl border border-sidebar-border shadow-xl";
 
@@ -98,19 +99,21 @@ export default async function AppLayout({
                                         <RecentRecordsProvider>
                                             <RecentRecordsActionsBridge />
                                             <SidebarModeProvider>
-                                                <ContentShell
-                                                    sidebar={
-                                                        <Suspense fallback={<SidebarFallback className={SIDEBAR_SURFACE_CLASS} />}>
-                                                            <Sidebar
-                                                                user={user}
-                                                                navAccess={navAccess}
-                                                                className={SIDEBAR_SURFACE_CLASS}
-                                                            />
-                                                        </Suspense>
-                                                    }
-                                                >
-                                                    {children}
-                                                </ContentShell>
+                                                <AskConnexProvider>
+                                                    <ContentShell
+                                                        sidebar={
+                                                            <Suspense fallback={<SidebarFallback className={SIDEBAR_SURFACE_CLASS} />}>
+                                                                <Sidebar
+                                                                    user={user}
+                                                                    navAccess={navAccess}
+                                                                    className={SIDEBAR_SURFACE_CLASS}
+                                                                />
+                                                            </Suspense>
+                                                        }
+                                                    >
+                                                        {children}
+                                                    </ContentShell>
+                                                </AskConnexProvider>
                                             </SidebarModeProvider>
                                         </RecentRecordsProvider>
                                     </PinnedViewsProvider>

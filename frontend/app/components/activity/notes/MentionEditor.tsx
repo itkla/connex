@@ -301,6 +301,8 @@ type Props = {
     commands?: readonly SlashCommandDef[];
     /** Invoked when a `run-action` slash command is chosen, with the command's `actionId`. */
     onRunAction?: (actionId: string) => void;
+    onSubmit?: () => void;
+    mentionTypes?: Partial<Record<'@' | '#', readonly NoteReferenceType[]>>;
     /** Request context inherited from the host overlay, including its workspace header and abort signal. */
     requestInit?: RequestInit;
 };
@@ -332,6 +334,8 @@ export default function MentionEditor({
     autoFocus,
     commands,
     onRunAction,
+    onSubmit,
+    mentionTypes,
     requestInit,
 }: Props) {
     const t = useTranslations('ActivityNotesEditor');
@@ -466,8 +470,9 @@ export default function MentionEditor({
 
     const suggestions = useMemo(() => {
         if (!query) return [];
-        const allowed =
-            query.trigger === '/' ? pickerScope : MENTION_TRIGGER_TYPES[query.trigger];
+        const allowed = query.trigger === '/'
+            ? pickerScope
+            : mentionTypes?.[query.trigger] ?? MENTION_TRIGGER_TYPES[query.trigger];
         if (!allowed) return [];
         const needle = query.text.toLowerCase();
         const localPool: Suggestion[] = [
@@ -489,7 +494,7 @@ export default function MentionEditor({
                     (suggestion.label.toLowerCase().includes(needle) || suggestion.sublabel.toLowerCase().includes(needle)),
             )
             .slice(0, MAX_SUGGESTIONS);
-    }, [query, pickerScope, members, records, remoteResults, excludeUserId]);
+    }, [query, pickerScope, mentionTypes, members, records, remoteResults, excludeUserId]);
 
     const menuOpen =
         query !== null && queryWorkspaceMatches && (stageA ? commandMatches.length > 0 : stageB ? true : suggestions.length > 0);
@@ -781,13 +786,18 @@ export default function MentionEditor({
                     return;
                 }
             }
+            if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && onSubmit) {
+                event.preventDefault();
+                onSubmit();
+                return;
+            }
             if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
                 event.preventDefault();
                 document.execCommand('insertText', false, '\n');
                 emit();
             }
         },
-        [menuOpen, optionCount, stageA, stageB, commandMatches, remoteSearchFailed, suggestions, boundedIndex, selectCommand, retrySearch, insertReference, closeMenu, emit, query],
+        [menuOpen, optionCount, stageA, stageB, commandMatches, remoteSearchFailed, suggestions, boundedIndex, selectCommand, retrySearch, insertReference, closeMenu, emit, query, onSubmit],
     );
 
     const showStageBState = stageB && optionCount === 0;

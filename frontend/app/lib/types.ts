@@ -2307,6 +2307,90 @@ export type ReportGenerateInput = {
 
 export type ReportNarrativeMode = "cached" | "full";
 
+/** Record kinds accepted as explicit context for an assistant turn. */
+export type AiChatPageContextKind = 'person' | 'company' | 'deal';
+
+/** Tenant-local record reference supplied with an assistant turn. */
+export type AiChatPageContext = {
+    kind: AiChatPageContextKind;
+    id: number;
+};
+
+/** API representation of one durable assistant chat session. */
+export type AiChatSession = {
+    id: number;
+    workspaceId: number;
+    createdByUserId: number | null;
+    title: string;
+    visibility: string;
+    status: string;
+    archived: boolean;
+    ownedByCurrentUser: boolean;
+    lastMessageAt: string | null;
+    archivedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+/** API representation of one ordered assistant chat message. */
+/**
+ * One record an assistant answer cited, projected for the current viewer. Citations the viewer may
+ * not access are omitted by the backend rather than marked, so a shared session can legitimately
+ * show fewer citations to one participant than another. `label` is optional because the backend
+ * projection carries identity only until a viewer-authorized display name is added.
+ */
+export type AiChatCitation = {
+    handle: string;
+    kind: 'person' | 'company' | 'deal';
+    id: number;
+    label?: string | null;
+};
+
+export type AiChatMessage = {
+    id: number;
+    sessionId: number;
+    seq: number;
+    authorKind: string;
+    authorUserId: number | null;
+    content: string;
+    createdAt: string;
+    citations?: AiChatCitation[] | null;
+};
+
+/** One accessible assistant session and its ordered message page. */
+export type AiChatSessionDetail = {
+    session: AiChatSession;
+    messages: Page<AiChatMessage>;
+};
+
+/** Request body for starting one bounded assistant turn. */
+export type AiChatTurnCreateRequest = {
+    content: string;
+    pageContext?: AiChatPageContext[];
+};
+
+/** Accepted assistant turn and its opaque generation handle. */
+export type AiChatTurnAccepted = {
+    turnId: number;
+    sessionId: number;
+    generationHandle: string;
+    status: string;
+};
+
+/** Caller-safe durable state for one assistant turn. */
+export type AiChatTurn = {
+    turnId: number;
+    sessionId: number;
+    status: string;
+    terminalReason: string | null;
+};
+
+/** Minimal assistant-turn result retained behind the shared generation handle. */
+export type AiChatTurnGenerationResult = {
+    turnId: number;
+    status: string;
+};
+
 type AiGenerationBase = {
     handle: string;
     kind: string;

@@ -315,6 +315,83 @@
     "run": "実行",
     "recipes": "レシピ"
   },
+  "AskConnex": {
+    "title": "Ask Connex",
+    "mobileLabel": "質問",
+    "newChatTitle": "新しい会話",
+    "archive": "アーカイブ",
+    "close": "Ask Connexを閉じる",
+    "composerAria": "Ask Connexへのメッセージ",
+    "composerHint": "Enterで送信・Shift+Enterで改行",
+    "composerPlaceholder": "このレコードやワークスペースについて質問…",
+    "context": "コンテキスト",
+    "contextLimit": "含められるレコードは10件までです。送信前に1件外してください。",
+    "contextNone": "レコードのコンテキストなし",
+    "emptyTitle": "具体的なタスクから始めましょう",
+    "emptyBody": "Ask Connexは、アクセス可能なレコードと上に表示されたコンテキストを使用します。",
+    "newChat": "新しいチャット",
+    "noRecentSessions": "最近のチャットはありません",
+    "moreOptions": "チャットのオプション",
+    "recentSessions": "最近のチャット",
+    "removeContext": "{label}をコンテキストから外す",
+    "rename": "名前を変更",
+    "renameCancel": "キャンセル",
+    "renameDescription": "後から見つけやすい短い会話名を付けてください。",
+    "renameLabel": "会話名",
+    "renameSave": "保存",
+    "renameSaving": "保存中…",
+    "renameTitle": "チャット名を変更",
+    "send": "メッセージを送信",
+    "tooLong": "メッセージは16,000文字以内で入力してください。",
+    "turnAccepted": "リクエストを受け付けました",
+    "turnWorking": "アクセス可能なワークスペース情報を確認中…",
+    "turnResolved": "回答の準備ができました",
+    "turnFailed": "このターンを完了できませんでした。",
+    "turnTimedOut": "完了前にこのターンがタイムアウトしました。",
+    "starters": {
+      "person": {
+        "followUp": "フォローアップを予定する",
+        "activity": "最近の活動を要約する",
+        "stalled": "何が停滞していますか？"
+      },
+      "company": {
+        "relationships": "最も強い関係は誰とのものですか？",
+        "activity": "最近の活動を要約する",
+        "risks": "注意すべき点は何ですか？"
+      },
+      "deal": {
+        "summary": "この案件を要約する",
+        "risks": "この案件の障害になりそうな点は？",
+        "nextStep": "次に何をすべきですか？"
+      },
+      "workspace": {
+        "followUps": "対応が必要なフォローアップは？",
+        "risks": "関係が冷えつつある相手は？",
+        "activity": "最近のワークスペース活動を要約する"
+      }
+    },
+    "unavailable": {
+      "permissionTitle": "現在のロールではAsk Connexを利用できません",
+      "permissionBody": "現在のワークスペースロールにはAI機能を利用する権限がありません。",
+      "lookupTitle": "権限の状態を確認できません",
+      "lookupBody": "アシスタントを利用できるロールか確認できませんでした。権限の再読み込み後にもう一度お試しください。",
+      "featureTitle": "Ask Connexを利用できません",
+      "featureBody": "現在アシスタントを利用できません。サーバーからの理由: {reason}",
+      "uncertainTitle": "このターンの状態を確認する必要があります",
+      "uncertainBody": "ターンの応答を確実に受け取れなかったため、重複防止のため再送信を停止しています。新しいチャットを始めるか、このセッションを再読み込みしてください。"
+    },
+    "toast": {
+      "archived": "チャットをアーカイブしました",
+      "renamed": "チャット名を変更しました",
+      "requestFailed": "Ask Connexのリクエストに失敗しました",
+      "turnFailed": "Ask Connexはターンを完了できませんでした",
+      "turnTimedOut": "Ask Connexがタイムアウトしました"
+    },
+    "citations": "参照元",
+    "citationKindPerson": "連絡先",
+    "citationKindCompany": "会社",
+    "citationKindDeal": "取引"
+  },
   "SearchLayout": {
     "title": "検索",
     "description": "ワークスペース全体を検索"
