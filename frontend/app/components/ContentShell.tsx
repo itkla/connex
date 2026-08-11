@@ -3,11 +3,15 @@
 import { Suspense, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import GlobalSearch from "@/app/components/GlobalSearch";
 import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import MobileBottomBar from "@/app/components/MobileBottomBar";
+import { useAskConnex } from "@/app/components/ask-connex/AskConnexProvider";
+import { useIsMobile } from "@/app/hooks/useIsMobile";
 import { useSidebarMode } from "@/app/hooks/useSidebarMode";
+import { instant, springSmooth } from "@/app/lib/motion";
 import { useTranslations } from "next-intl";
 
 export default function ContentShell({
@@ -18,6 +22,9 @@ export default function ContentShell({
     children: React.ReactNode;
 }) {
     const { mode, toggle } = useSidebarMode();
+    const askConnex = useAskConnex();
+    const isMobile = useIsMobile();
+    const reduceMotion = useReducedMotion() ?? false;
     const [mobileOpen, setMobileOpen] = useState(false);
     const pathname = usePathname();
     const t = useTranslations("CommonContentShell");
@@ -79,59 +86,75 @@ export default function ContentShell({
                 {sidebar}
             </div>
 
-            <div className="flex min-w-0 flex-1 flex-col">
-                <div
-                    data-app-toolbar
-                    className="relative flex w-full shrink-0 items-center gap-3 p-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(20rem,36rem)_minmax(0,1fr)] md:gap-0"
-                >
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setMobileOpen((o) => !o)}
-                        aria-label={t("showSidebar")}
-                        aria-expanded={mobileOpen}
-                        aria-controls="app-sidebar"
-                        className="shrink-0 md:hidden"
+            <motion.div
+                className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_0rem]"
+                initial={false}
+                animate={{
+                    gridTemplateColumns: askConnex.open && !isMobile
+                        ? "minmax(0, 1fr) 24rem"
+                        : "minmax(0, 1fr) 0rem",
+                }}
+                transition={askConnex.instantOpen || reduceMotion ? instant : springSmooth}
+            >
+                <div className="flex min-w-0 flex-col">
+                    <div
+                        data-app-toolbar
+                        className="relative flex w-full shrink-0 items-center gap-3 p-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,36rem)_minmax(0,1fr)] md:gap-0"
                     >
-                        <MenuIcon className="size-5 text-muted-foreground" />
-                    </Button>
-                    <div className="hidden min-w-0 items-center gap-2 md:flex">
                         <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            onClick={toggle}
-                            aria-label={mode === "expanded" ? t("collapseSidebar") : t("expandSidebar")}
-                            aria-expanded={mode === "expanded"}
-                            className="shrink-0"
+                            onClick={() => setMobileOpen((o) => !o)}
+                            aria-label={t("showSidebar")}
+                            aria-expanded={mobileOpen}
+                            aria-controls="app-sidebar"
+                            className="shrink-0 md:hidden"
                         >
-                            {mode === "expanded" ? (
-                                <PanelLeftCloseIcon className="size-5 text-muted-foreground" />
-                            ) : (
-                                <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
-                            )}
+                            <MenuIcon className="size-5 text-muted-foreground" />
                         </Button>
-                        <div className="hidden min-w-0 xl:block">
-                            <Suspense fallback={null}>
-                                <NavBreadcrumb />
-                            </Suspense>
+                        <div className="hidden min-w-0 items-center gap-2 md:flex">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={toggle}
+                                aria-label={mode === "expanded" ? t("collapseSidebar") : t("expandSidebar")}
+                                aria-expanded={mode === "expanded"}
+                                className="shrink-0"
+                            >
+                                {mode === "expanded" ? (
+                                    <PanelLeftCloseIcon className="size-5 text-muted-foreground" />
+                                ) : (
+                                    <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
+                                )}
+                            </Button>
+                            <div className="hidden min-w-0 xl:block">
+                                <Suspense fallback={null}>
+                                    <NavBreadcrumb />
+                                </Suspense>
+                            </div>
+                        </div>
+
+                        <div className="w-full max-w-xl min-w-0 md:col-start-2 md:row-start-1">
+                            <GlobalSearch />
                         </div>
                     </div>
 
-                    <div className="w-full max-w-xl min-w-0 md:col-start-2 md:row-start-1">
-                        <GlobalSearch />
-                    </div>
+                    <Suspense fallback={null}>
+                        <NavBreadcrumb mode="mobile" />
+                    </Suspense>
+
+                    <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6">
+                        {children}
+                    </main>
                 </div>
 
-                <Suspense fallback={null}>
-                    <NavBreadcrumb mode="mobile" />
-                </Suspense>
-
-                <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6">
-                    {children}
-                </main>
-            </div>
+                <div
+                    id="ask-connex-desktop-root"
+                    className="relative z-30 hidden min-h-0 overflow-visible md:block"
+                />
+            </motion.div>
 
             {!mobileOpen && <MobileBottomBar onOpenMore={() => setMobileOpen(true)} />}
         </div>
