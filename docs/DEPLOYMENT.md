@@ -569,13 +569,27 @@ uses the same profile template plus the build overlay and
 
 ```bash
 cd deploy
-cp onprem.env.example .env        # or silo.env.example
+install -m 600 onprem.env.example .env    # or silo.env.example
 # fill every REPLACE_* value in .env, including CONNEX_VERSION
 docker compose \
   --env-file .env --env-file source-build.env \
   -f docker-compose.yml -f docker-compose.build.yml \
   up --build -d
 curl -s http://localhost/api/version
+```
+
+`install -m 600` rather than `cp`: the tracked templates are world-readable, and a plain copy under
+the usual `umask 022` leaves `.env` mode 0644. That file ends up holding the database password, the
+secret-store master key, the audit-integrity HMAC secret, and the OCR service token.
+
+Because the profile templates keep the digest variables blank, **every** later Compose command needs
+the same file and env-file flags — `up`, `stop`, `down`, `logs`, `ps` and any migration invocation.
+Export them once instead of repeating them:
+
+```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml
+export COMPOSE_ENV_FILES=.env,source-build.env
+docker compose ps        # now works without flags
 ```
 
 `source-build.env` supplies placeholder image digests. They are never resolved, because
