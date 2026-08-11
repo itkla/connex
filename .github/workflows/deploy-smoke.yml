@@ -53,13 +53,13 @@ jobs:
         working-directory: deploy
         run: |
           set -euo pipefail
-          DIGEST=0000000000000000000000000000000000000000000000000000000000000000
+          # Validate each template exactly as an operator receives it. Digests are supplied only
+          # through deploy/source-build.env, the same fragment the from-source install documents,
+          # so this job can no longer pass on a configuration nobody actually runs.
           for TEMPLATE in eval.env.example silo.env.example onprem.env.example; do
             cp "$TEMPLATE" .env
-            CONNEX_BACKEND_DIGEST="$DIGEST" \
-              CONNEX_FRONTEND_DIGEST="$DIGEST" \
-              CONNEX_OCR_DIGEST="$DIGEST" \
-              docker compose -f docker-compose.yml -f docker-compose.build.yml config --format json \
+            docker compose --env-file .env --env-file source-build.env \
+              -f docker-compose.yml -f docker-compose.build.yml config --format json \
               > "/tmp/${TEMPLATE}.json"
             jq -e --arg template "$TEMPLATE" '
               .services.ocr != null
@@ -74,6 +74,17 @@ jobs:
                 end
               )
             ' "/tmp/${TEMPLATE}.json" >/dev/null
+          done
+
+          # The published-image path must refuse to start when the operator has not filled in
+          # verified digests. Silo and on-prem ship those blank on purpose; eval ships usable
+          # placeholders because it is an explicitly non-production local trial.
+          for TEMPLATE in silo.env.example onprem.env.example; do
+            cp "$TEMPLATE" .env
+            if docker compose --env-file .env -f docker-compose.yml config -q 2>/dev/null; then
+              echo "::error::${TEMPLATE} accepted a published-image install without verified digests"
+              exit 1
+            fi
           done
           cp eval.env.example .env
           sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=/' .env

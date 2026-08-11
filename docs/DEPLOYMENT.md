@@ -561,6 +561,35 @@ curl -s http://localhost:8088/api/version
 To include local OCR, set the OCR token and timeout variables described above and set
 `COMPOSE_PROFILES=ocr` in `.env` before starting the stack.
 
+## Installing from source (`silo` / `on-prem`)
+
+An operator who builds the images themselves — rather than pulling the published, signed digests —
+uses the same profile template plus the build overlay and
+[`deploy/source-build.env`](../deploy/source-build.env):
+
+```bash
+cd deploy
+cp onprem.env.example .env        # or silo.env.example
+# fill every REPLACE_* value in .env, including CONNEX_VERSION
+docker compose \
+  --env-file .env --env-file source-build.env \
+  -f docker-compose.yml -f docker-compose.build.yml \
+  up --build -d
+curl -s http://localhost/api/version
+```
+
+`source-build.env` supplies placeholder image digests. They are never resolved, because
+`docker-compose.build.yml` replaces every image reference with a locally built tag — but Compose
+interpolates `docker-compose.yml` before the overlay is merged, so the variables must be defined
+for the file to parse at all. The profile templates deliberately leave those digests **blank** so
+that a published-image install refuses to start rather than silently running an unverified image;
+do not copy the placeholders into `.env`.
+
+A from-source install carries none of the supply-chain guarantees of a published release: there is
+no cosign signature, no provenance attestation, no SBOM attestation, and no immutable digest to
+pin. Operators who need those must install the published images instead, following
+[`RELEASE.md`](RELEASE.md).
+
 ## CI coverage
 
 [`deploy-smoke.yml`](../.github/workflows/deploy-smoke.yml) validates the compose bundle and boots
