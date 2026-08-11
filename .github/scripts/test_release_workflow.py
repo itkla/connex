@@ -21,19 +21,25 @@ SEMVER_TAG_PATTERN = (
 PUBLISH_MODE_CONDITION = "needs.metadata.outputs.release_mode == 'publish'"
 DRY_RUN_MODE_CONDITION = "needs.metadata.outputs.release_mode == 'dry-run'"
 BUILD_PUSH_MODE_INPUT = "${{ needs.metadata.outputs.release_mode == 'publish' }}"
-MODE_SPOOF_FIXTURE = 'if [ "$REQUESTED_VERSION" = v2.0.0 ]; then RELEASE_MODE=publish; fi'
-ALTERNATE_MODE_SPOOF_FIXTURE = (
-    'if [ "$REQUESTED_VERSION" = v2.0.0 ]; then for RELEASE_MODE in publish; do :; done; fi'
-)
-QUOTED_MODE_SPOOF_FIXTURE = (
-    'if [ "$REQUESTED_VERSION" = v2.0.0 ]; then printf -v RELEASE"_MODE" %s publish; fi'
-)
+EVENT_MODE_EXPRESSION = "${{ github.event_name == 'push' && 'publish' || 'dry-run' }}"
+CONFIRMED_SINK = "CONFIRMED_SINK"
+UNREVIEWED = "UNREVIEWED"
 RELEASE_OR_PACKAGE_ENDPOINT_PATTERN = re.compile(r"(?:^|/)(releases|packages)(?:/|\b)", re.IGNORECASE)
-MODE_ASSIGNMENT_PATTERN = re.compile(r"(?<![A-Za-z0-9_])RELEASE_MODE\s*\+?=")
 NONPUBLISHING_ACTIONS = {
     "actions/checkout",
     "anchore/scan-action",
     "docker/setup-buildx-action",
+}
+BUILD_ACTIONS = {
+    "docker/bake-action",
+    "docker/build-push-action",
+}
+DOCKER_GLOBAL_OPTIONS_WITH_VALUE = {
+    "--config",
+    "--context",
+    "--host",
+    "--log-level",
+    "-H",
 }
 
 
@@ -181,35 +187,59 @@ def buildx_registry_exports(arguments: list[str]) -> list[str]:
     return sinks
 
 
-def publication_sinks(step: dict[str, object]) -> list[str]:
-    sinks: list[str] = []
+def docker_subcommand(arguments: list[str]) -> tuple[str, list[str]]:
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument in DOCKER_GLOBAL_OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        long_options = (
+            option
+            for option in DOCKER_GLOBAL_OPTIONS_WITH_VALUE
+            if option.startswith("--")
+        )
+        if any(argument.startswith(f"{option}=") for option in long_options):
+            index += 1
+            continue
+        if argument.startswith("-"):
+            index += 1
+            continue
+        return argument, arguments[index + 1:]
+    return "", []
+
+
+def publication_sinks(step: dict[str, object]) -> list[tuple[str, str]]:
+    sinks: list[tuple[str, str]] = []
     run = step.get("run")
     if isinstance(run, str):
         for command in shell_commands(run):
             for index, token in enumerate(command):
                 if token == "docker":
                     docker_arguments = command[index + 1:]
-                    if "push" in docker_arguments:
-                        sinks.append("docker push")
-                    if "buildx" in docker_arguments:
-                        buildx_index = docker_arguments.index("buildx")
-                        buildx_arguments = docker_arguments[buildx_index + 1:]
+                    subcommand, subcommand_arguments = docker_subcommand(docker_arguments)
+                    if subcommand == "push":
+                        sinks.append((CONFIRMED_SINK, "docker push"))
+                    if subcommand == "buildx":
+                        buildx_arguments = subcommand_arguments
                         push_index = next(
                             (
                                 candidate_index
-                                for candidate_index in range(buildx_index + 1, len(docker_arguments))
-                                if docker_arguments[candidate_index] == "--push"
-                                or docker_arguments[candidate_index].startswith("--push=")
+                                for candidate_index, argument in enumerate(buildx_arguments)
+                                if argument == "--push" or argument.startswith("--push=")
                             ),
                             None,
                         )
                         if push_index is not None:
-                            sinks.append("docker buildx ... --push")
-                        sinks.extend(buildx_registry_exports(buildx_arguments))
-                    if "imagetools" in docker_arguments:
-                        imagetools_index = docker_arguments.index("imagetools")
-                        if docker_arguments[imagetools_index + 1:imagetools_index + 2] == ["create"]:
-                            sinks.append("docker buildx imagetools create")
+                            sinks.append((CONFIRMED_SINK, "docker buildx ... --push"))
+                        sinks.extend(
+                            (CONFIRMED_SINK, sink)
+                            for sink in buildx_registry_exports(buildx_arguments)
+                        )
+                        if "imagetools" in buildx_arguments:
+                            imagetools_index = buildx_arguments.index("imagetools")
+                            if buildx_arguments[imagetools_index + 1:imagetools_index + 2] == ["create"]:
+                                sinks.append((CONFIRMED_SINK, "docker buildx imagetools create"))
                 if token == "buildx" and "docker" not in command[:index]:
                     buildx_arguments = command[index + 1:]
                     push_index = next(
@@ -221,14 +251,17 @@ def publication_sinks(step: dict[str, object]) -> list[str]:
                         None,
                     )
                     if push_index is not None:
-                        sinks.append("buildx ... --push")
-                    sinks.extend(buildx_registry_exports(buildx_arguments))
+                        sinks.append((CONFIRMED_SINK, "buildx ... --push"))
+                    sinks.extend(
+                        (CONFIRMED_SINK, sink)
+                        for sink in buildx_registry_exports(buildx_arguments)
+                    )
                 if (
                     token == "imagetools"
                     and "docker" not in command[:index]
                     and command[index + 1:index + 2] == ["create"]
                 ):
-                    sinks.append("imagetools create")
+                    sinks.append((CONFIRMED_SINK, "imagetools create"))
                 if token == "cosign":
                     operation = next(
                         (
@@ -239,7 +272,7 @@ def publication_sinks(step: dict[str, object]) -> list[str]:
                         None,
                     )
                     if operation:
-                        sinks.append(f"cosign {operation}")
+                        sinks.append((CONFIRMED_SINK, f"cosign {operation}"))
                 if token != "gh":
                     continue
                 next_gh = command.index("gh", index + 1) if "gh" in command[index + 1:] else len(command)
@@ -248,7 +281,7 @@ def publication_sinks(step: dict[str, object]) -> list[str]:
                     if subcommand == "release" and gh_arguments[subcommand_index + 1:subcommand_index + 2]:
                         operation = gh_arguments[subcommand_index + 1]
                         if operation in {"create", "upload", "edit", "delete"}:
-                            sinks.append(f"gh release {operation}")
+                            sinks.append((CONFIRMED_SINK, f"gh release {operation}"))
                     if subcommand != "api":
                         continue
                     api_arguments = gh_arguments[subcommand_index + 1:]
@@ -263,9 +296,13 @@ def publication_sinks(step: dict[str, object]) -> list[str]:
                     )
                     if method not in {"GET", "HEAD"}:
                         if endpoint:
-                            sinks.append(f"gh api {method} .../{endpoint.group(1).lower()}")
+                            sinks.append(
+                                (CONFIRMED_SINK, f"gh api {method} .../{endpoint.group(1).lower()}")
+                            )
                         else:
-                            sinks.append(f"gh api {method} (endpoint not statically classified)")
+                            sinks.append(
+                                (CONFIRMED_SINK, f"gh api {method} (endpoint not statically classified)")
+                            )
 
     uses = step.get("uses")
     if not isinstance(uses, str):
@@ -285,16 +322,17 @@ def publication_sinks(step: dict[str, object]) -> list[str]:
         "upload",
     }
     if independent_publication_tokens & action_tokens:
-        sinks.append(f"uses: {uses}")
+        sinks.append((CONFIRMED_SINK, f"uses: {uses}"))
     for input_name in ("outputs", "cache-to"):
         input_value = action_inputs.get(input_name)
         if isinstance(input_value, str):
             destination = buildx_export_destination(input_value)
             if destination:
-                sinks.append(f"uses: {uses} with {input_name}: {destination}")
-    if "push" in action_inputs and {"build", "bake"} & action_tokens:
-        if action_inputs["push"] != BUILD_PUSH_MODE_INPUT:
-            sinks.append(f"uses: {uses} with push: {action_inputs['push']}")
+                sinks.append((CONFIRMED_SINK, f"uses: {uses} with {input_name}: {destination}"))
+    if "push" in action_inputs and action in BUILD_ACTIONS:
+        push_input = action_inputs["push"]
+        if push_input is not False and push_input != BUILD_PUSH_MODE_INPUT:
+            sinks.append((CONFIRMED_SINK, f"uses: {uses} with push: {push_input}"))
         return sinks
     if action in NONPUBLISHING_ACTIONS:
         return sinks
@@ -305,7 +343,7 @@ def publication_sinks(step: dict[str, object]) -> list[str]:
     ):
         return sinks
     if not sinks:
-        sinks.append(f"uses: {uses}")
+        sinks.append((UNREVIEWED, f"uses: {uses}"))
     return sinks
 
 
@@ -320,11 +358,16 @@ def publication_gate_errors(workflow: dict[str, object]) -> list[str]:
         job_condition = job_value.get("if")
         job_sinks = publication_sinks(job_value)
         if job_sinks and not effective_publish_condition(job_condition):
-            for sink in job_sinks:
+            for classification, sink in job_sinks:
+                reason = (
+                    "publication sink lacks an effective publish-only condition"
+                    if classification == CONFIRMED_SINK
+                    else "audit this action before classifying it as nonpublishing"
+                )
                 errors.append(
                     ".github/workflows/release.yml: "
-                    f"job '{job_name}', step '<job-level uses>': publication sink lacks an effective "
-                    f"publish-only condition: {sink}"
+                    f"job '{job_name}', step '<job-level uses>': {classification}: "
+                    f"{reason}: {sink}"
                 )
         steps = job_value.get("steps")
         if not isinstance(steps, list):
@@ -338,102 +381,17 @@ def publication_gate_errors(workflow: dict[str, object]) -> list[str]:
             if effective_publish_condition(step_value.get("if")) or effective_publish_condition(job_condition):
                 continue
             step_name = step_value.get("name") or step_value.get("id") or f"step {index}"
-            for sink in sinks:
+            for classification, sink in sinks:
+                reason = (
+                    "publication sink lacks an effective publish-only condition"
+                    if classification == CONFIRMED_SINK
+                    else "audit this action before classifying it as nonpublishing"
+                )
                 errors.append(
                     ".github/workflows/release.yml: "
-                    f"job '{job_name}', step '{step_name}': publication sink lacks an effective "
-                    f"publish-only condition: {sink}"
+                    f"job '{job_name}', step '{step_name}': {classification}: "
+                    f"{reason}: {sink}"
                 )
-    return errors
-
-
-def metadata_mode_errors(script: str) -> list[str]:
-    errors: list[str] = []
-    case_start = re.search(r'^\s*case\s+"\$GITHUB_EVENT_NAME"\s+in\s*$', script, re.MULTILINE)
-    if not case_start:
-        return ['metadata script must contain case "$GITHUB_EVENT_NAME" in']
-    esac = re.search(r"^\s*esac\s*$", script[case_start.end():], re.MULTILINE)
-    if not esac:
-        return ["metadata event case must end with esac"]
-    case_end = case_start.end() + esac.end()
-    assignments = list(MODE_ASSIGNMENT_PATTERN.finditer(script))
-    if len(assignments) != 2:
-        errors.append(f"RELEASE_MODE must be assigned exactly twice; found {len(assignments)} assignments")
-    outside_case = [
-        assignment.group()
-        for assignment in assignments
-        if not case_start.end() <= assignment.start() < case_end
-    ]
-    if outside_case:
-        errors.append(f"RELEASE_MODE assignments must stay inside the event case; found {outside_case}")
-
-    before_case = script[:case_start.start()]
-    if "RELEASE_MODE" in before_case:
-        errors.append("RELEASE_MODE cannot be referenced before the event case")
-    event_source_lines = [
-        line.strip()
-        for line in script.splitlines()
-        if "GITHUB_EVENT_NAME" in line or "GITHUB_REF_NAME" in line
-    ]
-    expected_event_source_lines = [
-        'case "$GITHUB_EVENT_NAME" in',
-        'TAG_NAME="$GITHUB_REF_NAME"',
-        'echo "::error::Unsupported release event: ${GITHUB_EVENT_NAME}"',
-    ]
-    if event_source_lines != expected_event_source_lines:
-        errors.append(
-            "GitHub event source variables may only be read by the exact event case; "
-            f"found {event_source_lines}"
-        )
-    case_lines = [line.strip() for line in script[case_start.end():case_end].splitlines() if "RELEASE_MODE" in line]
-    expected_case_lines = ["RELEASE_MODE=publish", "RELEASE_MODE=dry-run"]
-    if case_lines != expected_case_lines:
-        errors.append(
-            f"RELEASE_MODE has unexpected assignment-capable uses inside the event case; found {case_lines}"
-        )
-
-    after_esac = script[case_end:]
-    after_esac_lines = [
-        line.strip()
-        for line in after_esac.splitlines()
-        if "RELEASE_MODE" in line
-    ]
-    expected_after_esac_lines = [
-        'if [ "$RELEASE_MODE" = publish ]; then',
-        'echo "release_mode=$RELEASE_MODE"',
-    ]
-    if after_esac_lines != expected_after_esac_lines:
-        errors.append(
-            "RELEASE_MODE cannot be reassigned, read, or substituted after esac outside its exact "
-            f"validated reads; found {after_esac_lines}"
-        )
-    release_mode_outputs = [line.strip() for line in script.splitlines() if "release_mode=" in line]
-    if release_mode_outputs != ['echo "release_mode=$RELEASE_MODE"']:
-        errors.append(
-            "release_mode output must be written exactly once from RELEASE_MODE; "
-            f"found {release_mode_outputs}"
-        )
-    tokenized_mode_commands = [
-        command
-        for command in shell_commands(after_esac)
-        if any("RELEASE_MODE" in token for token in command)
-    ]
-    expected_mode_commands = [
-        ["if", "[", "$RELEASE_MODE", "=", "publish", "]"],
-        ["echo", "release_mode=$RELEASE_MODE"],
-    ]
-    if tokenized_mode_commands != expected_mode_commands:
-        errors.append(
-            "RELEASE_MODE token uses after esac must match the exact validated reads; "
-            f"found {tokenized_mode_commands}"
-        )
-    dynamic_shell_commands = [
-        command
-        for command in shell_commands(script)
-        if any(token in {"eval", "source"} for token in command)
-    ]
-    if dynamic_shell_commands:
-        errors.append(f"metadata mode derivation cannot use dynamic shell evaluation; found {dynamic_shell_commands}")
     return errors
 
 
@@ -499,12 +457,35 @@ class ReleaseWorkflowTest(unittest.TestCase):
                           200)
                             printf 'HTTP/2.0 200 OK\\r\\n\\r\\n{}\\n'
                             ;;
+                          403)
+                            printf 'HTTP/2.0 403 Forbidden\\r\\n\\r\\n{"message":"Forbidden"}\\n'
+                            printf 'request forbidden\\n' >&2
+                            exit 1
+                            ;;
                           404)
                             printf 'HTTP/2.0 404 Not Found\\r\\n\\r\\n{"message":"Not Found"}\\n'
+                            printf 'HTTP/1.1 502 diagnostic-only\\n' >&2
+                            exit 1
+                            ;;
+                          429)
+                            printf 'HTTP/2.0 429 Too Many Requests\\r\\n\\r\\n{"message":"Rate limited"}\\n'
                             exit 1
                             ;;
                           500)
                             printf 'HTTP/2.0 500 Internal Server Error\\r\\n\\r\\n{"message":"Error"}\\n'
+                            exit 1
+                            ;;
+                          redirect)
+                            printf 'HTTP/2.0 301 Moved Permanently\\r\\nlocation: /redirected\\r\\n\\r\\n'
+                            printf 'HTTP/2.0 404 Not Found\\r\\n\\r\\n{"message":"Not Found"}\\n'
+                            exit 1
+                            ;;
+                          empty)
+                            exit 1
+                            ;;
+                          502-fake-404)
+                            printf 'HTTP/2.0 502 Bad Gateway\\r\\n\\r\\nupstream failed\\n'
+                            printf 'HTTP/1.1 404 Not Found\\n'
                             exit 1
                             ;;
                           error)
@@ -560,7 +541,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         )
         self.assertIs(False, self.workflow["concurrency"]["cancel-in-progress"])
 
-    def test_dispatch_requires_version_and_metadata_is_the_only_mode_derivation(self) -> None:
+    def test_dispatch_requires_version_and_job_output_derives_mode_from_event(self) -> None:
         events = self.workflow_events()
         self.assertEqual({"tags": ["v*.*.*"]}, events["push"])
         dispatch = events["workflow_dispatch"]
@@ -575,12 +556,19 @@ class ReleaseWorkflowTest(unittest.TestCase):
 
         metadata = self.named_step("metadata", "Resolve release event metadata")
         self.assertEqual("${{ inputs.version }}", metadata["env"]["REQUESTED_VERSION"])
-        metadata_errors = metadata_mode_errors(metadata["run"])
-        self.assertEqual([], metadata_errors, "\n".join(metadata_errors))
+        self.assertEqual(EVENT_MODE_EXPRESSION, metadata["env"]["DERIVED_RELEASE_MODE"])
         self.assertEqual(
-            "${{ steps.metadata.outputs.release_mode }}",
+            EVENT_MODE_EXPRESSION,
             self.workflow["jobs"]["metadata"]["outputs"]["release_mode"],
         )
+        self.assertNotIn("release_mode=", metadata["run"])
+        self.assertEqual(1, metadata["run"].count('test "$RELEASE_MODE" = "$DERIVED_RELEASE_MODE"'))
+        self.assertIn("Unsupported release event", metadata["run"])
+        preconditions = self.named_step(
+            "metadata",
+            "Verify release preconditions and immutable publication policy",
+        )
+        self.assertEqual(EVENT_MODE_EXPRESSION, preconditions["env"]["RELEASE_MODE"])
         for job_name, job in self.workflow["jobs"].items():
             if job_name == "metadata":
                 continue
@@ -588,40 +576,53 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertNotIn("github.event_name", str(job), job_name)
             self.assertNotIn("GITHUB_EVENT_NAME", str(job), job_name)
 
-    def test_metadata_mode_invariant_rejects_version_input_spoof_fixture(self) -> None:
+    def test_metadata_shell_mode_must_match_the_yaml_derived_mode(self) -> None:
         metadata = self.named_step("metadata", "Resolve release event metadata")
-        mutated = metadata["run"].replace("esac\n", f"esac\n{MODE_SPOOF_FIXTURE}\n", 1)
-        errors = metadata_mode_errors(mutated)
-        self.assertTrue(any("assigned exactly twice; found 3" in error for error in errors), errors)
-        self.assertTrue(any("after esac" in error for error in errors), errors)
-
-        alternate_mutated = metadata["run"].replace(
-            "esac\n",
-            f"esac\n{ALTERNATE_MODE_SPOOF_FIXTURE}\n",
-            1,
+        mode_resolution = metadata["run"].split(
+            'if [[ ! "$TAG_NAME" =~',
+            maxsplit=1,
+        )[0]
+        matched = subprocess.run(
+            ["bash", "-c", mode_resolution],
+            env={
+                "DERIVED_RELEASE_MODE": "dry-run",
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "GITHUB_REF_NAME": "main",
+                "REQUESTED_VERSION": "v2.0.0",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
         )
-        alternate_errors = metadata_mode_errors(alternate_mutated)
-        self.assertTrue(any("after esac" in error for error in alternate_errors), alternate_errors)
-
-        quoted_mutated = metadata["run"].replace(
-            "esac\n",
-            f"esac\n{QUOTED_MODE_SPOOF_FIXTURE}\n",
-            1,
+        drifted = subprocess.run(
+            ["bash", "-c", mode_resolution],
+            env={
+                "DERIVED_RELEASE_MODE": "publish",
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "GITHUB_REF_NAME": "main",
+                "REQUESTED_VERSION": "v2.0.0",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
         )
-        quoted_errors = metadata_mode_errors(quoted_mutated)
-        self.assertTrue(any("token uses after esac" in error for error in quoted_errors), quoted_errors)
-
-        event_spoof_mutated = metadata["run"].replace(
-            'case "$GITHUB_EVENT_NAME" in\n',
-            'if [ "$REQUESTED_VERSION" = v2.0.0 ]; then\n'
-            '  GITHUB_EVENT_NAME=push\n'
-            '  GITHUB_REF_NAME="$REQUESTED_VERSION"\n'
-            'fi\n'
-            'case "$GITHUB_EVENT_NAME" in\n',
-            1,
+        unsupported = subprocess.run(
+            ["bash", "-c", mode_resolution],
+            env={
+                "DERIVED_RELEASE_MODE": "dry-run",
+                "GITHUB_EVENT_NAME": "schedule",
+                "GITHUB_REF_NAME": "main",
+                "REQUESTED_VERSION": "v2.0.0",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
         )
-        event_spoof_errors = metadata_mode_errors(event_spoof_mutated)
-        self.assertTrue(any("event source variables" in error for error in event_spoof_errors), event_spoof_errors)
+
+        self.assertEqual(0, matched.returncode, matched.stderr)
+        self.assertNotEqual(0, drifted.returncode)
+        self.assertNotEqual(0, unsupported.returncode)
+        self.assertIn("Unsupported release event", unsupported.stdout)
 
     def test_every_publication_sink_has_an_effective_publish_only_condition(self) -> None:
         errors = publication_gate_errors(self.workflow)
@@ -629,7 +630,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
 
     def test_publication_sink_scanner_rejects_unconditional_helper_fixture(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
-        workflow["jobs"]["candidate-images"]["steps"].append(
+        workflow["jobs"]["candidate-images-dry-run"]["steps"].append(
             {
                 "name": "Publish helper image",
                 "run": (
@@ -642,8 +643,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
         )
         self.assertEqual(
             [
-                ".github/workflows/release.yml: job 'candidate-images', step 'Publish helper image': "
-                "publication sink lacks an effective publish-only condition: docker push"
+                ".github/workflows/release.yml: job 'candidate-images-dry-run', "
+                "step 'Publish helper image': CONFIRMED_SINK: publication sink lacks an effective "
+                "publish-only condition: docker push"
             ],
             publication_gate_errors(workflow),
         )
@@ -657,7 +659,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertEqual(
             [
                 ".github/workflows/release.yml: job 'helper-publisher', step '<job-level uses>': "
-                "publication sink lacks an effective publish-only condition: "
+                "CONFIRMED_SINK: publication sink lacks an effective publish-only condition: "
                 "uses: example/publish/.github/workflows/release.yml@sha"
             ],
             publication_gate_errors(workflow),
@@ -714,7 +716,12 @@ class ReleaseWorkflowTest(unittest.TestCase):
         }
         for run, expected_sink in run_fixtures.items():
             with self.subTest(run=run):
-                self.assertIn(expected_sink, publication_sinks({"run": run}))
+                self.assertIn((CONFIRMED_SINK, expected_sink), publication_sinks({"run": run}))
+
+        self.assertEqual(
+            [],
+            publication_sinks({"run": "docker run --rm alpine printf '%s\\n' push"}),
+        )
 
         self.assertEqual(
             [],
@@ -768,8 +775,39 @@ class ReleaseWorkflowTest(unittest.TestCase):
         )
         for action in ("actions/attest@sha", "example/publish-package-action@sha"):
             with self.subTest(action=action):
-                self.assertEqual([f"uses: {action}"], publication_sinks({"uses": action}))
-        self.assertTrue(publication_sinks({"uses": "peaceiris/actions-gh-pages@sha"}))
+                self.assertEqual(
+                    [(CONFIRMED_SINK, f"uses: {action}")],
+                    publication_sinks({"uses": action}),
+                )
+        self.assertEqual(
+            [(UNREVIEWED, "uses: actions/setup-python@sha")],
+            publication_sinks({"uses": "actions/setup-python@sha"}),
+        )
+        self.assertEqual(
+            [(UNREVIEWED, "uses: example/build-action@sha")],
+            publication_sinks(
+                {
+                    "uses": "example/build-action@sha",
+                    "with": {"push": False},
+                }
+            ),
+        )
+        unreviewed_workflow = {
+            "jobs": {
+                "test": {
+                    "runs-on": "ubuntu-latest",
+                    "steps": [{"uses": "actions/setup-python@sha"}],
+                }
+            }
+        }
+        self.assertEqual(
+            [
+                ".github/workflows/release.yml: job 'test', step 'step 1': UNREVIEWED: "
+                "audit this action before classifying it as nonpublishing: "
+                "uses: actions/setup-python@sha"
+            ],
+            publication_gate_errors(unreviewed_workflow),
+        )
         self.assertTrue(
             publication_sinks(
                 {
@@ -787,14 +825,47 @@ class ReleaseWorkflowTest(unittest.TestCase):
         )
         self.assertFalse(effective_publish_condition(f"${{{{ {PUBLISH_MODE_CONDITION} || success() }}}}"))
 
-    def test_build_mode_inputs_preserve_dry_run_behavior(self) -> None:
-        build = self.named_step("candidate-images", "Build candidate")
-        self.assertEqual(BUILD_PUSH_MODE_INPUT, build["with"]["push"])
-        self.assertEqual("${{ needs.metadata.outputs.release_mode == 'dry-run' }}", build["with"]["load"])
+    def test_publish_build_is_pristine_and_dry_run_build_cannot_push(self) -> None:
+        publish_build = self.named_step("candidate-images", "Build and push candidate")
+        self.assertIs(True, publish_build["with"]["push"])
+        self.assertEqual("mode=max", publish_build["with"]["provenance"])
+        self.assertNotIn("load", publish_build["with"])
+        self.assertNotIn("release_mode", str(publish_build))
+
+        dry_run_build = self.named_step("candidate-images-dry-run", "Build dry-run candidate")
+        self.assertIs(False, dry_run_build["with"]["push"])
+        self.assertIs(True, dry_run_build["with"]["load"])
+        self.assertIs(False, dry_run_build["with"]["provenance"])
+
+    def test_dry_run_candidate_declares_only_contents_read(self) -> None:
+        dry_run = self.workflow["jobs"]["candidate-images-dry-run"]
+
+        self.assertEqual({"contents": "read"}, dry_run["permissions"])
+        self.assertEqual(DRY_RUN_MODE_CONDITION, dry_run["if"])
+        serialized = str(dry_run)
+        for forbidden in (
+            "actions/attest",
+            "cosign",
+            "docker/login-action",
+            "push-to-registry",
+            "secrets.",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_publish_only_jobs_do_not_depend_on_the_dry_run_build(self) -> None:
+        jobs = self.workflow["jobs"]
+
+        self.assertTrue(effective_publish_condition(jobs["candidate-images"]["if"]))
+        self.assertEqual(["metadata", "candidate-images"], jobs["release-set-smoke"]["needs"])
         self.assertEqual(
-            "${{ needs.metadata.outputs.release_mode == 'publish' && 'mode=max' || false }}",
-            build["with"]["provenance"],
+            ["metadata", "candidate-images", "release-set-smoke"],
+            jobs["promote"]["needs"],
         )
+        self.assertEqual(["metadata", "promote"], jobs["release"]["needs"])
+        self.assertIn("always()", jobs["promote"]["if"])
+        self.assertTrue(effective_publish_condition(jobs["promote"]["if"]))
+        for job_name in ("release-set-smoke", "promote", "release"):
+            self.assertNotIn("candidate-images-dry-run", str(jobs[job_name]), job_name)
 
     def test_dry_run_keeps_required_nonpublishing_verification(self) -> None:
         metadata_names = [step.get("name") for step in self.steps("metadata")]
@@ -805,46 +876,67 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ):
             self.assertIn(name, metadata_names)
 
-        candidate = self.workflow["jobs"]["candidate-images"]
-        self.assertEqual("needs.metadata.outputs.transaction_exists != 'true'", candidate["if"])
+        candidate = self.workflow["jobs"]["candidate-images-dry-run"]
         self.assertEqual(["backend", "frontend", "ocr"], candidate["strategy"]["matrix"]["component"])
-        build = self.named_step("candidate-images", "Build candidate")
+        build = self.named_step("candidate-images-dry-run", "Build dry-run candidate")
         self.assertEqual(
             "VERSION=${{ needs.metadata.outputs.version }}\n"
             "BUILD_TIME=${{ needs.metadata.outputs.build_time }}\n"
             "SOURCE_DATE_EPOCH=${{ needs.metadata.outputs.build_epoch }}\n",
             build["with"]["build-args"],
         )
-        for name in ("Smoke exact OCR candidate", "Smoke exact frontend candidate"):
-            self.assertNotIn("release_mode", self.named_step("candidate-images", name)["if"])
-        scan = self.named_step("candidate-images", "Scan exact candidate for high-severity vulnerabilities")
+        for name in ("Smoke dry-run OCR candidate", "Smoke dry-run frontend candidate"):
+            self.assertNotIn("release_mode", self.named_step("candidate-images-dry-run", name)["if"])
+        scan = self.named_step(
+            "candidate-images-dry-run",
+            "Scan dry-run candidate for high-severity vulnerabilities",
+        )
         self.assertEqual("high", scan["with"]["severity-cutoff"])
         self.assertTrue(scan["with"]["fail-build"])
-        sbom = self.named_step("candidate-images", "Generate SBOM")
+        sbom = self.named_step("candidate-images-dry-run", "Generate dry-run SBOM")
         self.assertNotIn("if", sbom)
         self.assertEqual("spdx-json", sbom["with"]["format"])
 
-    def test_smoke_scan_and_sbom_share_the_mode_resolved_image_reference(self) -> None:
-        resolver = self.named_step("candidate-images", "Resolve candidate image reference")
-        self.assertIn('image_ref="${IMAGE}@${digest}"', resolver["run"])
-        self.assertIn('image_ref="${IMAGE}:${CANDIDATE_TAG}"', resolver["run"])
+    def test_publish_job_body_is_unchanged_from_the_prepublication_pipeline(self) -> None:
+        publish = self.workflow["jobs"]["candidate-images"]
 
+        self.assertNotIn("release_mode", str(publish["steps"]))
+        self.assertEqual(
+            "${{ steps.digest.outputs.digest }}",
+            self.named_step("candidate-images", "Sign candidate digest")["env"]["DIGEST"],
+        )
         for name in ("Smoke exact OCR candidate", "Smoke exact frontend candidate"):
             step = self.named_step("candidate-images", name)
-            self.assertEqual("${{ steps.image.outputs.image_ref }}", step["env"]["IMAGE_REF"])
-            self.assertIn('"$IMAGE_REF"', step["run"])
+            self.assertEqual("${{ steps.digest.outputs.digest }}", step["env"]["DIGEST"])
+            self.assertIn('"${IMAGE}@${DIGEST}"', step["run"])
         for name in (
             "Scan exact candidate for high-severity vulnerabilities",
             "Generate SBOM",
         ):
-            self.assertEqual(
-                "${{ steps.image.outputs.image_ref }}",
+            self.assertIn(
+                "@${{ steps.digest.outputs.digest }}",
                 self.named_step("candidate-images", name)["with"]["image"],
+            )
+
+    def test_dry_run_smoke_scan_and_sbom_share_the_local_tag(self) -> None:
+        local_tag = "connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}"
+        for name in ("Smoke dry-run OCR candidate", "Smoke dry-run frontend candidate"):
+            step = self.named_step("candidate-images-dry-run", name)
+            self.assertEqual(local_tag, step["env"]["IMAGE_REF"])
+            self.assertIn('"$IMAGE_REF"', step["run"])
+        for name in (
+            "Scan dry-run candidate for high-severity vulnerabilities",
+            "Generate dry-run SBOM",
+        ):
+            self.assertEqual(
+                local_tag,
+                self.named_step("candidate-images-dry-run", name)["with"]["image"],
             )
 
     def test_dry_run_summary_discloses_covered_and_uncovered_guarantees(self) -> None:
         summary_job = self.workflow["jobs"]["dry-run-summary"]
         self.assertIn(DRY_RUN_MODE_CONDITION, summary_job["if"])
+        self.assertEqual(["metadata", "candidate-images-dry-run"], summary_job["needs"])
         summary = self.named_step("dry-run-summary", "Record dry-run coverage")["run"]
         for covered in (
             "Strict release-version validation",
@@ -892,12 +984,12 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def test_buildkit_check_matches_the_current_inspection_field(self) -> None:
         checks = [
             step["run"]
-            for job in ("candidate-images", "promote")
+            for job in ("candidate-images", "candidate-images-dry-run", "promote")
             for step in self.steps(job)
             if step.get("name") == "Verify pinned build toolchain"
         ]
 
-        self.assertEqual(2, len(checks))
+        self.assertEqual(3, len(checks))
         self.assertTrue(all("BuildKit version: v0.31.1" in check for check in checks))
 
     def test_transaction_and_candidates_are_attempt_scoped(self) -> None:
@@ -971,6 +1063,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     "_",
                 ],
                 env={
+                    "DERIVED_RELEASE_MODE": expected_mode,
                     "GITHUB_EVENT_NAME": event_name,
                     "GITHUB_REF_NAME": ref_name,
                     "REQUESTED_VERSION": requested_version,
@@ -986,6 +1079,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 result = subprocess.run(
                     ["bash", "-c", event_validation],
                     env={
+                        "DERIVED_RELEASE_MODE": "publish" if event_name == "push" else "dry-run",
                         "GITHUB_EVENT_NAME": event_name,
                         "GITHUB_REF_NAME": tag if event_name == "push" else "main",
                         "REQUESTED_VERSION": tag if event_name == "workflow_dispatch" else "",
@@ -1009,6 +1103,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 result = subprocess.run(
                     ["bash", "-c", validation],
                     env={
+                        "DERIVED_RELEASE_MODE": "publish" if event_name == "push" else "dry-run",
                         "GITHUB_EVENT_NAME": event_name,
                         "GITHUB_REF_NAME": ref_name,
                         "REQUESTED_VERSION": requested_version,
@@ -1106,7 +1201,16 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertEqual(0, confirmed_missing.returncode, confirmed_missing.stderr)
         self.assertTrue(any(call[-1] == "repos/example/connex/releases/tags/v2.0.0" for call in calls))
 
-        for status in ("200", "500", "error"):
+        for status in (
+            "200",
+            "403",
+            "429",
+            "500",
+            "redirect",
+            "empty",
+            "502-fake-404",
+            "error",
+        ):
             with self.subTest(status=status):
                 result, status_calls = self.run_preconditions("dry-run", status)
                 self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
@@ -1114,6 +1218,10 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     any(call[-1] == "repos/example/connex/releases/tags/v2.0.0" for call in status_calls),
                     status_calls,
                 )
+                if status in {"redirect", "502-fake-404"}:
+                    self.assertIn("expected exactly one HTTP status line, found 2", result.stdout)
+                if status in {"empty", "error"}:
+                    self.assertIn("expected exactly one HTTP status line, found 0", result.stdout)
 
     def test_prereleases_are_explicitly_excluded_from_latest(self) -> None:
         publish = self.named_step("release", "Publish the complete verified release atomically")
