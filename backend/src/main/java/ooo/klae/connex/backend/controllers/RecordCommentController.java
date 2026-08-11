@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -17,11 +18,14 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.RecordCommentCountDto;
 import ooo.klae.connex.backend.dto.RecordCommentCreateRequest;
 import ooo.klae.connex.backend.dto.RecordCommentCreateThreadRequest;
 import ooo.klae.connex.backend.dto.RecordCommentDto;
+import ooo.klae.connex.backend.dto.RecordCommentIndicatorDto;
+import ooo.klae.connex.backend.dto.RecordCommentReactionDto;
 import ooo.klae.connex.backend.dto.RecordCommentThreadDto;
 import ooo.klae.connex.backend.dto.RecordCommentThreadStateRequest;
 import ooo.klae.connex.backend.services.RecordCommentService;
@@ -29,7 +33,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
-/** REST endpoints for workspace-local record comment threads, resolution, and redaction. */
+/** REST endpoints for workspace-local record comments, reactions, and thread state. */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
@@ -61,6 +65,14 @@ public class RecordCommentController {
             @RequestParam(defaultValue = "open") String state) {
         return new RecordCommentCountDto(
             recordCommentService.countThreads(targetType, targetId, state));
+    }
+
+    @GetMapping("/comment-threads/indicators")
+    public List<RecordCommentIndicatorDto> getIndicators(
+            @Pattern(regexp = "^(person|company|deal)$") @RequestParam String targetType,
+            @Size(min = 1, max = 100)
+            @RequestParam List<@Positive Integer> targetIds) {
+        return recordCommentService.getIndicators(targetType, targetIds);
     }
 
     @GetMapping("/comment-threads/{threadId}")
@@ -109,5 +121,16 @@ public class RecordCommentController {
     @DeleteMapping("/comments/{commentId}")
     public void deleteComment(@Positive @PathVariable long commentId) {
         recordCommentService.deleteComment(commentId);
+    }
+
+    @PutMapping("/comments/{commentId}/reactions/{reaction}")
+    @RequirePermission(Permission.COMMENT_CREATE)
+    public List<RecordCommentReactionDto> toggleReaction(
+            @Positive @PathVariable long commentId,
+            @Pattern(regexp = "^(thumbs_up|thumbs_down|heart|celebrate|eyes|laugh)$")
+            @PathVariable String reaction) {
+        return recordCommentService.toggleReaction(commentId, reaction).stream()
+            .map(RecordCommentReactionDto::from)
+            .toList();
     }
 }

@@ -69,6 +69,7 @@ class OffboardingIndexArchTest {
         new String[] {"workflow_intervention", "owner_user_id"},
         new String[] {"record_comment", "author_user_id"},
         new String[] {"record_comment", "deleted_by_user_id"},
+        new String[] {"record_comment_reaction", "user_id"},
         new String[] {"record_comment_thread", "created_by_user_id"},
         new String[] {"record_comment_thread", "resolved_by_user_id"});
 

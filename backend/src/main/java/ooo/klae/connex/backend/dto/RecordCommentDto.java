@@ -15,7 +15,8 @@ public record RecordCommentDto(
         LocalDateTime createdAt,
         LocalDateTime deletedAt,
         Integer deletedByUserId,
-        List<EntityReference> references) {
+        List<EntityReference> references,
+        List<RecordCommentReactionDto> reactions) {
 
     /** Maps a persisted comment into its API representation. */
     public static RecordCommentDto from(RecordComment comment) {
@@ -34,6 +35,7 @@ public record RecordCommentDto(
             comment.getCreatedAt(),
             comment.getDeletedAt(),
             comment.getDeletedByUserId(),
-            comment.getReferences());
+            comment.getReferences(),
+            comment.getReactions().stream().map(RecordCommentReactionDto::from).toList());
     }
 }

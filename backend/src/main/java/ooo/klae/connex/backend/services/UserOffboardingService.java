@@ -324,6 +324,7 @@ public class UserOffboardingService {
         recordCommentMapper.clearDeletersAnywhere(userId);
         recordCommentMapper.clearThreadCreatorsAnywhere(userId);
         recordCommentMapper.clearThreadResolversAnywhere(userId);
+        recordCommentMapper.deleteReactionsAnywhere(userId);
         taskMapper.unassignAnywhere(userId);
         attachmentMapper.clearUploaderAnywhere(userId);
         campaignMapper.clearCampaignUserReferencesAnywhere(userId);

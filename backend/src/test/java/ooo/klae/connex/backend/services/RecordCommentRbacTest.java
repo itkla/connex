@@ -48,6 +48,19 @@ class RecordCommentRbacTest extends AbstractServiceTest {
     }
 
     @Test
+    void reactionWithoutCommentCreateIsForbidden() {
+        Person person = newPerson(newCompany());
+        RecordCommentThread thread = recordCommentService.createThread(
+            "person", person.getId(), "Reaction target", token());
+        User restricted = newUser();
+        assignRole(restricted, List.of());
+        authenticateAs(restricted, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> recordCommentService.toggleReaction(
+            thread.getComments().getFirst().getId(), "heart"));
+    }
+
+    @Test
     void nonAuthorWithoutCommentModerateCannotDelete() {
         Person person = newPerson(newCompany());
         RecordCommentThread thread = recordCommentService.createThread(

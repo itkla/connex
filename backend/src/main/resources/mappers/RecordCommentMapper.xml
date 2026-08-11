@@ -29,6 +29,13 @@
     <result property="deletedByUserId" column="deleted_by_user_id"/>
   </resultMap>
 
+  <resultMap id="ReactionSummaryResult" type="RecordCommentReactionSummary">
+    <id property="commentId" column="comment_id"/>
+    <id property="reaction" column="reaction"/>
+    <result property="count" column="reaction_count"/>
+    <result property="reactedByMe" column="reacted_by_me"/>
+  </resultMap>
+
   <sql id="threadColumns">
     id, workspace_id, target_type, target_id, created_by_user_id, state,
     resolved_by_user_id, resolved_at, version, created_at, updated_at
@@ -109,6 +116,63 @@
     SELECT <include refid="commentColumns"/>
     FROM record_comment
     WHERE workspace_id = #{workspaceId} AND client_token = #{clientToken}
+  </select>
+
+  <select id="getReactionSummaries" resultMap="ReactionSummaryResult">
+    SELECT comment_id,
+           reaction,
+           COUNT(*) AS reaction_count,
+           MAX(user_id = #{userId}) AS reacted_by_me
+    FROM record_comment_reaction
+    WHERE workspace_id = #{workspaceId}
+      AND comment_id IN
+      <foreach item="commentId" collection="commentIds" open="(" separator="," close=")">#{commentId}</foreach>
+    GROUP BY comment_id, reaction
+    ORDER BY comment_id,
+      FIELD(reaction, 'thumbs_up', 'thumbs_down', 'heart', 'celebrate', 'eyes', 'laugh')
+  </select>
+
+  <select id="hasReaction" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM record_comment_reaction
+      WHERE workspace_id = #{workspaceId}
+        AND comment_id = #{commentId}
+        AND user_id = #{userId}
+        AND reaction = #{reaction}
+    )
+  </select>
+
+  <insert id="insertReaction">
+    INSERT INTO record_comment_reaction (
+      workspace_id, comment_id, user_id, reaction
+    )
+    SELECT #{workspaceId}, c.id, #{userId}, #{reaction}
+    FROM record_comment c
+    WHERE c.workspace_id = #{workspaceId}
+      AND c.id = #{commentId}
+      AND c.deleted_at IS NULL
+  </insert>
+
+  <delete id="deleteReaction">
+    DELETE FROM record_comment_reaction
+    WHERE workspace_id = #{workspaceId}
+      AND comment_id = #{commentId}
+      AND user_id = #{userId}
+      AND reaction = #{reaction}
+  </delete>
+
+  <select id="getOpenThreadIndicators"
+      resultType="ooo.klae.connex.backend.dto.RecordCommentIndicatorDto">
+    SELECT target_id, COUNT(*) AS open_threads
+    FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId}
+      AND target_type = #{targetType}
+      AND state = 'open'
+      AND target_id IN
+      <foreach item="targetId" collection="targetIds" open="(" separator="," close=")">#{targetId}</foreach>
+    GROUP BY target_id
+    ORDER BY target_id
   </select>
 
   <insert id="insertThread" useGeneratedKeys="true" keyProperty="id">
@@ -201,6 +265,11 @@
     SET resolved_by_user_id = NULL
     WHERE resolved_by_user_id = #{userId}
   </update>
+
+  <delete id="deleteReactionsAnywhere">
+    DELETE FROM record_comment_reaction
+    WHERE user_id = #{userId}
+  </delete>
 
   <select id="getCommentIdsForTarget" resultType="long">
     SELECT c.id

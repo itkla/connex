@@ -290,8 +290,9 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("provider_captured_interaction", 396));
         raw.add(direct("activity", 400));
         raw.add(direct("note", 410));
-        raw.add(direct("record_comment", 411));
-        raw.add(direct("record_comment_thread", 412));
+        raw.add(direct("record_comment_reaction", 411));
+        raw.add(direct("record_comment", 412));
+        raw.add(direct("record_comment_thread", 413));
         raw.add(direct("task", 420));
         raw.add(direct("person", 430));
         raw.add(direct("company_share", 440));

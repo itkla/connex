@@ -24,11 +24,16 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.RecordComment;
+import ooo.klae.connex.backend.beans.RecordCommentReactionSummary;
 import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.RecordCommentIndicatorDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -54,6 +59,7 @@ public class RecordCommentService {
     private static final int MAX_COMMENT_LENGTH = 5000;
     private static final int MAX_COMMENTS_PER_THREAD = 200;
     private static final int MAX_PAGE_LIMIT = 100;
+    private static final int MAX_INDICATOR_TARGETS = 100;
     private static final int SNIPPET_LENGTH = 140;
     private static final String MENTION_TYPE = "comment.mention";
     private static final String REPLY_TYPE = "comment.reply";
@@ -112,6 +118,21 @@ public class RecordCommentService {
         RecordCommentThread thread = requireThread(workspaceId, threadId);
         requireTargetVisible(workspaceId, TargetType.parse(thread.getTargetType()), thread.getTargetId());
         return hydrateThread(workspaceId, thread);
+    }
+
+    /** Returns open-thread counts for currently visible targets in one bounded batch. */
+    public List<RecordCommentIndicatorDto> getIndicators(
+            String targetTypeRaw,
+            List<Integer> targetIds) {
+        TargetType targetType = TargetType.parse(targetTypeRaw);
+        List<Integer> requestedIds = requireIndicatorTargetIds(targetIds);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> visibleIds = visibleTargetIds(workspaceId, targetType, requestedIds);
+        if (visibleIds.isEmpty()) {
+            return List.of();
+        }
+        return recordCommentMapper.getOpenThreadIndicators(
+            workspaceId, targetType.wire(), visibleIds);
     }
 
     /** Creates a thread and root comment atomically. */
@@ -281,6 +302,46 @@ public class RecordCommentService {
             Map.of("threadId", lockedThread.getId(), "commentId", commentId));
         notificationChanges.publish(
             workspaceId, ReferenceService.SOURCE_COMMENT, commentSourceId(commentId));
+    }
+
+    /** Toggles one current-user reaction and returns the comment's updated summary. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMMENT_CREATE)
+    public List<RecordCommentReactionSummary> toggleReaction(
+            long commentId,
+            String reactionRaw) {
+        requirePositiveId(commentId, "Comment");
+        Reaction reaction = Reaction.parse(reactionRaw);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        RecordComment comment = requireComment(workspaceId, commentId);
+        RecordCommentThread thread = requireThread(workspaceId, comment.getThreadId());
+        requireTargetVisible(
+            workspaceId, TargetType.parse(thread.getTargetType()), thread.getTargetId());
+
+        if (recordCommentMapper.hasReaction(
+                workspaceId, commentId, actorId, reaction.wire())) {
+            recordCommentMapper.deleteReaction(
+                workspaceId, commentId, actorId, reaction.wire());
+            return reactionSummary(workspaceId, commentId, actorId);
+        }
+        if (comment.getDeletedAt() != null) {
+            throw new BadRequestException("Redacted comments cannot receive new reactions");
+        }
+        try {
+            if (recordCommentMapper.insertReaction(
+                    workspaceId, commentId, actorId, reaction.wire()) == 0) {
+                RecordComment current = recordCommentMapper.getCommentById(workspaceId, commentId);
+                if (current == null) {
+                    throw new ResourceNotFoundException(
+                        "Comment not found with id: " + commentId);
+                }
+                throw new BadRequestException("Redacted comments cannot receive new reactions");
+            }
+        } catch (DuplicateKeyException exception) {
+            return reactionSummary(workspaceId, commentId, actorId);
+        }
+        return reactionSummary(workspaceId, commentId, actorId);
     }
 
     /** Resolves an open thread when its optimistic version still matches. */
@@ -456,6 +517,7 @@ public class RecordCommentService {
         List<RecordComment> comments = recordCommentMapper.getCommentsByThreadIds(workspaceId, threadIds);
         hydrateAuthors(workspaceId, comments);
         hydrateReferences(workspaceId, comments);
+        hydrateReactions(workspaceId, comments);
         Map<Long, List<RecordComment>> commentsByThread = comments.stream().collect(
             Collectors.groupingBy(
                 RecordComment::getThreadId,
@@ -470,6 +532,7 @@ public class RecordCommentService {
         List<RecordComment> comments = recordCommentMapper.getCommentsByThread(workspaceId, thread.getId());
         hydrateAuthors(workspaceId, comments);
         hydrateReferences(workspaceId, comments);
+        hydrateReactions(workspaceId, comments);
         thread.setComments(comments);
         return thread;
     }
@@ -477,7 +540,35 @@ public class RecordCommentService {
     private RecordComment hydrateComment(int workspaceId, RecordComment comment) {
         hydrateAuthors(workspaceId, List.of(comment));
         hydrateReferences(workspaceId, List.of(comment));
+        hydrateReactions(workspaceId, List.of(comment));
         return comment;
+    }
+
+    private void hydrateReactions(int workspaceId, List<RecordComment> comments) {
+        if (comments.isEmpty()) {
+            return;
+        }
+        int actorId = workspaceService.getCurrentUserId();
+        Map<Long, List<RecordCommentReactionSummary>> reactionsByComment = recordCommentMapper
+            .getReactionSummaries(
+                workspaceId,
+                comments.stream().map(RecordComment::getId).toList(),
+                actorId)
+            .stream()
+            .collect(Collectors.groupingBy(
+                RecordCommentReactionSummary::getCommentId,
+                LinkedHashMap::new,
+                Collectors.toList()));
+        comments.forEach(comment -> comment.setReactions(
+            reactionsByComment.getOrDefault(comment.getId(), List.of())));
+    }
+
+    private List<RecordCommentReactionSummary> reactionSummary(
+            int workspaceId,
+            long commentId,
+            int actorId) {
+        return recordCommentMapper.getReactionSummaries(
+            workspaceId, List.of(commentId), actorId);
     }
 
     private void hydrateReferences(int workspaceId, List<RecordComment> comments) {
@@ -548,6 +639,23 @@ public class RecordCommentService {
             case PERSON -> personMapper.exists(workspaceId, targetId);
             case COMPANY -> companyMapper.exists(workspaceId, targetId);
             case DEAL -> dealMapper.exists(workspaceId, targetId);
+        };
+    }
+
+    private List<Integer> visibleTargetIds(
+            int workspaceId,
+            TargetType targetType,
+            List<Integer> targetIds) {
+        return switch (targetType) {
+            case PERSON -> personMapper.getByIds(workspaceId, targetIds).stream()
+                .map(Person::getId)
+                .toList();
+            case COMPANY -> companyMapper.getByIds(workspaceId, targetIds).stream()
+                .map(Company::getId)
+                .toList();
+            case DEAL -> dealMapper.getByIds(workspaceId, targetIds).stream()
+                .map(Deal::getId)
+                .toList();
         };
     }
 
@@ -631,6 +739,22 @@ public class RecordCommentService {
         }
     }
 
+    private static List<Integer> requireIndicatorTargetIds(List<Integer> targetIds) {
+        if (targetIds == null || targetIds.isEmpty()) {
+            throw new BadRequestException("At least one target id is required");
+        }
+        if (targetIds.size() > MAX_INDICATOR_TARGETS) {
+            throw new BadRequestException(
+                "At most " + MAX_INDICATOR_TARGETS + " target ids are allowed");
+        }
+        for (Integer targetId : targetIds) {
+            if (targetId == null || targetId < 1) {
+                throw new BadRequestException("Target ids must be positive");
+            }
+        }
+        return targetIds.stream().distinct().toList();
+    }
+
     private static void requirePositiveId(long id, String label) {
         if (id < 1) {
             throw new BadRequestException(label + " id must be positive");
@@ -711,6 +835,30 @@ public class RecordCommentService {
                 return valueOf(value.trim().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException exception) {
                 throw new BadRequestException("Unknown record comment thread state: " + raw);
+            }
+        }
+
+        private String wire() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
+    private enum Reaction {
+        THUMBS_UP,
+        THUMBS_DOWN,
+        HEART,
+        CELEBRATE,
+        EYES,
+        LAUGH;
+
+        private static Reaction parse(String raw) {
+            if (raw == null) {
+                throw new BadRequestException("Reaction is required");
+            }
+            try {
+                return valueOf(raw.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                throw new BadRequestException("Unknown comment reaction: " + raw);
             }
         }
 

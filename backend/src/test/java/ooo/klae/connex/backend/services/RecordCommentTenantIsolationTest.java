@@ -10,7 +10,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.RecordCommentReactionSummary;
 import ooo.klae.connex.backend.beans.RecordCommentThread;
+import ooo.klae.connex.backend.dto.RecordCommentIndicatorDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RecordCommentMapper;
@@ -84,6 +86,68 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
             grantee.getId(), "person", person.getId(), "all"));
         assertEquals(1, recordCommentMapper.countCommentsInThread(
             grantee.getId(), thread.getId()));
+    }
+
+    @Test
+    void reactionRowsAreInvisibleAcrossWorkspaces() {
+        WorkspaceMembershipDto owner = workspaceService.createWorkspace(
+            "Reaction Owner " + unique(), currentUser.getId());
+        authenticateAs(currentUser, owner.getId());
+        WorkspaceMembershipDto grantee = workspaceService.createWorkspace(
+            "Reaction Grantee " + unique(), currentUser.getId());
+        Person person = personIn(owner.getId());
+        assertEquals(1, shareMapper.sharePerson(
+            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
+        RecordCommentThread ownerThread = recordCommentService.createThread(
+            "person", person.getId(), "Owner reaction", token());
+        long ownerCommentId = ownerThread.getComments().getFirst().getId();
+        recordCommentService.toggleReaction(ownerCommentId, "heart");
+
+        authenticateAs(currentUser, grantee.getId());
+
+        assertEquals(List.of(), recordCommentMapper.getReactionSummaries(
+            grantee.getId(), List.of(ownerCommentId), currentUser.getId()));
+
+        authenticateAs(currentUser, owner.getId());
+        List<RecordCommentReactionSummary> retained = recordCommentService
+            .getThread(ownerThread.getId())
+            .getComments()
+            .getFirst()
+            .getReactions();
+        assertEquals(1, retained.size());
+        assertEquals("heart", retained.getFirst().getReaction());
+
+        authenticateAs(currentUser, grantee.getId());
+        assertThrows(ResourceNotFoundException.class,
+            () -> recordCommentService.toggleReaction(ownerCommentId, "heart"));
+    }
+
+    @Test
+    void indicatorCountsStayWithinTheActiveWorkspace() {
+        WorkspaceMembershipDto owner = workspaceService.createWorkspace(
+            "Indicator Isolation Owner " + unique(), currentUser.getId());
+        authenticateAs(currentUser, owner.getId());
+        WorkspaceMembershipDto grantee = workspaceService.createWorkspace(
+            "Indicator Isolation Grantee " + unique(), currentUser.getId());
+        Person person = personIn(owner.getId());
+        assertEquals(1, shareMapper.sharePerson(
+            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
+        recordCommentService.createThread("person", person.getId(), "Owner one", token());
+        recordCommentService.createThread("person", person.getId(), "Owner two", token());
+
+        authenticateAs(currentUser, grantee.getId());
+        recordCommentService.createThread("person", person.getId(), "Grantee one", token());
+
+        List<RecordCommentIndicatorDto> granteeIndicators = recordCommentService.getIndicators(
+            "person", List.of(person.getId()));
+        assertEquals(1, granteeIndicators.size());
+        assertEquals(1, granteeIndicators.getFirst().openThreads());
+
+        authenticateAs(currentUser, owner.getId());
+        List<RecordCommentIndicatorDto> ownerIndicators = recordCommentService.getIndicators(
+            "person", List.of(person.getId()));
+        assertEquals(1, ownerIndicators.size());
+        assertEquals(2, ownerIndicators.getFirst().openThreads());
     }
 
     private Person personIn(int workspaceId) {
