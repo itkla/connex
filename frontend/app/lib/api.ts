@@ -3675,6 +3675,37 @@ export function reopenCommentThread(threadId: number, expectedVersion: number, i
 }
 
 /**
+ * Toggles the caller's reaction on a comment and returns the comment's updated
+ * per-reaction aggregate.
+ */
+export function toggleCommentReaction(
+    commentId: number,
+    reaction: Types.RecordCommentReactionKey,
+    init: RequestInit = {},
+) {
+    return putJson<Types.RecordCommentReactionSummary[]>(
+        `/api/comments/${commentId}/reactions/${reaction}`,
+        {},
+        init,
+    );
+}
+
+/**
+ * Batch open-thread counts for up to 100 records of one type. Ids whose target
+ * is not visible to the active workspace are silently omitted.
+ */
+export function getCommentIndicators(
+    targetType: Types.RecordCommentTargetType,
+    targetIds: number[],
+    init: RequestInit = {},
+) {
+    return getJson<Types.RecordCommentIndicator[]>(
+        `/api/comment-threads/indicators${buildQuery({ targetType, targetIds: targetIds.join(',') })}`,
+        init,
+    );
+}
+
+/**
  * Opens a new comment thread on a record. {@code clientToken} makes retries of
  * the same submission idempotent.
  */

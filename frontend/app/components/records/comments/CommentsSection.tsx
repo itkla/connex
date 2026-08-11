@@ -15,8 +15,14 @@ import {
     reopenCommentThread,
     replyToCommentThread,
     resolveCommentThread,
+    toggleCommentReaction,
 } from '@/app/lib/api';
-import type { RecordComment, RecordCommentTargetType, RecordCommentThread } from '@/app/lib/types';
+import type {
+    RecordComment,
+    RecordCommentReactionKey,
+    RecordCommentTargetType,
+    RecordCommentThread,
+} from '@/app/lib/types';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import CommentDeleteDialog from '@/app/components/records/comments/CommentDeleteDialog';
@@ -255,6 +261,31 @@ export default function CommentsSection({
         }
     }, [submitting, replyThreadId, replyValue, t]);
 
+    const handleToggleReaction = useCallback(
+        async (comment: RecordComment, reaction: RecordCommentReactionKey) => {
+            try {
+                const summary = await toggleCommentReaction(comment.id, reaction);
+                setThreads((prev) =>
+                    prev.map((thread) =>
+                        thread.id === comment.threadId
+                            ? {
+                                  ...thread,
+                                  comments: thread.comments.map((existing) =>
+                                      existing.id === comment.id
+                                          ? { ...existing, reactions: summary }
+                                          : existing,
+                                  ),
+                              }
+                            : thread,
+                    ),
+                );
+            } catch {
+                toastError(t('reactionFailed'));
+            }
+        },
+        [t],
+    );
+
     const confirmDelete = useCallback(async () => {
         if (!pendingDelete || deleting) return;
         setDeleting(true);
@@ -385,6 +416,7 @@ export default function CommentsSection({
                                 }}
                                 onReplySubmit={handleReply}
                                 onDelete={setPendingDelete}
+                                onToggleReaction={handleToggleReaction}
                                 onResolve={() => handleStateTransition(thread, 'resolve')}
                                 onReopen={() => handleStateTransition(thread, 'reopen')}
                             />

@@ -50,6 +50,8 @@ import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hook
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealListRow from '@/app/components/records/deals/DealListRow';
+import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
+import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
@@ -1043,8 +1045,22 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         return { openCount, openValue, closedActualValue, closedForecastValue, forecastAccuracy };
     }, [dealMetrics, activeCurrency]);
 
+    const commentIndicatorIds = useMemo(() => deals.map((deal) => deal.id), [deals]);
+    const commentCounts = useCommentIndicators('deal', commentIndicatorIds);
+
     const columns: ColumnDef<Deal>[] = useMemo(() => [
-        { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null, widthClass: 'min-w-48' },
+        {
+            key: 'name',
+            label: t('columnName'),
+            getSortValue: (d) => d.name ?? null,
+            widthClass: 'min-w-48',
+            render: (d) => (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <span className="truncate">{d.name}</span>
+                    <CommentIndicatorChip count={commentCounts.get(d.id)} />
+                </span>
+            ),
+        },
         {
             key: 'value',
             label: t('columnValue'),
@@ -1159,7 +1175,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
             render: (d) => formatDateTime(d.updatedAt, locale),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit, commentCounts]);
 
     const visibleDeals = deals;
 

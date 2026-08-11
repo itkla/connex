@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -33,6 +34,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useActionRecord, useActions } from '@/app/hooks/useActions';
+import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
+import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
 import type { ActionId } from '@/app/lib/actions/types';
@@ -103,6 +106,9 @@ function RecordPeekDrawer({
     const [data, setData] = useState<PeekData | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<'notFound' | 'forbidden' | 'failed' | null>(null);
+
+    const commentIndicatorIds = useMemo(() => (target ? [target.id] : []), [target]);
+    const commentCounts = useCommentIndicators(target?.type ?? 'person', commentIndicatorIds);
 
     const targetKey = target ? `${target.type}:${target.id}` : null;
     const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -212,7 +218,17 @@ function RecordPeekDrawer({
                     <div className="flex items-center gap-3">
                         <PeekAvatar target={target} data={data} />
                         <div className="min-w-0 flex-1">
-                            <DrawerTitle className="truncate text-base">{label || (loading ? t('loading') : '')}</DrawerTitle>
+                            <div className="flex min-w-0 items-center gap-2">
+                                <DrawerTitle className="truncate text-base">{label || (loading ? t('loading') : '')}</DrawerTitle>
+                                {target && commentCounts.get(target.id) ? (
+                                    <Link
+                                        href={`/records/${PEEK_COLLECTIONS[target.type]}/${target.id}#${target.type === 'person' ? 'contact' : target.type}-detail-comments`}
+                                        className="shrink-0"
+                                    >
+                                        <CommentIndicatorChip count={commentCounts.get(target.id)} />
+                                    </Link>
+                                ) : null}
+                            </div>
                             <DrawerDescription className="truncate">{data ? recordSubtitle(data) : ''}</DrawerDescription>
                         </div>
                     </div>

@@ -4,7 +4,11 @@ import type { Ref } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowUturnLeftIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 
-import type { RecordComment, RecordCommentThread } from '@/app/lib/types';
+import type {
+    RecordComment,
+    RecordCommentReactionKey,
+    RecordCommentThread,
+} from '@/app/lib/types';
 import { formatDateTime } from '@/app/lib/utils';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import CommentRow from '@/app/components/records/comments/CommentRow';
@@ -25,6 +29,7 @@ type Props = {
     onReplyChange: (value: string) => void;
     onReplySubmit: () => void;
     onDelete: (comment: RecordComment) => void;
+    onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
     onResolve: () => void;
     onReopen: () => void;
 };
@@ -57,6 +62,7 @@ export default function CommentThreadCard({
     onReplyChange,
     onReplySubmit,
     onDelete,
+    onToggleReaction,
     onResolve,
     onReopen,
 }: Props) {
@@ -90,7 +96,9 @@ export default function CommentThreadCard({
                                 !deleted &&
                                 (comment.author?.id === currentUserId || canModerate)
                             }
+                            canReact={canComment}
                             onDelete={onDelete}
+                            onToggleReaction={onToggleReaction}
                         />
                     );
                 })}

@@ -31,6 +31,10 @@
     "postFailed": "Couldn't post the comment",
     "deleteFailed": "Couldn't delete the comment",
     "posted": "Comment posted",
-    "deleted": "Comment deleted"
+    "deleted": "Comment deleted",
+    "openThreads": "{count, plural, =1 {# open thread} other {# open threads}}",
+    "addReaction": "Add reaction",
+    "reactionLabel": "{reaction}, {count, plural, =1 {# person} other {# people}}",
+    "reactionFailed": "Couldn't update the reaction"
   }
 }

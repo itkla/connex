@@ -2734,6 +2734,25 @@ export type RecordCommentTargetType = 'person' | 'company' | 'deal';
 
 export type RecordCommentStateFilter = 'open' | 'resolved' | 'all';
 
+export type RecordCommentReactionKey =
+    | 'thumbs_up'
+    | 'thumbs_down'
+    | 'heart'
+    | 'celebrate'
+    | 'eyes'
+    | 'laugh';
+
+export type RecordCommentReactionSummary = {
+    reaction: RecordCommentReactionKey;
+    count: number;
+    reactedByMe: boolean;
+};
+
+export type RecordCommentIndicator = {
+    targetId: number;
+    openThreads: number;
+};
+
 export type RecordCommentAuthor = {
     id: number;
     displayName: string;
@@ -2752,6 +2771,8 @@ export type RecordComment = {
     deletedByUserId?: number | null;
     /** Server-authorized @/# references resolved from the content tokens. */
     references?: NoteReference[];
+    /** Per-reaction aggregate for this comment, including the caller's own state. */
+    reactions?: RecordCommentReactionSummary[];
 };
 
 export type RecordCommentThread = {

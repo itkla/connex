@@ -31,6 +31,10 @@
     "postFailed": "コメントを投稿できませんでした",
     "deleteFailed": "コメントを削除できませんでした",
     "posted": "コメントを投稿しました",
-    "deleted": "コメントを削除しました"
+    "deleted": "コメントを削除しました",
+    "openThreads": "未解決スレッド{count}件",
+    "addReaction": "リアクションを追加",
+    "reactionLabel": "{reaction}、{count}人",
+    "reactionFailed": "リアクションを更新できませんでした"
   }
 }
