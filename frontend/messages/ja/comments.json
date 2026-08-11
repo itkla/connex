@@ -8,6 +8,7 @@
     "reply": "返信",
     "cancel": "キャンセル",
     "deletedComment": "このコメントは削除されました",
+    "formerMember": "元メンバー",
     "delete": "コメントを削除",
     "deleteTitle": "このコメントを削除しますか？",
     "deleteBody": "コメントは全員に対して削除され、元に戻せません。スレッド内の位置は保持されます。",

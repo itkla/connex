@@ -2741,7 +2741,8 @@ export type RecordCommentAuthor = {
 export type RecordComment = {
     id: number;
     threadId: number;
-    author: RecordCommentAuthor;
+    /** Null when the author's account has been permanently erased. */
+    author: RecordCommentAuthor | null;
     /** Null once the comment has been redacted; the row survives as a tombstone. */
     content: string | null;
     createdAt: string;

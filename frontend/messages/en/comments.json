@@ -8,6 +8,7 @@
     "reply": "Reply",
     "cancel": "Cancel",
     "deletedComment": "This comment was deleted",
+    "formerMember": "Former member",
     "delete": "Delete comment",
     "deleteTitle": "Delete this comment?",
     "deleteBody": "The comment is removed for everyone and can't be restored. Its place in the thread is kept.",

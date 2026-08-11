@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 import { LoaderCircle } from 'lucide-react';
-import { ArrowUturnLeftIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { ArrowUturnLeftIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import {
@@ -15,21 +15,12 @@ import {
     replyToCommentThread,
 } from '@/app/lib/api';
 import type { RecordComment, RecordCommentTargetType, RecordCommentThread } from '@/app/lib/types';
-import { formatDateTime } from '@/app/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import MentionEditor from '@/app/components/activity/notes/MentionEditor';
-import NoteContent from '@/app/components/activity/notes/NoteContent';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import CommentComposer from '@/app/components/records/comments/CommentComposer';
+import CommentDeleteDialog from '@/app/components/records/comments/CommentDeleteDialog';
+import CommentRow from '@/app/components/records/comments/CommentRow';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 
 type Props = {
     targetType: RecordCommentTargetType;
@@ -40,6 +31,9 @@ type Props = {
     className?: string;
 };
 
+const PAGE_SIZE = 10;
+const DEEP_LINK_LIMIT = 50;
+
 function tokenText(value: string): string {
     return value.replace(/\[([^\]]*)\]\((?:user|person|deal|company|note|file|task|activity):\d+\)/g, '$1').trim();
 }
@@ -48,8 +42,8 @@ function tokenText(value: string): string {
  * Workspace-local discussion feed for one record (#906 slice 0): open threads with
  * replies, a MentionEditor composer, and redaction tombstones. Comments are
  * immutable — the only mutation besides posting is a soft redact. The section is
- * deliberately calm: no entry animations, content ordered oldest-first inside a
- * thread and newest thread first.
+ * deliberately calm: shape-matched skeletons while loading, no entry animations,
+ * comments oldest-first inside a thread and newest thread first.
  */
 export default function CommentsSection({
     targetType,
@@ -60,7 +54,6 @@ export default function CommentsSection({
     className,
 }: Props) {
     const t = useTranslations('Comments');
-    const locale = useLocale();
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
 
@@ -80,9 +73,10 @@ export default function CommentsSection({
     const composerToken = useRef<string | null>(null);
     const replyToken = useRef<string | null>(null);
     const highlightRef = useRef<HTMLLIElement | null>(null);
+    const highlightScrolled = useRef(false);
 
     const highlightedCommentId = searchParams.get('comment');
-    const initialLimit = highlightedCommentId ? 100 : 20;
+    const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
 
     useEffect(() => {
         let active = true;
@@ -104,33 +98,15 @@ export default function CommentsSection({
         };
     }, [targetType, targetId, initialLimit, refreshNonce]);
 
-    const handleLoadMore = useCallback(async () => {
-        if (loadingMore) return;
-        setLoadingMore(true);
-        try {
-            const data = await getCommentThreads(targetType, targetId, {
-                limit: 20,
-                offset: threads.length,
-            });
-            setThreads((prev) => [
-                ...prev,
-                ...data.filter((thread) => !prev.some((existing) => existing.id === thread.id)),
-            ]);
-            setHasMore(data.length === 20);
-        } catch {
-            toastError(t('loadFailed'));
-        } finally {
-            setLoadingMore(false);
-        }
-    }, [loadingMore, targetType, targetId, threads.length, t]);
-
     useEffect(() => {
-        if (!loaded || !highlightedCommentId) return;
-        highlightRef.current?.scrollIntoView({
+        if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
+        if (!highlightRef.current) return;
+        highlightScrolled.current = true;
+        highlightRef.current.scrollIntoView({
             behavior: reduceMotion ? 'auto' : 'smooth',
             block: 'center',
         });
-    }, [loaded, highlightedCommentId, reduceMotion]);
+    }, [loaded, threads, highlightedCommentId, reduceMotion]);
 
     const commentCount = useMemo(
         () =>
@@ -142,8 +118,28 @@ export default function CommentsSection({
         [threads],
     );
 
+    const handleLoadMore = useCallback(async () => {
+        if (loadingMore) return;
+        setLoadingMore(true);
+        try {
+            const data = await getCommentThreads(targetType, targetId, {
+                limit: PAGE_SIZE,
+                offset: threads.length,
+            });
+            setThreads((prev) => [
+                ...prev,
+                ...data.filter((thread) => !prev.some((existing) => existing.id === thread.id)),
+            ]);
+            setHasMore(data.length === PAGE_SIZE);
+        } catch {
+            toastError(t('loadFailed'));
+        } finally {
+            setLoadingMore(false);
+        }
+    }, [loadingMore, targetType, targetId, threads.length, t]);
+
     const handlePost = useCallback(async () => {
-        if (submitting || tokenText(composerValue).length === 0) return;
+        if (submitting || !loaded || tokenText(composerValue).length === 0) return;
         composerToken.current ??= crypto.randomUUID();
         setSubmitting(true);
         try {
@@ -162,7 +158,7 @@ export default function CommentsSection({
         } finally {
             setSubmitting(false);
         }
-    }, [submitting, composerValue, targetType, targetId, t]);
+    }, [submitting, loaded, composerValue, targetType, targetId, t]);
 
     const handleReply = useCallback(async () => {
         if (submitting || replyThreadId == null || tokenText(replyValue).length === 0) return;
@@ -232,15 +228,23 @@ export default function CommentsSection({
             <div className="mb-3 flex h-8 items-center">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('title')}
-                    {loaded ? ` · ${commentCount}` : ''}
+                    {loaded && !loadError ? ` · ${commentCount}` : ''}
                 </h2>
             </div>
 
             <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
                 {!loaded && (
-                    <div className="flex items-center justify-center px-6 py-8">
-                        <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-                    </div>
+                    <ul className="flex flex-col gap-4 px-6 py-5">
+                        {[0, 1].map((row) => (
+                            <li key={row} className="flex items-start gap-3">
+                                <Skeleton className="size-7 shrink-0 rounded-full" />
+                                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                                    <Skeleton className="h-3.5 w-40" />
+                                    <Skeleton className="h-4 w-3/4" />
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
                 )}
 
                 {loaded && loadError && (
@@ -273,61 +277,20 @@ export default function CommentsSection({
                                         const highlighted =
                                             highlightedCommentId === String(comment.id);
                                         const deleted = comment.deletedAt != null;
-                                        const canDelete =
-                                            !deleted &&
-                                            (comment.author.id === currentUserId || canModerate);
                                         return (
-                                            <li
+                                            <CommentRow
                                                 key={comment.id}
-                                                ref={highlighted ? highlightRef : undefined}
-                                                className={cn(
-                                                    'group flex scroll-mt-24 items-start gap-3 rounded-lg px-2 py-1.5 transition-colors duration-700',
-                                                    index > 0 && 'ml-9',
-                                                    highlighted && 'bg-brand-light/40',
-                                                )}
-                                            >
-                                                <Avatar className="mt-0.5 size-7 shrink-0">
-                                                    <AvatarImage
-                                                        src={comment.author.profilePictureUrl ?? undefined}
-                                                        alt=""
-                                                    />
-                                                    <AvatarFallback className="text-[0.65rem]">
-                                                        {comment.author.displayName.slice(0, 1).toUpperCase()}
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="flex items-baseline gap-2 text-sm">
-                                                        <span className="font-medium text-foreground">
-                                                            {comment.author.displayName}
-                                                        </span>
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {formatDateTime(comment.createdAt, locale)}
-                                                        </span>
-                                                    </p>
-                                                    {deleted ? (
-                                                        <p className="text-sm italic text-muted-foreground">
-                                                            {t('deletedComment')}
-                                                        </p>
-                                                    ) : (
-                                                        <NoteContent
-                                                            content={comment.content ?? ''}
-                                                            className="text-sm text-foreground"
-                                                            block
-                                                        />
-                                                    )}
-                                                </div>
-                                                {canDelete && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPendingDelete(comment)}
-                                                        className="shrink-0 cursor-pointer rounded-md p-1.5 text-muted-foreground opacity-0 transition-[color,background-color,opacity] hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-                                                        title={t('delete')}
-                                                        aria-label={t('delete')}
-                                                    >
-                                                        <TrashIcon className="size-4" />
-                                                    </button>
-                                                )}
-                                            </li>
+                                                comment={comment}
+                                                indented={index > 0}
+                                                highlighted={highlighted}
+                                                highlightRef={highlighted ? highlightRef : undefined}
+                                                canDelete={
+                                                    !deleted &&
+                                                    (comment.author?.id === currentUserId ||
+                                                        canModerate)
+                                                }
+                                                onDelete={setPendingDelete}
+                                            />
                                         );
                                     })}
                                 </ul>
@@ -350,46 +313,24 @@ export default function CommentsSection({
                                 )}
 
                                 {canComment && replyThreadId === thread.id && (
-                                    <div className="mt-2 ml-11 flex flex-col gap-2">
-                                        <MentionEditor
+                                    <div className="mt-2 ml-11">
+                                        <CommentComposer
                                             value={replyValue}
                                             onChange={(value) => {
                                                 setReplyValue(value);
                                                 replyToken.current = null;
                                             }}
-                                            placeholder={t('replyPlaceholder')}
-                                            ariaLabel={t('reply')}
-                                            autoFocus
                                             onSubmit={handleReply}
-                                            className="min-h-16 rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                                            onCancel={() => {
+                                                setReplyThreadId(null);
+                                                setReplyValue('');
+                                            }}
+                                            placeholder={t('replyPlaceholder')}
+                                            submitLabel={t('reply')}
+                                            submitting={submitting}
+                                            canSubmit={tokenText(replyValue).length > 0}
+                                            autoFocus
                                         />
-                                        <div className="flex justify-end gap-2">
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                disabled={submitting}
-                                                onClick={() => {
-                                                    setReplyThreadId(null);
-                                                    setReplyValue('');
-                                                }}
-                                            >
-                                                {t('cancel')}
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="brand"
-                                                size="sm"
-                                                disabled={submitting || tokenText(replyValue).length === 0}
-                                                onClick={handleReply}
-                                            >
-                                                {submitting ? (
-                                                    <LoaderCircle className="size-4 animate-spin" />
-                                                ) : (
-                                                    t('reply')
-                                                )}
-                                            </Button>
-                                        </div>
                                     </div>
                                 )}
                             </li>
@@ -417,69 +358,30 @@ export default function CommentsSection({
                 )}
 
                 {canComment && (
-                    <div className={cn('flex flex-col gap-2 p-3', !isEmpty && 'border-t border-border')}>
-                        <MentionEditor
+                    <div className={cn('p-3', !isEmpty && 'border-t border-border')}>
+                        <CommentComposer
                             value={composerValue}
                             onChange={(value) => {
                                 setComposerValue(value);
                                 composerToken.current = null;
                             }}
-                            placeholder={t('composerPlaceholder')}
-                            ariaLabel={t('title')}
                             onSubmit={handlePost}
-                            className="min-h-16 rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                            placeholder={t('composerPlaceholder')}
+                            submitLabel={t('post')}
+                            submitting={submitting}
+                            disabled={!loaded}
+                            canSubmit={tokenText(composerValue).length > 0}
                         />
-                        <div className="flex justify-end">
-                            <Button
-                                type="button"
-                                variant="brand"
-                                size="sm"
-                                disabled={submitting || tokenText(composerValue).length === 0}
-                                onClick={handlePost}
-                            >
-                                {submitting ? (
-                                    <LoaderCircle className="size-4 animate-spin" />
-                                ) : (
-                                    t('post')
-                                )}
-                            </Button>
-                        </div>
                     </div>
                 )}
             </div>
 
-            <Dialog
+            <CommentDeleteDialog
                 open={pendingDelete != null}
-                onOpenChange={(open) => {
-                    if (!open && !deleting) setPendingDelete(null);
-                }}
-            >
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('deleteBody')}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deleting}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
-                        <Button
-                            variant="destructive"
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            disabled={deleting}
-                            onClick={confirmDelete}
-                        >
-                            {deleting ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                            ) : (
-                                t('confirmDelete')
-                            )}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                deleting={deleting}
+                onCancel={() => setPendingDelete(null)}
+                onConfirm={confirmDelete}
+            />
         </div>
     );
 }

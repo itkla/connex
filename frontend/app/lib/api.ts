@@ -3643,7 +3643,7 @@ export function getCommentThreads(
             targetType,
             targetId,
             state: 'all',
-            limit: page.limit ?? 20,
+            limit: page.limit ?? 10,
             offset: page.offset ?? 0,
         })}`,
         init,
