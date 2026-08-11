@@ -5,8 +5,10 @@ import {
     classifyRadarReadFailure,
     createRadarTaskSignalStore,
     filterRadarSignals,
+    groupRadarSignalsByBand,
     isRadarEvidenceStale,
     radarEvidenceRefreshDelay,
+    radarFamilyCounts,
     replaceRadarSignal,
     submitRadarTaskWithCurrentSignal,
 } from '@/app/lib/radar';
@@ -135,6 +137,42 @@ describe('Radar presentation state', () => {
         expect(classifyRadarSurface(partial, [])).toBe('partial');
         expect(classifyRadarSurface(unavailable, [])).toBe('unavailable');
         expect(classifyRadarSurface(payload([], availableFamilies), [])).toBe('empty');
+    });
+
+    it('groups signals into triage bands without disturbing the backend rank order', () => {
+        const signals = [
+            signal({ id: 1, priority: 'high' }),
+            signal({ id: 2, priority: 'opportunity' }),
+            signal({ id: 3, priority: 'cooling' }),
+            signal({ id: 4, priority: 'high' }),
+            signal({ id: 5, priority: 'medium' }),
+        ];
+
+        expect(groupRadarSignalsByBand(signals).map((group) => [group.band, group.signals.map((item) => item.id)]))
+            .toEqual([['now', [1, 4]], ['soon', [3, 5]], ['later', [2]]]);
+        expect(groupRadarSignalsByBand([signal({ priority: 'high' })]).map((group) => group.band))
+            .toEqual(['now']);
+        expect(groupRadarSignalsByBand([])).toEqual([]);
+    });
+
+    it('counts what each family chip would actually yield under the current state and query', () => {
+        const signals = [
+            signal({ id: 1 }),
+            signal({
+                id: 2,
+                family: 'deal_risk',
+                subject: { type: 'deal', id: 20, label: 'Apollo renewal' },
+            }),
+            signal({ id: 3, family: 'warm_path', state: 'dismissed' }),
+            signal({ id: 4, family: 'deal_risk', state: 'followed' }),
+        ];
+
+        expect(radarFamilyCounts(signals, { state: 'attention', query: '' }))
+            .toEqual({ all: 3, relationship_decay: 1, deal_risk: 2, warm_path: 0 });
+        expect(radarFamilyCounts(signals, { state: 'attention', query: 'apollo' }))
+            .toEqual({ all: 1, relationship_decay: 0, deal_risk: 1, warm_path: 0 });
+        expect(radarFamilyCounts(signals, { state: 'all', query: '' }))
+            .toEqual({ all: 4, relationship_decay: 1, deal_risk: 2, warm_path: 1 });
     });
 
     it('distinguishes filtered no-results and replaces only the mutated signal', () => {

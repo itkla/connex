@@ -35,7 +35,7 @@ export default async function RadarPage() {
 
     return (
         <PageShell tier="wide">
-            <PageHeader title={t('title')} description={t('description')} />
+            <PageHeader title={t('title')} description={result.ok ? undefined : t('description')} />
             {result.ok ? (
                 <RadarBoard key={result.data.asOf} initialPayload={result.data} />
             ) : (

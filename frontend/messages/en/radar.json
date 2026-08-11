@@ -6,7 +6,15 @@
     },
     "title": "Relationship Radar",
     "description": "Review cooling relationships, deal risk, and warm paths from one ranked, evidence-backed list.",
-    "listLabel": "Ranked relationship signals",
+    "summary": {
+      "headline": "{count, plural, =0 {Nothing needs your attention right now} one {# signal needs your attention} other {# signals need your attention}}",
+      "asOf": " · evidence as of {asOf}"
+    },
+    "band": {
+      "now": "Act today",
+      "soon": "Slipping away",
+      "later": "Worth a look"
+    },
     "family": {
       "relationship_decay": "Cooling relationships",
       "deal_risk": "Deal risk",
@@ -28,6 +36,12 @@
       "followed": "Following",
       "snoozed": "Snoozed",
       "dismissed": "Dismissed"
+    },
+    "detail": {
+      "show": "Show evidence",
+      "hide": "Hide evidence",
+      "showNamed": "Show evidence for {subject}",
+      "hideNamed": "Hide evidence for {subject}"
     },
     "filters": {
       "label": "Radar filters",

@@ -996,7 +996,7 @@ describe('Radar action integration', () => {
         await board.unmount();
     });
 
-    it('disables every real Radar card action while the board-wide gate is occupied', async () => {
+    it('disables every mutating card action while the board-wide gate is occupied, leaving the evidence disclosure usable', async () => {
         const cardModule = await vi.importActual<
             typeof import('@/app/components/radar/RadarSignalCard')
         >('@/app/components/radar/RadarSignalCard');
@@ -1023,11 +1023,17 @@ describe('Radar action integration', () => {
                 ...callbacks,
             }));
         });
-        const actionButtons = installed.elements.filter(
+        const buttons = installed.elements.filter(
             (element) => element.tagName === 'BUTTON' && element.parentNode !== null,
         );
+        const disclosure = buttons.filter((button) => button.getAttribute('aria-expanded') !== null);
+        const actionButtons = buttons.filter((button) => button.getAttribute('aria-expanded') === null);
+
         expect(actionButtons).toHaveLength(5);
         expect(actionButtons.every((button) => button.disabled === true)).toBe(true);
+        expect(disclosure).toHaveLength(1);
+        expect(disclosure[0].disabled).not.toBe(true);
+        expect(disclosure[0].getAttribute('aria-expanded')).toBe('false');
 
         await act(async () => root.unmount());
     });
