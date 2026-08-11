@@ -2361,13 +2361,31 @@ case_jar_identity_reads_every_build_layout() {
     jar_git_sha "$SANDBOX/missing.jar" >/dev/null 2>&1
     assert_status jar_missing_file 1 $? || return 1
 
-    # unzip is absent on the staging host; the fallback readers must return the same identity.
+    # A present-but-broken unzip must fall through to another reader rather than report the JAR
+    # as identity-less, which would refuse every deploy.
     local shim="$SANDBOX/no-unzip"
     mkdir -p "$shim"
     printf '#!/bin/sh\nexit 127\n' > "$shim/unzip"
     chmod +x "$shim/unzip"
-    assert_equals jar_without_unzip "$sha" \
+    assert_equals jar_broken_unzip "$sha" \
         "$(PATH="$shim:$PATH" jar_git_sha "$SANDBOX/root.jar")" || return 1
+
+    # The staging host has no unzip at all. Preflight must accept python3 or jar instead, or the
+    # fallback readers are unreachable in a real deployment.
+    local bare="$SANDBOX/bare-bin"
+    mkdir -p "$bare"
+    for tool in python3 jq zip sha256sum stat sed head cat mktemp rm mkdir printf; do
+        [ -x "$bare/$tool" ] || ln -sf "$(command -v "$tool" 2>/dev/null)" "$bare/$tool" 2>/dev/null
+    done
+    PATH="$bare" archive_reader_available
+    assert_status reader_available_without_unzip 0 $? || return 1
+    assert_equals jar_without_unzip_at_all "$sha" \
+        "$(PATH="$bare" jar_git_sha "$SANDBOX/root.jar")" || return 1
+
+    local empty_bin="$SANDBOX/empty-bin"
+    mkdir -p "$empty_bin"
+    PATH="$empty_bin" archive_reader_available
+    assert_status reader_absent_is_refused 1 $? || return 1
 }
 
 run_case case_pair_rollback_restores_exact_artifacts

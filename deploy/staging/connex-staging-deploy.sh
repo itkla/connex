@@ -143,6 +143,13 @@ frontend_marker_absent() {
     [ ! -e "$FRONTEND_RELEASE_MARKER" ] && [ ! -L "$FRONTEND_RELEASE_MARKER" ]
 }
 
+# True when at least one archive reader read_archive_entry can drive is installed.
+archive_reader_available() {
+    command -v unzip >/dev/null 2>&1 \
+        || command -v python3 >/dev/null 2>&1 \
+        || command -v jar >/dev/null 2>&1
+}
+
 # Prints one entry from a zip archive, or nothing when the archive has no such entry. Staging
 # hosts do not all carry unzip, so the JDK's jar tool and python3 are accepted as equals; a host
 # with none of the three fails rather than reporting every archive as empty.
@@ -1430,8 +1437,8 @@ main() {
         set_failure_context preflight release "Deploy refused: retained rollback marker or bundle is invalid"
         return 1
     fi
-    if ! command -v unzip >/dev/null 2>&1; then
-        set_failure_context preflight backend "Deploy refused: unzip is required to verify JAR release identity"
+    if ! archive_reader_available; then
+        set_failure_context preflight backend "Deploy refused: unzip, python3, or jar is required to verify JAR release identity"
         return 1
     fi
 
