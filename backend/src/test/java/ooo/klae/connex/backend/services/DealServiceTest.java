@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -39,6 +41,7 @@ import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
@@ -69,6 +72,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.util.AnalyticsPeriods;
@@ -81,6 +85,7 @@ class DealServiceTest extends AbstractServiceTest {
     @Autowired DealLineItemService dealLineItemService;
     @Autowired BulkOperationService bulkOperationService;
     @Autowired DuplicatePreflightService duplicatePreflightService;
+    @Autowired RecordCommentService recordCommentService;
     @Autowired RuleActionExecutor ruleActionExecutor;
     @Autowired AuditService auditService;
     @Autowired ApplicationEvents applicationEvents;
@@ -88,6 +93,7 @@ class DealServiceTest extends AbstractServiceTest {
     @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
     @MockitoSpyBean DealMapper dealMapperSpy;
+    @MockitoSpyBean RecordCommentMapper recordCommentMapperSpy;
     @MockitoSpyBean NotificationChangePublisher notificationChanges;
     @MockitoSpyBean RuleTriggerPublisher ruleTriggers;
 
@@ -107,6 +113,33 @@ class DealServiceTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
+    }
+
+    @Test
+    void deleteRemovesOnlyTheDealsCommentThreadsAndTheirCascadedComments() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deletedDeal = newDeal(pipeline, stage, company);
+        Deal retainedDeal = newDeal(pipeline, stage, company);
+        RecordCommentThread deletedThread = recordCommentService.createThread(
+            "deal", deletedDeal.getId(), "Deleted deal comment", UUID.randomUUID().toString());
+        RecordCommentThread retainedThread = recordCommentService.createThread(
+            "deal", retainedDeal.getId(), "Retained deal comment", UUID.randomUUID().toString());
+        long deletedCommentId = deletedThread.getComments().getFirst().getId();
+        long retainedCommentId = retainedThread.getComments().getFirst().getId();
+        clearInvocations(dealMapperSpy, recordCommentMapperSpy);
+
+        dealService.delete(deletedDeal.getId());
+
+        var order = inOrder(recordCommentMapperSpy, dealMapperSpy);
+        order.verify(dealMapperSpy).delete(workspace.getId(), deletedDeal.getId());
+        order.verify(recordCommentMapperSpy).deleteThreadsForTarget(
+            workspace.getId(), "deal", deletedDeal.getId());
+        assertNull(recordCommentMapperSpy.getThreadById(workspace.getId(), deletedThread.getId()));
+        assertNull(recordCommentMapperSpy.getCommentById(workspace.getId(), deletedCommentId));
+        assertNotNull(recordCommentMapperSpy.getThreadById(workspace.getId(), retainedThread.getId()));
+        assertNotNull(recordCommentMapperSpy.getCommentById(workspace.getId(), retainedCommentId));
     }
 
     @Test

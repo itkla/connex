@@ -64,6 +64,7 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import InfoRow from '@/app/components/me/InfoRow';
 import Timeline from '@/app/components/me/Timeline';
 import Attachments from '@/app/components/attachments/Attachments';
+import CommentsSection from '@/app/components/records/comments/CommentsSection';
 import SummaryTile from '@/app/components/SummaryTile';
 import { EngagementSparkline, type EngagementPoint } from '@/app/components/records/companies/CompanyCard';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
@@ -505,6 +506,19 @@ export default async function DealPage({ params }: DealPageProps) {
                             </RecordDetailSection>
                         </Rise>
                     </div>
+
+                <Rise delay={0.1}>
+                    <RecordDetailSection recordKind="deal" section="comments">
+                        <CommentsSection
+                            key={`deal-${deal.id}`}
+                            targetType="deal"
+                            targetId={deal.id}
+                            currentUserId={currentUser.id}
+                            canComment={effectivePermissions.includes('COMMENT_CREATE')}
+                            canModerate={effectivePermissions.includes('COMMENT_MODERATE')}
+                        />
+                    </RecordDetailSection>
+                </Rise>
 
                 <Rise delay={0.12}>
                     <RecordDetailSection

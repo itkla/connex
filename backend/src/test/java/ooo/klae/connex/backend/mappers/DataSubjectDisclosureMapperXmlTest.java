@@ -42,7 +42,7 @@ class DataSubjectDisclosureMapperXmlTest {
             "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findIdentities", "findTags",
             "findCustomFields", "findActivities", "findNotes", "findTasks", "findAttachments",
             "findEmployment", "findEdges", "findDeals", "findIntroductions", "findProvisions",
-            "findProviderCaptureEvidence");
+            "findProviderCaptureEvidence", "findRecordCommentThreads", "findRecordComments");
         String namespacePrefix = DataSubjectDisclosureMapper.class.getName() + ".";
         Set<String> found = new HashSet<>();
         for (MappedStatement statement : new HashSet<>(configuration.getMappedStatements())) {

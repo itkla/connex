@@ -14,6 +14,8 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonIdentityDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ProviderCaptureEvidenceDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentDisclosureDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentThreadDisclosureDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RelationshipEdgeDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.TagDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.TaskDto;
@@ -52,6 +54,16 @@ public interface DataSubjectDisclosureMapper {
         @Param("workspaceIds") List<Integer> workspaceIds);
 
     List<NoteDto> findNotes(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds);
+
+    List<RecordCommentThreadDisclosureDto> findRecordCommentThreads(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds);
+
+    List<RecordCommentDisclosureDto> findRecordComments(
+        @Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);
 

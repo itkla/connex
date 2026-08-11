@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,12 +31,15 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.RecordComment;
+import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ActivityDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentDisclosureDto;
 
 class DataSubjectRequestMapperTest extends AbstractMapperTest {
     @Autowired private DataSubjectRequestMapper dataSubjectRequestMapper;
@@ -44,6 +48,7 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
     @Autowired private ActivityMapper activityMapper;
     @Autowired private AttachmentMapper attachmentMapper;
     @Autowired private NoteMapper noteMapper;
+    @Autowired private RecordCommentMapper recordCommentMapper;
     @Autowired private TaskMapper taskMapper;
     @Autowired private PersonEmploymentMapper personEmploymentMapper;
     @Autowired private PersonEdgeMapper personEdgeMapper;
@@ -119,6 +124,20 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         newActivity(foreignWorkspace.getId(), subject, actor, "Foreign Activity");
         Note subjectNote = newNote(overlayWorkspace.getId(), subject, actor, "Subject Note");
         newNote(overlayWorkspace.getId(), other, actor, "Other Note");
+        RecordCommentThread subjectCommentThread = newCommentThread(
+            overlayWorkspace.getId(), subject, actor);
+        RecordComment subjectComment = newRecordComment(
+            overlayWorkspace.getId(), subjectCommentThread, actor, "Subject Comment");
+        RecordComment redactedSubjectComment = newRecordComment(
+            overlayWorkspace.getId(), subjectCommentThread, actor, "Redacted Subject Comment");
+        recordCommentMapper.softDeleteComment(
+            overlayWorkspace.getId(), redactedSubjectComment.getId(), actor.getId());
+        RecordCommentThread otherCommentThread = newCommentThread(
+            overlayWorkspace.getId(), other, actor);
+        newRecordComment(overlayWorkspace.getId(), otherCommentThread, actor, "Other Comment");
+        RecordCommentThread foreignCommentThread = newCommentThread(
+            foreignWorkspace.getId(), subject, actor);
+        newRecordComment(foreignWorkspace.getId(), foreignCommentThread, actor, "Foreign Comment");
         Task subjectTask = newTask(overlayWorkspace.getId(), subject, actor, "Subject Task");
         newTask(overlayWorkspace.getId(), other, actor, "Other Task");
         PersonEmployment subjectEmployment = newEmployment(
@@ -165,6 +184,21 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(ActivityDto::getId).toList());
         assertEquals(List.of(subjectNote.getId()), dataSubjectDisclosureMapper.findNotes(
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        var disclosedCommentThreads = dataSubjectDisclosureMapper.findRecordCommentThreads(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds);
+        assertEquals(List.of(subjectCommentThread.getId()), disclosedCommentThreads.stream()
+            .map(row -> row.getId()).toList());
+        assertEquals("person", disclosedCommentThreads.getFirst().getTargetType());
+        assertEquals(subject.getId(), disclosedCommentThreads.getFirst().getTargetId());
+        List<RecordCommentDisclosureDto> disclosedComments =
+            dataSubjectDisclosureMapper.findRecordComments(
+                ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds);
+        assertEquals(List.of(subjectComment.getId(), redactedSubjectComment.getId()),
+            disclosedComments.stream().map(RecordCommentDisclosureDto::getId).toList());
+        assertEquals("Subject Comment", disclosedComments.getFirst().getContent());
+        assertNull(disclosedComments.getLast().getContent());
+        assertNotNull(disclosedComments.getLast().getDeletedAt());
+        assertEquals(actor.getId(), disclosedComments.getLast().getDeletedByUserId());
         assertEquals(List.of(subjectTask.getId()), dataSubjectDisclosureMapper.findTasks(
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
         assertEquals(List.of(subjectEmployment.getId()), dataSubjectDisclosureMapper.findEmployment(
@@ -281,6 +315,32 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         note.setAuthor(actor);
         noteMapper.insert(note);
         return note;
+    }
+
+    private RecordCommentThread newCommentThread(int workspaceId, Person person, User actor) {
+        RecordCommentThread thread = new RecordCommentThread();
+        thread.setWorkspaceId(workspaceId);
+        thread.setTargetType("person");
+        thread.setTargetId(person.getId());
+        thread.setCreatedByUserId(actor.getId());
+        thread.setState("open");
+        recordCommentMapper.insertThread(thread);
+        return thread;
+    }
+
+    private RecordComment newRecordComment(
+            int workspaceId,
+            RecordCommentThread thread,
+            User actor,
+            String content) {
+        RecordComment comment = new RecordComment();
+        comment.setWorkspaceId(workspaceId);
+        comment.setThreadId(thread.getId());
+        comment.setAuthorUserId(actor.getId());
+        comment.setContent(content);
+        comment.setClientToken(UUID.randomUUID().toString());
+        recordCommentMapper.insertComment(comment);
+        return comment;
     }
 
     private Task newTask(int workspaceId, Person person, User actor, String description) {

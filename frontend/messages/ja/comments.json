@@ -1,0 +1,25 @@
+{
+  "Comments": {
+    "title": "コメント",
+    "empty": "まだコメントはありません。最初のコメントを書きましょう。",
+    "composerPlaceholder": "コメント — @でメンション、#でレコード参照",
+    "replyPlaceholder": "返信…",
+    "post": "コメントする",
+    "reply": "返信",
+    "cancel": "キャンセル",
+    "deletedComment": "このコメントは削除されました",
+    "formerMember": "元メンバー",
+    "delete": "コメントを削除",
+    "deleteTitle": "このコメントを削除しますか？",
+    "deleteBody": "コメントは全員に対して削除され、元に戻せません。スレッド内の位置は保持されます。",
+    "confirmDelete": "削除",
+    "replyCount": "{count}件の返信",
+    "loadMore": "以前のスレッドを表示",
+    "retry": "再試行",
+    "loadFailed": "コメントを読み込めませんでした",
+    "postFailed": "コメントを投稿できませんでした",
+    "deleteFailed": "コメントを削除できませんでした",
+    "posted": "コメントを投稿しました",
+    "deleted": "コメントを削除しました"
+  }
+}

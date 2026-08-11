@@ -1,0 +1,25 @@
+{
+  "Comments": {
+    "title": "Comments",
+    "empty": "No comments yet. Start the discussion.",
+    "composerPlaceholder": "Comment — @ to mention, # to reference a record",
+    "replyPlaceholder": "Reply…",
+    "post": "Comment",
+    "reply": "Reply",
+    "cancel": "Cancel",
+    "deletedComment": "This comment was deleted",
+    "formerMember": "Former member",
+    "delete": "Delete comment",
+    "deleteTitle": "Delete this comment?",
+    "deleteBody": "The comment is removed for everyone and can't be restored. Its place in the thread is kept.",
+    "confirmDelete": "Delete",
+    "replyCount": "{count, plural, =1 {# reply} other {# replies}}",
+    "loadMore": "Show older threads",
+    "retry": "Try again",
+    "loadFailed": "Couldn't load comments",
+    "postFailed": "Couldn't post the comment",
+    "deleteFailed": "Couldn't delete the comment",
+    "posted": "Comment posted",
+    "deleted": "Comment deleted"
+  }
+}
