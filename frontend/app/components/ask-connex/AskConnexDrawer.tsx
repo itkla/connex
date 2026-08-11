@@ -5,13 +5,13 @@ import {
     ArchiveBoxIcon,
     ArrowDownIcon,
     ArrowPathIcon,
+    ArrowUpIcon,
     CheckIcon,
     ClockIcon,
     EllipsisHorizontalIcon,
     ExclamationCircleIcon,
     LinkIcon,
     MapPinIcon,
-    PaperAirplaneIcon,
     PencilSquareIcon,
     PlusIcon,
     SparklesIcon,
@@ -613,7 +613,7 @@ function ConversationSurface({
                                 )}
                             </div>
                             <Button type="submit" size="icon-sm" aria-label={labels.send} disabled={!canSend}>
-                                <PaperAirplaneIcon className="size-4" />
+                                <ArrowUpIcon className="size-4" />
                             </Button>
                         </div>
                     </div>
