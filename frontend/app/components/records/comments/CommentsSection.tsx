@@ -83,7 +83,10 @@ export default function CommentsSection({
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
     const [showResolved, setShowResolved] = useState(false);
     const stateFilter = highlightedCommentId || showResolved ? 'all' : 'open';
-    stateFilterRef.current = stateFilter;
+
+    useEffect(() => {
+        stateFilterRef.current = stateFilter;
+    }, [stateFilter]);
 
     useEffect(() => {
         let active = true;
