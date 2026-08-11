@@ -20,6 +20,10 @@
           "h": "Personal information we handle",
           "b": "- Account and profile data you provide: name, email, authentication credentials such as passkeys, and your workspace and role.\n- Usage and technical data generated when you use the Service: IP address, browser / user-agent, session identifiers, audit-log events, and timestamps.\n- Customer content: as an entrustee, we store and process the CRM records our customers enter, which may include third parties' names, contact details, employment history, activities, notes, and relationship information."
         },
+        "assistantSessions": {
+          "h": "Assistant sessions and workspace access",
+          "b": "Assistant sessions are workspace data. While the author remains an active member, a session not marked shared is inaccessible to other members, including workspace administrators. If the author leaves the workspace or deletes their account, the session is retained and becomes accessible to workspace administrators who hold the assistant-oversight permission, including when the session was not marked shared. These administrative reads are recorded in the audit log, and administrators cannot modify a retained session."
+        },
         "purpose": {
           "h": "Purpose of use",
           "b": "We use personal information to:\n\n- provide, operate, secure, and improve the Service;\n- authenticate users and enforce access control and tenant isolation;\n- maintain audit logs and detect, investigate, and respond to security incidents;\n- provide support and send service-related communications;\n- comply with legal obligations.\n\nWe handle customer content only to provide the Service on the customer's behalf and within the scope the customer instructs."
@@ -82,20 +86,24 @@
           "h": "3. Purpose of use of all retained personal data",
           "b": "We use retained personal data for the following purposes:\n\n- to provide, operate, and improve the Connex service;\n- to authenticate users and manage access, tenant isolation, and workspaces;\n- to maintain audit logs and to detect and respond to security incidents;\n- to provide customer support and service communications;\n- to handle inquiries and requests concerning personal data;\n- to comply with applicable laws.\n\nFor customer content handled under entrustment, the purpose is limited to providing the Service on the customer's behalf."
         },
+        "assistantSessions": {
+          "h": "4. Assistant sessions",
+          "b": "Assistant sessions are workspace data. Sessions not marked shared remain inaccessible to other members, including workspace administrators, while their author is an active workspace member. If the author leaves the workspace or deletes their account, the sessions are retained and become accessible to workspace administrators who hold the assistant-oversight permission, including sessions not marked shared. Each such administrative read is recorded in the audit log, and administrators cannot modify the retained session."
+        },
         "procedure": {
-          "h": "4. Procedures for disclosure and other requests (開示等の請求)",
+          "h": "5. Procedures for disclosure and other requests (開示等の請求)",
           "b": "You may request disclosure, correction / addition / deletion, cease of use or erasure, cease of third-party provision, and disclosure of third-party-provision records of your retained personal data.\n\nSend requests to the contact point in section 2. We will verify the requester's identity, respond without undue delay in the manner prescribed by the APPI, and inform you of any prescribed fee before proceeding. Where Connex holds the data only as an entrustee, we will refer the request to the customer that is the handling operator."
         },
         "security": {
-          "h": "5. Security control measures taken",
+          "h": "6. Security control measures taken",
           "b": "We have taken the following categories of security control measures:\n\n- Organizational: defined responsibilities, access management, and an append-only audit log of access to and changes of personal data.\n- Human: staff supervision and confidentiality obligations.\n- Physical: reliance on cloud infrastructure with physical-security controls.\n- Technical: role-based access control, tenant isolation, encrypted transport, hardened authentication (passkeys / WebAuthn), and security headers.\n- External environment: SaaS personal data is stored on cloud infrastructure located in Japan; where handling involves parties outside Japan, we take account of that country's data-protection environment."
         },
         "complaints": {
-          "h": "6. Where to lodge complaints",
+          "h": "7. Where to lodge complaints",
           "b": "Complaints about our handling of personal data may be made to the contact point in section 2. You may also contact the Personal Information Protection Commission (個人情報保護委員会).\n\n[Connex is not currently a member of an authorized personal-information protection organization (認定個人情報保護団体).]"
         },
         "external": {
-          "h": "7. Grasp of the external environment (外的環境の把握)",
+          "h": "8. Grasp of the external environment (外的環境の把握)",
           "b": "Where retained personal data is stored or handled outside Japan, we identify the relevant country and take account of its personal-data protection framework in our safeguards.\n\nSaaS data is currently stored in Japan. [Name any country and provider here if applicable.]"
         }
       }

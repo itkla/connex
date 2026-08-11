@@ -4,9 +4,18 @@ import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import LegalArticle, { type LegalSection } from "@/app/components/legal/LegalArticle";
 
-const SECTION_IDS = ["operator", "manager", "purpose", "procedure", "security", "complaints", "external"] as const;
+const SECTION_IDS = [
+    "operator",
+    "manager",
+    "purpose",
+    "assistantSessions",
+    "procedure",
+    "security",
+    "complaints",
+    "external",
+] as const;
 
-const UPDATED = "2026-07-01";
+const UPDATED = "2026-08-10";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("Legal");

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
@@ -47,19 +48,36 @@ public class AiAssistantService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AiChatCitationProjector citationProjector;
+    private final AuditService auditService;
 
     /** Returns an ordered page of caller-owned and explicitly shared sessions. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public PageResponse<AiChatSessionDto> page(int page, int size) {
         int offset = pageOffset(page, size);
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
-        List<AiChatSessionDto> items = chatMapper.listAccessibleSessions(
-            workspaceId, userId, size, offset).stream()
-            .map(AiChatSessionDto::from)
-            .toList();
+        List<AiChatSession> sessions = chatMapper.listAccessibleSessions(
+            workspaceId, userId, size, offset);
+        auditAdministrativeReads(workspaceId, userId, sessions);
+        List<AiChatSessionDto> items = sessions.stream().map(AiChatSessionDto::from).toList();
         return new PageResponse<>(items, chatMapper.countAccessibleSessions(workspaceId, userId));
+    }
+
+    /** Returns an ordered page of sessions whose creators are no longer active members. */
+    @Transactional
+    @RequirePermission(Permission.AI_SESSION_ADMIN)
+    public PageResponse<AiChatSessionDto> pageRetained(int page, int size) {
+        int offset = pageOffset(page, size);
+        int workspaceId = currentWorkspaceId();
+        int userId = currentUserId();
+        List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
+        List<AiChatSession> sessions = chatMapper.listRetainedSessions(
+            workspaceId, userId, activeMemberIds, size, offset);
+        sessions.forEach(this::auditRetainedRead);
+        return new PageResponse<>(
+            sessions.stream().map(AiChatSessionDto::from).toList(),
+            chatMapper.countRetainedSessions(workspaceId, activeMemberIds));
     }
 
     /** Creates a private active session owned by the authenticated caller. */
@@ -81,13 +99,40 @@ public class AiAssistantService {
     }
 
     /** Returns one accessible session together with an ordered page of messages. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public AiChatSessionDetailDto get(int id, int messagePage, int messageSize) {
         int offset = pageOffset(messagePage, messageSize);
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
+        auditAdministrativeReads(workspaceId, userId, List.of(session));
+        return detail(workspaceId, id, messageSize, offset, session);
+    }
+
+    /** Returns one retained session and records the metadata-only administrative read. */
+    @Transactional
+    @RequirePermission(Permission.AI_SESSION_ADMIN)
+    public AiChatSessionDetailDto getRetained(int id, int messagePage, int messageSize) {
+        int offset = pageOffset(messagePage, messageSize);
+        int workspaceId = currentWorkspaceId();
+        int userId = currentUserId();
+        List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
+        AiChatSession session = chatMapper.getRetainedSessionById(
+            workspaceId, userId, id, activeMemberIds);
+        if (session == null) {
+            throw inaccessible();
+        }
+        auditRetainedRead(session);
+        return detail(workspaceId, id, messageSize, offset, session);
+    }
+
+    private AiChatSessionDetailDto detail(
+            int workspaceId,
+            int id,
+            int messageSize,
+            int offset,
+            AiChatSession session) {
         List<AiChatMessage> storedMessages = chatMapper.listMessages(
             workspaceId, id, messageSize, offset);
         var citations = citationProjector.project(workspaceId, storedMessages);
@@ -147,7 +192,9 @@ public class AiAssistantService {
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
+        List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
         AiChatSession session = requireLocked(workspaceId, userId, id);
+        requireActiveAuthor(session, activeMemberIds);
         requireAppendAccess(workspaceId, userId, session);
         if (ARCHIVED.equals(session.getStatus())) {
             throw new ConflictException("Archived sessions cannot accept messages");
@@ -174,6 +221,48 @@ public class AiAssistantService {
 
     private int currentUserId() {
         return authService.getCurrentUser().getId();
+    }
+
+    private List<Integer> activeMemberIds(int workspaceId, int userId) {
+        List<Integer> activeMemberIds = workspaceService.getMembers(workspaceId).stream()
+            .map(user -> user.getId())
+            .toList();
+        if (!activeMemberIds.contains(userId)) {
+            throw inaccessible();
+        }
+        return activeMemberIds;
+    }
+
+    private void requireActiveAuthor(AiChatSession session, List<Integer> activeMemberIds) {
+        if (session.getCreatedByUserId() == null
+                || !activeMemberIds.contains(session.getCreatedByUserId())) {
+            throw inaccessible();
+        }
+    }
+
+    private void auditRetainedRead(AiChatSession session) {
+        auditSessionRead(session, "retained");
+    }
+
+    private void auditSessionRead(AiChatSession session, String scope) {
+        auditService.recordStrict(
+            "ai.assistant.session.read",
+            "ai_chat_session",
+            session.getId(),
+            "Assistant session " + session.getId(),
+            "Administrative assistant session read",
+            Map.of("scope", scope));
+    }
+
+    private void auditAdministrativeReads(
+            int workspaceId, int userId, List<AiChatSession> sessions) {
+        if (!workspaceService.permissionsFor(workspaceId, userId)
+                .contains(Permission.AI_SESSION_ADMIN)) {
+            return;
+        }
+        sessions.stream()
+            .filter(session -> !Objects.equals(session.getCreatedByUserId(), userId))
+            .forEach(session -> auditSessionRead(session, "accessible"));
     }
 
     private AiChatSession requireAccessible(int workspaceId, int userId, int id) {

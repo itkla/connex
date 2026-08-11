@@ -74,6 +74,14 @@
       )))
   </sql>
 
+  <sql id="retainedSession">
+    (s.created_by_user_id IS NULL
+      OR s.created_by_user_id NOT IN
+      <foreach collection="activeMemberIds" item="activeMemberId" open="(" separator="," close=")">
+        #{activeMemberId}
+      </foreach>)
+  </sql>
+
   <select id="listAccessibleSessions" resultMap="sessionResult">
     SELECT <include refid="sessionColumns"/>
     FROM ai_chat_session s
@@ -90,12 +98,36 @@
       AND <include refid="accessibleSession"/>
   </select>
 
+  <select id="listRetainedSessions" resultMap="sessionResult">
+    SELECT <include refid="sessionColumns"/>
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND <include refid="retainedSession"/>
+    ORDER BY s.last_message_at DESC, s.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countRetainedSessions" resultType="long">
+    SELECT COUNT(*)
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND <include refid="retainedSession"/>
+  </select>
+
   <select id="getAccessibleSessionById" resultMap="sessionResult">
     SELECT <include refid="sessionColumns"/>
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
       AND s.id = #{id}
       AND <include refid="accessibleSession"/>
+  </select>
+
+  <select id="getRetainedSessionById" resultMap="sessionResult">
+    SELECT <include refid="sessionColumns"/>
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.id = #{id}
+      AND <include refid="retainedSession"/>
   </select>
 
   <select id="getSessionById" resultMap="sessionResult">
