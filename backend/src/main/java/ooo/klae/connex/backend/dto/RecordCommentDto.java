@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.dto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
+import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.RecordComment;
 
 /** Serialized immutable comment or retained redaction tombstone. */
@@ -12,7 +14,8 @@ public record RecordCommentDto(
         String content,
         LocalDateTime createdAt,
         LocalDateTime deletedAt,
-        Integer deletedByUserId) {
+        Integer deletedByUserId,
+        List<EntityReference> references) {
 
     /** Maps a persisted comment into its API representation. */
     public static RecordCommentDto from(RecordComment comment) {
@@ -30,6 +33,7 @@ public record RecordCommentDto(
             comment.getContent(),
             comment.getCreatedAt(),
             comment.getDeletedAt(),
-            comment.getDeletedByUserId());
+            comment.getDeletedByUserId(),
+            comment.getReferences());
     }
 }

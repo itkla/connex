@@ -141,6 +141,26 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND deleted_at IS NULL
   </update>
 
+  <update id="resolveThread">
+    UPDATE record_comment_thread
+    SET state = 'resolved',
+        resolved_by_user_id = #{resolvedByUserId},
+        resolved_at = UTC_TIMESTAMP(6),
+        version = version + 1,
+        updated_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND state = 'open'
+  </update>
+
+  <update id="reopenThread">
+    UPDATE record_comment_thread
+    SET state = 'open',
+        resolved_by_user_id = NULL,
+        resolved_at = NULL,
+        version = version + 1,
+        updated_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND state = 'resolved'
+  </update>
+
   <delete id="deleteEmptyThread">
     DELETE FROM record_comment_thread
     WHERE workspace_id = #{workspaceId} AND id = #{id}

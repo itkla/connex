@@ -64,6 +64,15 @@ public interface RecordCommentMapper {
         @Param("id") long id,
         @Param("deletedByUserId") int deletedByUserId);
 
+    int resolveThread(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("resolvedByUserId") int resolvedByUserId);
+
+    int reopenThread(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id);
+
     int deleteEmptyThread(
         @Param("workspaceId") int workspaceId,
         @Param("id") long id);

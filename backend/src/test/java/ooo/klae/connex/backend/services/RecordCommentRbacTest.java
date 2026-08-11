@@ -25,7 +25,10 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
+import tools.jackson.databind.ObjectMapper;
 
 class RecordCommentRbacTest extends AbstractServiceTest {
 
@@ -86,7 +89,13 @@ class RecordCommentRbacTest extends AbstractServiceTest {
             dealMapper,
             userMapper,
             localWorkspaceService,
-            auditService);
+            mock(AuthService.class),
+            mock(ReferenceService.class),
+            mock(NotificationDelivery.class),
+            mock(NotificationPreferenceService.class),
+            mock(NotificationChangePublisher.class),
+            auditService,
+            mock(ObjectMapper.class));
         RecordComment comment = new RecordComment();
         comment.setId(5L);
         comment.setWorkspaceId(7);

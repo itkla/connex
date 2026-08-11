@@ -23,12 +23,13 @@ import ooo.klae.connex.backend.dto.RecordCommentCreateRequest;
 import ooo.klae.connex.backend.dto.RecordCommentCreateThreadRequest;
 import ooo.klae.connex.backend.dto.RecordCommentDto;
 import ooo.klae.connex.backend.dto.RecordCommentThreadDto;
+import ooo.klae.connex.backend.dto.RecordCommentThreadStateRequest;
 import ooo.klae.connex.backend.services.RecordCommentService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
-/** REST endpoints for workspace-local record comment threads and redaction. */
+/** REST endpoints for workspace-local record comment threads, resolution, and redaction. */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
@@ -85,6 +86,22 @@ public class RecordCommentController {
             @Valid @RequestBody RecordCommentCreateRequest request) {
         return RecordCommentDto.from(recordCommentService.reply(
             threadId, request.getContent(), request.getClientToken()));
+    }
+
+    @PostMapping("/comment-threads/{threadId}/resolve")
+    public RecordCommentThreadDto resolve(
+            @Positive @PathVariable long threadId,
+            @Valid @RequestBody RecordCommentThreadStateRequest request) {
+        return RecordCommentThreadDto.from(
+            recordCommentService.resolve(threadId, request.getExpectedVersion()));
+    }
+
+    @PostMapping("/comment-threads/{threadId}/reopen")
+    public RecordCommentThreadDto reopen(
+            @Positive @PathVariable long threadId,
+            @Valid @RequestBody RecordCommentThreadStateRequest request) {
+        return RecordCommentThreadDto.from(
+            recordCommentService.reopen(threadId, request.getExpectedVersion()));
     }
 
     @DeleteMapping("/comments/{commentId}")
