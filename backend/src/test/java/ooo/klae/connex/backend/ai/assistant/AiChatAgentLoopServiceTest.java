@@ -5,14 +5,19 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,11 +26,17 @@ import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiInvocation;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.AiStructuredRepair;
+import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -36,6 +47,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -46,19 +58,25 @@ class AiChatAgentLoopServiceTest {
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiInvocationService invocationService;
+    private AiInvocationAdmissionService invocationAdmissionService;
+    private AiInvocationAdmissionService.DirectAdmission directAdmission;
     private AiAssistantToolExecutor toolExecutor;
     private AiChatTurnPersistenceService persistenceService;
     private AiRestrictionEpoch restrictionEpoch;
     private WorkspaceService workspaceService;
+    private Clock clock;
     private AiChatAgentLoopService service;
 
     @BeforeEach
     void setUp() {
         invocationService = mock(AiInvocationService.class);
+        invocationAdmissionService = mock(AiInvocationAdmissionService.class);
+        directAdmission = mock(AiInvocationAdmissionService.DirectAdmission.class);
         toolExecutor = mock(AiAssistantToolExecutor.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         workspaceService = mock(WorkspaceService.class);
+        clock = mock(Clock.class);
         var catalog = new AiAssistantToolCatalog();
         var promptAssembler = new AiAssistantPromptAssembler(objectMapper, catalog);
         var identifierResolver = mock(AiAssistantIdentifierResolver.class);
@@ -66,7 +84,9 @@ class AiChatAgentLoopServiceTest {
                 .getBeanProvider(AiChatRealtimePublisher.class);
         service = new AiChatAgentLoopService(
                 invocationService,
+                invocationAdmissionService,
                 new AiAssistantStepGuard(catalog),
+                new AiAssistantStepSchema(objectMapper, catalog),
                 toolExecutor,
                 identifierResolver,
                 promptAssembler,
@@ -74,12 +94,14 @@ class AiChatAgentLoopServiceTest {
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,
+                clock,
                 publishers);
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(TURN.userMessageId());
         userMessage.setAuthorKind("user");
         userMessage.setContent("Summarize my pipeline");
         when(persistenceService.markRunning(TURN)).thenReturn(true);
+        doReturn(directAdmission).when(invocationAdmissionService).acquireDirect();
         when(persistenceService.loadHistory(TURN, 50)).thenReturn(List.of(userMessage));
         when(toolExecutor.pageContext(any(), any())).thenReturn(
                 new AiAssistantToolResult(Map.of(), List.of()));
@@ -88,37 +110,133 @@ class AiChatAgentLoopServiceTest {
         when(persistenceService.proposeTool(eq(TURN), anyInt(), any(), any())).thenReturn(29);
         when(persistenceService.finishTool(eq(TURN), anyInt(), any(), any())).thenReturn(true);
         when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
+        when(clock.instant()).thenReturn(Instant.parse("2026-08-11T00:00:00Z"));
     }
 
     @Test
-    void sixToolStepsFailAtTheCapWithoutASeventhProviderCall() throws Exception {
+    void repeatedIdenticalToolCallsUseTheCacheThenStopForNoProgress() throws Exception {
         AiAssistantStep toolStep = new AiAssistantStep(
                 new AiAssistantStep.Tool(
                         "search_records",
                         objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
                 null);
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(toolStep));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        assertEquals("step_cap_exceeded", result.reason());
-        verify(invocationService, times(6)).completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class));
-        verify(toolExecutor, times(6)).execute(
+        assertEquals("no_progress", result.reason());
+        verify(invocationService, times(3)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
+        verify(toolExecutor).execute(
                 eq("search_records"), any(JsonNode.class), any(), eq(true));
         verify(persistenceService, never()).resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt());
     }
 
     @Test
+    void toolResultToolResultFinalCompletesWithinOneTurn() throws Exception {
+        AiAssistantStep firstTool = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        AiAssistantStep secondTool = toolStep(
+                "aggregate_metric", "{\"metric\":\"deal_metrics\"}");
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
+                .thenReturn(parsed(firstTool))
+                .thenReturn(parsed(secondTool))
+                .thenReturn(parsed(finalStep));
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class)))
+                .thenReturn(
+                        new AiAssistantToolResult(Map.of("records", List.of("r1")), List.of()),
+                        new AiAssistantToolResult(Map.of("count", 1), List.of()));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(invocationService, times(3)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
+        verify(toolExecutor, times(2)).execute(any(), any(), any(), eq(true));
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Pipeline is healthy."), any(), eq(9), eq(15));
+    }
+
+    @Test
+    void schemaViolationGetsExactlyOneRepairThenFailsDistinctly() {
+        AiStructuredRepair repair = AiStructuredRepair.from(
+                "exclusive_step", "{\"tool\":null,\"final\":null}");
+        AiStructuredRepairAttempt<AiAssistantStep> malformed = new AiStructuredRepairAttempt<>(
+                new AiStructuredOutcome.Malformed<>("malformed_output", 2, 3, "stop"),
+                Optional.of(repair));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
+                .thenReturn(malformed);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("schema_repair_failed", result.reason());
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
+    }
+
+    @Test
+    void hardBackstopHasItsOwnTerminalReason() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
+                .thenAnswer(invocation -> parsed(toolStep(
+                        "search_records",
+                        "{\"query\":\"pipeline-" + calls.incrementAndGet()
+                                + "\",\"kinds\":[\"deal\"]}")));
+        AtomicInteger results = new AtomicInteger();
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class)))
+                .thenAnswer(invocation -> new AiAssistantToolResult(
+                        Map.of("result", results.incrementAndGet()), List.of()));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("agent_backstop_exceeded", result.reason());
+        verify(invocationService, times(AiChatAgentLoopService.HARD_MAX_STEPS))
+                .completeStructuredRepairable(
+                        any(AiInvocation.class), eq(AiAssistantStep.class),
+                        any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
+    }
+
+    @Test
+    void wallClockDeadlineHasItsOwnTerminalReason() {
+        when(clock.instant()).thenReturn(
+                Instant.parse("2026-08-11T00:00:00Z"),
+                Instant.parse("2026-08-11T00:01:10Z"));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.TIMED_OUT, result.outcome());
+        assertEquals("turn_deadline_exceeded", result.reason());
+        verify(invocationService, never()).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
+    }
+
+    @Test
     void resolvedFinalPersistsTheDemaskedAnswerAndTokenTotals() throws Exception {
         AiAssistantStep finalStep = new AiAssistantStep(
                 null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(finalStep));
         when(persistenceService.resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
@@ -134,27 +252,32 @@ class AiChatAgentLoopServiceTest {
     }
 
     @Test
-    void malformedProviderQuotaAndProviderErrorsStayDistinct() {
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
-                .thenReturn(new AiStructuredOutcome.Malformed<>("malformed_output", 1, 1, "stop"));
-        assertTerminal("malformed_output");
+    void invocationQuotaCapacityAndProviderErrorsStayDistinct() {
+        doThrow(new DirectAdmissionRejectedException(Rejection.ORGANIZATION_QUOTA))
+                .when(invocationAdmissionService).acquireDirect();
+        assertTerminal("org_invocation_quota_exhausted");
 
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
-                .thenThrow(new TooManyRequestsException("quota"));
+        doThrow(new DirectAdmissionRejectedException(Rejection.CAPACITY))
+                .when(invocationAdmissionService).acquireDirect();
+        assertTerminal("invocation_capacity_exhausted");
+
+        doReturn(directAdmission).when(invocationAdmissionService).acquireDirect();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission)))
+                .thenThrow(new TooManyRequestsException("tool quota"));
         assertTerminal("quota_exhausted");
 
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenThrow(new AiProviderException("provider"));
         assertTerminal("provider_error");
     }
 
     @Test
     void revokedAiUseAndChangedRestrictionsRemainDistinctFromProviderFailure() {
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenThrow(new ForbiddenException("gate"));
         doThrow(new ForbiddenException("revoked")).when(workspaceService)
                 .requirePermission(TURN.workspaceId(), TURN.userId(), Permission.AI_USE);
@@ -173,8 +296,8 @@ class AiChatAgentLoopServiceTest {
                         "search_records",
                         objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
                 null);
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(toolStep));
         doThrow(new ConflictException("Assistant turn is no longer active"))
                 .when(persistenceService).requireRunning(TURN);
@@ -191,8 +314,8 @@ class AiChatAgentLoopServiceTest {
                         "search_records",
                         objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
                 null);
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(toolStep));
         when(toolExecutor.execute(any(), any(), any(), any(Boolean.class)))
                 .thenThrow(new IllegalStateException("database unavailable"));
@@ -201,8 +324,8 @@ class AiChatAgentLoopServiceTest {
 
         AiAssistantStep finalStep = new AiAssistantStep(
                 null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(finalStep));
         doThrow(new IllegalStateException("database unavailable")).when(persistenceService)
                 .resolve(eq(TURN), any(), any(), anyInt(), anyInt());
@@ -214,8 +337,8 @@ class AiChatAgentLoopServiceTest {
     void finalCommitEpochChangeKeepsItsDistinctTerminalReason() {
         AiAssistantStep finalStep = new AiAssistantStep(
                 null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(finalStep));
         doThrow(new AiAssistantLoopException(
                 "restrictions_changed", "restrictions_changed")).when(persistenceService)
@@ -228,8 +351,8 @@ class AiChatAgentLoopServiceTest {
     void unknownCitationFailsBeforeAnAssistantMessageIsCommitted() {
         AiAssistantStep finalStep = new AiAssistantStep(
                 null, new AiAssistantStep.FinalAnswer("Use this record.", List.of("r9")));
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(finalStep));
 
         assertTerminal("malformed_output");
@@ -253,19 +376,23 @@ class AiChatAgentLoopServiceTest {
                 mock(PersonMapper.class),
                 mock(CompanyMapper.class),
                 mock(DealMapper.class));
+        var catalog = new AiAssistantToolCatalog();
         service = new AiChatAgentLoopService(
                 invocationService,
-                new AiAssistantStepGuard(new AiAssistantToolCatalog()),
+                invocationAdmissionService,
+                new AiAssistantStepGuard(catalog),
+                new AiAssistantStepSchema(objectMapper, catalog),
                 realExecutor,
                 mock(AiAssistantIdentifierResolver.class),
-                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
+                new AiAssistantPromptAssembler(objectMapper, catalog),
                 persistenceService,
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,
+                clock,
                 new StaticListableBeanFactory().getBeanProvider(AiChatRealtimePublisher.class));
-        when(invocationService.completeStructured(
-                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
                 .thenReturn(parsed(new AiAssistantStep(
                         new AiAssistantStep.Tool(
                                 "get_record", objectMapper.readTree("{\"handle\":\"r9\"}")),
@@ -292,14 +419,34 @@ class AiChatAgentLoopServiceTest {
         assertEquals(initiating.getContent(), bounded.get(2).getContent());
     }
 
+    @Test
+    void oversizedNewestUserMessageRemainsIntactWhileAllOlderContentIsTrimmed() {
+        AiChatMessage oldest = message(1, "a".repeat(10_000));
+        AiChatMessage initiating = message(TURN.userMessageId(), "c".repeat(80_000));
+
+        List<AiChatMessage> bounded = AiChatAgentLoopService.boundedHistory(
+                List.of(oldest, initiating), TURN);
+
+        assertEquals(1, bounded.size());
+        assertEquals(initiating.getContent(), bounded.getFirst().getContent());
+    }
+
     private void assertTerminal(String reason) {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals(reason, result.reason());
     }
 
-    private static AiStructuredOutcome<AiAssistantStep> parsed(AiAssistantStep step) {
-        return new AiStructuredOutcome.Parsed<>(step, 0, 3, 5, "stop");
+    private AiAssistantStep toolStep(String name, String arguments) throws JacksonException {
+        return new AiAssistantStep(
+                new AiAssistantStep.Tool(name, objectMapper.readTree(arguments)),
+                null);
+    }
+
+    private static AiStructuredRepairAttempt<AiAssistantStep> parsed(AiAssistantStep step) {
+        return new AiStructuredRepairAttempt<>(
+                new AiStructuredOutcome.Parsed<>(step, 0, 3, 5, "stop"),
+                Optional.empty());
     }
 
     private static AiChatMessage message(int id, String content) {

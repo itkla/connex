@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 
 /**
  * Minimal Azure OpenAI transport. The client uses a single Spring {@link RestClient} backed by the
@@ -81,7 +82,7 @@ public class AzureOpenAiClient {
             throw new AiProviderException("Azure OpenAI invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
-            throw new AiProviderException("Azure OpenAI invocation failed with status " + response.statusCode());
+            throw new AiProviderRequestRejectedException("Azure OpenAI", response.statusCode());
         }
         return new String(response.body(), StandardCharsets.UTF_8);
     }

@@ -56,13 +56,15 @@ class AiChatTurnTerminalCoordinatorTest {
                 TURN, "failed", "generation_capacity")).thenReturn(true);
         when(persistenceService.markTerminal(
                 TURN, "timed_out", "generation_timeout")).thenReturn(true);
+        when(persistenceService.markTerminal(
+                TURN, "timed_out", "turn_deadline_exceeded")).thenReturn(true);
     }
 
     @Test
     void capacityAndDeadlinePersistDistinctTerminalsBeforePublishing() {
         coordinator.generationCapacity(TURN);
         coordinator.listener(TURN).onTerminal(
-                AiGenerationTaskResult.Outcome.TIMED_OUT, "generation_timeout");
+                AiGenerationTaskResult.Outcome.TIMED_OUT, "turn_deadline_exceeded");
 
         InOrder order = inOrder(persistenceService, publisher);
         order.verify(persistenceService).markTerminal(
@@ -71,10 +73,10 @@ class AiChatTurnTerminalCoordinatorTest {
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
                 "terminal", null, "failed", "generation_capacity"));
         order.verify(persistenceService).markTerminal(
-                TURN, "timed_out", "generation_timeout");
+                TURN, "timed_out", "turn_deadline_exceeded");
         order.verify(publisher).send(TURN.userId(), new AiChatStepFrameDto(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
-                "terminal", null, "timed_out", "generation_timeout"));
+                "terminal", null, "timed_out", "turn_deadline_exceeded"));
     }
 
     @Test
@@ -85,7 +87,12 @@ class AiChatTurnTerminalCoordinatorTest {
         for (String reason : List.of(
                 "provider_error",
                 "quota_exhausted",
+                "org_invocation_quota_exhausted",
+                "invocation_capacity_exhausted",
                 "malformed_output",
+                "schema_repair_failed",
+                "no_progress",
+                "agent_backstop_exceeded",
                 "step_cap_exceeded",
                 "internal_error")) {
             coordinator.listener(TURN).onTerminal(

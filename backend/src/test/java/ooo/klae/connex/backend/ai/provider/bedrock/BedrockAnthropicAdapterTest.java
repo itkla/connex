@@ -27,6 +27,8 @@ import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -99,6 +101,46 @@ class BedrockAnthropicAdapterTest {
         verify(bedrockClient).invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
                 any(AiCredentials.class), bodyCaptor.capture());
         assertFalse(objectMapper.readTree(bodyCaptor.getValue()).has("system"));
+    }
+
+    @Test
+    void complete_supportedClaudeModelSendsNativeJsonSchema() throws Exception {
+        String modelId = "anthropic.claude-sonnet-4-5-20250929-v1:0";
+        when(bedrockClient.invokeModel(
+                eq(BedrockRegion.US_EAST_1), eq(modelId),
+                any(AiCredentials.class), anyString()))
+                .thenReturn("""
+                        {
+                          "content": [{ "type": "text", "text": "{}" }],
+                          "usage": { "input_tokens": 1, "output_tokens": 1 },
+                          "stop_reason": "end_turn"
+                        }
+                        """);
+        AiCompletionRequest request = new AiCompletionRequest(
+                new AiProviderTarget("bedrock", "us-east-1", modelId,
+                        null, null, null, null, false),
+                credentials(),
+                "Return JSON",
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                64,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(bedrockClient).invokeModel(
+                eq(BedrockRegion.US_EAST_1), eq(modelId),
+                any(AiCredentials.class), bodyCaptor.capture());
+        JsonNode format = objectMapper.readTree(bodyCaptor.getValue())
+                .path("output_config").path("format");
+        assertEquals("json_schema", format.path("type").asString());
+        assertEquals("object", format.path("schema").path("type").asString());
+        assertEquals(AiStructuredOutputEnforcement.JSON_SCHEMA,
+                result.structuredOutputEnforcement());
     }
 
     @Test

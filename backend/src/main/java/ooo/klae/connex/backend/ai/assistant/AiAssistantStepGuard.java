@@ -25,48 +25,58 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
 
     @Override
     public boolean permits(JsonNode output) {
+        return rejectionReason(output) == null;
+    }
+
+    @Override
+    public String rejectionReason(JsonNode output) {
         if (output == null || !output.isObject() || !exactFields(output, TOP_LEVEL_FIELDS)) {
-            return false;
+            return "top_level_fields";
         }
         JsonNode tool = output.get("tool");
         JsonNode finalAnswer = output.get("final");
         boolean hasTool = tool != null && !tool.isNull();
         boolean hasFinal = finalAnswer != null && !finalAnswer.isNull();
         if (hasTool == hasFinal) {
-            return false;
+            return "exclusive_step";
         }
-        return hasTool ? permitsTool(tool) : permitsFinal(finalAnswer);
+        return hasTool ? toolRejection(tool) : finalRejection(finalAnswer);
     }
 
-    private boolean permitsTool(JsonNode tool) {
+    private String toolRejection(JsonNode tool) {
         if (!tool.isObject() || !exactFields(tool, TOOL_FIELDS)) {
-            return false;
+            return "tool_fields";
         }
         JsonNode name = tool.get("name");
         JsonNode args = tool.get("args");
-        return name != null && name.isString()
-                && toolCatalog.isKnown(name.asString())
-                && toolCatalog.permitsArguments(name.asString(), args);
+        if (name == null || !name.isString() || !toolCatalog.isKnown(name.asString())) {
+            return "tool_name";
+        }
+        return toolCatalog.permitsArguments(name.asString(), args)
+                ? null
+                : "tool_arguments";
     }
 
-    private static boolean permitsFinal(JsonNode finalAnswer) {
+    private static String finalRejection(JsonNode finalAnswer) {
         if (!finalAnswer.isObject() || !exactFields(finalAnswer, FINAL_FIELDS)) {
-            return false;
+            return "final_fields";
         }
         JsonNode text = finalAnswer.get("text");
         JsonNode citations = finalAnswer.get("citations");
         if (text == null || !text.isString() || text.asString().isBlank()
                 || text.asString().length() > MAX_FINAL_CHARS
-                || citations == null || !citations.isArray()
-                || citations.size() > MAX_CITATIONS) {
-            return false;
+                || citations == null || !citations.isArray()) {
+            return "final_shape";
+        }
+        if (citations.size() > MAX_CITATIONS) {
+            return "final_citations";
         }
         for (JsonNode citation : citations) {
             if (!citation.isString() || !HANDLE.matcher(citation.asString()).matches()) {
-                return false;
+                return "final_citations";
             }
         }
-        return true;
+        return null;
     }
 
     private static boolean exactFields(JsonNode node, Set<String> expected) {

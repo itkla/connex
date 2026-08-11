@@ -12,6 +12,7 @@ import tools.jackson.databind.JsonNode;
  */
 @FunctionalInterface
 public interface AiRawOutputGuard {
+    String REASON_GUARD_REJECTED = "raw_guard_rejected";
 
     /** Permits every output; the default when a feature has no pre-demask constraint. */
     AiRawOutputGuard PERMIT_ALL = maskedOutput -> true;
@@ -21,4 +22,13 @@ public interface AiRawOutputGuard {
      * @return whether the output may proceed to demasking and binding
      */
     boolean permits(JsonNode maskedOutput);
+
+    /**
+     * Returns a content-free stable rule when the output is rejected.
+     * @param maskedOutput parsed, still-masked provider output object
+     * @return stable rule, or {@code null} when the output is permitted
+     */
+    default String rejectionReason(JsonNode maskedOutput) {
+        return permits(maskedOutput) ? null : REASON_GUARD_REJECTED;
+    }
 }

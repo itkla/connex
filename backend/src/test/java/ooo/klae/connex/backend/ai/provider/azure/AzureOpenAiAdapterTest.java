@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -28,7 +29,10 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -84,11 +88,80 @@ class AzureOpenAiAdapterTest {
         assertEquals("Hello.", body.path("messages").path(2).path("content").asString());
         assertEquals(64, body.path("max_completion_tokens").asInt());
         assertEquals(0.25, body.path("temperature").asDouble());
-        assertFalse(body.has("response_format"));
+        assertEquals("json_object", body.path("response_format").path("type").asString());
         assertEquals("Hello world", result.text());
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
         assertEquals("stop", result.stopReason());
+        assertEquals(AiStructuredOutputEnforcement.JSON_OBJECT,
+                result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_sendsStrictJsonSchemaResponseFormat() throws Exception {
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+                .thenReturn(validResponse());
+        AiCompletionRequest request = new AiCompletionRequest(
+                new AiProviderTarget("azure_openai", null, "gpt-5.2",
+                        "https://connex.openai.azure.com",
+                        "2025-01-01-preview", "contacts-prod", null, false),
+                credentials(),
+                "Return one step",
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                64,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(azureOpenAiClient).complete(
+                any(URI.class), any(AiCredentials.class), bodyCaptor.capture());
+        JsonNode responseFormat = objectMapper.readTree(bodyCaptor.getValue()).path("response_format");
+        assertEquals("json_schema", responseFormat.path("type").asString());
+        assertEquals("assistant_step", responseFormat.path("json_schema").path("name").asString());
+        assertEquals(true, responseFormat.path("json_schema").path("strict").asBoolean());
+        assertEquals("object", responseFormat.path("json_schema").path("schema")
+                .path("type").asString());
+        assertEquals(AiStructuredOutputEnforcement.JSON_SCHEMA,
+                result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_degradesRejectedSchemaToJsonObjectThenPromptOnly() throws Exception {
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+                .thenThrow(new AiProviderRequestRejectedException("Azure OpenAI", 400))
+                .thenThrow(new AiProviderRequestRejectedException("Azure OpenAI", 422))
+                .thenReturn(validResponse());
+        AiCompletionRequest request = new AiCompletionRequest(
+                new AiProviderTarget("azure_openai", null, "gpt-5.2",
+                        "https://connex.openai.azure.com",
+                        "2025-01-01-preview", "contacts-prod", null, false),
+                credentials(),
+                "Return one step",
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                64,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
+        verify(azureOpenAiClient, times(3)).complete(
+                any(URI.class), any(AiCredentials.class), bodies.capture());
+        assertEquals("json_schema", objectMapper.readTree(bodies.getAllValues().get(0))
+                .path("response_format").path("type").asString());
+        assertEquals("json_object", objectMapper.readTree(bodies.getAllValues().get(1))
+                .path("response_format").path("type").asString());
+        assertFalse(objectMapper.readTree(bodies.getAllValues().get(2)).has("response_format"));
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
+                result.structuredOutputEnforcement());
     }
 
     @Test

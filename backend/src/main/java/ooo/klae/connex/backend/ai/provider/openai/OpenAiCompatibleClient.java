@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.egress.PinnedHostDnsResolver;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 
 /**
  * Minimal OpenAI-compatible transport. The client never follows redirects, revalidates and
@@ -132,8 +133,8 @@ public class OpenAiCompatibleClient {
             throw new AiProviderException("OpenAI-compatible invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
-            throw new AiProviderException(
-                    "OpenAI-compatible invocation failed with status " + response.statusCode());
+            throw new AiProviderRequestRejectedException(
+                    "OpenAI-compatible", response.statusCode());
         }
         return new String(response.body(), StandardCharsets.UTF_8);
     }

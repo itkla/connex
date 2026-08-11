@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -49,6 +50,13 @@ public class VertexAdapter implements AiProvider {
     }
 
     @Override
+    public AiStructuredOutputEnforcement structuredOutputCapability(AiProviderTarget target) {
+        return target != null && target.modelId() != null && target.modelId().startsWith("gemini")
+                ? AiStructuredOutputEnforcement.JSON_SCHEMA
+                : AiStructuredOutputEnforcement.PROMPT_ONLY;
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
@@ -69,15 +77,19 @@ public class VertexAdapter implements AiProvider {
                 throw new AiProviderException("Vertex model does not support image input in this region");
             }
             URI endpoint = endpoint(projectId, region, modelId, family);
+            AiStructuredOutputEnforcement enforcement = requestedEnforcement(request, family);
             String requestBody = switch (family) {
-                case GEMINI -> buildGeminiRequest(request);
+                case GEMINI -> buildGeminiRequest(request, enforcement);
                 case CLAUDE -> buildClaudeRequest(request);
             };
-            String accessToken = googleAccessTokenClient.accessToken(request.credentials(), deadline);
-            String responseBody = vertexClient.complete(endpoint, accessToken, requestBody, deadline);
+            String responseBody = request.providerAttemptExecutor().execute(() -> {
+                String accessToken = googleAccessTokenClient.accessToken(
+                        request.credentials(), deadline);
+                return vertexClient.complete(endpoint, accessToken, requestBody, deadline);
+            });
             return switch (family) {
-                case GEMINI -> parseGeminiResponse(responseBody);
-                case CLAUDE -> parseClaudeResponse(responseBody);
+                case GEMINI -> parseGeminiResponse(responseBody, enforcement);
+                case CLAUDE -> parseClaudeResponse(responseBody, enforcement);
             };
         } catch (AiProviderException exception) {
             throw exception;
@@ -98,7 +110,9 @@ public class VertexAdapter implements AiProvider {
                 + operation);
     }
 
-    private String buildGeminiRequest(AiCompletionRequest request) throws Exception {
+    private String buildGeminiRequest(
+            AiCompletionRequest request,
+            AiStructuredOutputEnforcement enforcement) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode contents = root.putArray("contents");
         boolean imagesPending = !request.images().isEmpty();
@@ -128,8 +142,14 @@ public class VertexAdapter implements AiProvider {
         ObjectNode generationConfig = root.putObject("generationConfig");
         generationConfig.put("maxOutputTokens", request.maxTokens());
         generationConfig.put("temperature", request.temperature());
-        if (request.outputMode() == AiOutputMode.JSON) {
+        if (enforcement != AiStructuredOutputEnforcement.PROMPT_ONLY) {
             generationConfig.put("responseMimeType", "application/json");
+        }
+        if (enforcement == AiStructuredOutputEnforcement.JSON_SCHEMA) {
+            if (request.responseSchema() == null) {
+                throw new AiProviderException("AI response schema is required");
+            }
+            generationConfig.set("responseJsonSchema", request.responseSchema().schema());
         }
         return objectMapper.writeValueAsString(root);
     }
@@ -169,7 +189,9 @@ public class VertexAdapter implements AiProvider {
         return objectMapper.writeValueAsString(root);
     }
 
-    private AiCompletionResult parseGeminiResponse(String responseBody) {
+    private AiCompletionResult parseGeminiResponse(
+            String responseBody,
+            AiStructuredOutputEnforcement enforcement) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             if (root == null || !root.isObject()) {
@@ -189,7 +211,8 @@ public class VertexAdapter implements AiProvider {
             int inputTokens = readRequiredInt(usage.path("promptTokenCount"));
             int outputTokens = readRequiredInt(usage.path("candidatesTokenCount"));
             String stopReason = readRequiredText(candidate.path("finishReason"));
-            return new AiCompletionResult(text, inputTokens, outputTokens, stopReason);
+            return new AiCompletionResult(
+                    text, inputTokens, outputTokens, stopReason, enforcement);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -197,7 +220,9 @@ public class VertexAdapter implements AiProvider {
         }
     }
 
-    private AiCompletionResult parseClaudeResponse(String responseBody) {
+    private AiCompletionResult parseClaudeResponse(
+            String responseBody,
+            AiStructuredOutputEnforcement enforcement) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             if (root == null || !root.isObject()) {
@@ -211,7 +236,8 @@ public class VertexAdapter implements AiProvider {
             int inputTokens = readRequiredInt(usage.path("input_tokens"));
             int outputTokens = readRequiredInt(usage.path("output_tokens"));
             String stopReason = readRequiredText(root.path("stop_reason"));
-            return new AiCompletionResult(text, inputTokens, outputTokens, stopReason);
+            return new AiCompletionResult(
+                    text, inputTokens, outputTokens, stopReason, enforcement);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -277,6 +303,17 @@ public class VertexAdapter implements AiProvider {
             return ModelFamily.CLAUDE;
         }
         throw new AiProviderException("Unsupported Vertex model");
+    }
+
+    private static AiStructuredOutputEnforcement requestedEnforcement(
+            AiCompletionRequest request,
+            ModelFamily family) {
+        if (family != ModelFamily.GEMINI || request.outputMode() != AiOutputMode.JSON) {
+            return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
+        return request.responseSchema() == null
+                ? AiStructuredOutputEnforcement.JSON_OBJECT
+                : AiStructuredOutputEnforcement.JSON_SCHEMA;
     }
 
     private static String requireModelId(String modelId) {

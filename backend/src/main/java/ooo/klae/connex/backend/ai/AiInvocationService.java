@@ -4,9 +4,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
 
@@ -23,8 +25,12 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
+import ooo.klae.connex.backend.ai.provider.AiProviderAttemptBlockedException;
+import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -54,6 +60,7 @@ public class AiInvocationService {
     private static final Runnable NO_INVOCATION_COMMITMENT = () -> {};
 
     private final AiFeatureGate aiFeatureGate;
+    private final AiInvocationAdmissionService aiInvocationAdmissionService;
     private final AiMediaAdmissionService aiMediaAdmissionService;
     private final AiProviderConfigService aiProviderConfigService;
     private final AiProviderRouter aiProviderRouter;
@@ -69,7 +76,7 @@ public class AiInvocationService {
      */
     public AiCompletionOutcome complete(AiInvocation invocation) {
         try (RawInvocation raw = invokeRaw(
-                invocation, AiOutputMode.TEXT, NO_INVOCATION_COMMITMENT)) {
+                invocation, AiOutputMode.TEXT, null, NO_INVOCATION_COMMITMENT)) {
             AiCompletionResult result = raw.result();
             Demasker.DemaskResult demasked = Demasker.demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
@@ -91,8 +98,9 @@ public class AiInvocationService {
      * @return parsed or malformed structured outcome
      */
     public <T> AiStructuredOutcome<T> completeStructured(AiInvocation invocation, Class<T> type) {
-        return completeStructuredWithCommitment(
-                invocation, type, AiRawOutputGuard.PERMIT_ALL, NO_INVOCATION_COMMITMENT);
+        return completeStructuredAttemptWithCommitment(
+                invocation, type, AiRawOutputGuard.PERMIT_ALL, null,
+                NO_INVOCATION_COMMITMENT, false).outcome();
     }
 
     /**
@@ -109,8 +117,9 @@ public class AiInvocationService {
             Class<T> type,
             AiInvocationAdmissionService.Admission admission) {
         Objects.requireNonNull(admission, "admission");
-        return completeStructuredWithCommitment(
-                invocation, type, AiRawOutputGuard.PERMIT_ALL, admission::commitLeaderInvocation);
+        return completeStructuredAttemptWithCommitment(
+                invocation, type, AiRawOutputGuard.PERMIT_ALL, null,
+                admission::commitLeaderInvocation, false).outcome();
     }
 
     /**
@@ -125,8 +134,9 @@ public class AiInvocationService {
      */
     public <T> AiStructuredOutcome<T> completeStructured(
             AiInvocation invocation, Class<T> type, AiRawOutputGuard guard) {
-        return completeStructuredWithCommitment(
-                invocation, type, guard, NO_INVOCATION_COMMITMENT);
+        return completeStructuredAttemptWithCommitment(
+                invocation, type, guard, null,
+                NO_INVOCATION_COMMITMENT, false).outcome();
     }
 
     /**
@@ -145,57 +155,132 @@ public class AiInvocationService {
             AiRawOutputGuard guard,
             AiInvocationAdmissionService.Admission admission) {
         Objects.requireNonNull(admission, "admission");
-        return completeStructuredWithCommitment(
-                invocation, type, guard, admission::commitLeaderInvocation);
+        return completeStructuredAttemptWithCommitment(
+                invocation, type, guard, null,
+                admission::commitLeaderInvocation, false).outcome();
     }
 
-    private <T> AiStructuredOutcome<T> completeStructuredWithCommitment(
+    /**
+     * Completes a schema-constrained invocation and retains one bounded masked repair payload when
+     * validation fails. The payload is ephemeral and must never be logged or persisted.
+     * @param invocation masked invocation request
+     * @param type content type to bind the parsed object to
+     * @param guard pre-demask validator run on the masked output
+     * @param responseSchema provider-neutral response schema
+     * @param <T> content type
+     * @return parsed outcome or malformed outcome with an optional repair payload
+     */
+    public <T> AiStructuredRepairAttempt<T> completeStructuredRepairable(
             AiInvocation invocation,
             Class<T> type,
             AiRawOutputGuard guard,
-            Runnable invocationCommitment) {
+            AiResponseSchema responseSchema) {
+        return completeStructuredAttemptWithCommitment(
+                invocation, type, guard, Objects.requireNonNull(responseSchema, "responseSchema"),
+                NO_INVOCATION_COMMITMENT, true);
+    }
+
+    /**
+     * Completes a repairable structured invocation and commits an interactive organization-quota
+     * reservation immediately before provider egress.
+     * @param invocation masked invocation request
+     * @param type content type to bind the parsed object to
+     * @param guard pre-demask validator run on the masked output
+     * @param responseSchema provider-neutral response schema
+     * @param admission active direct invocation admission
+     * @param <T> content type
+     * @return parsed outcome or malformed outcome with an optional repair payload
+     */
+    public <T> AiStructuredRepairAttempt<T> completeStructuredRepairable(
+            AiInvocation invocation,
+            Class<T> type,
+            AiRawOutputGuard guard,
+            AiResponseSchema responseSchema,
+            AiInvocationAdmissionService.DirectAdmission admission) {
+        Objects.requireNonNull(admission, "admission");
+        return completeStructuredAttemptWithCommitment(
+                invocation, type, guard, Objects.requireNonNull(responseSchema, "responseSchema"),
+                admission::commitInvocation, true);
+    }
+
+    private <T> AiStructuredRepairAttempt<T> completeStructuredAttemptWithCommitment(
+            AiInvocation invocation,
+            Class<T> type,
+            AiRawOutputGuard guard,
+            AiResponseSchema responseSchema,
+            Runnable invocationCommitment,
+            boolean captureRepair) {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(guard, "guard");
         Objects.requireNonNull(invocationCommitment, "invocationCommitment");
-        try (RawInvocation raw = invokeRaw(invocation, AiOutputMode.JSON, invocationCommitment)) {
+        try (RawInvocation raw = invokeRaw(
+                invocation, AiOutputMode.JSON, responseSchema, invocationCommitment)) {
             AiCompletionResult result = raw.result();
             String stripped = CompletionNormalizer.stripReasoning(result.text());
             ObjectNode object = AiJson.extractObject(stripped, objectMapper);
             if (object == null) {
-                return malformed(raw, invocation, result, truncationReason(result.stopReason()));
+                return malformed(
+                        raw, invocation, result, truncationReason(result.stopReason()),
+                        "json_object_missing", stripped, false, captureRepair);
             }
-            if (!guard.permits(object)) {
-                return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
+            String rejectionReason = guard.rejectionReason(object);
+            if (rejectionReason != null) {
+                return malformed(
+                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                        rejectionReason, stripped, true, captureRepair);
             }
             int warnings = Demasker.demaskTree(object, invocation.context());
             T value;
             try {
                 value = objectMapper.treeToValue(object, type);
             } catch (JacksonException | IllegalArgumentException exception) {
-                return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
+                return malformed(
+                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                        "binding_failed", stripped, true, captureRepair);
             }
             if (value == null) {
-                return malformed(raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED);
+                return malformed(
+                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                        "binding_failed", stripped, true, captureRepair);
             }
             raw.close();
             emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                     result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
-            return new AiStructuredOutcome.Parsed<>(value, warnings,
-                    result.inputTokens(), result.outputTokens(), result.stopReason());
+            return new AiStructuredRepairAttempt<>(
+                    new AiStructuredOutcome.Parsed<>(value, warnings,
+                            result.inputTokens(), result.outputTokens(), result.stopReason()),
+                    Optional.empty());
         }
     }
 
-    private <T> AiStructuredOutcome<T> malformed(
-            RawInvocation raw, AiInvocation invocation, AiCompletionResult result, String parseOutcome) {
+    private <T> AiStructuredRepairAttempt<T> malformed(
+            RawInvocation raw,
+            AiInvocation invocation,
+            AiCompletionResult result,
+            String parseOutcome,
+            String schemaRule,
+            String offendingOutput,
+            boolean objectExtracted,
+            boolean captureRepair) {
         raw.close();
+        MalformedDiagnostic diagnostic = new MalformedDiagnostic(
+                schemaRule, result.text().length(), objectExtracted);
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
-                result.stopReason(), null, null, true, parseOutcome);
-        return new AiStructuredOutcome.Malformed<>(parseOutcome,
-                result.inputTokens(), result.outputTokens(), result.stopReason());
+                result.stopReason(), null, null, true, parseOutcome, diagnostic);
+        Optional<AiStructuredRepair> repair = captureRepair
+                ? Optional.of(AiStructuredRepair.from(schemaRule, offendingOutput))
+                : Optional.empty();
+        return new AiStructuredRepairAttempt<>(
+                new AiStructuredOutcome.Malformed<>(parseOutcome,
+                        result.inputTokens(), result.outputTokens(), result.stopReason()),
+                repair);
     }
 
     private RawInvocation invokeRaw(
-            AiInvocation invocation, AiOutputMode outputMode, Runnable invocationCommitment) {
+            AiInvocation invocation,
+            AiOutputMode outputMode,
+            AiResponseSchema responseSchema,
+            Runnable invocationCommitment) {
         Objects.requireNonNull(invocation, "invocation");
         Objects.requireNonNull(outputMode, "outputMode");
         Objects.requireNonNull(invocationCommitment, "invocationCommitment");
@@ -213,7 +298,8 @@ public class AiInvocationService {
         }
 
         return invokeAdmitted(
-                invocation, outputMode, workspaceId, orgId, correlationId, invocationCommitment);
+                invocation, outputMode, responseSchema,
+                workspaceId, orgId, correlationId, invocationCommitment);
     }
 
     private AiMediaAdmissionService.Lease acquireMedia(
@@ -234,6 +320,7 @@ public class AiInvocationService {
     private RawInvocation invokeAdmitted(
             AiInvocation invocation,
             AiOutputMode outputMode,
+            AiResponseSchema responseSchema,
             int workspaceId,
             int orgId,
             String correlationId,
@@ -276,37 +363,53 @@ public class AiInvocationService {
                 null, null, null, null, null, structured, null);
 
         MediaLeaseGuard mediaLease = MediaLeaseGuard.none();
+        ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
+                workspaceId, orgId, resolved, invocation, correlationId,
+                structured, invocationCommitment);
         try {
             if (!invocation.images().isEmpty()) {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
                         workspaceId, orgId, correlationId, invocation, structured));
             }
-            AiCompletionResult result = aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
-                invocationCommitment.run();
-                return aiProviderRouter.adapterFor(resolved.provider())
-                        .complete(request(resolved, invocation, outputMode));
-            });
+            AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
+                    .complete(request(
+                            resolved, invocation, outputMode, responseSchema, attemptTracker));
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
+        } catch (AiProviderAttemptBlockedException exception) {
+            mediaLease.close();
+            throw directAdmissionFailure(exception.reason());
         } catch (AiProviderException exception) {
             mediaLease.close();
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
-                    null, null, null, null, "provider_exception", structured, null);
+            if (!attemptTracker.failureAudited()) {
+                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
+                        null, null, null, null, "provider_exception", structured, null);
+            }
             throw exception;
         } catch (TooManyRequestsException exception) {
             mediaLease.close();
             throw exception;
-        } catch (AiRestrictionEpoch.EgressRejectedException exception) {
-            mediaLease.close();
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                    null, null, null, null, "restriction_epoch", structured, null);
-            throw exception;
         } catch (RuntimeException | Error exception) {
             mediaLease.close();
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
-                    null, null, null, null, "invocation_exception", structured, null);
+            if (!attemptTracker.failureAudited()) {
+                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
+                        null, null, null, null, "invocation_exception", structured, null);
+            }
             throw exception;
         }
+    }
+
+    private RuntimeException directAdmissionFailure(
+            AiProviderAttemptBlockedException.Reason reason) {
+        return switch (reason) {
+            case ORGANIZATION_QUOTA ->
+                    new AiInvocationAdmissionService.DirectAdmissionRejectedException(
+                            AiInvocationAdmissionService.Rejection.ORGANIZATION_QUOTA);
+            case CAPACITY -> new AiInvocationAdmissionService.DirectAdmissionRejectedException(
+                    AiInvocationAdmissionService.Rejection.CAPACITY);
+            case RESTRICTION_EPOCH ->
+                    new IllegalStateException("AI restrictions changed before provider egress");
+        };
     }
 
     private static String truncationReason(String stopReason) {
@@ -316,12 +419,17 @@ public class AiInvocationService {
     }
 
     private AiCompletionRequest request(
-            ResolvedAiProvider resolved, AiInvocation invocation, AiOutputMode outputMode) {
+            ResolvedAiProvider resolved,
+            AiInvocation invocation,
+            AiOutputMode outputMode,
+            AiResponseSchema responseSchema,
+            AiProviderAttemptExecutor providerAttemptExecutor) {
         List<AiMessage> messages = invocation.prompt().getMessages().stream()
                 .map(message -> new AiMessage(message.getRole(), message.getContent()))
                 .toList();
         return new AiCompletionRequest(resolved.target(), resolved.credentials(), invocation.prompt().getSystemPrompt(),
-                messages, invocation.images(), outputMode, invocation.maxTokens(), invocation.temperature());
+                messages, invocation.images(), outputMode, responseSchema,
+                providerAttemptExecutor, invocation.maxTokens(), invocation.temperature());
     }
 
     private String serializePrompt(MaskedPrompt prompt) {
@@ -348,12 +456,30 @@ public class AiInvocationService {
             Integer outputTokens, String stopReason, Integer demaskWarnings, String reason, boolean structured,
             String parseOutcome) {
         emitAudit(raw.workspaceId(), raw.orgId(), raw.resolved(), invocation, raw.correlationId(), outcome,
-                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome);
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                raw.result().structuredOutputEnforcement(), null);
+    }
+
+    private void emitAudit(RawInvocation raw, AiInvocation invocation, String outcome, Integer inputTokens,
+            Integer outputTokens, String stopReason, Integer demaskWarnings, String reason, boolean structured,
+            String parseOutcome, MalformedDiagnostic diagnostic) {
+        emitAudit(raw.workspaceId(), raw.orgId(), raw.resolved(), invocation, raw.correlationId(), outcome,
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                raw.result().structuredOutputEnforcement(), diagnostic);
     }
 
     private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
             String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
             Integer demaskWarnings, String reason, boolean structured, String parseOutcome) {
+        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                null, null);
+    }
+
+    private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
+            String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
+            Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
+            AiStructuredOutputEnforcement enforcement, MalformedDiagnostic diagnostic) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("provider", provider(resolved));
         metadata.put("region", region(resolved));
@@ -373,6 +499,9 @@ public class AiInvocationService {
                     .toList());
         }
         metadata.put("structured", structured);
+        if (structured && enforcement != null) {
+            metadata.put("structuredEnforcement", enforcement.name().toLowerCase(java.util.Locale.ROOT));
+        }
         if (inputTokens != null) {
             metadata.put("inputTokens", inputTokens);
         }
@@ -390,6 +519,11 @@ public class AiInvocationService {
         }
         if (reason != null) {
             metadata.put("reason", reason);
+        }
+        if (diagnostic != null) {
+            metadata.put("schemaRule", diagnostic.schemaRule());
+            metadata.put("outputLength", diagnostic.outputLength());
+            metadata.put("objectExtracted", diagnostic.objectExtracted());
         }
         if (AUDIT_OUTCOME_ATTEMPT.equals(outcome)) {
             auditService.recordStrictIndependentScoped(AUDIT_ACTION, AUDIT_ENTITY_TYPE, null, workspaceId, orgId,
@@ -414,6 +548,106 @@ public class AiInvocationService {
 
     private static String model(ResolvedAiProvider resolved) {
         return resolved == null ? UNKNOWN_TARGET : resolved.modelId();
+    }
+
+    private final class ProviderAttemptTracker implements AiProviderAttemptExecutor {
+        private final int workspaceId;
+        private final int orgId;
+        private final ResolvedAiProvider resolved;
+        private final AiInvocation invocation;
+        private final String correlationId;
+        private final boolean structured;
+        private final Runnable initialCommitment;
+        private boolean firstAttempt = true;
+        private boolean failureAudited;
+
+        private ProviderAttemptTracker(
+                int workspaceId,
+                int orgId,
+                ResolvedAiProvider resolved,
+                AiInvocation invocation,
+                String correlationId,
+                boolean structured,
+                Runnable initialCommitment) {
+            this.workspaceId = workspaceId;
+            this.orgId = orgId;
+            this.resolved = resolved;
+            this.invocation = invocation;
+            this.correlationId = correlationId;
+            this.structured = structured;
+            this.initialCommitment = initialCommitment;
+        }
+
+        @Override
+        public synchronized String execute(Supplier<String> attempt) {
+            Supplier<String> providerAttempt = Objects.requireNonNull(attempt, "attempt");
+            failureAudited = false;
+            AiInvocationAdmissionService.DirectAdmission fallbackAdmission = null;
+            Runnable commitment = initialCommitment;
+            boolean fallbackAttempt = !firstAttempt;
+            if (firstAttempt) {
+                firstAttempt = false;
+            } else {
+                try {
+                    fallbackAdmission = aiInvocationAdmissionService.acquireDirect();
+                    commitment = fallbackAdmission::commitInvocation;
+                } catch (AiInvocationAdmissionService.DirectAdmissionRejectedException exception) {
+                    auditAdmissionBlock(exception.rejection());
+                    throw new AiProviderAttemptBlockedException(
+                            exception.rejection() == AiInvocationAdmissionService.Rejection.ORGANIZATION_QUOTA
+                                    ? AiProviderAttemptBlockedException.Reason.ORGANIZATION_QUOTA
+                                    : AiProviderAttemptBlockedException.Reason.CAPACITY);
+                }
+            }
+            Runnable attemptCommitment = commitment;
+            try {
+                if (fallbackAttempt) {
+                    emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
+                            null, null, null, null, null, structured, null);
+                }
+                return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
+                    attemptCommitment.run();
+                    return providerAttempt.get();
+                });
+            } catch (AiRestrictionEpoch.EgressRejectedException exception) {
+                failureAudited = true;
+                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                        null, null, null, null, "restriction_epoch", structured, null);
+                throw new AiProviderAttemptBlockedException(
+                        AiProviderAttemptBlockedException.Reason.RESTRICTION_EPOCH);
+            } catch (RuntimeException exception) {
+                failureAudited = true;
+                String reason = exception instanceof AiProviderException
+                        ? "provider_exception"
+                        : "invocation_exception";
+                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
+                        null, null, null, null, reason, structured, null);
+                throw exception;
+            } finally {
+                if (fallbackAdmission != null) {
+                    fallbackAdmission.close();
+                }
+            }
+        }
+
+        private void auditAdmissionBlock(AiInvocationAdmissionService.Rejection rejection) {
+            failureAudited = true;
+            String reason = rejection == AiInvocationAdmissionService.Rejection.ORGANIZATION_QUOTA
+                    ? "organization_quota"
+                    : "invocation_capacity";
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, reason, structured, null);
+        }
+
+        private boolean failureAudited() {
+            return failureAudited;
+        }
+    }
+
+    private record MalformedDiagnostic(
+            String schemaRule,
+            int outputLength,
+            boolean objectExtracted) {
     }
 
     private record RawInvocation(

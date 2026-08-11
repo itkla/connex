@@ -31,7 +31,10 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -109,13 +112,44 @@ class OpenAiCompatibleAdapterTest {
         assertEquals("Hello.", body.path("messages").path(2).path("content").asString());
         assertEquals(64, body.path("max_tokens").asInt());
         assertFalse(body.has("max_completion_tokens"));
-        assertFalse(body.has("response_format"));
+        assertEquals("json_object", body.path("response_format").path("type").asString());
         assertEquals(0.25, body.path("temperature").asDouble());
         assertEquals("Hello world", result.text());
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
         assertEquals("stop", result.stopReason());
+        assertEquals(AiStructuredOutputEnforcement.JSON_OBJECT,
+                result.structuredOutputEnforcement());
         assertFalse(result.toString().contains("Hello world"));
+    }
+
+    @Test
+    void complete_sendsStrictJsonSchemaAndDegradesOnARejectedCapability() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+                .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 400))
+                .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 422))
+                .thenReturn(validResponse());
+
+        AiCompletionResult result = adapter.complete(schemaRequest());
+
+        ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient, times(3)).complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture());
+        JsonNode schemaBody = objectMapper.readTree(bodies.getAllValues().get(0));
+        assertEquals("json_schema", schemaBody.path("response_format").path("type").asString());
+        assertEquals("assistant_step",
+                schemaBody.path("response_format").path("json_schema").path("name").asString());
+        assertEquals(true,
+                schemaBody.path("response_format").path("json_schema").path("strict").asBoolean());
+        assertEquals("object", schemaBody.path("response_format").path("json_schema")
+                .path("schema").path("type").asString());
+        JsonNode fallbackBody = objectMapper.readTree(bodies.getAllValues().get(1));
+        assertEquals("json_object", fallbackBody.path("response_format").path("type").asString());
+        JsonNode promptOnlyBody = objectMapper.readTree(bodies.getAllValues().get(2));
+        assertFalse(promptOnlyBody.has("response_format"));
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
+                result.structuredOutputEnforcement());
     }
 
     @Test
@@ -309,6 +343,20 @@ class OpenAiCompatibleAdapterTest {
         return new AiProviderTarget(
                 "openai_compatible", null, modelId, endpoint,
                 null, null, null, allowInternalEndpoint);
+    }
+
+    private AiCompletionRequest schemaRequest() throws Exception {
+        return new AiCompletionRequest(
+                target("https://api.example.test/v1", false),
+                credentials(),
+                "Return one step",
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                64,
+                0.25);
     }
 
     private static AiCredentials credentials() {

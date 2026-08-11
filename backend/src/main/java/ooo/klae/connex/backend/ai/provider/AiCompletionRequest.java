@@ -11,6 +11,8 @@ import java.util.Objects;
  * @param messages ordered conversation messages
  * @param images bounded embedded images attached to the first user message
  * @param outputMode requested provider response shape
+ * @param responseSchema optional provider-neutral JSON Schema for structured enforcement
+ * @param providerAttemptExecutor provider-send egress boundary
  * @param maxTokens provider output token cap
  * @param temperature provider sampling temperature
  */
@@ -21,6 +23,8 @@ public record AiCompletionRequest(
         List<AiMessage> messages,
         List<AiInputImage> images,
         AiOutputMode outputMode,
+        AiResponseSchema responseSchema,
+        AiProviderAttemptExecutor providerAttemptExecutor,
         int maxTokens,
         double temperature) {
 
@@ -30,9 +34,40 @@ public record AiCompletionRequest(
         messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
         images = List.copyOf(Objects.requireNonNull(images, "images"));
         Objects.requireNonNull(outputMode, "outputMode");
+        Objects.requireNonNull(providerAttemptExecutor, "providerAttemptExecutor");
+        if (outputMode == AiOutputMode.TEXT && responseSchema != null) {
+            throw new IllegalArgumentException("AI text completion cannot declare a response schema");
+        }
         if (images.size() > 1) {
             throw new IllegalArgumentException("AI completion accepts at most one image");
         }
+    }
+
+    public AiCompletionRequest(
+            AiProviderTarget target,
+            AiCredentials credentials,
+            String systemPrompt,
+            List<AiMessage> messages,
+            List<AiInputImage> images,
+            AiOutputMode outputMode,
+            AiResponseSchema responseSchema,
+            int maxTokens,
+            double temperature) {
+        this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema,
+                AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
+    }
+
+    public AiCompletionRequest(
+            AiProviderTarget target,
+            AiCredentials credentials,
+            String systemPrompt,
+            List<AiMessage> messages,
+            List<AiInputImage> images,
+            AiOutputMode outputMode,
+            int maxTokens,
+            double temperature) {
+        this(target, credentials, systemPrompt, messages, images, outputMode, null,
+                AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
     }
 
     @Override
@@ -40,6 +75,7 @@ public record AiCompletionRequest(
         return "AiCompletionRequest[target=" + target
                 + ", credentials=<redacted>, systemPrompt=<redacted>, messages=<redacted>, maxTokens="
                 + maxTokens + ", images=<redacted>, outputMode=" + outputMode
+                + ", responseSchema=" + (responseSchema == null ? "none" : responseSchema.name())
                 + ", temperature=" + temperature + "]";
     }
 }
