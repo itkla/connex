@@ -27,6 +27,10 @@ git tag v1.4.0
 git push origin v1.4.0
 ```
 
+Trial candidates and release candidates use SemVer prerelease tags such as `v1.4.0-tc.1` and
+`v1.4.0-rc.2`. Their complete prerelease version is preserved in every image, manifest, bundle, and
+runtime version surface.
+
 `.github/workflows/release.yml` treats the three images as one release transaction:
 
 Before the workflow can cut or resume a release, repository immutable releases must be enabled and
@@ -34,11 +38,12 @@ the `CONNEX_RELEASE_ADMIN_TOKEN` Actions secret must provide repository Administ
 The normal `GITHUB_TOKEN` remains the only token used to upload release assets. The administration
 token is used only to fail closed on the immutable-release policy precondition.
 
-1. It rejects anything except strict `vMAJOR.MINOR.PATCH`. Before creating a transaction, it requires
-   the tag to point to the current `main` head and waits for the latest `push` run of the repository's
-   CI, security, and deployment-smoke workflows to succeed for that exact commit. A resume uses the
-   already signed transaction even if `main` has advanced. Workflow identity is resolved through the
-   GitHub Actions API, not by accepting a matching check name from another integration.
+1. It rejects anything except strict `vMAJOR.MINOR.PATCH` with optional SemVer prerelease
+   identifiers. Before creating a transaction, it requires the tag to point to the current `main`
+   head and waits for the latest `push` run of the repository's CI, security, and deployment-smoke
+   workflows to succeed for that exact commit. A resume uses the already signed transaction even if
+   `main` has advanced. Workflow identity is resolved through the GitHub Actions API, not by accepting
+   a matching check name from another integration.
 2. It builds each component with a reproducible commit timestamp and pushes only an attempt-scoped
    `candidate-<run>-<attempt>` tag. Every attempt builds from the checked-out release commit with
    pinned Buildx and BuildKit versions and emits BuildKit provenance; it never trusts content found
@@ -59,7 +64,8 @@ token is used only to fail closed on the immutable-release policy precondition.
    build attestation; rejects any conflicting destination tag; and fills only absent matching
    `:<version>` and `:sha-<commit>` convenience names.
 6. Publication uploads every transaction-bound asset to a draft GitHub Release, downloads and
-   re-hashes the complete draft, and only then makes it public. A public release is the availability
+   re-hashes the complete draft, and only then makes it public. Prerelease tags are explicitly marked
+   as prereleases and excluded from GitHub's latest release. A public release is the availability
    signal; partial drafts and orphaned registry tags are not.
 
 The GitHub Release and its signed manifest are the release-set availability signal. Ignore orphaned
@@ -154,9 +160,11 @@ curl -s http://<backend>/api/version   # {"version":"1.4.0","buildTime":"..."}
 
 ## Release channels
 
-Two, no more:
+Three, no more:
 
 - **Continuous** — SaaS/staging track `main`.
+- **Prerelease tags** — trial and release candidates use pinned `vX.Y.Z-<identifier>` artifacts and
+  never become GitHub's latest release.
 - **Stable tags** — silo and on-prem run a pinned `vX.Y.Z`. "Silo staged rollout" is Connex applying a stable tag on a schedule, not separate channel infrastructure.
 
 ## Repointing staging (host-side, not in this repo)

@@ -8,7 +8,7 @@ TAG_NAME="${2:?release tag is required}"
 : "${CONNEX_RELEASE_ADMIN_TOKEN:?CONNEX_RELEASE_ADMIN_TOKEN must provide repository administration read access}"
 
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-[[ "$TAG_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+[[ "$TAG_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$ ]]
 
 REMOTE_REF="refs/connex-release/${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
 git fetch --force --no-tags origin "+refs/tags/${TAG_NAME}:${REMOTE_REF}"

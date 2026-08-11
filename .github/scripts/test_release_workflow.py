@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -5,7 +6,13 @@ import yaml
 
 
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "release.yml"
+PRECONDITIONS_PATH = Path(__file__).parent / "verify-release-preconditions.sh"
 DEPLOYMENT_PATH = Path(__file__).parents[2] / "docs" / "DEPLOYMENT.md"
+SEMVER_TAG_PATTERN = (
+    r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$"
+)
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
@@ -79,6 +86,64 @@ class ReleaseWorkflowTest(unittest.TestCase):
             4,
             WORKFLOW_PATH.read_text(encoding="utf-8").count("verify-release-preconditions.sh"),
         )
+
+    def test_core_and_prerelease_tags_preserve_exact_artifact_identity(self) -> None:
+        accepted = ("v0.9.0", "v0.9.0-tc.1", "v1.0.0", "v0.9.0-rc.2")
+        rejected = ("v0.9", "v0.9.0.1", "v0.9.0-", "banana", "v01.9.0", "v0.9.0-rc.02")
+        for tag in accepted:
+            result = subprocess.run(
+                ["bash", "-c", f'[[ "$1" =~ {SEMVER_TAG_PATTERN} ]]', "_", tag],
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, tag)
+        for tag in rejected:
+            result = subprocess.run(
+                ["bash", "-c", f'[[ "$1" =~ {SEMVER_TAG_PATTERN} ]]', "_", tag],
+                check=False,
+            )
+            self.assertNotEqual(0, result.returncode, tag)
+
+        workflow_source = WORKFLOW_PATH.read_text(encoding="utf-8")
+        preconditions_source = PRECONDITIONS_PATH.read_text(encoding="utf-8")
+        self.assertIn(f'if [[ ! "$GITHUB_REF_NAME" =~ {SEMVER_TAG_PATTERN} ]]; then', workflow_source)
+        self.assertIn(f'[[ "$TAG_NAME" =~ {SEMVER_TAG_PATTERN} ]]', preconditions_source)
+
+        metadata = self.named_step("metadata", "Resolve release event metadata")
+        version_line = next(
+            line.strip() for line in metadata["run"].splitlines() if line.strip().startswith("VERSION=")
+        )
+        for tag, expected in (("v0.9.0", "0.9.0"), ("v0.9.0-tc.1", "0.9.0-tc.1")):
+            result = subprocess.run(
+                ["bash", "-c", f'{version_line}\nprintf "%s" "$VERSION"', "_"],
+                env={"GITHUB_REF_NAME": tag},
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(expected, result.stdout)
+
+    def test_prereleases_are_explicitly_excluded_from_latest(self) -> None:
+        publish = self.named_step("release", "Publish the complete verified release atomically")
+        flag_setup = publish["run"].split("assets=(", maxsplit=1)[0]
+        stable = subprocess.run(
+            ["bash", "-c", f'{flag_setup}\nprintf "%s\\n" "${{prerelease_flags[@]}}"', "_"],
+            env={"VERSION": "0.9.0"},
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        prerelease = subprocess.run(
+            ["bash", "-c", f'{flag_setup}\nprintf "%s\\n" "${{prerelease_flags[@]}}"', "_"],
+            env={"VERSION": "0.9.0-tc.1"},
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual("\n", stable.stdout)
+        self.assertEqual("--prerelease\n--latest=false\n", prerelease.stdout)
+        self.assertIn('"${prerelease_flags[@]}" \\\n    --notes', publish["run"])
+        self.assertIn('gh release edit "$GITHUB_REF_NAME" --draft=false "${prerelease_flags[@]}"', publish["run"])
+        self.assertNotIn(":latest", WORKFLOW_PATH.read_text(encoding="utf-8"))
 
     def test_qualification_and_sbom_are_recomputed_and_bound(self) -> None:
         workflow_source = WORKFLOW_PATH.read_text(encoding="utf-8")
