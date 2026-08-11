@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArrowTopRightOnSquareIcon,
@@ -33,6 +32,8 @@ type RadarSignalCardProps = {
     busy: boolean;
     snoozeOpen: boolean;
     onSnoozeOpenChange: (open: boolean) => void;
+    expanded: boolean;
+    onExpandedChange: (open: boolean) => void;
     onFollow: () => void;
     onSnooze: (until: string) => void;
     onDismiss: () => void;
@@ -93,6 +94,8 @@ export default function RadarSignalCard({
     busy,
     snoozeOpen,
     onSnoozeOpenChange,
+    expanded,
+    onExpandedChange,
     onFollow,
     onSnooze,
     onDismiss,
@@ -102,7 +105,6 @@ export default function RadarSignalCard({
 }: RadarSignalCardProps) {
     const t = useTranslations('Radar');
     const locale = useLocale();
-    const [expanded, setExpanded] = useState(false);
     const taskPermission = usePermissionCheck('TASK_CREATE');
     const personUpdatePermission = usePermissionCheck('PERSON_UPDATE');
     const refreshPermissions = usePermissionsRefresh();
@@ -404,13 +406,13 @@ export default function RadarSignalCard({
                                 variant="ghost"
                                 size="icon"
                                 className="size-11 lg:size-9"
-                                onClick={() => setExpanded((current) => !current)}
+                                onClick={() => onExpandedChange(!expanded)}
                                 aria-expanded={expanded}
                                 aria-controls={detailId}
                                 aria-label={t(expanded ? 'detail.hideNamed' : 'detail.showNamed', { subject: signal.subject.label })}
                                 title={t(expanded ? 'detail.hide' : 'detail.show')}
                             >
-                                <ChevronDownIcon className={cn('transition-transform duration-200', expanded && 'rotate-180')} aria-hidden />
+                                <ChevronDownIcon className={cn('transition-transform duration-200 motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden />
                             </Button>
                         </div>
                     </div>

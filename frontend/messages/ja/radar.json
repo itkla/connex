@@ -8,7 +8,7 @@
     "description": "冷え込みつつある関係、案件リスク、ウォームパスを、根拠に基づく一つの優先リストで確認します。",
     "summary": {
       "headline": "{count, plural, =0 {対応が必要なシグナルはありません} other {対応が必要なシグナル：#件}}",
-      "asOf": " · 根拠の基準時刻：{asOf}"
+      "headlineFiltered": "{count, plural, =0 {この表示に該当するシグナルはありません} other {この表示のシグナル：#件}}"
     },
     "band": {
       "now": "今日対応",

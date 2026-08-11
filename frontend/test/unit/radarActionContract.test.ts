@@ -996,6 +996,37 @@ describe('Radar action integration', () => {
         await board.unmount();
     });
 
+    it('keeps an opened evidence disclosure open across a Radar refresh that remounts the row', async () => {
+        const first = signal();
+        const second = signal({
+            id: 2,
+            subject: { type: 'person', id: 11, label: 'Grace Hopper' },
+        });
+        const currentPayload = payload([first, second]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        const board = await renderRadarBoard(currentPayload);
+
+        expect(requiredProps(captures.radarCardProps.get(1), 'First Radar card').expanded).toBe(false);
+
+        await act(async () => {
+            invoke(requiredProps(captures.radarCardProps.get(1), 'First Radar card'), 'onExpandedChange', true);
+            await Promise.resolve();
+        });
+        expect(requiredProps(captures.radarCardProps.get(1), 'First Radar card').expanded).toBe(true);
+        expect(requiredProps(captures.radarCardProps.get(2), 'Second Radar card').expanded).toBe(false);
+
+        api.getRadar.mockResolvedValue({ ...payload([first, second]), asOf: '2026-08-08T12:05:00Z' });
+        await act(async () => {
+            invoke(requiredProps(captures.radarCardProps.get(1), 'First Radar card'), 'onRefreshEvidence');
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(requiredProps(captures.radarCardProps.get(1), 'First Radar card').expanded).toBe(true);
+        expect(requiredProps(captures.radarCardProps.get(2), 'Second Radar card').expanded).toBe(false);
+        await board.unmount();
+    });
+
     it('disables every mutating card action while the board-wide gate is occupied, leaving the evidence disclosure usable', async () => {
         const cardModule = await vi.importActual<
             typeof import('@/app/components/radar/RadarSignalCard')
@@ -1020,6 +1051,8 @@ describe('Radar action integration', () => {
                 freshnessStatus: 'current',
                 busy: true,
                 snoozeOpen: false,
+                expanded: false,
+                onExpandedChange: vi.fn(),
                 ...callbacks,
             }));
         });

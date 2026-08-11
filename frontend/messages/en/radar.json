@@ -8,7 +8,7 @@
     "description": "Review cooling relationships, deal risk, and warm paths from one ranked, evidence-backed list.",
     "summary": {
       "headline": "{count, plural, =0 {Nothing needs your attention right now} one {# signal needs your attention} other {# signals need your attention}}",
-      "asOf": " · evidence as of {asOf}"
+      "headlineFiltered": "{count, plural, =0 {No signals match this view} one {# signal in this view} other {# signals in this view}}"
     },
     "band": {
       "now": "Act today",

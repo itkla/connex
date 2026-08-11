@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { AdjustmentsHorizontalIcon, MagnifyingGlassIcon, SignalIcon } from '@heroicons/react/24/outline';
 
 import RadarSignalCard from '@/app/components/radar/RadarSignalCard';
@@ -39,7 +39,6 @@ import {
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { RadarPayload, RadarSignal } from '@/app/lib/types';
 import type { TaskDraft } from '@/app/lib/actions/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import {
@@ -89,7 +88,6 @@ type RadarRefreshSession = { active: boolean };
 /** Stateful Radar work list with shareable filters and failure-aware per-signal actions. */
 export default function RadarBoard({ initialPayload }: { initialPayload: RadarPayload }) {
     const t = useTranslations('Radar');
-    const locale = useLocale();
     const searchParams = useSearchParams();
     const initialFamily = searchParams.get('family');
     const initialState = searchParams.get('state');
@@ -103,6 +101,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const [payload, setPayload] = useState(initialPayload);
     const [busyId, setBusyId] = useState<number | null>(null);
     const [snoozeId, setSnoozeId] = useState<number | null>(null);
+    const [expandedIds, setExpandedIds] = useState<ReadonlySet<number>>(() => new Set());
     const [announcement, setAnnouncement] = useState('');
     const [freshnessStatus, setFreshnessStatus] = useState<RadarFreshnessStatus>('checking');
     const { run } = useActions();
@@ -214,12 +213,6 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
         [payload.items, query, state],
     );
     const bands = useMemo(() => groupRadarSignalsByBand(visibleSignals), [visibleSignals]);
-    const asOf = useMemo(() => {
-        const timestamp = parseMysqlDateTime(payload.asOf);
-        return Number.isFinite(timestamp)
-            ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp)
-            : null;
-    }, [locale, payload.asOf]);
 
     const restoreListFocus = (id: number) => {
         const target = nextFocusId(visibleSignals, id);
@@ -353,8 +346,9 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
 
             <section aria-label={t('filters.label')} className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                    {t('summary.headline', { count: visibleSignals.length })}
-                    {asOf ? <span className="text-muted-foreground/80">{t('summary.asOf', { asOf })}</span> : null}
+                    {t(state === 'attention' ? 'summary.headline' : 'summary.headlineFiltered', {
+                        count: visibleSignals.length,
+                    })}
                 </p>
 
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -461,6 +455,13 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                 busy={busyId !== null}
                                 snoozeOpen={snoozeId === signal.id}
                                 onSnoozeOpenChange={(open) => setSnoozeId(open ? signal.id : null)}
+                                expanded={expandedIds.has(signal.id)}
+                                onExpandedChange={(open) => setExpandedIds((current) => {
+                                    const next = new Set(current);
+                                    if (open) next.add(signal.id);
+                                    else next.delete(signal.id);
+                                    return next;
+                                })}
                                 onFollow={() => void mutate(
                                     signal,
                                     () => followRadarSignal(signal.id, signal.version),
