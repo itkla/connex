@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     RADAR_FIELD_SURFACE,
+    RADAR_FORCED_COLORS_AFFORDANCE,
     RADAR_PRESSABLE_SURFACE,
 } from '@/app/components/radar/radarControlSurface';
 import { cn } from '@/lib/utils';
@@ -30,6 +31,20 @@ describe('radar borderless control surfaces', () => {
 
     it('keeps the focus ring so a borderless field still announces focus', () => {
         expect(cn(INPUT_BASE, RADAR_FIELD_SURFACE)).toContain('focus-visible:border-ring');
+    });
+
+    it('restores a boundary and a focus outline under forced colours', () => {
+        const merged = cn(INPUT_BASE, RADAR_FIELD_SURFACE).split(' ');
+        expect(merged).toContain('forced-colors:border');
+        expect(merged).toContain('forced-colors:focus-visible:outline-solid');
+        expect(merged).toContain('forced-colors:focus-visible:outline-2');
+    });
+
+    it('carries the forced-colours affordance into every radar surface', () => {
+        for (const token of RADAR_FORCED_COLORS_AFFORDANCE.split(' ')) {
+            expect(RADAR_FIELD_SURFACE.split(' ')).toContain(token);
+            expect(RADAR_PRESSABLE_SURFACE.split(' ')).toContain(token);
+        }
     });
 
     it('overrides the dark-mode fill the primitive sets behind the base background', () => {

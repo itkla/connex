@@ -7,7 +7,11 @@ import { AdjustmentsHorizontalIcon, MagnifyingGlassIcon, SignalIcon } from '@her
 
 import RadarSignalCard from '@/app/components/radar/RadarSignalCard';
 import { FAMILY_DOTS } from '@/app/components/radar/radarFamilyAccent';
-import { RADAR_FIELD_SURFACE, RADAR_PRESSABLE_SURFACE } from '@/app/components/radar/radarControlSurface';
+import {
+    RADAR_FIELD_SURFACE,
+    RADAR_FORCED_COLORS_AFFORDANCE,
+    RADAR_PRESSABLE_SURFACE,
+} from '@/app/components/radar/radarControlSurface';
 import SectionUnavailable from '@/app/components/SectionUnavailable';
 import { EmptyState } from '@/app/components/EmptyState';
 import { useActions } from '@/app/hooks/useActions';
@@ -364,6 +368,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                 aria-pressed={family === value}
                                 className={cn(
                                     'inline-flex min-h-9 shrink-0 items-center gap-2 rounded-full px-3 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
+                                    RADAR_FORCED_COLORS_AFFORDANCE,
                                     family === value
                                         ? 'bg-foreground text-background'
                                         : `${RADAR_PRESSABLE_SURFACE} text-muted-foreground hover:text-foreground`,
