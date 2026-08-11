@@ -192,6 +192,9 @@ public class RecordCommentService {
             requireReplayThread(existing, threadId);
             return hydrateComment(workspaceId, existing);
         }
+        if (ThreadState.RESOLVED.wire().equals(locked.getState())) {
+            throw new ConflictException("Thread is resolved; reopen it before replying");
+        }
         if (recordCommentMapper.countCommentsInThread(workspaceId, threadId) >= MAX_COMMENTS_PER_THREAD) {
             throw new BadRequestException("A comment thread may contain at most 200 comments");
         }
@@ -230,6 +233,7 @@ public class RecordCommentService {
 
     /** Soft-redacts a comment while retaining its immutable row and authorship. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMMENT_CREATE)
     public void deleteComment(long commentId) {
         requirePositiveId(commentId, "Comment");
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -281,12 +285,14 @@ public class RecordCommentService {
 
     /** Resolves an open thread when its optimistic version still matches. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMMENT_CREATE)
     public RecordCommentThread resolve(long threadId, int expectedVersion) {
         return transitionThread(threadId, expectedVersion, ThreadState.RESOLVED);
     }
 
     /** Reopens a resolved thread when its optimistic version still matches. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMMENT_CREATE)
     public RecordCommentThread reopen(long threadId, int expectedVersion) {
         return transitionThread(threadId, expectedVersion, ThreadState.OPEN);
     }
@@ -301,7 +307,7 @@ public class RecordCommentService {
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
-        workspaceService.requireMember(workspaceId, actorId);
+        workspaceService.requirePermission(workspaceId, actorId, Permission.COMMENT_CREATE);
         RecordCommentThread initial = requireThread(workspaceId, threadId);
         requireTargetVisible(
             workspaceId, TargetType.parse(initial.getTargetType()), initial.getTargetId());
@@ -310,7 +316,7 @@ public class RecordCommentService {
         if (locked == null) {
             throw new ResourceNotFoundException("Comment thread not found with id: " + threadId);
         }
-        workspaceService.requireMember(workspaceId, actorId);
+        workspaceService.requirePermission(workspaceId, actorId, Permission.COMMENT_CREATE);
         requireTargetVisible(
             workspaceId, TargetType.parse(locked.getTargetType()), locked.getTargetId());
         if (locked.getVersion() != expectedVersion) {

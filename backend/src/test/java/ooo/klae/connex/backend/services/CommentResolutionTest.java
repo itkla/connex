@@ -81,6 +81,22 @@ class CommentResolutionTest extends AbstractServiceTest {
             () -> recordCommentService.resolve(thread.getId(), 0));
     }
 
+    @Test
+    void resolvedThreadsRejectRepliesUntilReopened() {
+        Person person = newPerson(newCompany());
+        RecordCommentThread thread = recordCommentService.createThread(
+            "person", person.getId(), "Resolved reply gate", token());
+        recordCommentService.resolve(thread.getId(), 0);
+
+        assertThrows(
+            ConflictException.class,
+            () -> recordCommentService.reply(thread.getId(), "Late reply", token()));
+
+        recordCommentService.reopen(thread.getId(), 1);
+        assertEquals("Reply lands", recordCommentService
+            .reply(thread.getId(), "Reply lands", token()).getContent());
+    }
+
     private static String token() {
         return UUID.randomUUID().toString();
     }

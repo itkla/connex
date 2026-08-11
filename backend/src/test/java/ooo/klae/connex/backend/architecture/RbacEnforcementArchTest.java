@@ -61,7 +61,7 @@ class RbacEnforcementArchTest {
         "DocumentTemplateService", "DealDocumentService",
         "ApprovalPolicyService", "DocumentApprovalService",
         "ConnectionService", "CustomFieldDefinitionService", "BulkOperationService",
-        "IntroductionService", "ReportService", "GoalService", "ScheduleService",
+        "IntroductionService", "RecordCommentService", "ReportService", "GoalService", "ScheduleService",
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
         "SuppressionService", "WarmPathService", "InteractionHistoryImportService");
 

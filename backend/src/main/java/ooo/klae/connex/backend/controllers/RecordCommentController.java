@@ -89,6 +89,7 @@ public class RecordCommentController {
     }
 
     @PostMapping("/comment-threads/{threadId}/resolve")
+    @RequirePermission(Permission.COMMENT_CREATE)
     public RecordCommentThreadDto resolve(
             @Positive @PathVariable long threadId,
             @Valid @RequestBody RecordCommentThreadStateRequest request) {
@@ -97,6 +98,7 @@ public class RecordCommentController {
     }
 
     @PostMapping("/comment-threads/{threadId}/reopen")
+    @RequirePermission(Permission.COMMENT_CREATE)
     public RecordCommentThreadDto reopen(
             @Positive @PathVariable long threadId,
             @Valid @RequestBody RecordCommentThreadStateRequest request) {

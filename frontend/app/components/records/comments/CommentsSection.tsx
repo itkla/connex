@@ -76,6 +76,7 @@ export default function CommentsSection({
     const replyToken = useRef<string | null>(null);
     const highlightRef = useRef<HTMLLIElement | null>(null);
     const highlightScrolled = useRef(false);
+    const fetchGeneration = useRef(0);
 
     const highlightedCommentId = searchParams.get('comment');
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
@@ -84,6 +85,7 @@ export default function CommentsSection({
 
     useEffect(() => {
         let active = true;
+        fetchGeneration.current += 1;
         getCommentThreads(targetType, targetId, { limit: initialLimit, state: stateFilter })
             .then((data) => {
                 if (!active) return;
@@ -124,6 +126,7 @@ export default function CommentsSection({
 
     const handleLoadMore = useCallback(async () => {
         if (loadingMore) return;
+        const generation = fetchGeneration.current;
         setLoadingMore(true);
         try {
             const data = await getCommentThreads(targetType, targetId, {
@@ -131,6 +134,7 @@ export default function CommentsSection({
                 offset: threads.length,
                 state: stateFilter,
             });
+            if (generation !== fetchGeneration.current) return;
             setThreads((prev) => [
                 ...prev,
                 ...data.filter((thread) => !prev.some((existing) => existing.id === thread.id)),
@@ -153,16 +157,18 @@ export default function CommentsSection({
                         ? await resolveCommentThread(thread.id, thread.version)
                         : await reopenCommentThread(thread.id, thread.version);
                 setThreads((prev) =>
-                    prev.map((existing) =>
-                        existing.id === thread.id
-                            ? {
-                                  ...updated,
-                                  comments: updated.comments.length > 0
-                                      ? updated.comments
-                                      : existing.comments,
-                              }
-                            : existing,
-                    ),
+                    action === 'resolve' && stateFilter === 'open'
+                        ? prev.filter((existing) => existing.id !== thread.id)
+                        : prev.map((existing) =>
+                              existing.id === thread.id
+                                  ? {
+                                        ...updated,
+                                        comments: updated.comments.length > 0
+                                            ? updated.comments
+                                            : existing.comments,
+                                    }
+                                  : existing,
+                          ),
                 );
                 toastSuccess(t(action === 'resolve' ? 'resolvedToast' : 'reopenedToast'));
             } catch (error) {
@@ -177,7 +183,7 @@ export default function CommentsSection({
                 setSubmitting(false);
             }
         },
-        [submitting, t],
+        [submitting, stateFilter, t],
     );
 
     const handlePost = useCallback(async () => {
