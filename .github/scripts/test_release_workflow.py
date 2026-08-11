@@ -547,6 +547,19 @@ class ReleaseWorkflowTest(unittest.TestCase):
             calls = [line.split("\t") for line in call_log.read_text(encoding="utf-8").splitlines()]
         return result, calls
 
+    def test_dry_runs_cannot_queue_ahead_of_a_publication(self) -> None:
+        group = self.workflow["concurrency"]["group"]
+
+        self.assertIn("github.event_name == 'push'", group)
+        self.assertIn("-dry-run", group)
+        self.assertEqual(
+            "release-${{ github.repository }}",
+            group.replace(
+                "${{ github.event_name == 'push' && '' || '-dry-run' }}", ""
+            ),
+        )
+        self.assertIs(False, self.workflow["concurrency"]["cancel-in-progress"])
+
     def test_dispatch_requires_version_and_metadata_is_the_only_mode_derivation(self) -> None:
         events = self.workflow_events()
         self.assertEqual({"tags": ["v*.*.*"]}, events["push"])

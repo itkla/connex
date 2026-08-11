@@ -13,8 +13,12 @@ on:
 permissions:
   contents: read
 
+# Dry runs build three images and can occupy the group for the best part of an hour. They must
+# never queue ahead of a real publication, so they get their own group; the publication group name
+# is left exactly as it was. The mode is derived from the event here because job outputs are not
+# available at workflow level — it must stay consistent with the metadata job's derivation.
 concurrency:
-  group: release-${{ github.repository }}
+  group: release-${{ github.repository }}${{ github.event_name == 'push' && '' || '-dry-run' }}
   cancel-in-progress: false
 
 jobs:
