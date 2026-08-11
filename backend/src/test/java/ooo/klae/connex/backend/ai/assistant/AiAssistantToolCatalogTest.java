@@ -15,19 +15,22 @@ class AiAssistantToolCatalogTest {
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
-    void catalogKeepsFiveExecutableAndTwoReservedStableKeys() throws Exception {
+    void catalogKeepsReadAndWriteSafetyTiersExplicit() throws Exception {
         assertEquals(
                 List.of(
                         "search_records", "get_record", "list_activities", "list_tasks",
-                        "aggregate_metric", "find_schedule_conflicts", "get_deal_brief"),
+                        "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
+                        "create_activity", "create_task", "create_note", "add_tag",
+                        "change_deal_stage", "assign_owner"),
                 catalog.tools().stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(5, catalog.tools().stream()
+        assertEquals(12, catalog.tools().stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
-        assertFalse(catalog.isExecutable("find_schedule_conflicts"));
-        assertEquals(
-                "schedule_conflicts_unavailable",
-                catalog.unavailableReason("find_schedule_conflicts"));
+        assertTrue(catalog.isExecutable("find_schedule_conflicts"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.AUTO, catalog.tier("create_activity"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.AUTO, catalog.tier("add_tag"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("change_deal_stage"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("assign_owner"));
         assertFalse(catalog.isExecutable("get_deal_brief"));
         assertEquals(
                 "deal_brief_nested_generation_unavailable",
@@ -41,5 +44,13 @@ class AiAssistantToolCatalogTest {
         assertFalse(catalog.permitsArguments(
                 "aggregate_metric",
                 objectMapper.readTree("{\"metric\":\"activity_volume\",\"days\":31}")));
+        assertTrue(catalog.permitsArguments(
+                "create_note",
+                objectMapper.readTree(
+                        "{\"handle\":\"r1\",\"content\":\"Follow up\","
+                                + "\"idempotency_key\":\"note-replay-1\"}")));
+        assertFalse(catalog.permitsArguments(
+                "create_note",
+                objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"Follow up\"}")));
     }
 }

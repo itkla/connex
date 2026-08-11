@@ -167,11 +167,26 @@ public interface AiChatMapper {
         @Param("messageId") int messageId,
         @Param("id") int id);
 
+    AiChatToolCall getToolCallByIdempotencyKey(
+        @Param("workspaceId") int workspaceId,
+        @Param("idempotencyKey") String idempotencyKey);
+
+    AiChatToolCall getToolCallBySessionForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id);
+
     int updateToolCall(
         @Param("workspaceId") int workspaceId,
         @Param("messageId") int messageId,
         @Param("id") int id,
         @Param("status") String status,
+        @Param("resultJson") String resultJson,
+        @Param("executedByUserId") int executedByUserId);
+
+    int updateExecutedToolResult(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
         @Param("resultJson") String resultJson,
         @Param("executedByUserId") int executedByUserId);
 }

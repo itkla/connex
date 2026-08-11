@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -44,6 +46,8 @@ public class AiAssistantToolExecutor {
     private static final Set<Integer> ANALYTICS_DAYS = Set.of(30, 90, 365);
     private static final int DEFAULT_LIMIT = 10;
     private static final int MAX_NOTES = 10;
+    private static final DateTimeFormatter MYSQL_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final AiAssistantToolCatalog toolCatalog;
     private final SearchService searchService;
@@ -57,6 +61,7 @@ public class AiAssistantToolExecutor {
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
+    private final AiAssistantDateResolver dateResolver;
 
     /** Executes one validated, enabled tool call. */
     public AiAssistantToolResult execute(
@@ -75,6 +80,7 @@ public class AiAssistantToolExecutor {
                 case "list_activities" -> listActivities(args, resources);
                 case "list_tasks" -> listTasks(args, resources);
                 case "aggregate_metric" -> aggregateMetric(args);
+                case "find_schedule_conflicts" -> findScheduleConflicts(args, resources);
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
             };
         } catch (ResourceNotFoundException exception) {
@@ -100,6 +106,8 @@ public class AiAssistantToolExecutor {
         Set<String> acceptedKinds = switch (name) {
             case "get_deal_brief" -> Set.of("deal");
             case "find_schedule_conflicts" -> Set.of("person");
+            case "create_activity", "create_task", "create_note" -> Set.of("person", "deal");
+            case "change_deal_stage" -> Set.of("deal");
             default -> RECORD_KINDS;
         };
         resources.resolve(handle.asString(), acceptedKinds);
@@ -270,6 +278,35 @@ public class AiAssistantToolExecutor {
             default -> throw AiAssistantLoopException.malformed("unknown_metric");
         };
         return result(Map.of("metric", metric, "value", value), List.of());
+    }
+
+    private AiAssistantToolResult findScheduleConflicts(
+            JsonNode args, AiChatResourceRegistry resources) {
+        ResourceRef resource = resources.resolve(requiredText(args, "handle"), Set.of("person"));
+        AiAssistantDateResolver.ResolvedDateTime start =
+                dateResolver.resolveDateTime(requiredText(args, "start"));
+        AiAssistantDateResolver.ResolvedDateTime end =
+                dateResolver.resolveDateTime(requiredText(args, "end"));
+        if (!end.utc().isAfter(start.utc())) {
+            throw AiAssistantLoopException.malformed("invalid_schedule_window");
+        }
+        return findScheduleConflicts(resource.id(), start.utc(), end.utc());
+    }
+
+    /** Finds point-in-time activities for a processable person inside one UTC meeting window. */
+    public AiAssistantToolResult findScheduleConflicts(
+            int personId, LocalDateTime startUtc, LocalDateTime endUtc) {
+        requireProcessable(personService.getPersonById(personId));
+        List<Map<String, Object>> conflicts = activityService.getActivitiesByPersonId(personId)
+                .stream()
+                .filter(activity -> isWithin(activity.getTimestamp(), startUtc, endUtc))
+                .map(AiAssistantToolExecutor::activityData)
+                .toList();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("start", MYSQL_TIMESTAMP.format(startUtc));
+        data.put("end", MYSQL_TIMESTAMP.format(endUtc));
+        data.put("conflicts", conflicts);
+        return result(data, List.of());
     }
 
     private RecordResult readRecord(
@@ -516,6 +553,19 @@ public class AiAssistantToolExecutor {
         }
         if (value != null) {
             data.put(key, value);
+        }
+    }
+
+    private static boolean isWithin(
+            String timestamp, LocalDateTime startUtc, LocalDateTime endUtc) {
+        if (timestamp == null || timestamp.isBlank()) {
+            return false;
+        }
+        try {
+            LocalDateTime value = LocalDateTime.parse(timestamp, MYSQL_TIMESTAMP);
+            return !value.isBefore(startUtc) && value.isBefore(endUtc);
+        } catch (java.time.format.DateTimeParseException exception) {
+            return false;
         }
     }
 

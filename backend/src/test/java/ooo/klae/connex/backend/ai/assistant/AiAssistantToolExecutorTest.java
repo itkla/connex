@@ -48,6 +48,7 @@ class AiAssistantToolExecutorTest {
     private PersonMapper personMapper;
     private CompanyMapper companyMapper;
     private DealMapper dealMapper;
+    private AiAssistantDateResolver dateResolver;
     private AiAssistantToolExecutor executor;
 
     @BeforeEach
@@ -63,10 +64,11 @@ class AiAssistantToolExecutorTest {
         personMapper = mock(PersonMapper.class);
         companyMapper = mock(CompanyMapper.class);
         dealMapper = mock(DealMapper.class);
+        dateResolver = mock(AiAssistantDateResolver.class);
         executor = new AiAssistantToolExecutor(
                 new AiAssistantToolCatalog(), searchService, personService, companyService,
                 dealService, activityService, taskService, scoringService, workspaceService,
-                personMapper, companyMapper, dealMapper);
+                personMapper, companyMapper, dealMapper, dateResolver);
     }
 
     @Test
@@ -85,26 +87,16 @@ class AiAssistantToolExecutorTest {
     }
 
     @Test
-    void reservedKeysFailClosedWithoutNestedOrInventedReads() throws Exception {
+    void reservedDealBriefFailsClosedWithoutNestedReads() throws Exception {
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 7);
         resources.register("deal", 8);
 
-        AiAssistantLoopException schedule = assertThrows(
-                AiAssistantLoopException.class,
-                () -> executor.execute(
-                        "find_schedule_conflicts",
-                        objectMapper.readTree(
-                                "{\"handle\":\"r1\",\"start\":\"2026-08-10T09:00:00Z\","
-                                        + "\"end\":\"2026-08-10T10:00:00Z\"}"),
-                        resources,
-                        true));
         AiAssistantLoopException brief = assertThrows(
                 AiAssistantLoopException.class,
                 () -> executor.execute(
                         "get_deal_brief", objectMapper.readTree("{\"handle\":\"r2\"}"), resources, true));
 
-        assertEquals("schedule_conflicts_unavailable", schedule.detailReason());
         assertEquals("deal_brief_nested_generation_unavailable", brief.detailReason());
         verifyNoInteractions(
                 searchService, personService, companyService, dealService,

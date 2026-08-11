@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealAgingDto;
@@ -107,6 +108,19 @@ class DealServiceTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
+    }
+
+    @Test
+    void conditionalTagRemovalRefusesOnceTheAssociationChanged() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        Tag tag = newTag();
+        dealService.addTag(deal.getId(), tag.getId());
+
+        assertDoesNotThrow(() -> dealService.removeTagIfUnchanged(deal.getId(), tag.getId()));
+        assertThrows(
+            ConflictException.class,
+            () -> dealService.removeTagIfUnchanged(deal.getId(), tag.getId()));
     }
 
     @Test

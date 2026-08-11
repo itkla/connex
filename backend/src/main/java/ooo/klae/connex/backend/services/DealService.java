@@ -71,6 +71,7 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -1304,6 +1305,25 @@ public class DealService {
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         dealMapper.removeTag(workspaceId, dealId, tagId);
+        String tagName = tag != null ? tag.getName() : "#" + tagId;
+        auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
+            "Removed tag " + tagName + " from " + deal.getName(),
+            auditService.singleChange("tag", tagName, null));
+    }
+
+    /** Removes a tag only when the association still exists at the inverse write. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public void removeTagIfUnchanged(int dealId, int tagId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        if (dealMapper.removeTag(workspaceId, dealId, tagId) != 1) {
+            throw new ConflictException("Deal tag association changed and cannot be removed");
+        }
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
             "Removed tag " + tagName + " from " + deal.getName(),

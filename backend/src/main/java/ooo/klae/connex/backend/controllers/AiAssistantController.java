@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
+import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
@@ -40,6 +42,7 @@ public class AiAssistantController {
 
     private final AiAssistantService assistantService;
     private final AiAssistantTurnService turnService;
+    private final AiAssistantWriteToolService writeToolService;
 
     /** Returns a bounded page of caller-owned and shared-participant sessions. */
     @GetMapping
@@ -119,6 +122,30 @@ public class AiAssistantController {
             @PathVariable int sessionId,
             @PathVariable int turnId) {
         return turnService.get(sessionId, turnId);
+    }
+
+    /** Explicitly approves and executes one confirm-tier tool call. */
+    @PostMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}/approve")
+    public AiAssistantToolCallDto approveToolCall(
+            @PathVariable int sessionId,
+            @PathVariable int toolCallId) {
+        return writeToolService.approve(sessionId, toolCallId);
+    }
+
+    /** Explicitly rejects one confirm-tier tool call without executing it. */
+    @PostMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}/reject")
+    public AiAssistantToolCallDto rejectToolCall(
+            @PathVariable int sessionId,
+            @PathVariable int toolCallId) {
+        return writeToolService.reject(sessionId, toolCallId);
+    }
+
+    /** Applies the bounded inverse of one unchanged auto-tier tool outcome. */
+    @PostMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}/undo")
+    public AiAssistantToolCallDto undoToolCall(
+            @PathVariable int sessionId,
+            @PathVariable int toolCallId) {
+        return writeToolService.undo(sessionId, toolCallId);
     }
 
     private static BadRequestException unsupportedScope() {

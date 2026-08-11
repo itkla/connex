@@ -604,6 +604,22 @@ public class CompanyService {
             auditService.singleChange("tag", tagName, null));
     }
 
+    /** Removes a tag only when the association still exists at the inverse write. */
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public void removeTagIfUnchanged(int companyId, int tagId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company company = requireOwnedCompany(workspaceId, companyId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        if (companyMapper.removeTag(workspaceId, companyId, tagId) != 1) {
+            throw new ConflictException("Company tag association changed and cannot be removed");
+        }
+        String tagName = tag != null ? tag.getName() : "#" + tagId;
+        auditService.record("company.removeTag", "company", companyId, company.getName(),
+            "Removed tag " + tagName + " from " + company.getName(),
+            auditService.singleChange("tag", tagName, null));
+    }
+
     /**
      * Replaces the tags associated with a company in the active workspace.
      */

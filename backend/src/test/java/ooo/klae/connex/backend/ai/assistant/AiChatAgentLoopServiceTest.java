@@ -47,6 +47,7 @@ class AiChatAgentLoopServiceTest {
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiInvocationService invocationService;
     private AiAssistantToolExecutor toolExecutor;
+    private AiAssistantWriteToolService writeToolService;
     private AiChatTurnPersistenceService persistenceService;
     private AiRestrictionEpoch restrictionEpoch;
     private WorkspaceService workspaceService;
@@ -56,6 +57,7 @@ class AiChatAgentLoopServiceTest {
     void setUp() {
         invocationService = mock(AiInvocationService.class);
         toolExecutor = mock(AiAssistantToolExecutor.class);
+        writeToolService = mock(AiAssistantWriteToolService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         workspaceService = mock(WorkspaceService.class);
@@ -67,7 +69,9 @@ class AiChatAgentLoopServiceTest {
         service = new AiChatAgentLoopService(
                 invocationService,
                 new AiAssistantStepGuard(catalog),
+                catalog,
                 toolExecutor,
+                writeToolService,
                 identifierResolver,
                 promptAssembler,
                 persistenceService,
@@ -111,6 +115,38 @@ class AiChatAgentLoopServiceTest {
                 eq("search_records"), any(JsonNode.class), any(), eq(true));
         verify(persistenceService, never()).resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void confirmTierToolPersistsApprovalCardWithoutAutoExecution() throws Exception {
+        JsonNode args = objectMapper.readTree(
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\","
+                        + "\"idempotency_key\":\"owner-replay-1\"}");
+        AiAssistantStep toolStep = new AiAssistantStep(
+                new AiAssistantStep.Tool("assign_owner", args), null);
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Approval is required.", List.of()));
+        when(invocationService.completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+                .thenReturn(parsed(toolStep), parsed(finalStep));
+        AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
+                "assign_owner", AiAssistantToolCatalog.ToolTier.CONFIRM,
+                "owner-replay-1", "deal", 41, "{\"resolved\":true}");
+        AiAssistantToolProposal proposal =
+                new AiAssistantToolProposal(29, "proposed", null, true);
+        when(writeToolService.prepare(eq("assign_owner"), eq(args), any())).thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, write)).thenReturn(proposal);
+        when(writeToolService.proposalResult(write, proposal)).thenReturn(
+                new AiAssistantToolResult(
+                        Map.of("toolCallId", 29, "status", "approval_required"), List.of()));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService).proposeWriteTool(TURN, write);
+        verify(writeToolService, never()).executeAuto(TURN, 29);
     }
 
     @Test
@@ -252,11 +288,14 @@ class AiChatAgentLoopServiceTest {
                 workspaceService,
                 mock(PersonMapper.class),
                 mock(CompanyMapper.class),
-                mock(DealMapper.class));
+                mock(DealMapper.class),
+                mock(AiAssistantDateResolver.class));
         service = new AiChatAgentLoopService(
                 invocationService,
                 new AiAssistantStepGuard(new AiAssistantToolCatalog()),
+                new AiAssistantToolCatalog(),
                 realExecutor,
+                writeToolService,
                 mock(AiAssistantIdentifierResolver.class),
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
                 persistenceService,

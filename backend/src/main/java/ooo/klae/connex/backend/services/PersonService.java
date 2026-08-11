@@ -646,6 +646,22 @@ public class PersonService {
             auditService.singleChange("tag", tagName, null));
     }
 
+    /** Removes a tag only when the association still exists at the inverse write. */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public void removeTagIfUnchanged(int personId, int tagId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person person = requireOwnedPerson(workspaceId, personId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        if (personMapper.removeTag(workspaceId, personId, tagId) != 1) {
+            throw new ConflictException("Person tag association changed and cannot be removed");
+        }
+        String tagName = tag != null ? tag.getName() : "#" + tagId;
+        auditService.record("person.removeTag", "person", personId, person.getName(),
+            "Removed tag " + tagName + " from " + person.getName(),
+            auditService.singleChange("tag", tagName, null));
+    }
+
     /**
      * Replaces the tags associated with a person in the active workspace.
      */

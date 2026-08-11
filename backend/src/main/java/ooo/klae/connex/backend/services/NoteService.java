@@ -6,6 +6,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -189,6 +191,27 @@ public class NoteService {
         int currentUserId = workspaceService.getCurrentUserId();
         Note before = noteMapper.getVisibleNoteById(workspaceId, id, currentUserId);
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
+        noteMapper.delete(workspaceId, id);
+        referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_NOTE, id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_NOTE, id);
+        auditService.record("note.delete", "note", id, auditLabel(before),
+            "Deleted note",
+            auditService.diff(before, null, auditFields(before.getVisibility())));
+    }
+
+    /** Deletes a visible note only when its locked current state satisfies the supplied guard. */
+    @Transactional
+    @RequirePermission(Permission.NOTE_DELETE)
+    public void deleteIf(int id, Predicate<Note> guard) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int currentUserId = workspaceService.getCurrentUserId();
+        Note before = noteMapper.getVisibleNoteByIdForUpdate(workspaceId, id, currentUserId);
+        if (before == null) {
+            throw new ResourceNotFoundException("Note not found with id: " + id);
+        }
+        if (guard == null || !guard.test(before)) {
+            throw new ConflictException("Note changed and cannot be deleted");
+        }
         noteMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_NOTE, id);
         referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_NOTE, id);

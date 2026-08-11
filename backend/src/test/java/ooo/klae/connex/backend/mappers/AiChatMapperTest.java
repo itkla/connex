@@ -204,9 +204,16 @@ class AiChatMapperTest extends AbstractMapperTest {
                 "executed", "{\"kind\":\"person\"}", owner.getId()));
         AiChatToolCall storedTool = chatMapper.getToolCallById(
                 workspace.getId(), userMessage.getId(), toolCall.getId());
+        AiChatToolCall replayedTool = chatMapper.getToolCallByIdempotencyKey(
+                workspace.getId(), toolCall.getIdempotencyKey());
+        AiChatToolCall lockedTool = chatMapper.getToolCallBySessionForUpdate(
+                workspace.getId(), session.getId(), toolCall.getId());
         assertEquals("executed", storedTool.getStatus());
         assertEquals(owner.getId(), storedTool.getExecutedByUserId());
         assertEquals("turn-" + turn.getId() + "-step-1", storedTool.getIdempotencyKey());
+        assertEquals(session.getId(), replayedTool.getSessionId());
+        assertEquals(owner.getId(), replayedTool.getRequestedByUserId());
+        assertEquals(toolCall.getId(), lockedTool.getId());
 
         AiChatMessage answer = new AiChatMessage();
         answer.setWorkspaceId(workspace.getId());

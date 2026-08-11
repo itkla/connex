@@ -89,6 +89,18 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void conditionalTagRemovalRefusesOnceTheAssociationChanged() {
+        Person person = newPerson(newCompany());
+        Tag tag = newTag();
+        personService.addTag(person.getId(), tag.getId());
+
+        assertDoesNotThrow(() -> personService.removeTagIfUnchanged(person.getId(), tag.getId()));
+        assertThrows(
+            ConflictException.class,
+            () -> personService.removeTagIfUnchanged(person.getId(), tag.getId()));
+    }
+
+    @Test
     void createAndUpdateReconcileCurrentIdentityHistory() {
         Company company = newCompany();
         Person draft = new Person();

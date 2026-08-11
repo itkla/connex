@@ -43,7 +43,9 @@ public class AiChatAgentLoopService {
 
     private final AiInvocationService invocationService;
     private final AiAssistantStepGuard stepGuard;
+    private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantToolExecutor toolExecutor;
+    private final AiAssistantWriteToolService writeToolService;
     private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiChatTurnPersistenceService persistenceService;
@@ -112,6 +114,51 @@ public class AiChatAgentLoopService {
                     requireCurrentAccess(turn);
                     toolExecutor.validateReferences(
                             step.tool().name(), step.tool().args(), resources);
+                    if (toolCatalog.isWrite(step.tool().name())) {
+                        AiAssistantPreparedWrite write = writeToolService.prepare(
+                                step.tool().name(), step.tool().args(), resources);
+                        AiAssistantToolProposal proposal =
+                                persistenceService.proposeWriteTool(turn, write);
+                        int toolCallId = proposal.id();
+                        publish(turn.userId(), new AiChatStepFrameDto(
+                                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                stepNumber, "step", step.tool().name(),
+                                "proposed", null, toolCallId));
+                        try {
+                            requireCurrentToolExecution(turn);
+                            AiAssistantToolResult toolResult = write.tier()
+                                    == AiAssistantToolCatalog.ToolTier.AUTO
+                                    ? writeToolService.executeAuto(turn, toolCallId).toolResult()
+                                    : writeToolService.proposalResult(write, proposal);
+                            String status = write.tier() == AiAssistantToolCatalog.ToolTier.AUTO
+                                    ? "executed"
+                                    : ("executed".equals(proposal.status())
+                                            ? "executed"
+                                            : "approval_required");
+                            publish(turn.userId(), new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "step", step.tool().name(),
+                                    status, null, toolCallId));
+                            toolTurns.add(new ToolTurn(
+                                    stepNumber, step.tool().name(), toolResult));
+                        } catch (AiAssistantLoopException exception) {
+                            failTool(turn, toolCallId, exception.detailReason());
+                            publish(turn.userId(), new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "step", step.tool().name(),
+                                    "failed", exception.detailReason(), toolCallId));
+                            return AiGenerationTaskResult.failed(exception.terminalReason());
+                        } catch (RuntimeException exception) {
+                            String reason = toolFailureReason(exception);
+                            failTool(turn, toolCallId, reason);
+                            publish(turn.userId(), new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "step", step.tool().name(),
+                                    "failed", reason, toolCallId));
+                            return AiGenerationTaskResult.failed(reason);
+                        }
+                        continue;
+                    }
                     String argumentsJson = serialize(step.tool().args());
                     int toolCallId = persistenceService.proposeTool(
                             turn, stepNumber, step.tool().name(), argumentsJson);

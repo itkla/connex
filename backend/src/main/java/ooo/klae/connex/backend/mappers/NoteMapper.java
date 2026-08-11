@@ -52,6 +52,8 @@ public interface NoteMapper {
             @Param("reference") LocalDateTime reference,
             @Param("sourceLimit") int sourceLimit);
     Note getVisibleNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("currentUserId") int currentUserId);
+    Note getVisibleNoteByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id,
+            @Param("currentUserId") int currentUserId);
     List<Note> searchVisible(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("currentUserId") int currentUserId);
     List<Note> getNotesReferencing(@Param("workspaceId") int workspaceId, @Param("refType") String refType, @Param("refId") int refId, @Param("currentUserId") int currentUserId);
     List<Integer> getVisibleNoteIdsIn(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids, @Param("currentUserId") int currentUserId);

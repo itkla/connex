@@ -26,6 +26,8 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /** Transactional durable-state boundary for assistant turns, messages, and read-tool calls. */
 @Service
@@ -50,6 +52,7 @@ public class AiChatTurnPersistenceService {
     private final AiProperties aiProperties;
     private final AiRestrictionEpoch restrictionEpoch;
     private final Clock clock;
+    private final ObjectMapper objectMapper;
 
     /** Commits the user message and queued turn under the session sequence mutex. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -157,6 +160,36 @@ public class AiChatTurnPersistenceService {
         toolCall.setIdempotencyKey("turn-" + turn.turnId() + "-step-" + stepNumber);
         chatMapper.insertToolCall(toolCall);
         return toolCall.getId();
+    }
+
+    /** Persists or replays one validated write proposal under its caller-retained key. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public AiAssistantToolProposal proposeWriteTool(
+            AiChatQueuedTurn turn,
+            AiAssistantPreparedWrite write) {
+        requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
+        AiChatToolCall existing = chatMapper.getToolCallByIdempotencyKey(
+                turn.workspaceId(), write.idempotencyKey());
+        if (existing != null) {
+            if (existing.getSessionId() != turn.sessionId()
+                    || !Objects.equals(existing.getRequestedByUserId(), turn.userId())
+                    || !write.toolName().equals(existing.getToolName())
+                    || !sameJson(write.argumentsJson(), existing.getArgumentsJson())) {
+                throw new ConflictException("Assistant tool idempotency key was reused");
+            }
+            return new AiAssistantToolProposal(
+                    existing.getId(), existing.getStatus(), existing.getResultJson(), false);
+        }
+        AiChatToolCall toolCall = new AiChatToolCall();
+        toolCall.setWorkspaceId(turn.workspaceId());
+        toolCall.setMessageId(turn.userMessageId());
+        toolCall.setToolName(write.toolName());
+        toolCall.setStatus(PROPOSED);
+        toolCall.setArgumentsJson(write.argumentsJson());
+        toolCall.setIdempotencyKey(write.idempotencyKey());
+        chatMapper.insertToolCall(toolCall);
+        return new AiAssistantToolProposal(toolCall.getId(), PROPOSED, null, true);
     }
 
     /** Requires the turn to remain running immediately before a proposed tool executes. */
@@ -366,6 +399,14 @@ public class AiChatTurnPersistenceService {
     private LocalDateTime expiryCutoff() {
         return LocalDateTime.ofInstant(
                 clock.instant().minus(aiProperties.getGenerationMaxLifetime()), ZoneOffset.UTC);
+    }
+
+    private boolean sameJson(String left, String right) {
+        try {
+            return objectMapper.readTree(left).equals(objectMapper.readTree(right));
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Assistant tool proposal JSON is invalid", exception);
+        }
     }
 
     private static ResourceNotFoundException inaccessible() {

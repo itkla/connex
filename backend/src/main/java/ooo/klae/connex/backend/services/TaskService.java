@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Predicate;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -24,6 +25,7 @@ import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
@@ -203,6 +205,32 @@ public class TaskService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
         Task before = requireLockedTask(lockedTasks, id);
+        if (taskMapper.delete(workspaceId, id) != 1) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
+        compactStatusColumn(
+            workspaceId,
+            before.getStatus() != null ? before.getStatus() : STATUS_TODO,
+            lockedTasks,
+            id
+        );
+        referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_TASK, id);
+        auditService.record("task.delete", "task", id, before.getDescription(),
+            "Deleted task " + before.getDescription(),
+            auditService.diff(before, null, AUDIT_FIELDS));
+        notificationChanges.publish(workspaceId, "task", id);
+    }
+
+    /** Deletes a task only when its board-locked current state satisfies the supplied guard. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_DELETE)
+    public void deleteIf(int id, Predicate<Task> guard) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
+        Task before = requireLockedTask(lockedTasks, id);
+        if (guard == null || !guard.test(before)) {
+            throw new ConflictException("Task changed and cannot be deleted");
+        }
         if (taskMapper.delete(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
         }
