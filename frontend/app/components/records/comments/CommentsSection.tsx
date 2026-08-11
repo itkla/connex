@@ -77,11 +77,13 @@ export default function CommentsSection({
     const highlightRef = useRef<HTMLLIElement | null>(null);
     const highlightScrolled = useRef(false);
     const fetchGeneration = useRef(0);
+    const stateFilterRef = useRef<'open' | 'all'>('open');
 
     const highlightedCommentId = searchParams.get('comment');
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
     const [showResolved, setShowResolved] = useState(false);
     const stateFilter = highlightedCommentId || showResolved ? 'all' : 'open';
+    stateFilterRef.current = stateFilter;
 
     useEffect(() => {
         let active = true;
@@ -157,7 +159,7 @@ export default function CommentsSection({
                         ? await resolveCommentThread(thread.id, thread.version)
                         : await reopenCommentThread(thread.id, thread.version);
                 setThreads((prev) =>
-                    action === 'resolve' && stateFilter === 'open'
+                    action === 'resolve' && stateFilterRef.current === 'open'
                         ? prev.filter((existing) => existing.id !== thread.id)
                         : prev.map((existing) =>
                               existing.id === thread.id
@@ -183,7 +185,7 @@ export default function CommentsSection({
                 setSubmitting(false);
             }
         },
-        [submitting, stateFilter, t],
+        [submitting, t],
     );
 
     const handlePost = useCallback(async () => {
@@ -234,8 +236,17 @@ export default function CommentsSection({
             setReplyThreadId(null);
             replyToken.current = null;
             toastSuccess(t('posted'));
-        } catch {
-            toastError(t('postFailed'));
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409) {
+                toastError(t('conflict'));
+                setReplyThreadId(null);
+                setReplyValue('');
+                replyToken.current = null;
+                setLoaded(false);
+                setRefreshNonce((nonce) => nonce + 1);
+            } else {
+                toastError(t('postFailed'));
+            }
         } finally {
             setSubmitting(false);
         }

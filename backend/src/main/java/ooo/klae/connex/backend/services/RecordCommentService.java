@@ -428,6 +428,7 @@ public class RecordCommentService {
                 comment.getId(),
                 recipientId,
                 exception.toString());
+            return false;
         }
         return true;
     }

@@ -1259,6 +1259,12 @@ public class DealService {
         customFieldValueService.deleteByEntity("deal", id);
         dealMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_DEAL, id);
+        referenceService.deleteReferencesForSources(
+            workspaceId,
+            ReferenceService.SOURCE_COMMENT,
+            recordCommentMapper.getCommentIdsForTarget(workspaceId, "deal", id).stream()
+                .map(Math::toIntExact)
+                .toList());
         recordCommentMapper.deleteThreadsForTarget(workspaceId, "deal", id);
         auditService.record("deal.delete", "deal", id, before.getName(),
             "Deleted deal " + before.getName(),

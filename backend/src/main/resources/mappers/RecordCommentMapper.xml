@@ -201,4 +201,14 @@
     SET resolved_by_user_id = NULL
     WHERE resolved_by_user_id = #{userId}
   </update>
+
+  <select id="getCommentIdsForTarget" resultType="long">
+    SELECT c.id
+    FROM record_comment c
+    JOIN record_comment_thread t
+      ON t.workspace_id = c.workspace_id AND t.id = c.thread_id
+    WHERE c.workspace_id = #{workspaceId}
+      AND t.target_type = #{targetType}
+      AND t.target_id = #{targetId}
+  </select>
 </mapper>

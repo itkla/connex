@@ -175,6 +175,14 @@ public class ReferenceService {
         entityReferenceMapper.deleteBySource(workspaceId, sourceType, sourceId);
     }
 
+    /** Removes every stored reference for a batch of same-type sources in one statement. */
+    public void deleteReferencesForSources(int workspaceId, String sourceType, List<Integer> sourceIds) {
+        if (sourceIds.isEmpty()) {
+            return;
+        }
+        entityReferenceMapper.deleteBySourceIds(workspaceId, sourceType, sourceIds);
+    }
+
     /**
      * Removes every reference pointing AT a target entity, invoked when the
      * target itself is deleted so no dangling inbound chip is left behind.
