@@ -8,6 +8,7 @@ const SECTION_IDS = [
     "operator",
     "role",
     "data",
+    "assistantSessions",
     "purpose",
     "entrustment",
     "thirdParty",
@@ -21,7 +22,7 @@ const SECTION_IDS = [
     "contact",
 ] as const;
 
-const UPDATED = "2026-07-01";
+const UPDATED = "2026-08-10";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("Legal");

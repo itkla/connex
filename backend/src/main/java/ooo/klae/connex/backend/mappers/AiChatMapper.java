@@ -22,10 +22,27 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
 
+    List<AiChatSession> listRetainedSessions(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId,
+        @Param("activeMemberIds") List<Integer> activeMemberIds,
+        @Param("limit") int limit,
+        @Param("offset") int offset);
+
+    long countRetainedSessions(
+        @Param("workspaceId") int workspaceId,
+        @Param("activeMemberIds") List<Integer> activeMemberIds);
+
     AiChatSession getAccessibleSessionById(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("id") int id);
+
+    AiChatSession getRetainedSessionById(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId,
+        @Param("id") int id,
+        @Param("activeMemberIds") List<Integer> activeMemberIds);
 
     AiChatSession getSessionById(
         @Param("workspaceId") int workspaceId,

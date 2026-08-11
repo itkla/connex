@@ -105,6 +105,45 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void retainedSessionsDeriveFromCurrentActiveMembershipAndRemainWorkspaceScoped() {
+        User admin = newUser();
+        User activeAuthor = newUser();
+        User departedAuthor = newUser();
+        AiChatSession active = session(workspace, activeAuthor, "Active author", "private");
+        AiChatSession departed = session(workspace, departedAuthor, "Departed author", "private");
+        AiChatSession erased = session(workspace, activeAuthor, "Erased author", "private");
+        Workspace other = newWorkspace();
+        AiChatSession otherWorkspace = session(other, departedAuthor, "Other workspace", "private");
+        workspaceMapper.removeMember(workspace.getId(), departedAuthor.getId());
+        jdbcTemplate.update(
+            "UPDATE ai_chat_session SET created_by_user_id = NULL WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), erased.getId());
+
+        List<Integer> activeMemberIds = List.of(admin.getId(), activeAuthor.getId());
+        List<AiChatSession> retained = chatMapper.listRetainedSessions(
+            workspace.getId(), admin.getId(), activeMemberIds, 100, 0);
+
+        assertEquals(
+            List.of(departed.getId(), erased.getId()),
+            retained.stream().map(AiChatSession::getId).sorted().toList());
+        assertEquals(2, chatMapper.countRetainedSessions(workspace.getId(), activeMemberIds));
+        assertNull(chatMapper.getRetainedSessionById(
+            workspace.getId(), admin.getId(), active.getId(), activeMemberIds));
+        assertNotNull(chatMapper.getRetainedSessionById(
+            workspace.getId(), admin.getId(), departed.getId(), activeMemberIds));
+        assertNull(chatMapper.getRetainedSessionById(
+            workspace.getId(), admin.getId(), otherWorkspace.getId(), activeMemberIds));
+
+        workspaceMapper.addMember(workspace.getId(), departedAuthor.getId(), "member");
+        List<Integer> rejoinedMemberIds = List.of(
+            admin.getId(), activeAuthor.getId(), departedAuthor.getId());
+
+        assertNull(chatMapper.getRetainedSessionById(
+            workspace.getId(), admin.getId(), departed.getId(), rejoinedMemberIds));
+        assertEquals(1, chatMapper.countRetainedSessions(workspace.getId(), rejoinedMemberIds));
+    }
+
+    @Test
     void messageReplayIsAscendingAndWorkspaceScoped() {
         User owner = newUser();
         AiChatSession session = session(workspace, owner, "Replay", "private");

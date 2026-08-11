@@ -122,6 +122,26 @@ class AiAssistantControllerTest {
     }
 
     @Test
+    void retainedScopeDispatchesToTheSeparateOversightMethods() throws Exception {
+        when(service.pageRetained(1, 25)).thenReturn(new PageResponse<>(List.of(session()), 1));
+        when(service.getRetained(42, 1, 50)).thenReturn(detail());
+
+        mockMvc.perform(get("/api/ai/assistant/sessions?scope=retained"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(1));
+        mockMvc.perform(get("/api/ai/assistant/sessions/42?scope=retained"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.session.id").value(42));
+        mockMvc.perform(get("/api/ai/assistant/sessions?scope=all"))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42?scope=all"))
+            .andExpect(status().isBadRequest());
+
+        verify(service).pageRetained(1, 25);
+        verify(service).getRetained(42, 1, 50);
+    }
+
+    @Test
     void createReturnsCreatedBodyAndLocation() throws Exception {
         when(service.create(any(AiChatSessionCreateRequest.class))).thenReturn(session());
 

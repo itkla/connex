@@ -14,6 +14,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -23,6 +24,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
@@ -38,6 +40,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -49,6 +52,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     @Autowired private AiAssistantService service;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private RoleMapper roleMapper;
+    @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoSpyBean private WorkspaceService workspaceService;
 
@@ -89,6 +93,8 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertEquals(1, appended.getSeq());
         assertEquals("Participant message", detail.messages().items().getFirst().getContent());
         assertFalse(detail.session().isOwnedByCurrentUser());
+        assertEquals(2, auditLogMapper.findByEntity(
+            workspace.getId(), "ai_chat_session", session.getId(), 10, 0).size());
     }
 
     @Test
@@ -113,6 +119,145 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertEquals(INACCESSIBLE, sameWorkspace.getMessage());
         assertEquals(INACCESSIBLE, otherTenant.getMessage());
         assertEquals(INACCESSIBLE, unknown.getMessage());
+    }
+
+    @Test
+    void retainedScopeNeverExposesAnActiveMembersSessionToAnAdmin() {
+        User activeAuthor = newUser();
+        AiChatSession session = privateSession(activeAuthor, "Still private");
+
+        ForbiddenException ordinaryDetail = assertThrows(
+            ForbiddenException.class,
+            () -> service.get(session.getId(), 1, 50));
+        ForbiddenException detail = assertThrows(
+            ForbiddenException.class,
+            () -> service.getRetained(session.getId(), 1, 50));
+
+        assertEquals(INACCESSIBLE, ordinaryDetail.getMessage());
+        assertEquals(INACCESSIBLE, detail.getMessage());
+        assertEquals(0, service.pageRetained(1, 25).total());
+    }
+
+    @Test
+    void retainedScopeReadsDepartedAndErasedAuthorsAndAuditsOnlyMetadata() {
+        String transcript = "transcript-secret-" + unique();
+        User departedAuthor = newUser();
+        AiChatSession departed = privateSession(departedAuthor, "Departed private title");
+        assistantMessage(departed.getId(), 1, transcript, "{\"citations\":[],\"resources\":[]}");
+        workspaceMapper.removeMember(workspace.getId(), departedAuthor.getId());
+
+        AiChatSessionDetailDto detail = service.getRetained(departed.getId(), 1, 50);
+        AuditLog audit = auditLogMapper.findByEntity(
+            workspace.getId(), "ai_chat_session", departed.getId(), 10, 0).getFirst();
+
+        assertEquals(transcript, detail.messages().items().getFirst().getContent());
+        assertEquals("ai.assistant.session.read", audit.getAction());
+        assertEquals(currentUser.getId(), audit.getActorId());
+        assertEquals(workspace.getId(), audit.getWorkspaceId());
+        assertNotNull(audit.getCreatedAt());
+        assertEquals("{\"scope\": \"retained\"}", audit.getChanges());
+        String auditPayload = String.join(" ",
+            audit.getTargetLabel(), audit.getSummary(), audit.getChanges());
+        assertFalse(auditPayload.contains(transcript));
+        assertFalse(auditPayload.contains(departed.getTitle()));
+
+        User erasedAuthor = newUser();
+        AiChatSession erased = privateSession(erasedAuthor, "Erased account");
+        jdbcTemplate.update(
+            "UPDATE ai_chat_session SET created_by_user_id = NULL WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), erased.getId());
+
+        assertEquals(erased.getId(), service.getRetained(erased.getId(), 1, 50).session().getId());
+    }
+
+    @Test
+    void rejoiningTheWorkspaceRestoresSessionPrivacy() {
+        User author = newUser();
+        AiChatSession session = privateSession(author, "Rejoin privacy");
+        workspaceMapper.removeMember(workspace.getId(), author.getId());
+
+        assertEquals(session.getId(), service.getRetained(session.getId(), 1, 50).session().getId());
+
+        workspaceMapper.addMember(workspace.getId(), author.getId(), "member");
+
+        ForbiddenException privateAgain = assertThrows(
+            ForbiddenException.class,
+            () -> service.getRetained(session.getId(), 1, 50));
+        assertEquals(INACCESSIBLE, privateAgain.getMessage());
+    }
+
+    @Test
+    void authorRejoiningDuringTheReadFailsClosedRatherThanDisclosingTheTranscript() {
+        User author = newUser();
+        AiChatSession session = privateSession(author, "Rejoin race");
+        workspaceMapper.removeMember(workspace.getId(), author.getId());
+        assertEquals(session.getId(), service.getRetained(session.getId(), 1, 50).session().getId());
+
+        workspaceMapper.addMember(workspace.getId(), author.getId(), "member");
+
+        ForbiddenException raced = assertThrows(
+            ForbiddenException.class,
+            () -> service.getRetained(session.getId(), 1, 50));
+        assertEquals(INACCESSIBLE, raced.getMessage());
+        assertEquals(0, service.pageRetained(1, 25).total());
+    }
+
+    @Test
+    void retainedSessionsAreImmutableEvenForAnAdminParticipant() {
+        User author = newUser();
+        AiChatSession session = sharedSession(author, "Immutable evidence");
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), currentUser.getId());
+        workspaceMapper.removeMember(workspace.getId(), author.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> service.appendMessage(session.getId(), messageRequest("Rejected append")));
+        assertThrows(ForbiddenException.class,
+            () -> service.update(session.getId(), updateRequest("Rejected rename", null)));
+        assertThrows(ForbiddenException.class,
+            () -> service.update(session.getId(), updateRequest(null, true)));
+        assertThrows(ForbiddenException.class, () -> service.archive(session.getId()));
+
+        AiChatSession unchanged = chatMapper.getSessionById(
+            workspace.getId(), currentUser.getId(), session.getId());
+        assertNotNull(unchanged);
+        assertEquals("Immutable evidence", unchanged.getTitle());
+        assertEquals("active", unchanged.getStatus());
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+    }
+
+    @Test
+    void aiUseOnlyMemberKeepsOrdinarySharedAccessButCannotUseRetainedScope() {
+        AiChatSession shared = sharedSession(currentUser, "Existing shared behavior");
+        User member = newUser();
+        WorkspaceRole aiUseOnly = customRole(
+            "AI use only", List.of(Permission.AI_USE.name()));
+        workspaceMapper.setMemberCustomRole(
+            workspace.getId(), member.getId(), aiUseOnly.getId());
+        chatMapper.insertParticipant(workspace.getId(), shared.getId(), member.getId());
+        authenticateAs(member, workspace.getId());
+
+        assertEquals(1, service.page(1, 25).total());
+        assertEquals(shared.getId(), service.get(shared.getId(), 1, 50).session().getId());
+        assertThrows(ForbiddenException.class, () -> service.pageRetained(1, 25));
+        assertThrows(ForbiddenException.class,
+            () -> service.getRetained(shared.getId(), 1, 50));
+    }
+
+    @Test
+    void otherTenantAdminCannotReadARetainedSession() {
+        User author = newUser();
+        AiChatSession retained = sharedSession(author, "Tenant boundary");
+        workspaceMapper.removeMember(workspace.getId(), author.getId());
+        User caller = newUser();
+        Workspace other = newWorkspace();
+        workspaceMapper.addMember(other.getId(), caller.getId(), "admin");
+        authenticateAs(caller, other.getId());
+
+        ForbiddenException inaccessible = assertThrows(
+            ForbiddenException.class,
+            () -> service.getRetained(retained.getId(), 1, 50));
+
+        assertEquals(INACCESSIBLE, inaccessible.getMessage());
     }
 
     @Test
@@ -261,10 +406,14 @@ class AiAssistantServiceTest extends AbstractServiceTest {
             .filter(method -> !method.isSynthetic() && !method.isBridge())
             .toList();
 
-        assertEquals(6, publicMethods.size());
+        assertEquals(8, publicMethods.size());
         assertTrue(publicMethods.stream().allMatch(method -> {
             RequirePermission permission = method.getAnnotation(RequirePermission.class);
-            return permission != null && permission.value() == Permission.AI_USE;
+            Permission expected = Map.of(
+                "pageRetained", Permission.AI_SESSION_ADMIN,
+                "getRetained", Permission.AI_SESSION_ADMIN)
+                .getOrDefault(method.getName(), Permission.AI_USE);
+            return permission != null && permission.value() == expected;
         }));
 
         User member = newUser();
@@ -316,11 +465,19 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     private AiChatSession sharedSession(User owner, String title) {
+        return session(owner, title, "shared");
+    }
+
+    private AiChatSession privateSession(User owner, String title) {
+        return session(owner, title, "private");
+    }
+
+    private AiChatSession session(User owner, String title, String visibility) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(owner.getId());
         session.setTitle(title);
-        session.setVisibility("shared");
+        session.setVisibility(visibility);
         session.setStatus("active");
         chatMapper.insertSession(session);
         return session;

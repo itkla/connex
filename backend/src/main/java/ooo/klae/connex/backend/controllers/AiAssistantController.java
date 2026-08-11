@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.AiAssistantService;
 
 /** Authenticated active-workspace endpoints for durable assistant chat sessions. */
@@ -35,6 +36,8 @@ import ooo.klae.connex.backend.services.AiAssistantService;
 @RequestMapping("/api/ai/assistant/sessions")
 @RequiredArgsConstructor
 public class AiAssistantController {
+    private static final String RETAINED_SCOPE = "retained";
+
     private final AiAssistantService assistantService;
     private final AiAssistantTurnService turnService;
 
@@ -42,8 +45,15 @@ public class AiAssistantController {
     @GetMapping
     public PageResponse<AiChatSessionDto> page(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "25") int size) {
-        return assistantService.page(page, size);
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String scope) {
+        if (scope == null) {
+            return assistantService.page(page, size);
+        }
+        if (RETAINED_SCOPE.equals(scope)) {
+            return assistantService.pageRetained(page, size);
+        }
+        throw unsupportedScope();
     }
 
     /** Creates a private active session owned by the caller. */
@@ -60,8 +70,15 @@ public class AiAssistantController {
     public AiChatSessionDetailDto get(
             @PathVariable int id,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "50") int size) {
-        return assistantService.get(id, page, size);
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) String scope) {
+        if (scope == null) {
+            return assistantService.get(id, page, size);
+        }
+        if (RETAINED_SCOPE.equals(scope)) {
+            return assistantService.getRetained(id, page, size);
+        }
+        throw unsupportedScope();
     }
 
     /** Renames and/or archives an owned session. */
@@ -102,5 +119,9 @@ public class AiAssistantController {
             @PathVariable int sessionId,
             @PathVariable int turnId) {
         return turnService.get(sessionId, turnId);
+    }
+
+    private static BadRequestException unsupportedScope() {
+        return new BadRequestException("Assistant session scope must be retained when provided");
     }
 }

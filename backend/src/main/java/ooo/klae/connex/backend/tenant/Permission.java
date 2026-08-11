@@ -65,6 +65,11 @@ public enum Permission {
      */
     AI_USE,
     /**
+     * Permission to read assistant sessions retained after their creator is no longer an active
+     * workspace member. This permission never authorizes session mutation or turn execution.
+     */
+    AI_SESSION_ADMIN,
+    /**
      * Inert. SSO is org-scoped configuration, authorized against org membership
      * (see {@code OrgMemberService.requireOrgAdmin}), not this workspace-level
      * permission. Retained only so stored custom-role rows referencing it still

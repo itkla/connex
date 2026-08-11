@@ -99,7 +99,8 @@ public class WorkspaceService {
             Permission.PRODUCT_MANAGE, Permission.DOCUMENT_MANAGE, Permission.DOCUMENT_APPROVE,
             Permission.CUSTOM_FIELD_MANAGE, Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE,
             Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.RULE_MANAGE,
-            Permission.AI_USE, Permission.GOAL_MANAGE, Permission.CAMPAIGN_MANAGE,
+            Permission.AI_USE, Permission.AI_SESSION_ADMIN, Permission.GOAL_MANAGE,
+            Permission.CAMPAIGN_MANAGE,
             Permission.CAMPAIGN_SEND, Permission.CONSENT_MANAGE));
         return permissions;
     }

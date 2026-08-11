@@ -60,7 +60,9 @@ public class AiChatTurnPersistenceService {
         int userId = workspaceService.getCurrentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
+        List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
         AiChatSession session = requireAccessibleLocked(workspaceId, userId, sessionId);
+        requireActiveAuthor(session, activeMemberIds);
         if (ARCHIVED.equals(session.getStatus())) {
             throw new ConflictException("Archived sessions cannot accept turns");
         }
@@ -105,7 +107,9 @@ public class AiChatTurnPersistenceService {
         int userId = workspaceService.getCurrentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
-        requireAccessibleLocked(workspaceId, userId, sessionId);
+        List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
+        AiChatSession session = requireAccessibleLocked(workspaceId, userId, sessionId);
+        requireActiveAuthor(session, activeMemberIds);
         AiChatTurn turn = chatMapper.getTurnByIdForUpdate(workspaceId, sessionId, turnId);
         if (turn == null) {
             throw inaccessible();
@@ -322,6 +326,23 @@ public class AiChatTurnPersistenceService {
             throw inaccessible();
         }
         return session;
+    }
+
+    private List<Integer> activeMemberIds(int workspaceId, int userId) {
+        List<Integer> activeMemberIds = workspaceService.getMembers(workspaceId).stream()
+            .map(user -> user.getId())
+            .toList();
+        if (!activeMemberIds.contains(userId)) {
+            throw inaccessible();
+        }
+        return activeMemberIds;
+    }
+
+    private void requireActiveAuthor(AiChatSession session, List<Integer> activeMemberIds) {
+        if (session.getCreatedByUserId() == null
+                || !activeMemberIds.contains(session.getCreatedByUserId())) {
+            throw inaccessible();
+        }
     }
 
     private AiChatTurn expireIfStale(AiChatTurn turn, LocalDateTime cutoff) {
