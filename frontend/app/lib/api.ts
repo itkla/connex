@@ -3627,17 +3627,25 @@ export function getAttachmentsFromCookie(entityType: string, entityId: number, c
 }
 
 /**
- * Lists comment threads for a record, newest thread first, each thread carrying
- * its comments in chronological order. The feed is workspace-local: threads
- * authored in other workspaces of a shared record are never returned.
+ * Lists one bounded page of comment threads for a record, newest thread first,
+ * each thread carrying its comments in chronological order. The feed is
+ * workspace-local: threads authored in other workspaces of a shared record are
+ * never returned. The server caps {@code limit} at 100.
  */
 export function getCommentThreads(
     targetType: Types.RecordCommentTargetType,
     targetId: number,
+    page: { limit?: number; offset?: number } = {},
     init: RequestInit = {},
 ) {
     return getJson<Types.RecordCommentThread[]>(
-        `/api/comment-threads${buildQuery({ targetType, targetId, state: 'all' })}`,
+        `/api/comment-threads${buildQuery({
+            targetType,
+            targetId,
+            state: 'all',
+            limit: page.limit ?? 20,
+            offset: page.offset ?? 0,
+        })}`,
         init,
     );
 }

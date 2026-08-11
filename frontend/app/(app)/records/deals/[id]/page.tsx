@@ -510,6 +510,7 @@ export default async function DealPage({ params }: DealPageProps) {
                 <Rise delay={0.1}>
                     <RecordDetailSection recordKind="deal" section="comments">
                         <CommentsSection
+                            key={`deal-${deal.id}`}
                             targetType="deal"
                             targetId={deal.id}
                             currentUserId={currentUser.id}

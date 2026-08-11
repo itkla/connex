@@ -14,6 +14,9 @@ CREATE TABLE record_comment_thread (
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
         ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
+    -- Composite identity so child rows can carry a workspace-coherent FK,
+    -- matching the deal/campaign/ai_chat parent-table pattern.
+    UNIQUE KEY uq_record_comment_thread_workspace_id (workspace_id, id),
     CONSTRAINT chk_record_comment_thread_target_type
         CHECK (target_type IN ('person', 'company', 'deal')),
     CONSTRAINT chk_record_comment_thread_state
@@ -34,8 +37,11 @@ CREATE TABLE record_comment (
     deleted_at DATETIME(6) NULL,
     deleted_by_user_id INT NULL,
     PRIMARY KEY (id),
+    -- Composite FK keeps a comment's workspace equal to its thread's workspace,
+    -- so no erroneous write can create a cross-workspace parent/child pair.
     CONSTRAINT fk_record_comment_thread
-        FOREIGN KEY (thread_id) REFERENCES record_comment_thread(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id, thread_id)
+        REFERENCES record_comment_thread(workspace_id, id) ON DELETE CASCADE,
     CONSTRAINT chk_record_comment_content
         CHECK (content IS NULL OR CHAR_LENGTH(content) BETWEEN 1 AND 5000),
     UNIQUE KEY uq_record_comment_client_token (workspace_id, client_token),

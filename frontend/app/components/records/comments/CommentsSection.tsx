@@ -66,6 +66,10 @@ export default function CommentsSection({
 
     const [threads, setThreads] = useState<RecordCommentThread[]>([]);
     const [loaded, setLoaded] = useState(false);
+    const [loadError, setLoadError] = useState(false);
+    const [hasMore, setHasMore] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [refreshNonce, setRefreshNonce] = useState(0);
     const [composerValue, setComposerValue] = useState('');
     const [replyThreadId, setReplyThreadId] = useState<number | null>(null);
     const [replyValue, setReplyValue] = useState('');
@@ -78,24 +82,47 @@ export default function CommentsSection({
     const highlightRef = useRef<HTMLLIElement | null>(null);
 
     const highlightedCommentId = searchParams.get('comment');
+    const initialLimit = highlightedCommentId ? 100 : 20;
 
     useEffect(() => {
         let active = true;
-        getCommentThreads(targetType, targetId)
+        getCommentThreads(targetType, targetId, { limit: initialLimit })
             .then((data) => {
                 if (!active) return;
                 setThreads(data);
+                setHasMore(data.length === initialLimit);
+                setLoadError(false);
                 setLoaded(true);
             })
             .catch(() => {
                 if (!active) return;
+                setLoadError(true);
                 setLoaded(true);
-                toastError(t('loadFailed'));
             });
         return () => {
             active = false;
         };
-    }, [targetType, targetId, t]);
+    }, [targetType, targetId, initialLimit, refreshNonce]);
+
+    const handleLoadMore = useCallback(async () => {
+        if (loadingMore) return;
+        setLoadingMore(true);
+        try {
+            const data = await getCommentThreads(targetType, targetId, {
+                limit: 20,
+                offset: threads.length,
+            });
+            setThreads((prev) => [
+                ...prev,
+                ...data.filter((thread) => !prev.some((existing) => existing.id === thread.id)),
+            ]);
+            setHasMore(data.length === 20);
+        } catch {
+            toastError(t('loadFailed'));
+        } finally {
+            setLoadingMore(false);
+        }
+    }, [loadingMore, targetType, targetId, threads.length, t]);
 
     useEffect(() => {
         if (!loaded || !highlightedCommentId) return;
@@ -198,7 +225,7 @@ export default function CommentsSection({
         }
     }, [pendingDelete, deleting, t]);
 
-    const isEmpty = loaded && threads.length === 0;
+    const isEmpty = loaded && !loadError && threads.length === 0;
 
     return (
         <div className={cn(className)}>
@@ -216,11 +243,28 @@ export default function CommentsSection({
                     </div>
                 )}
 
+                {loaded && loadError && (
+                    <div className="flex items-center justify-between gap-3 px-6 py-5">
+                        <p className="text-sm text-muted-foreground">{t('loadFailed')}</p>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                setLoaded(false);
+                                setRefreshNonce((nonce) => nonce + 1);
+                            }}
+                        >
+                            {t('retry')}
+                        </Button>
+                    </div>
+                )}
+
                 {isEmpty && (
                     <p className="px-6 py-6 text-sm text-muted-foreground">{t('empty')}</p>
                 )}
 
-                {loaded && threads.length > 0 && (
+                {loaded && !loadError && threads.length > 0 && (
                     <ul className="divide-y divide-border">
                         {threads.map((thread) => (
                             <li key={thread.id} className="px-4 py-4">
@@ -351,6 +395,25 @@ export default function CommentsSection({
                             </li>
                         ))}
                     </ul>
+                )}
+
+                {loaded && !loadError && hasMore && (
+                    <div className="border-t border-border px-4 py-2">
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="w-full text-muted-foreground"
+                            disabled={loadingMore}
+                            onClick={handleLoadMore}
+                        >
+                            {loadingMore ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                            ) : (
+                                t('loadMore')
+                            )}
+                        </Button>
+                    </div>
                 )}
 
                 {canComment && (

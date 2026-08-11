@@ -371,6 +371,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                 <Rise delay={0.1}>
                     <RecordDetailSection recordKind="contact" section="comments">
                         <CommentsSection
+                            key={`person-${contact.id}`}
                             targetType="person"
                             targetId={contact.id}
                             currentUserId={currentUser.id}

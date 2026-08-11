@@ -13,6 +13,8 @@
     "deleteBody": "コメントは全員に対して削除され、元に戻せません。スレッド内の位置は保持されます。",
     "confirmDelete": "削除",
     "replyCount": "{count}件の返信",
+    "loadMore": "以前のスレッドを表示",
+    "retry": "再試行",
     "loadFailed": "コメントを読み込めませんでした",
     "postFailed": "コメントを投稿できませんでした",
     "deleteFailed": "コメントを削除できませんでした",

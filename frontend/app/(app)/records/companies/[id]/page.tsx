@@ -266,6 +266,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                 <Rise delay={0.1}>
                     <RecordDetailSection recordKind="company" section="comments">
                         <CommentsSection
+                            key={`company-${company.id}`}
                             targetType="company"
                             targetId={company.id}
                             currentUserId={currentUser.id}

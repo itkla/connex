@@ -13,6 +13,8 @@
     "deleteBody": "The comment is removed for everyone and can't be restored. Its place in the thread is kept.",
     "confirmDelete": "Delete",
     "replyCount": "{count, plural, =1 {# reply} other {# replies}}",
+    "loadMore": "Show older threads",
+    "retry": "Try again",
     "loadFailed": "Couldn't load comments",
     "postFailed": "Couldn't post the comment",
     "deleteFailed": "Couldn't delete the comment",
