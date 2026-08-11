@@ -1,9 +1,10 @@
 import { Client, type IMessage } from "@stomp/stompjs";
 
 import { csrfHeader } from "@/app/lib/api";
-import { type Notification } from "@/app/lib/types";
+import { type AiChatRealtimeFrame, type Notification } from "@/app/lib/types";
 
 const NOTIFICATIONS_QUEUE = "/user/queue/notifications";
+const AI_CHAT_QUEUE = "/user/queue/ai-chat";
 const RECONNECT_DELAY_MS = 5_000;
 const HEARTBEAT_MS = 10_000;
 
@@ -39,6 +40,12 @@ export type NotificationSocketHandlers = {
 export type NotificationSocket = {
     activate: () => void;
     deactivate: () => void;
+};
+
+/** Callbacks for one authenticated assistant-session realtime stream. */
+export type AiChatSocketHandlers = {
+    onFrame: (frame: AiChatRealtimeFrame) => void;
+    onStatusChange?: (status: RealtimeStatus) => void;
 };
 
 /**
@@ -80,16 +87,53 @@ function parseFrame(message: IMessage): RealtimeNotificationFrame | null {
     return parsed as RealtimeNotificationFrame;
 }
 
-/**
- * Creates a STOMP-over-WebSocket client for realtime notification frames. The
- * socket connects directly to the backend origin, authenticates via the session
- * cookie carried on the handshake, echoes the CSRF token on CONNECT, and
- * auto-subscribes to the recipient's per-user queue. Reconnection and heartbeats
- * are handled by the underlying client; it is a no-op during server rendering.
- * @param handlers frame and connection-state callbacks
- * @returns lifecycle controls for the socket
- */
-export function createNotificationSocket(handlers: NotificationSocketHandlers): NotificationSocket {
+function parseAiChatFrame(message: IMessage): AiChatRealtimeFrame | null {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(message.body);
+    } catch {
+        return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const workspaceId = Reflect.get(parsed, "workspaceId");
+    const sessionId = Reflect.get(parsed, "sessionId");
+    const turnId = Reflect.get(parsed, "turnId");
+    const seq = Reflect.get(parsed, "seq");
+    const kind = Reflect.get(parsed, "kind");
+    const status = Reflect.get(parsed, "status");
+    const tool = Reflect.get(parsed, "tool");
+    const reason = Reflect.get(parsed, "reason");
+    const numericFields = [workspaceId, sessionId, turnId, seq];
+    if (numericFields.some((value) => typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)) {
+        return null;
+    }
+    if (
+        kind !== "session"
+        && kind !== "message"
+        && kind !== "state"
+        && kind !== "step"
+        && kind !== "terminal"
+    ) return null;
+    if (typeof status !== "string") return null;
+    if (tool !== null && tool !== undefined && typeof tool !== "string") return null;
+    if (reason !== null && reason !== undefined && typeof reason !== "string") return null;
+    return {
+        workspaceId,
+        sessionId,
+        turnId,
+        seq,
+        kind,
+        tool: typeof tool === "string" ? tool : null,
+        status,
+        reason: typeof reason === "string" ? reason : null,
+    };
+}
+
+function createUserQueueSocket(
+    queue: string,
+    onMessage: (message: IMessage) => void,
+    onStatusChange?: (status: RealtimeStatus) => void,
+): NotificationSocket {
     if (typeof window === "undefined") {
         return { activate: () => {}, deactivate: () => {} };
     }
@@ -103,30 +147,47 @@ export function createNotificationSocket(handlers: NotificationSocketHandlers): 
             client.connectHeaders = await csrfHeader();
         },
         onConnect: () => {
-            client.subscribe(NOTIFICATIONS_QUEUE, (message) => {
-                const frame = parseFrame(message);
-                if (frame) {
-                    handlers.onFrame(frame);
-                }
-            });
-            handlers.onStatusChange?.("connected");
+            client.subscribe(queue, onMessage);
+            onStatusChange?.("connected");
         },
         onWebSocketClose: (event: CloseEvent) => {
-            handlers.onStatusChange?.("disconnected");
-            if (event.code === CONNECTION_LIMIT_CLOSE_CODE) {
-                void client.deactivate();
-            }
+            onStatusChange?.("disconnected");
+            if (event.code === CONNECTION_LIMIT_CLOSE_CODE) void client.deactivate();
         },
-        onStompError: () => handlers.onStatusChange?.("disconnected"),
+        onStompError: () => onStatusChange?.("disconnected"),
     });
 
     return {
         activate: () => {
-            handlers.onStatusChange?.("connecting");
+            onStatusChange?.("connecting");
             client.activate();
         },
         deactivate: () => {
             void client.deactivate();
         },
     };
+}
+
+/**
+ * Creates a STOMP-over-WebSocket client for realtime notification frames. The
+ * socket connects directly to the backend origin, authenticates via the session
+ * cookie carried on the handshake, echoes the CSRF token on CONNECT, and
+ * auto-subscribes to the recipient's per-user queue. Reconnection and heartbeats
+ * are handled by the underlying client; it is a no-op during server rendering.
+ * @param handlers frame and connection-state callbacks
+ * @returns lifecycle controls for the socket
+ */
+export function createNotificationSocket(handlers: NotificationSocketHandlers): NotificationSocket {
+    return createUserQueueSocket(NOTIFICATIONS_QUEUE, (message) => {
+        const frame = parseFrame(message);
+        if (frame) handlers.onFrame(frame);
+    }, handlers.onStatusChange);
+}
+
+/** Creates a metadata-only assistant-session socket on the authenticated user's queue. */
+export function createAiChatSocket(handlers: AiChatSocketHandlers): NotificationSocket {
+    return createUserQueueSocket(AI_CHAT_QUEUE, (message) => {
+        const frame = parseAiChatFrame(message);
+        if (frame) handlers.onFrame(frame);
+    }, handlers.onStatusChange);
 }

@@ -23,12 +23,23 @@ import {
     ApiError,
     archiveAiChatSession,
     createAiChatSession,
+    getActiveWorkspaceMembers,
+    getAiChatInvitations,
+    getAiChatParticipants,
+    getAiChatPresence,
     getAiChatSession,
     getAiChatSessions,
     getAiChatTurn,
     getAiGenerationStatus,
+    inviteAiChatParticipant,
+    joinAiChatSession,
+    leaveAiChatPresence,
+    leaveAiChatSession,
+    removeAiChatParticipant,
     resolveAcceptedAiGeneration,
+    setAiChatSessionShared,
     startAiChatTurn,
+    touchAiChatPresence,
     updateAiChatSession,
 } from '@/app/lib/api';
 import {
@@ -47,13 +58,17 @@ import {
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
+import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     AiChatCitation,
     AiChatMessage,
+    AiChatParticipant,
+    AiChatPresence,
     AiChatSession,
     AiChatTurn,
     AiChatTurnGenerationResult,
+    WorkspaceMember,
 } from '@/app/lib/types';
 
 type OpenSource = 'standard' | 'keyboard';
@@ -134,8 +149,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const { context } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
+    const sharePermission = usePermissionCheck('AI_SESSION_SHARE');
     const isMobile = useIsMobile();
     const userId = context.user?.id ?? null;
+    const userDisplayName = context.user?.displayName ?? null;
     const identity = `${userId ?? 'anon'}:${activeWorkspaceId ?? 'none'}`;
     const sessionKey = askConnexSessionStorageKey(userId, activeWorkspaceId);
     const turnKey = askConnexTurnStorageKey(userId, activeWorkspaceId);
@@ -145,7 +162,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [instantOpen, setInstantOpen] = useState(false);
     const [stateIdentity, setStateIdentity] = useState<string | null>(null);
     const [sessions, setSessions] = useState<AiChatSession[]>([]);
+    const [invitations, setInvitations] = useState<AiChatSession[]>([]);
     const [activeSession, setActiveSession] = useState<AiChatSession | null>(null);
+    const [participants, setParticipants] = useState<AiChatParticipant[]>([]);
+    const [presence, setPresence] = useState<AiChatPresence | null>(null);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [messages, setMessages] = useState<AiChatMessage[]>([]);
     const [freshMessageIds, setFreshMessageIds] = useState<ReadonlySet<number>>(new Set());
     const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error' | 'forbidden'>('loading');
@@ -160,6 +181,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
     const tempMessageIdRef = useRef(-1);
+    const activeSessionRef = useRef<AiChatSession | null>(null);
+    const typingRef = useRef(false);
 
     const contextResult = useMemo(
         () => mergeAskConnexContext(context.record, composer),
@@ -176,6 +199,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const contentTooLong = askConnexMessageContent(composer).length > 16_000;
     const working = turn.phase === 'accepted' || turn.phase === 'running';
     const scoped = stateIdentity === identity && !switching;
+
+    useEffect(() => {
+        activeSessionRef.current = activeSession;
+    }, [activeSession]);
+
+    useEffect(() => {
+        typingRef.current = composer.trim().length > 0;
+    }, [composer]);
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
         setInstantOpen(source === 'keyboard');
@@ -195,10 +226,27 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [openDrawer]);
 
     const refreshSessions = useCallback(async (signal: AbortSignal): Promise<AiChatSession[]> => {
-        const page = await getAiChatSessions({ page: 1, size: 25 }, { signal });
+        const [page, invitationPage] = await Promise.all([
+            getAiChatSessions({ page: 1, size: 25 }, { signal }),
+            getAiChatInvitations({ page: 1, size: 25 }, { signal }),
+        ]);
         if (signal.aborted) return [];
         setSessions(page.items.filter((session) => !session.archived));
+        setInvitations(invitationPage.items.filter((session) => !session.archived));
         return page.items;
+    }, []);
+
+    const refreshCollaboration = useCallback(async (
+        sessionId: number,
+        signal: AbortSignal,
+    ): Promise<void> => {
+        const [nextParticipants, nextPresence] = await Promise.all([
+            getAiChatParticipants(sessionId, { signal }),
+            getAiChatPresence(sessionId, { signal }),
+        ]);
+        if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
+        setParticipants(nextParticipants);
+        setPresence(nextPresence);
     }, []);
 
     const refreshTranscript = useCallback(async (
@@ -220,10 +268,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 .map((message) => message.id))
             : new Set());
         setActiveSession(detail.session);
+        activeSessionRef.current = detail.session;
+        if (detail.session.visibility === 'shared') {
+            await refreshCollaboration(sessionId, signal);
+        } else {
+            setParticipants([]);
+            setPresence(null);
+        }
         setLoadState('ready');
         setLoadError(null);
         return detail.session;
-    }, []);
+    }, [refreshCollaboration]);
 
     const pollDurableTurn = useCallback(async (
         sessionId: number,
@@ -308,7 +363,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (controller.signal.aborted) return;
             setStateIdentity(identity);
             setSessions([]);
+            setInvitations([]);
             setActiveSession(null);
+            activeSessionRef.current = null;
+            setParticipants([]);
+            setPresence(null);
+            setMembers([]);
             messagesRef.current = [];
             setMessages([]);
             setFreshMessageIds(new Set());
@@ -326,6 +386,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
             try {
                 await refreshSessions(controller.signal);
+                if (sharePermission === 'granted') {
+                    const workspaceMembers = await getActiveWorkspaceMembers({ signal: controller.signal });
+                    if (!controller.signal.aborted) {
+                        setMembers(workspaceMembers.filter((member) => member.status === 'active'));
+                    }
+                }
                 if (storedSessionId === null) {
                     setLoadState('ready');
                     return;
@@ -366,7 +432,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         void initialize();
         return () => controller.abort();
-    }, [activeWorkspaceId, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, sessionKey, switching, t, turnKey, userId]);
+    }, [activeWorkspaceId, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, sessionKey, sharePermission, switching, t, turnKey, userId]);
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
@@ -378,6 +444,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         safeStorageSet(sessionKey, String(session.id));
         safeStorageRemove(turnKey);
         setActiveSession(session);
+        activeSessionRef.current = session;
+        setParticipants([]);
+        setPresence(null);
         messagesRef.current = [];
         setMessages([]);
         setFreshMessageIds(new Set());
@@ -406,6 +475,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         safeStorageRemove(sessionKey);
         safeStorageRemove(turnKey);
         setActiveSession(null);
+        activeSessionRef.current = null;
+        setParticipants([]);
+        setPresence(null);
         messagesRef.current = [];
         setMessages([]);
         setFreshMessageIds(new Set());
@@ -415,6 +487,129 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setLoadState('ready');
         setLoadError(null);
     }, [sessionKey, turnKey, working]);
+
+    useEffect(() => {
+        if (userId === null || activeWorkspaceId === null || switching) return;
+        const socket = createAiChatSocket({
+            onFrame: (frame) => {
+                if (frame.workspaceId !== activeWorkspaceId) return;
+                const signal = identityControllerRef.current?.signal;
+                if (!signal || signal.aborted) return;
+                void refreshSessions(signal).catch(() => {});
+                if (activeSessionRef.current?.id !== frame.sessionId) return;
+                void refreshTranscript(frame.sessionId, signal, true).catch((error: unknown) => {
+                    if (signal.aborted) return;
+                    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                        newChat();
+                    }
+                });
+            },
+        });
+        socket.activate();
+        return () => socket.deactivate();
+    }, [activeWorkspaceId, newChat, refreshSessions, refreshTranscript, switching, userId]);
+
+    useEffect(() => {
+        const session = activeSession;
+        if (!open || session === null || session.visibility !== 'shared' || loadState !== 'ready') {
+            return;
+        }
+        const sessionId = session.id;
+        const controller = new AbortController();
+        const heartbeat = async () => {
+            try {
+                const snapshot = await touchAiChatPresence(
+                    sessionId,
+                    typingRef.current,
+                    { signal: controller.signal },
+                );
+                if (!controller.signal.aborted && activeSessionRef.current?.id === sessionId) {
+                    setPresence(snapshot);
+                }
+            } catch {}
+        };
+        void heartbeat();
+        const interval = window.setInterval(() => void heartbeat(), 20_000);
+        return () => {
+            window.clearInterval(interval);
+            controller.abort();
+            void leaveAiChatPresence(sessionId).catch(() => {});
+        };
+    }, [activeSession, loadState, open]);
+
+    const shareSession = useCallback(async (shared: boolean): Promise<boolean> => {
+        if (!activeSession?.ownedByCurrentUser || sharePermission !== 'granted') return false;
+        try {
+            const updated = await setAiChatSessionShared(activeSession.id, shared);
+            setActiveSession(updated);
+            activeSessionRef.current = updated;
+            setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
+            if (shared) {
+                const signal = identityControllerRef.current?.signal;
+                if (signal && !signal.aborted) await refreshCollaboration(updated.id, signal);
+            } else {
+                setParticipants([]);
+                setPresence(null);
+            }
+            toastSuccess(t(shared ? 'toast.shared' : 'toast.private'));
+            return true;
+        } catch (error) {
+            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            return false;
+        }
+    }, [activeSession, refreshCollaboration, sharePermission, t]);
+
+    const inviteParticipant = useCallback(async (targetUserId: number): Promise<boolean> => {
+        if (!activeSession?.ownedByCurrentUser || activeSession.visibility !== 'shared') return false;
+        try {
+            const invited = await inviteAiChatParticipant(activeSession.id, targetUserId);
+            setParticipants((current) => [
+                ...current.filter((participant) => participant.userId !== invited.userId),
+                invited,
+            ]);
+            toastSuccess(t('toast.invited'));
+            return true;
+        } catch (error) {
+            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            return false;
+        }
+    }, [activeSession, t]);
+
+    const joinInvitation = useCallback(async (invitation: AiChatSession) => {
+        if (working) return;
+        try {
+            const joined = await joinAiChatSession(invitation.id);
+            setInvitations((current) => current.filter((session) => session.id !== joined.id));
+            setSessions((current) => [joined, ...current.filter((session) => session.id !== joined.id)]);
+            await selectSession(joined);
+            toastSuccess(t('toast.joined'));
+        } catch (error) {
+            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+        }
+    }, [selectSession, t, working]);
+
+    const leaveSession = useCallback(async () => {
+        if (!activeSession || activeSession.ownedByCurrentUser || working) return;
+        try {
+            await leaveAiChatSession(activeSession.id);
+            setSessions((current) => current.filter((session) => session.id !== activeSession.id));
+            newChat();
+            toastSuccess(t('toast.left'));
+        } catch (error) {
+            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+        }
+    }, [activeSession, newChat, t, working]);
+
+    const removeParticipant = useCallback(async (targetUserId: number) => {
+        if (!activeSession?.ownedByCurrentUser) return;
+        try {
+            await removeAiChatParticipant(activeSession.id, targetUserId);
+            setParticipants((current) => current.filter((participant) => participant.userId !== targetUserId));
+            toastSuccess(t('toast.participantRemoved'));
+        } catch (error) {
+            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+        }
+    }, [activeSession, t]);
 
     const renameSession = useCallback(async (title: string): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser) return false;
@@ -503,6 +698,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 seq: (messagesRef.current.at(-1)?.seq ?? 0) + 1,
                 authorKind: 'user',
                 authorUserId: userId,
+                authorDisplayName: userDisplayName,
                 content,
                 createdAt: new Date().toISOString(),
             };
@@ -530,7 +726,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 await refreshTranscript(session.id, activeSignal, true);
             } catch {}
         }
-    }, [activeSession, composer, contextResult.overflow, contextResult.pageContext, followTurn, permission, refreshTranscript, sessionKey, submissionBlocked, t, turnKey, unavailableReason, userId, working]);
+    }, [activeSession, composer, contextResult.overflow, contextResult.pageContext, followTurn, permission, refreshTranscript, sessionKey, submissionBlocked, t, turnKey, unavailableReason, userDisplayName, userId, working]);
 
     const removeAttachment = useCallback((attachment: AskConnexAttachment) => {
         setComposer((current) => removeAskConnexAttachment(current, attachment));
@@ -560,7 +756,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [implicitContext?.kind, t],
     );
     const labels = useMemo(() => ({
+        assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
+        budgetExhausted: t('budgetExhausted'),
         citations: t('citations'),
         disclosureCreation: tDisclosure('sessionCreation'),
         disclosureList: tDisclosure('sessionList'),
@@ -579,11 +777,24 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         contextNone: t('contextNone'),
         emptyBody: t('emptyBody'),
         emptyTitle: t('emptyTitle'),
+        formerMember: t('formerMember'),
+        invitation: t('invitation'),
+        invitations: t('invitations'),
+        invite: t('invite'),
+        inviteMember: t('inviteMember'),
+        invitePending: t('invitePending'),
+        join: t('join'),
+        leave: t('leave'),
+        manageSharing: t('manageSharing'),
+        memberAuthor: (id: number) => t('memberAuthor', { id }),
         newChat: t('newChat'),
         noRecentSessions: t('noRecentSessions'),
         moreOptions: t('moreOptions'),
+        participants: t('participants'),
+        presence: t('presence'),
         recentSessions: t('recentSessions'),
         removeContext: (label: string) => t('removeContext', { label }),
+        removeParticipant: (name: string) => t('removeParticipant', { name }),
         rename: t('rename'),
         renameCancel: t('renameCancel'),
         renameDescription: t('renameDescription'),
@@ -592,8 +803,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         renameSaving: t('renameSaving'),
         renameTitle: t('renameTitle'),
         send: t('send'),
+        shareCancel: t('shareCancel'),
+        shareConfirm: t('shareConfirm'),
+        shareDescription: t('shareDescription'),
+        shared: t('shared'),
+        shareTitle: t('shareTitle'),
         title: t('title'),
         tooLong: t('tooLong'),
+        typing: (names: string) => t('typing', { names }),
+        unshare: t('unshare'),
         turnAccepted: t('turnAccepted'),
         turnFailed: t('turnFailed'),
         turnResolved: t('turnResolved'),
@@ -617,7 +835,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 instantOpen={instantOpen}
                 isMobile={isMobile}
                 sessions={scoped ? sessions : []}
+                invitations={scoped ? invitations : []}
                 activeSession={scoped ? activeSession : null}
+                participants={scoped ? participants : []}
+                presence={scoped ? presence : null}
+                members={scoped ? members : []}
+                canShare={sharePermission === 'granted'}
                 messages={scoped ? messages : []}
                 freshMessageIds={scoped ? freshMessageIds : new Set()}
                 loadState={scoped ? loadState : 'loading'}
@@ -637,6 +860,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onNewChat={newChat}
                 onRename={renameSession}
                 onArchive={() => void archiveSession()}
+                onJoinInvitation={(session) => void joinInvitation(session)}
+                onShare={shareSession}
+                onInvite={inviteParticipant}
+                onLeave={() => void leaveSession()}
+                onRemoveParticipant={(participantUserId) => void removeParticipant(participantUserId)}
                 onRetry={() => setReloadVersion((version) => version + 1)}
                 onComposerChange={setComposer}
                 onRemoveAttachment={removeAttachment}

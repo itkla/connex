@@ -3,8 +3,23 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import type { AiProviderConfig, AiProviderConfigRequest, AiProviderKind } from "@/app/lib/types";
-import { getAiProviderConfig, revokeAiProviderConfig, saveAiProviderConfig, ApiError } from "@/app/lib/api";
+import type {
+    AiProviderConfig,
+    AiProviderConfigRequest,
+    AiProviderKind,
+    AiOrganizationBudget,
+    AiWorkspaceGovernance,
+} from "@/app/lib/types";
+import {
+    ApiError,
+    getAiOrganizationBudget,
+    getAiProviderConfig,
+    getAiWorkspaceGovernance,
+    revokeAiProviderConfig,
+    saveAiProviderConfig,
+    saveAiOrganizationBudget,
+    saveAiWorkspaceGovernance,
+} from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
@@ -143,6 +158,8 @@ export default function OrgAiProviderPanel() {
     const { activeWorkspaceId } = useWorkspace();
 
     const [form, setForm] = useState<FormState | null>(null);
+    const [governance, setGovernance] = useState<AiWorkspaceGovernance | null>(null);
+    const [budget, setBudget] = useState<AiOrganizationBudget | null>(null);
     const [storedProvider, setStoredProvider] = useState<AiProviderKind | null>(null);
     const [hasCredential, setHasCredential] = useState(false);
     const [credentialLast4, setCredentialLast4] = useState<string | null>(null);
@@ -150,6 +167,8 @@ export default function OrgAiProviderPanel() {
     const [error, setError] = useState(false);
     const [accessDenied, setAccessDenied] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [savingGovernance, setSavingGovernance] = useState(false);
+    const [savingBudget, setSavingBudget] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
@@ -160,9 +179,15 @@ export default function OrgAiProviderPanel() {
             setError(false);
             setAccessDenied(false);
             try {
-                const config = await getAiProviderConfig(activeWorkspaceId);
+                const [config, loadedGovernance, loadedBudget] = await Promise.all([
+                    getAiProviderConfig(activeWorkspaceId),
+                    getAiWorkspaceGovernance(activeWorkspaceId),
+                    getAiOrganizationBudget(activeWorkspaceId),
+                ]);
                 if (cancelled) return;
                 setForm(toForm(config));
+                setGovernance(loadedGovernance);
+                setBudget(loadedBudget);
                 setStoredProvider(config.provider);
                 setHasCredential(config.hasCredential);
                 setCredentialLast4(config.credentialLast4);
@@ -219,6 +244,40 @@ export default function OrgAiProviderPanel() {
         }
     };
 
+    const saveGovernance = async () => {
+        if (activeWorkspaceId == null || governance == null) return;
+        setSavingGovernance(true);
+        try {
+            const saved = await saveAiWorkspaceGovernance(activeWorkspaceId, {
+                enabled: governance.enabled,
+                assistantMaxSteps: governance.assistantMaxSteps,
+            });
+            setGovernance(saved);
+            toastSuccess(t("governanceSaved"));
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t("governanceSaveFailed"));
+        } finally {
+            setSavingGovernance(false);
+        }
+    };
+
+    const saveBudget = async () => {
+        if (activeWorkspaceId == null || budget == null) return;
+        setSavingBudget(true);
+        try {
+            const saved = await saveAiOrganizationBudget(
+                activeWorkspaceId,
+                budget.dailyUsageLimit,
+            );
+            setBudget(saved);
+            toastSuccess(t("budgetSaved"));
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t("budgetSaveFailed"));
+        } finally {
+            setSavingBudget(false);
+        }
+    };
+
     const revoke = async () => {
         if (activeWorkspaceId == null) return;
         setSaving(true);
@@ -249,6 +308,14 @@ export default function OrgAiProviderPanel() {
 
     const credentialStored = form != null && hasCredential && form.provider === storedProvider;
     const credentialPlaceholder = credentialStored ? t("credentialConfigured") : "";
+    const governanceValid = governance != null
+        && Number.isInteger(governance.assistantMaxSteps)
+        && governance.assistantMaxSteps >= 1
+        && governance.assistantMaxSteps <= 12;
+    const budgetValid = budget != null
+        && Number.isSafeInteger(budget.dailyUsageLimit)
+        && budget.dailyUsageLimit >= 0
+        && budget.dailyUsageLimit <= 1_000_000_000_000;
 
     return (
         <Rise className="space-y-3">
@@ -264,7 +331,7 @@ export default function OrgAiProviderPanel() {
                         {t("retry")}
                     </Button>
                 </div>
-            ) : loading || form == null ? (
+            ) : loading || form == null || governance == null || budget == null ? (
                 <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
                     <Skeleton className="h-9 w-full rounded-md" />
                     <Skeleton className="h-9 w-full rounded-md" />
@@ -272,7 +339,110 @@ export default function OrgAiProviderPanel() {
                     <Skeleton className="h-9 w-2/3 rounded-md" />
                 </div>
             ) : (
-                <div className="space-y-5 rounded-2xl border border-border bg-card p-4">
+                <>
+                    <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+                        <div className="flex items-center gap-4">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-foreground">{t("workspaceEnableTitle")}</p>
+                                <p className="text-sm text-muted-foreground">{t("workspaceEnableDescription")}</p>
+                            </div>
+                            <Switch
+                                checked={governance.enabled}
+                                disabled={savingGovernance}
+                                onCheckedChange={(enabled) => setGovernance((current) => (
+                                    current ? { ...current, enabled } : current
+                                ))}
+                                aria-label={t("workspaceEnableTitle")}
+                            />
+                        </div>
+                        <div className="space-y-1.5 border-t border-border pt-4">
+                            <Label htmlFor="assistant-max-steps">{t("assistantMaxSteps")}</Label>
+                            <Input
+                                id="assistant-max-steps"
+                                type="number"
+                                min={1}
+                                max={12}
+                                value={governance.assistantMaxSteps}
+                                onChange={(event) => setGovernance((current) => current ? {
+                                    ...current,
+                                    assistantMaxSteps: Number(event.target.value),
+                                } : current)}
+                                className="max-w-28"
+                                disabled={savingGovernance}
+                            />
+                            <p className="text-xs text-muted-foreground">{t("assistantMaxStepsDescription")}</p>
+                        </div>
+                        <Button onClick={() => void saveGovernance()} disabled={!governanceValid || savingGovernance}>
+                            {savingGovernance ? t("saving") : t("saveWorkspaceControls")}
+                        </Button>
+                    </div>
+
+                    <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+                        <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium text-foreground">{t("dailyBudgetTitle")}</p>
+                                {budget.exhausted ? (
+                                    <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+                                        {t("budgetExhausted")}
+                                    </span>
+                                ) : null}
+                            </div>
+                            <p className="text-sm text-muted-foreground">{t("dailyBudgetDescription")}</p>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="ai-daily-budget">{t("dailyTokenLimit")}</Label>
+                                <Input
+                                    id="ai-daily-budget"
+                                    type="number"
+                                    min={0}
+                                    max={1_000_000_000_000}
+                                    value={budget.dailyUsageLimit}
+                                    onChange={(event) => setBudget((current) => current ? {
+                                        ...current,
+                                        dailyUsageLimit: Number(event.target.value),
+                                    } : current)}
+                                    disabled={savingBudget}
+                                />
+                                <p className="text-xs text-muted-foreground">{t("dailyTokenLimitHint")}</p>
+                            </div>
+                            <dl className="grid grid-cols-2 gap-3 text-sm">
+                                <div>
+                                    <dt className="text-muted-foreground">{t("tokensUsed")}</dt>
+                                    <dd className="font-medium text-foreground">{budget.consumedUsage.toLocaleString()}</dd>
+                                </div>
+                                <div>
+                                    <dt className="text-muted-foreground">{t("tokensRemaining")}</dt>
+                                    <dd className="font-medium text-foreground">
+                                        {budget.dailyUsageLimit === 0 ? t("unlimited") : budget.remainingUsage.toLocaleString()}
+                                    </dd>
+                                </div>
+                            </dl>
+                        </div>
+                        {budget.usage.length > 0 ? (
+                            <div className="space-y-2 border-t border-border pt-4">
+                                <p className="text-sm font-medium text-foreground">{t("todayUsage")}</p>
+                                <ul className="space-y-2">
+                                    {budget.usage.map((entry) => (
+                                        <li key={`${entry.userId ?? 'system'}:${entry.feature}`} className="flex items-center gap-3 text-sm">
+                                            <span className="min-w-0 flex-1 truncate text-foreground">
+                                                {entry.displayName}
+                                            </span>
+                                            <span className="text-muted-foreground">{entry.feature}</span>
+                                            <span className="tabular-nums text-foreground">
+                                                {(entry.inputUsage + entry.outputUsage).toLocaleString()}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ) : null}
+                        <Button onClick={() => void saveBudget()} disabled={!budgetValid || savingBudget}>
+                            {savingBudget ? t("saving") : t("saveBudget")}
+                        </Button>
+                    </div>
+
+                    <div className="space-y-5 rounded-2xl border border-border bg-card p-4">
                     <div className="flex items-center gap-4">
                         <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-foreground">{t("enableTitle")}</p>
@@ -552,7 +722,8 @@ export default function OrgAiProviderPanel() {
                             </Button>
                         )}
                     </div>
-                </div>
+                    </div>
+                </>
             )}
         </Rise>
     );

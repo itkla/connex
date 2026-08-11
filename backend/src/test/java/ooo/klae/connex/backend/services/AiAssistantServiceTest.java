@@ -279,6 +279,121 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void sharingRequiresDedicatedPermissionInAdditionToAiUse() {
+        AiChatSessionDto created = service.create(createRequest("Permission boundary"));
+        WorkspaceRole aiUseOnly = customRole(
+                "AI use without sharing", List.of(Permission.AI_USE.name()));
+        workspaceMapper.setMemberCustomRole(
+                workspace.getId(), currentUser.getId(), aiUseOnly.getId());
+
+        ForbiddenException forbidden = assertThrows(
+                ForbiddenException.class,
+                () -> service.setShared(created.getId(), true));
+
+        AiChatSession unchanged = chatMapper.getSessionById(
+                workspace.getId(), currentUser.getId(), created.getId());
+        assertEquals("Requires the AI_SESSION_SHARE permission in this workspace",
+                forbidden.getMessage());
+        assertNotNull(unchanged);
+        assertEquals("private", unchanged.getVisibility());
+        assertEquals(0, chatMapper.countParticipants(workspace.getId(), created.getId()));
+    }
+
+    @Test
+    void invitedWorkspaceMemberMustJoinBeforeTranscriptAccessAndKeepsProvenance() {
+        AiChatSessionDto created = service.create(createRequest("Shared provenance"));
+        service.setShared(created.getId(), true);
+        User participant = aiUser("admin");
+
+        assertEquals("invited", service.invite(created.getId(), participant.getId()).status());
+        authenticateAs(participant, workspace.getId());
+        assertEquals(1, service.pageInvitations(1, 25).total());
+        assertThrows(ForbiddenException.class, () -> service.get(created.getId(), 1, 50));
+
+        AiChatSessionDto joined = service.join(created.getId());
+        AiChatMessageDto message = service.appendMessage(
+                created.getId(), messageRequest("Participant-authored question"));
+        authenticateAs(currentUser, workspace.getId());
+        AiChatSessionDetailDto detail = service.get(created.getId(), 1, 50);
+
+        assertEquals("joined", joined.getParticipationStatus());
+        assertEquals(participant.getId(), message.getAuthorUserId());
+        assertEquals(participant.getDisplayName(), message.getAuthorDisplayName());
+        assertEquals(participant.getId(),
+                detail.messages().items().getFirst().getAuthorUserId());
+        assertEquals(participant.getDisplayName(),
+                detail.messages().items().getFirst().getAuthorDisplayName());
+        assertTrue(service.participants(created.getId()).stream()
+                .anyMatch(item -> item.userId() == participant.getId()
+                        && "joined".equals(item.status())));
+    }
+
+    @Test
+    void otherWorkspaceMemberCannotBeInvitedIntoTheCurrentWorkspaceSession() {
+        AiChatSessionDto created = service.create(createRequest("Workspace-local"));
+        service.setShared(created.getId(), true);
+        User outsider = aiUser("admin");
+        workspaceMapper.removeMember(workspace.getId(), outsider.getId());
+        Workspace other = newWorkspace();
+        workspaceMapper.addMember(other.getId(), outsider.getId(), "admin");
+
+        assertThrows(ForbiddenException.class,
+                () -> service.invite(created.getId(), outsider.getId()));
+        assertEquals(0, chatMapper.countParticipants(workspace.getId(), created.getId()));
+    }
+
+    @Test
+    void unsharingRevokesAccessPresenceAndRealtimeRecipientsImmediately() {
+        AiChatSessionDto created = service.create(createRequest("Immediate revoke"));
+        service.setShared(created.getId(), true);
+        User participant = aiUser("admin");
+        service.invite(created.getId(), participant.getId());
+        authenticateAs(participant, workspace.getId());
+        service.join(created.getId());
+        service.touchPresence(created.getId(), true);
+        authenticateAs(currentUser, workspace.getId());
+
+        service.setShared(created.getId(), false);
+
+        assertEquals(List.of(currentUser.getId()),
+                chatMapper.listRealtimeRecipientUserIds(workspace.getId(), created.getId()));
+        assertEquals(0, service.presence(created.getId()).present().size());
+        authenticateAs(participant, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> service.get(created.getId(), 1, 50));
+    }
+
+    @Test
+    void participantCitationProjectionOmitsRecordsThatFailLiveVisibility() {
+        AiChatSessionDto created = service.create(createRequest("Viewer citations"));
+        service.setShared(created.getId(), true);
+        User participant = aiUser("admin");
+        service.invite(created.getId(), participant.getId());
+        Company company = newCompany();
+        Person visible = newPerson(company);
+        Person restricted = newPerson(company);
+        personMapper.updateProcessingRestrictions(
+                workspace.getId(), restricted.getId(), true, false);
+        assistantMessage(
+                created.getId(),
+                1,
+                "Viewer-specific sources",
+                "{\"citations\":["
+                        + "{\"handle\":\"r1\",\"kind\":\"person\",\"id\":"
+                        + visible.getId()
+                        + "},{\"handle\":\"r2\",\"kind\":\"person\",\"id\":"
+                        + restricted.getId()
+                        + "}],\"resources\":[]}");
+        authenticateAs(participant, workspace.getId());
+        service.join(created.getId());
+
+        AiChatMessageDto answer = service.get(created.getId(), 1, 50)
+                .messages().items().getFirst();
+
+        assertEquals(1, answer.getCitations().size());
+        assertEquals(visible.getId(), answer.getCitations().getFirst().id());
+    }
+
+    @Test
     void permanentlyErasedCreatorFailsClosedOnOwnerAndAppendPaths() {
         AiChatSessionDto created = service.create(createRequest("Erased creator"));
         jdbcTemplate.update(
@@ -406,12 +521,15 @@ class AiAssistantServiceTest extends AbstractServiceTest {
             .filter(method -> !method.isSynthetic() && !method.isBridge())
             .toList();
 
-        assertEquals(8, publicMethods.size());
+        assertEquals(18, publicMethods.size());
         assertTrue(publicMethods.stream().allMatch(method -> {
             RequirePermission permission = method.getAnnotation(RequirePermission.class);
             Permission expected = Map.of(
                 "pageRetained", Permission.AI_SESSION_ADMIN,
-                "getRetained", Permission.AI_SESSION_ADMIN)
+                "getRetained", Permission.AI_SESSION_ADMIN,
+                "setShared", Permission.AI_SESSION_SHARE,
+                "invite", Permission.AI_SESSION_SHARE,
+                "removeParticipant", Permission.AI_SESSION_SHARE)
                 .getOrDefault(method.getName(), Permission.AI_USE);
             return permission != null && permission.value() == expected;
         }));

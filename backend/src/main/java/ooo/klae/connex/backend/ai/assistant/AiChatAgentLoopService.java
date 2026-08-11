@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -21,9 +20,11 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
-import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.core.JacksonException;
@@ -33,7 +34,6 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
-    static final int MAX_STEPS = 6;
     private static final String INTERNAL_ERROR = "internal_error";
     private static final int MAX_HISTORY_MESSAGES = 50;
     private static final int MAX_HISTORY_CHARS = 64_000;
@@ -50,11 +50,13 @@ public class AiChatAgentLoopService {
     private final AiRestrictionEpoch restrictionEpoch;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
-    private final ObjectProvider<AiChatRealtimePublisher> realtimePublisher;
+    private final AiChatRealtimeDispatcher realtimeDispatcher;
+    private final AiWorkspaceGovernanceService governanceService;
 
     /** Runs one committed turn under the shared generation context. */
     public AiGenerationTaskResult<AiChatTurnGenerationResult> run(AiChatQueuedTurn turn) {
         try {
+            requireWorkspaceEnabled(turn);
             boolean running;
             try {
                 running = persistenceService.markRunning(turn);
@@ -64,7 +66,7 @@ public class AiChatAgentLoopService {
             if (!running) {
                 return AiGenerationTaskResult.failed(INTERNAL_ERROR);
             }
-            publish(turn.userId(), new AiChatStepFrameDto(
+            publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "state", null, "running", null));
             List<AiChatMessage> history = boundedHistory(
@@ -85,8 +87,10 @@ public class AiChatAgentLoopService {
             List<ToolTurn> toolTurns = new ArrayList<>();
             int inputTokens = 0;
             int outputTokens = 0;
+            int maxSteps = governanceService.assistantMaxSteps(turn.workspaceId());
 
-            for (int stepNumber = 1; stepNumber <= MAX_STEPS; stepNumber++) {
+            for (int stepNumber = 1; stepNumber <= maxSteps; stepNumber++) {
+                requireWorkspaceEnabled(turn);
                 AiInvocation invocation = new AiInvocation(
                         AiFeature.ASSISTANT_CHAT,
                         maskingContext,
@@ -96,6 +100,7 @@ public class AiChatAgentLoopService {
                         TEMPERATURE);
                 AiStructuredOutcome<AiAssistantStep> outcome = invocationService.completeStructured(
                         invocation, AiAssistantStep.class, stepGuard);
+                requireWorkspaceEnabled(turn);
                 inputTokens = addTokens(inputTokens, inputTokens(outcome));
                 outputTokens = addTokens(outputTokens, outputTokens(outcome));
                 if (outcome instanceof AiStructuredOutcome.Malformed<?>) {
@@ -115,7 +120,7 @@ public class AiChatAgentLoopService {
                     String argumentsJson = serialize(step.tool().args());
                     int toolCallId = persistenceService.proposeTool(
                             turn, stepNumber, step.tool().name(), argumentsJson);
-                    publish(turn.userId(), new AiChatStepFrameDto(
+                    publish(turn, new AiChatStepFrameDto(
                             turn.workspaceId(), turn.sessionId(), turn.turnId(),
                             stepNumber, "step", step.tool().name(),
                             "proposed", null));
@@ -130,14 +135,14 @@ public class AiChatAgentLoopService {
                             failTool(turn, toolCallId, "turn_not_active");
                             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
                         }
-                        publish(turn.userId(), new AiChatStepFrameDto(
+                        publish(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "executed", null));
                         toolTurns.add(new ToolTurn(stepNumber, step.tool().name(), toolResult));
                     } catch (AiAssistantLoopException exception) {
                         failTool(turn, toolCallId, exception.detailReason());
-                        publish(turn.userId(), new AiChatStepFrameDto(
+                        publish(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
@@ -145,7 +150,7 @@ public class AiChatAgentLoopService {
                     } catch (RuntimeException exception) {
                         String reason = toolFailureReason(exception);
                         failTool(turn, toolCallId, reason);
-                        publish(turn.userId(), new AiChatStepFrameDto(
+                        publish(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", reason));
@@ -172,6 +177,8 @@ public class AiChatAgentLoopService {
             return AiGenerationTaskResult.failed("step_cap_exceeded");
         } catch (AiAssistantLoopException exception) {
             return AiGenerationTaskResult.failed(exception.terminalReason());
+        } catch (AiBudgetExhaustedException exception) {
+            return AiGenerationTaskResult.failed("budget_exhausted");
         } catch (TooManyRequestsException exception) {
             return AiGenerationTaskResult.failed("quota_exhausted");
         } catch (AiProviderException exception) {
@@ -199,6 +206,7 @@ public class AiChatAgentLoopService {
     }
 
     private void requireCurrentAccess(AiChatQueuedTurn turn) {
+        requireWorkspaceEnabled(turn);
         if (restrictionsChanged(turn)) {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
@@ -207,6 +215,12 @@ public class AiChatAgentLoopService {
                     turn.workspaceId(), turn.userId(), Permission.AI_USE);
         } catch (ForbiddenException exception) {
             throw new AiAssistantLoopException("access_revoked", "access_revoked");
+        }
+    }
+
+    private void requireWorkspaceEnabled(AiChatQueuedTurn turn) {
+        if (!governanceService.isEnabled(turn.workspaceId())) {
+            throw new AiAssistantLoopException("workspace_disabled", "workspace_disabled");
         }
     }
 
@@ -223,15 +237,8 @@ public class AiChatAgentLoopService {
         }
     }
 
-    private void publish(int userId, AiChatStepFrameDto frame) {
-        try {
-            AiChatRealtimePublisher publisher = realtimePublisher.getIfAvailable();
-            if (publisher != null) {
-                publisher.send(userId, frame);
-            }
-        } catch (RuntimeException exception) {
-            return;
-        }
+    private void publish(AiChatQueuedTurn turn, AiChatStepFrameDto frame) {
+        realtimeDispatcher.sessionNow(turn.workspaceId(), turn.sessionId(), frame);
     }
 
     private void failTool(AiChatQueuedTurn turn, int toolCallId, String reason) {
@@ -240,6 +247,9 @@ public class AiChatAgentLoopService {
     }
 
     private static String toolFailureReason(RuntimeException exception) {
+        if (exception instanceof AiBudgetExhaustedException) {
+            return "budget_exhausted";
+        }
         if (exception instanceof TooManyRequestsException) {
             return "quota_exhausted";
         }

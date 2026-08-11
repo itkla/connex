@@ -44,6 +44,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
@@ -66,6 +67,8 @@ class AiInvocationServiceTest {
     @Mock private AiProviderRouter aiProviderRouter;
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
+    @Mock private AiOrganizationBudgetCoordinator budgetCoordinator;
+    @Mock private AiOrganizationBudgetCoordinator.Lease budgetLease;
 
     private AiInvocationService service;
     private AiRestrictionEpoch restrictionEpoch;
@@ -75,7 +78,8 @@ class AiInvocationServiceTest {
     void setUp() {
         restrictionEpoch = new AiRestrictionEpoch();
         service = new AiInvocationService(aiFeatureGate, aiMediaAdmissionService, aiProviderConfigService,
-                aiProviderRouter, restrictionEpoch, workspaceService, auditService, new ObjectMapper());
+                aiProviderRouter, restrictionEpoch, workspaceService, auditService, new ObjectMapper(),
+                budgetCoordinator);
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
                 null, null, null, null, false, true,
                 AiCredentials.of(Map.of(
@@ -87,6 +91,8 @@ class AiInvocationServiceTest {
         lenient().when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(resolved);
         lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
+        lenient().when(budgetCoordinator.reserve(eq(ORG_ID), any(AiInvocation.class)))
+                .thenReturn(budgetLease);
     }
 
     @Test
@@ -151,6 +157,26 @@ class AiInvocationServiceTest {
         assertEquals(0, audits.get(1).get("demaskWarnings"));
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
+        verify(budgetLease).settle(12, 7);
+    }
+
+    @Test
+    void complete_exhaustedOrganizationBudgetIsAnExplicitBlockedState() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(budgetCoordinator.reserve(ORG_ID, invocation))
+                .thenThrow(new AiBudgetExhaustedException());
+
+        AiBudgetExhaustedException exhausted = assertThrows(
+                AiBudgetExhaustedException.class,
+                () -> service.complete(invocation));
+
+        assertEquals(
+                "The organization daily AI token budget is exhausted",
+                exhausted.getMessage());
+        Map<?, ?> metadata = singleAuditMetadata();
+        assertEquals("blocked", metadata.get("outcome"));
+        assertEquals("budget_exhausted", metadata.get("reason"));
+        verify(aiProvider, never()).complete(any());
     }
 
     @Test

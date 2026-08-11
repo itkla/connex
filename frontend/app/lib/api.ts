@@ -4634,6 +4634,58 @@ export function getAiChatSessions(
     );
 }
 
+export function getAiWorkspaceGovernance(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.AiWorkspaceGovernance>(
+        `/api/ai/governance?workspaceId=${workspaceId}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function getAiOrganizationBudget(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.AiOrganizationBudget>(
+        `/api/ai/budget?workspaceId=${workspaceId}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function saveAiOrganizationBudget(
+    workspaceId: number,
+    dailyUsageLimit: number,
+    init: RequestInit = {},
+) {
+    return putJson<Types.AiOrganizationBudget>(
+        `/api/ai/budget?workspaceId=${workspaceId}`,
+        { dailyUsageLimit },
+        init,
+    );
+}
+
+export function saveAiWorkspaceGovernance(
+    workspaceId: number,
+    governance: Pick<Types.AiWorkspaceGovernance, 'enabled' | 'assistantMaxSteps'>,
+    init: RequestInit = {},
+) {
+    return putJson<Types.AiWorkspaceGovernance>(
+        `/api/ai/governance?workspaceId=${workspaceId}`,
+        governance,
+        init,
+    );
+}
+
+export function getAiChatInvitations(
+    params: Pick<Types.PageParams, 'page' | 'size'> = {},
+    init: RequestInit = {},
+) {
+    const query = new URLSearchParams();
+    if (params.page != null) query.set('page', String(params.page));
+    if (params.size != null) query.set('size', String(params.size));
+    const suffix = query.size > 0 ? `?${query}` : '';
+    return getJson<Types.Page<Types.AiChatSession>>(
+        `/api/ai/assistant/sessions/invitations${suffix}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
 export function createAiChatSession(title: string, init: RequestInit = {}) {
     return postJson<Types.AiChatSession>('/api/ai/assistant/sessions', { title }, init);
 }
@@ -4663,6 +4715,60 @@ export function updateAiChatSession(
 
 export function archiveAiChatSession(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/ai/assistant/sessions/${id}`, init);
+}
+
+export function setAiChatSessionShared(id: number, shared: boolean, init: RequestInit = {}) {
+    return patchJson<Types.AiChatSession>(
+        `/api/ai/assistant/sessions/${id}/sharing`,
+        { shared },
+        init,
+    );
+}
+
+export function inviteAiChatParticipant(id: number, userId: number, init: RequestInit = {}) {
+    return postJson<Types.AiChatParticipant>(
+        `/api/ai/assistant/sessions/${id}/invitations`,
+        { userId },
+        init,
+    );
+}
+
+export function joinAiChatSession(id: number, init: RequestInit = {}) {
+    return postJson<Types.AiChatSession>(`/api/ai/assistant/sessions/${id}/join`, {}, init);
+}
+
+export function leaveAiChatSession(id: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/ai/assistant/sessions/${id}/leave`, init);
+}
+
+export function getAiChatParticipants(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiChatParticipant[]>(
+        `/api/ai/assistant/sessions/${id}/participants`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function removeAiChatParticipant(id: number, userId: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/ai/assistant/sessions/${id}/participants/${userId}`, init);
+}
+
+export function getAiChatPresence(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiChatPresence>(
+        `/api/ai/assistant/sessions/${id}/presence`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function touchAiChatPresence(id: number, typing: boolean, init: RequestInit = {}) {
+    return putJson<Types.AiChatPresence>(
+        `/api/ai/assistant/sessions/${id}/presence`,
+        { typing },
+        init,
+    );
+}
+
+export function leaveAiChatPresence(id: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/ai/assistant/sessions/${id}/presence`, init);
 }
 
 export async function startAiChatTurn(

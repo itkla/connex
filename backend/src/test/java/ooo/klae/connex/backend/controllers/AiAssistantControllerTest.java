@@ -28,6 +28,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
+import ooo.klae.connex.backend.dto.AiChatParticipantDto;
+import ooo.klae.connex.backend.dto.AiChatPresenceDto;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
@@ -115,6 +117,7 @@ class AiAssistantControllerTest {
             .andExpect(jsonPath("$.messages.total").value(1))
             .andExpect(jsonPath("$.messages.items[0].seq").value(1))
             .andExpect(jsonPath("$.messages.items[0].authorKind").value("user"))
+            .andExpect(jsonPath("$.messages.items[0].authorDisplayName").value("Aki Tanaka"))
             .andExpect(jsonPath("$.messages.items[0].content").value("Hello"));
 
         verify(service).page(1, 25);
@@ -187,6 +190,60 @@ class AiAssistantControllerTest {
     }
 
     @Test
+    void collaborationEndpointsExposeInvitationsMembershipAndPresence() throws Exception {
+        AiChatParticipantDto participant = new AiChatParticipantDto(
+                8, "Mina Sato", null, "participant", "invited", false);
+        AiChatPresenceDto presence = new AiChatPresenceDto(
+                42, List.of(participant), List.of(8));
+        when(service.pageInvitations(1, 25))
+                .thenReturn(new PageResponse<>(List.of(session()), 1));
+        when(service.setShared(42, true)).thenReturn(session());
+        when(service.invite(42, 8)).thenReturn(participant);
+        when(service.join(42)).thenReturn(session());
+        when(service.participants(42)).thenReturn(List.of(participant));
+        when(service.presence(42)).thenReturn(presence);
+        when(service.touchPresence(42, true)).thenReturn(presence);
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/invitations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1));
+        mockMvc.perform(patch("/api/ai/assistant/sessions/42/sharing")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shared\":true}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/invitations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":8}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("invited"));
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/join"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/participants"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].displayName").value("Mina Sato"));
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/presence"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.typingUserIds[0]").value(8));
+        mockMvc.perform(put("/api/ai/assistant/sessions/42/presence")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"typing\":true}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(delete("/api/ai/assistant/sessions/42/presence"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(delete("/api/ai/assistant/sessions/42/participants/8"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(delete("/api/ai/assistant/sessions/42/leave"))
+                .andExpect(status().isNoContent());
+
+        verify(service).setShared(42, true);
+        verify(service).invite(42, 8);
+        verify(service).join(42);
+        verify(service).removeParticipant(42, 8);
+        verify(service).leavePresence(42);
+        verify(service).leave(42);
+    }
+
+    @Test
     void beanAndPaginationValidationReturnBadRequest() throws Exception {
         when(service.page(0, 25)).thenThrow(new BadRequestException(
             "Page must be positive and size must be between 1 and 100"));
@@ -206,6 +263,14 @@ class AiAssistantControllerTest {
         mockMvc.perform(post("/api/ai/assistant/sessions/42/turns")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"Question\",\"pageContext\":[{\"kind\":\"contact\",\"id\":0}]}"))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(patch("/api/ai/assistant/sessions/42/sharing")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/invitations")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":0}"))
             .andExpect(status().isBadRequest());
         mockMvc.perform(get("/api/ai/assistant/sessions?page=0"))
             .andExpect(status().isBadRequest());
@@ -279,6 +344,7 @@ class AiAssistantControllerTest {
         message.setSeq(1);
         message.setAuthorKind("user");
         message.setAuthorUserId(7);
+        message.setAuthorDisplayName("Aki Tanaka");
         message.setContent("Hello");
         message.setCreatedAt("2026-08-09 10:01:00.000000");
         return message;

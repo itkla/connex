@@ -99,7 +99,8 @@ public class WorkspaceService {
             Permission.PRODUCT_MANAGE, Permission.DOCUMENT_MANAGE, Permission.DOCUMENT_APPROVE,
             Permission.CUSTOM_FIELD_MANAGE, Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE,
             Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.RULE_MANAGE,
-            Permission.AI_USE, Permission.AI_SESSION_ADMIN, Permission.GOAL_MANAGE,
+            Permission.AI_USE, Permission.AI_SESSION_SHARE, Permission.AI_SESSION_ADMIN,
+            Permission.GOAL_MANAGE,
             Permission.CAMPAIGN_MANAGE,
             Permission.CAMPAIGN_SEND, Permission.CONSENT_MANAGE));
         return permissions;
@@ -415,6 +416,12 @@ public class WorkspaceService {
         if (workspaceMapper.lockActiveMembership(workspaceId, userId) == null) {
             throw new ForbiddenException("User " + userId + " is not a member of this workspace");
         }
+    }
+
+    /** Locks every requested active membership in ascending user-id order. */
+    public void lockAndRequireMembers(int workspaceId, List<Integer> userIds) {
+        userIds.stream().distinct().sorted()
+            .forEach(userId -> lockAndRequireMember(workspaceId, userId));
     }
 
     /** Returns whether every requested id is an active member of the workspace. */

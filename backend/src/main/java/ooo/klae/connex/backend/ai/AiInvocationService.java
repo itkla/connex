@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
@@ -61,6 +62,7 @@ public class AiInvocationService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final AiOrganizationBudgetCoordinator budgetCoordinator;
 
     /**
      * Completes a masked AI invocation and returns demasked text.
@@ -272,8 +274,22 @@ public class AiInvocationService {
             throw exception;
         }
 
-        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
-                null, null, null, null, null, structured, null);
+        AiOrganizationBudgetCoordinator.Lease budgetLease;
+        try {
+            budgetLease = budgetCoordinator.reserve(orgId, invocation);
+        } catch (AiBudgetExhaustedException exception) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "budget_exhausted", structured, null);
+            throw exception;
+        }
+
+        try {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
+                    null, null, null, null, null, structured, null);
+        } catch (RuntimeException | Error exception) {
+            budgetLease.close();
+            throw exception;
+        }
 
         MediaLeaseGuard mediaLease = MediaLeaseGuard.none();
         try {
@@ -286,23 +302,28 @@ public class AiInvocationService {
                 return aiProviderRouter.adapterFor(resolved.provider())
                         .complete(request(resolved, invocation, outputMode));
             });
+            budgetLease.settle(result.inputTokens(), result.outputTokens());
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
         } catch (AiProviderException exception) {
             mediaLease.close();
+            budgetLease.close();
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
                     null, null, null, null, "provider_exception", structured, null);
             throw exception;
         } catch (TooManyRequestsException exception) {
             mediaLease.close();
+            budgetLease.close();
             throw exception;
         } catch (AiRestrictionEpoch.EgressRejectedException exception) {
             mediaLease.close();
+            budgetLease.close();
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "restriction_epoch", structured, null);
             throw exception;
         } catch (RuntimeException | Error exception) {
             mediaLease.close();
+            budgetLease.close();
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
                     null, null, null, null, "invocation_exception", structured, null);
             throw exception;

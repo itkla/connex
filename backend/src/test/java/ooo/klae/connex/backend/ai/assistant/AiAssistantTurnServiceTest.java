@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 
 class AiAssistantTurnServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
@@ -123,10 +124,13 @@ class AiAssistantTurnServiceTest {
     }
 
     private AiFeatureGate featureGate(AiProperties properties) {
+        AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         return new AiFeatureGate(
                 properties,
                 workspaceService,
-                new StaticListableBeanFactory().getBeanProvider(AiProviderReadiness.class));
+                new StaticListableBeanFactory().getBeanProvider(AiProviderReadiness.class),
+                governanceService);
     }
 
     private void verifyNoAdmission() {

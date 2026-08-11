@@ -15,6 +15,7 @@ public class AiChatMessageDto {
     private int seq;
     private String authorKind;
     private Integer authorUserId;
+    private String authorDisplayName;
     private String content;
     private String createdAt;
     private List<AiChatCitationDto> citations = List.of();
@@ -27,12 +28,21 @@ public class AiChatMessageDto {
     /** Maps a persisted message with citations authorized for the current viewer. */
     public static AiChatMessageDto from(
             AiChatMessage message, List<AiChatCitationDto> citations) {
+        return from(message, citations, null);
+    }
+
+    /** Maps a persisted message with viewer-authorized citations and current author identity. */
+    public static AiChatMessageDto from(
+            AiChatMessage message,
+            List<AiChatCitationDto> citations,
+            String authorDisplayName) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
         dto.setSeq(message.getSeq());
         dto.setAuthorKind(message.getAuthorKind());
         dto.setAuthorUserId(message.getAuthorUserId());
+        dto.setAuthorDisplayName(authorDisplayName);
         dto.setContent(message.getContent());
         dto.setCreatedAt(message.getCreatedAt());
         dto.setCitations(List.copyOf(citations));

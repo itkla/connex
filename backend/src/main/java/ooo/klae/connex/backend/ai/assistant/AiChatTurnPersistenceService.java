@@ -19,10 +19,12 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -50,6 +52,7 @@ public class AiChatTurnPersistenceService {
     private final AiProperties aiProperties;
     private final AiRestrictionEpoch restrictionEpoch;
     private final Clock clock;
+    private final AiChatRealtimeDispatcher realtimeDispatcher;
 
     /** Commits the user message and queued turn under the session sequence mutex. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -92,6 +95,12 @@ public class AiChatTurnPersistenceService {
         turn.setStatus(QUEUED);
         chatMapper.insertTurn(turn);
         chatMapper.updateLastMessageAt(workspaceId, sessionId);
+        realtimeDispatcher.sessionAfterCommit(
+                workspaceId,
+                sessionId,
+                new AiChatStepFrameDto(
+                        workspaceId, sessionId, turn.getId(), message.getSeq(),
+                        "message", null, "created", null));
         return new AiChatQueuedTurn(
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
                 message.getSeq(), restrictionEpoch,

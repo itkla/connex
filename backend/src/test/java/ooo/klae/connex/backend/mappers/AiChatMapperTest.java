@@ -105,6 +105,34 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void invitationsDoNotGrantAccessOrFanoutUntilJoinAndPrivateVisibilityRevokesFanout() {
+        User owner = newUser();
+        User participant = newUser();
+        AiChatSession session = session(workspace, owner, "Invitation state", "shared");
+        chatMapper.insertInvitation(
+                workspace.getId(), session.getId(), participant.getId(), owner.getId());
+
+        assertEquals(0, chatMapper.countAccessibleSessions(
+                workspace.getId(), participant.getId()));
+        assertEquals(1, chatMapper.countInvitedSessions(
+                workspace.getId(), participant.getId()));
+        assertEquals(List.of(owner.getId()), chatMapper.listRealtimeRecipientUserIds(
+                workspace.getId(), session.getId()));
+
+        assertEquals(1, chatMapper.joinParticipant(
+                workspace.getId(), session.getId(), participant.getId()));
+        assertEquals(1, chatMapper.countAccessibleSessions(
+                workspace.getId(), participant.getId()));
+        assertEquals(List.of(owner.getId(), participant.getId()).stream().sorted().toList(),
+                chatMapper.listRealtimeRecipientUserIds(workspace.getId(), session.getId()));
+
+        chatMapper.updateSession(
+                workspace.getId(), session.getId(), null, null, "private");
+        assertEquals(List.of(owner.getId()), chatMapper.listRealtimeRecipientUserIds(
+                workspace.getId(), session.getId()));
+    }
+
+    @Test
     void retainedSessionsDeriveFromCurrentActiveMembershipAndRemainWorkspaceScoped() {
         User admin = newUser();
         User activeAuthor = newUser();

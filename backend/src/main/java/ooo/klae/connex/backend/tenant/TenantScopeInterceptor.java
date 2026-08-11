@@ -59,6 +59,7 @@ public class TenantScopeInterceptor implements Interceptor {
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
         MAPPERS + "AiChatMapper",
+        MAPPERS + "AiWorkspaceGovernanceMapper",
         MAPPERS + "CompanyMapper",
         MAPPERS + "IdentityCollisionMapper",
         MAPPERS + "IdentityMapper",
@@ -136,6 +137,7 @@ public class TenantScopeInterceptor implements Interceptor {
      */
     public static final Set<String> CONTROL_PLANE_NAMESPACES = Set.of(
         MAPPERS + "AllowedDomainMapper",
+        MAPPERS + "AiOrganizationBudgetMapper",
         MAPPERS + "AiProviderConfigMapper",
         MAPPERS + "AppiIncidentMapper",
         MAPPERS + "AuditIntegrityMapper",

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
     ArchiveBoxIcon,
+    ArrowRightStartOnRectangleIcon,
     CheckIcon,
     ChevronDownIcon,
     ClockIcon,
@@ -13,6 +14,8 @@ import {
     PencilSquareIcon,
     PlusIcon,
     SparklesIcon,
+    UserGroupIcon,
+    UserPlusIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
@@ -25,7 +28,15 @@ import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import type { AskConnexAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
 import { askConnexCitationHref, askConnexCitations } from '@/app/lib/askConnex';
 import { easeOut, instant } from '@/app/lib/motion';
-import type { AiChatCitation, AiChatMessage, AiChatSession } from '@/app/lib/types';
+import type {
+    AiChatCitation,
+    AiChatMessage,
+    AiChatParticipant,
+    AiChatPresence,
+    AiChatSession,
+    WorkspaceMember,
+} from '@/app/lib/types';
+import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -54,6 +65,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 
 type DrawerLoadState = 'loading' | 'ready' | 'error' | 'forbidden';
@@ -69,7 +87,9 @@ type UnavailableState = {
 } | null;
 
 type AskConnexDrawerLabels = {
+    assistantAuthor: string;
     archive: string;
+    budgetExhausted: string;
     citations: string;
     disclosureCreation: string;
     disclosureList: string;
@@ -83,11 +103,24 @@ type AskConnexDrawerLabels = {
     contextNone: string;
     emptyBody: string;
     emptyTitle: string;
+    formerMember: string;
+    invitation: string;
+    invitations: string;
+    invite: string;
+    inviteMember: string;
+    invitePending: string;
+    join: string;
+    leave: string;
+    manageSharing: string;
+    memberAuthor: (id: number) => string;
     newChat: string;
     noRecentSessions: string;
     moreOptions: string;
+    participants: string;
+    presence: string;
     recentSessions: string;
     removeContext: (label: string) => string;
+    removeParticipant: (name: string) => string;
     rename: string;
     renameCancel: string;
     renameDescription: string;
@@ -96,8 +129,15 @@ type AskConnexDrawerLabels = {
     renameSaving: string;
     renameTitle: string;
     send: string;
+    shareCancel: string;
+    shareConfirm: string;
+    shareDescription: string;
+    shared: string;
+    shareTitle: string;
     title: string;
     tooLong: string;
+    typing: (names: string) => string;
+    unshare: string;
     turnAccepted: string;
     turnFailed: string;
     turnResolved: string;
@@ -110,7 +150,12 @@ type AskConnexDrawerProps = {
     instantOpen: boolean;
     isMobile: boolean;
     sessions: AiChatSession[];
+    invitations: AiChatSession[];
     activeSession: AiChatSession | null;
+    participants: AiChatParticipant[];
+    presence: AiChatPresence | null;
+    members: WorkspaceMember[];
+    canShare: boolean;
     messages: AiChatMessage[];
     freshMessageIds: ReadonlySet<number>;
     loadState: DrawerLoadState;
@@ -130,6 +175,11 @@ type AskConnexDrawerProps = {
     onNewChat: () => void;
     onRename: (title: string) => Promise<boolean>;
     onArchive: () => void;
+    onJoinInvitation: (session: AiChatSession) => void;
+    onShare: (shared: boolean) => Promise<boolean>;
+    onInvite: (userId: number) => Promise<boolean>;
+    onLeave: () => void;
+    onRemoveParticipant: (userId: number) => void;
     onRetry: () => void;
     onComposerChange: (value: string) => void;
     onRemoveAttachment: (attachment: AskConnexAttachment) => void;
@@ -190,6 +240,10 @@ function TranscriptMessage({
 }) {
     const reduceMotion = useReducedMotion() ?? false;
     const user = message.authorKind === 'user';
+    const author = user
+        ? message.authorDisplayName
+            ?? (message.authorUserId === null ? labels.formerMember : labels.memberAuthor(message.authorUserId))
+        : labels.assistantAuthor;
 
     return (
         <motion.article
@@ -198,6 +252,7 @@ function TranscriptMessage({
             transition={reduceMotion ? instant : { duration: 0.2, ease: easeOut }}
             className="border-t border-border py-6 first:border-t-0"
         >
+            <p className="mb-2 text-xs font-medium text-muted-foreground">{author}</p>
             {user ? (
                 <p className="ml-8 whitespace-pre-wrap break-words rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-foreground">
                     {message.content}
@@ -211,6 +266,31 @@ function TranscriptMessage({
                 </div>
             )}
         </motion.article>
+    );
+}
+
+function PresenceStrip({ presence, labels }: { presence: AiChatPresence; labels: AskConnexDrawerLabels }) {
+    const typingNames = presence.present
+        .filter((participant) => presence.typingUserIds.includes(participant.userId))
+        .map((participant) => participant.displayName);
+
+    return (
+        <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+            <span className="text-xs font-medium text-muted-foreground">{labels.presence}</span>
+            <AvatarGroup aria-label={labels.presence}>
+                {presence.present.map((participant) => (
+                    <Avatar key={participant.userId} size="sm" title={participant.displayName}>
+                        <AvatarImage src={participant.profilePictureUrl ?? undefined} alt="" />
+                        <AvatarFallback>{participant.displayName.slice(0, 1).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                ))}
+            </AvatarGroup>
+            {typingNames.length > 0 ? (
+                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                    {labels.typing(typingNames.join(', '))}
+                </span>
+            ) : null}
+        </div>
     );
 }
 
@@ -229,7 +309,7 @@ function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskC
         return (
             <div role="status" className="flex items-center gap-2 border-t border-border px-4 py-2 text-xs text-destructive">
                 <span className="size-2 rounded-full bg-destructive" />
-                <span>{labels.turnFailed}</span>
+                <span>{turn.reason === 'budget_exhausted' ? labels.budgetExhausted : labels.turnFailed}</span>
             </div>
         );
     }
@@ -304,7 +384,12 @@ export default function AskConnexDrawer({
     instantOpen,
     isMobile,
     sessions,
+    invitations,
     activeSession,
+    participants,
+    presence,
+    members,
+    canShare,
     messages,
     freshMessageIds,
     loadState,
@@ -324,6 +409,11 @@ export default function AskConnexDrawer({
     onNewChat,
     onRename,
     onArchive,
+    onJoinInvitation,
+    onShare,
+    onInvite,
+    onLeave,
+    onRemoveParticipant,
     onRetry,
     onComposerChange,
     onRemoveAttachment,
@@ -334,6 +424,9 @@ export default function AskConnexDrawer({
     const [renameOpen, setRenameOpen] = useState(false);
     const [renameValue, setRenameValue] = useState('');
     const [renaming, setRenaming] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const [sharing, setSharing] = useState(false);
+    const [selectedMemberId, setSelectedMemberId] = useState<string>('');
     const working = turn.phase === 'accepted' || turn.phase === 'running';
     const canSend = composer.trim().length > 0
         && loadState === 'ready'
@@ -341,6 +434,10 @@ export default function AskConnexDrawer({
         && !contentTooLong
         && !working
         && unavailable === null;
+    const participantIds = new Set(participants.map((participant) => participant.userId));
+    const availableMembers = members.filter((member) => (
+        member.id !== activeSession?.createdByUserId && !participantIds.has(member.id)
+    ));
 
     useEffect(() => {
         endRef.current?.scrollIntoView({ block: 'end' });
@@ -359,6 +456,30 @@ export default function AskConnexDrawer({
         const saved = await onRename(title);
         setRenaming(false);
         if (saved) setRenameOpen(false);
+    };
+
+    const enableSharing = async () => {
+        if (sharing) return;
+        setSharing(true);
+        await onShare(true);
+        setSharing(false);
+    };
+
+    const disableSharing = async () => {
+        if (sharing) return;
+        setSharing(true);
+        const saved = await onShare(false);
+        setSharing(false);
+        if (saved) setShareOpen(false);
+    };
+
+    const inviteSelectedMember = async () => {
+        const memberId = Number(selectedMemberId);
+        if (!Number.isSafeInteger(memberId) || memberId <= 0 || sharing) return;
+        setSharing(true);
+        const invited = await onInvite(memberId);
+        setSharing(false);
+        if (invited) setSelectedMemberId('');
     };
 
     return (
@@ -397,6 +518,23 @@ export default function AskConnexDrawer({
                                     <p className="px-2 pb-1.5 text-xs leading-relaxed text-muted-foreground">
                                         {labels.disclosureList}
                                     </p>
+                                    {invitations.length > 0 ? (
+                                        <>
+                                            <DropdownMenuLabel>{labels.invitations}</DropdownMenuLabel>
+                                            {invitations.map((invitation) => (
+                                                <DropdownMenuItem
+                                                    key={`invitation:${invitation.id}`}
+                                                    disabled={working}
+                                                    onSelect={() => onJoinInvitation(invitation)}
+                                                >
+                                                    <UserPlusIcon />
+                                                    <span className="min-w-0 flex-1 truncate">{invitation.title}</span>
+                                                    <span className="text-xs text-muted-foreground">{labels.join}</span>
+                                                </DropdownMenuItem>
+                                            ))}
+                                            <DropdownMenuSeparator />
+                                        </>
+                                    ) : null}
                                     {sessions.length === 0 ? (
                                         <DropdownMenuItem disabled>{labels.noRecentSessions}</DropdownMenuItem>
                                     ) : sessions.map((session) => (
@@ -432,6 +570,18 @@ export default function AskConnexDrawer({
                                     <PencilSquareIcon />
                                     {labels.rename}
                                 </DropdownMenuItem>
+                                {activeSession?.ownedByCurrentUser && canShare ? (
+                                    <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+                                        <UserGroupIcon />
+                                        {labels.manageSharing}
+                                    </DropdownMenuItem>
+                                ) : null}
+                                {activeSession && !activeSession.ownedByCurrentUser ? (
+                                    <DropdownMenuItem disabled={working} onSelect={onLeave}>
+                                        <ArrowRightStartOnRectangleIcon />
+                                        {labels.leave}
+                                    </DropdownMenuItem>
+                                ) : null}
                                 <DropdownMenuItem
                                     variant="destructive"
                                     disabled={!activeSession?.ownedByCurrentUser || working}
@@ -455,6 +605,10 @@ export default function AskConnexDrawer({
                         labels={labels}
                         onRemove={onRemoveAttachment}
                     />
+
+                    {activeSession?.visibility === 'shared' && presence ? (
+                        <PresenceStrip presence={presence} labels={labels} />
+                    ) : null}
 
                     <ScrollArea className="min-h-0 flex-1">
                         {loadState === 'loading' ? <TranscriptSkeleton /> : null}
@@ -582,6 +736,95 @@ export default function AskConnexDrawer({
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={shareOpen} onOpenChange={(next) => !sharing && setShareOpen(next)}>
+                <DialogContent size="sm">
+                    <DialogHeader>
+                        <DialogTitle>{labels.shareTitle}</DialogTitle>
+                        <DialogDescription>{labels.shareDescription}</DialogDescription>
+                    </DialogHeader>
+                    {activeSession?.visibility !== 'shared' ? (
+                        <DialogFooter>
+                            <Button type="button" variant="ghost" onClick={() => setShareOpen(false)} disabled={sharing}>
+                                {labels.shareCancel}
+                            </Button>
+                            <Button type="button" onClick={() => void enableSharing()} disabled={sharing}>
+                                {labels.shareConfirm}
+                            </Button>
+                        </DialogFooter>
+                    ) : (
+                        <div className="space-y-5">
+                            <section className="space-y-2" aria-labelledby="ask-connex-participants-title">
+                                <h3 id="ask-connex-participants-title" className="text-sm font-medium text-foreground">
+                                    {labels.participants}
+                                </h3>
+                                <ul className="divide-y divide-border rounded-lg border border-border px-3">
+                                    {participants.map((participant) => (
+                                        <li key={participant.userId} className="flex min-w-0 items-center gap-3 py-2.5">
+                                            <Avatar size="sm">
+                                                <AvatarImage src={participant.profilePictureUrl ?? undefined} alt="" />
+                                                <AvatarFallback>{participant.displayName.slice(0, 1).toUpperCase()}</AvatarFallback>
+                                            </Avatar>
+                                            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                                                {participant.displayName}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {participant.status === 'invited' ? labels.invitePending : labels.shared}
+                                            </span>
+                                            {participant.role === 'participant' ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    aria-label={labels.removeParticipant(participant.displayName)}
+                                                    onClick={() => onRemoveParticipant(participant.userId)}
+                                                    disabled={sharing}
+                                                >
+                                                    <XMarkIcon className="size-4" />
+                                                </Button>
+                                            ) : null}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </section>
+                            <div className="space-y-2">
+                                <label htmlFor="ask-connex-invite-member" className="text-sm font-medium text-foreground">
+                                    {labels.inviteMember}
+                                </label>
+                                <div className="flex gap-2">
+                                    <Select value={selectedMemberId} onValueChange={setSelectedMemberId} disabled={sharing || availableMembers.length === 0}>
+                                        <SelectTrigger id="ask-connex-invite-member" className="min-w-0 flex-1">
+                                            <SelectValue placeholder={labels.inviteMember} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableMembers.map((member) => (
+                                                <SelectItem key={member.id} value={String(member.id)}>
+                                                    {member.displayName}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Button
+                                        type="button"
+                                        onClick={() => void inviteSelectedMember()}
+                                        disabled={!selectedMemberId || sharing}
+                                    >
+                                        {labels.invite}
+                                    </Button>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button type="button" variant="ghost" onClick={() => setShareOpen(false)} disabled={sharing}>
+                                    {labels.shareCancel}
+                                </Button>
+                                <Button type="button" variant="destructive" onClick={() => void disableSharing()} disabled={sharing}>
+                                    {labels.unshare}
+                                </Button>
+                            </DialogFooter>
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
         </>

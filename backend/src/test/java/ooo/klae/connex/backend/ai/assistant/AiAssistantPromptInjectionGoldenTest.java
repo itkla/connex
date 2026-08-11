@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -21,6 +23,7 @@ import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiMediaAdmissionService;
+import ooo.klae.connex.backend.ai.AiOrganizationBudgetCoordinator;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
@@ -116,6 +119,9 @@ class AiAssistantPromptInjectionGoldenTest {
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
         when(providerConfigService.resolveForOrg(9, 11)).thenReturn(resolved);
+        var budgetCoordinator = mock(AiOrganizationBudgetCoordinator.class);
+        when(budgetCoordinator.reserve(eq(9), any(AiInvocation.class)))
+                .thenReturn(mock(AiOrganizationBudgetCoordinator.Lease.class));
         var invocationService = new AiInvocationService(
                 featureGate,
                 mock(AiMediaAdmissionService.class),
@@ -124,7 +130,8 @@ class AiAssistantPromptInjectionGoldenTest {
                 new AiRestrictionEpoch(),
                 workspaceService,
                 mock(AuditService.class),
-                objectMapper);
+                objectMapper,
+                budgetCoordinator);
         AiChatMessage userRequest = new AiChatMessage();
         userRequest.setAuthorKind("user");
         userRequest.setContent("What changed for Ada Lovelace?");

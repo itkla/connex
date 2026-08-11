@@ -6,6 +6,7 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -19,6 +20,16 @@ public interface AiChatMapper {
         @Param("offset") int offset);
 
     long countAccessibleSessions(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    List<AiChatSession> listInvitedSessions(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId,
+        @Param("limit") int limit,
+        @Param("offset") int offset);
+
+    long countInvitedSessions(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
 
@@ -60,12 +71,46 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
         @Param("title") String title,
-        @Param("status") String status);
+        @Param("status") String status,
+        @Param("visibility") String visibility);
 
     int insertParticipant(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("userId") int userId);
+
+    int insertInvitation(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("userId") int userId,
+        @Param("invitedByUserId") int invitedByUserId);
+
+    AiChatParticipant getParticipant(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("userId") int userId);
+
+    List<AiChatParticipant> listParticipants(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
+    List<Integer> listRealtimeRecipientUserIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
+    int joinParticipant(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("userId") int userId);
+
+    int deleteParticipant(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("userId") int userId);
+
+    int deleteParticipantsForSession(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
 
     void deleteParticipantsForUser(
         @Param("workspaceId") int workspaceId,

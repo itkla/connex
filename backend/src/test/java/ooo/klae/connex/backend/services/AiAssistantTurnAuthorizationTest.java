@@ -107,7 +107,8 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
     @Test
     void archivedOrAlreadyRunningSessionReturnsConflictWithoutGeneration() {
         AiChatSession archived = session(currentUser, workspace);
-        chatMapper.updateSession(workspace.getId(), archived.getId(), null, "archived");
+        chatMapper.updateSession(
+                workspace.getId(), archived.getId(), null, "archived", null);
         assertThrows(ConflictException.class, () ->
                 turnService.start(archived.getId(), request("Archived")));
 

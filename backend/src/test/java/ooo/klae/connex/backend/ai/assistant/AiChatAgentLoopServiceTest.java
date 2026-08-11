@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -17,7 +18,6 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiInvocation;
@@ -33,8 +33,9 @@ import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
-import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -50,6 +51,8 @@ class AiChatAgentLoopServiceTest {
     private AiChatTurnPersistenceService persistenceService;
     private AiRestrictionEpoch restrictionEpoch;
     private WorkspaceService workspaceService;
+    private AiChatRealtimeDispatcher realtimeDispatcher;
+    private AiWorkspaceGovernanceService governanceService;
     private AiChatAgentLoopService service;
 
     @BeforeEach
@@ -59,11 +62,11 @@ class AiChatAgentLoopServiceTest {
         persistenceService = mock(AiChatTurnPersistenceService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         workspaceService = mock(WorkspaceService.class);
+        realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
+        governanceService = mock(AiWorkspaceGovernanceService.class);
         var catalog = new AiAssistantToolCatalog();
         var promptAssembler = new AiAssistantPromptAssembler(objectMapper, catalog);
         var identifierResolver = mock(AiAssistantIdentifierResolver.class);
-        var publishers = new StaticListableBeanFactory()
-                .getBeanProvider(AiChatRealtimePublisher.class);
         service = new AiChatAgentLoopService(
                 invocationService,
                 new AiAssistantStepGuard(catalog),
@@ -74,7 +77,8 @@ class AiChatAgentLoopServiceTest {
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,
-                publishers);
+                realtimeDispatcher,
+                governanceService);
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(TURN.userMessageId());
         userMessage.setAuthorKind("user");
@@ -88,6 +92,8 @@ class AiChatAgentLoopServiceTest {
         when(persistenceService.proposeTool(eq(TURN), anyInt(), any(), any())).thenReturn(29);
         when(persistenceService.finishTool(eq(TURN), anyInt(), any(), any())).thenReturn(true);
         when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(6);
     }
 
     @Test
@@ -109,8 +115,35 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class));
         verify(toolExecutor, times(6)).execute(
                 eq("search_records"), any(JsonNode.class), any(), eq(true));
+        verify(workspaceService, atLeastOnce()).requirePermission(
+                TURN.workspaceId(), TURN.userId(), Permission.AI_USE);
+        verify(workspaceService, never()).requirePermission(
+                TURN.workspaceId(), 99, Permission.AI_USE);
         verify(persistenceService, never()).resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void workspaceKillSwitchTerminatesAnInFlightTurnBeforeAnotherProviderStep() throws Exception {
+        AiAssistantStep toolStep = new AiAssistantStep(
+                new AiAssistantStep.Tool(
+                        "search_records",
+                        objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
+                null);
+        when(invocationService.completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+                .thenReturn(parsed(toolStep));
+        when(governanceService.isEnabled(TURN.workspaceId()))
+                .thenReturn(true, true, true, true, true, false);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("workspace_disabled", result.reason());
+        verify(invocationService).completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class));
+        verify(toolExecutor).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true));
     }
 
     @Test
@@ -263,7 +296,8 @@ class AiChatAgentLoopServiceTest {
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,
-                new StaticListableBeanFactory().getBeanProvider(AiChatRealtimePublisher.class));
+                realtimeDispatcher,
+                governanceService);
         when(invocationService.completeStructured(
                 any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
                 .thenReturn(parsed(new AiAssistantStep(

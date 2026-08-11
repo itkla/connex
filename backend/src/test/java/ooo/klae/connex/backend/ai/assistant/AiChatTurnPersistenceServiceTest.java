@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 class AiChatTurnPersistenceServiceTest {
@@ -35,7 +36,8 @@ class AiChatTurnPersistenceServiceTest {
                 mock(WorkspaceService.class),
                 mock(AiProperties.class),
                 mock(AiRestrictionEpoch.class),
-                Clock.systemUTC());
+                Clock.systemUTC(),
+                mock(AiChatRealtimeDispatcher.class));
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         AiChatTurn storedTurn = new AiChatTurn();

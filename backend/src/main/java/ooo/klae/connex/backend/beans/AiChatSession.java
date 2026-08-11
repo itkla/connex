@@ -13,6 +13,7 @@ public class AiChatSession {
     private String title;
     private String visibility;
     private String status;
+    private String participationStatus;
     private boolean ownedByCurrentUser;
     private String lastMessageAt;
     private String archivedAt;
