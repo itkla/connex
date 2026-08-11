@@ -108,7 +108,8 @@ export default function CommentsSection({
     const commentCount = useMemo(
         () =>
             threads.reduce(
-                (sum, thread) => sum + thread.comments.filter((comment) => !comment.deleted).length,
+                (sum, thread) =>
+                    sum + thread.comments.filter((comment) => comment.deletedAt == null).length,
                 0,
             ),
         [threads],
@@ -181,7 +182,7 @@ export default function CommentsSection({
                               ...thread,
                               comments: thread.comments.map((comment) =>
                                   comment.id === pendingDelete.id
-                                      ? { ...comment, content: null, deleted: true }
+                                      ? { ...comment, content: null, deletedAt: new Date().toISOString() }
                                       : comment,
                               ),
                           }
@@ -227,8 +228,9 @@ export default function CommentsSection({
                                     {thread.comments.map((comment, index) => {
                                         const highlighted =
                                             highlightedCommentId === String(comment.id);
+                                        const deleted = comment.deletedAt != null;
                                         const canDelete =
-                                            !comment.deleted &&
+                                            !deleted &&
                                             (comment.author.id === currentUserId || canModerate);
                                         return (
                                             <li
@@ -242,7 +244,7 @@ export default function CommentsSection({
                                             >
                                                 <Avatar className="mt-0.5 size-7 shrink-0">
                                                     <AvatarImage
-                                                        src={comment.author.profileImageUrl ?? undefined}
+                                                        src={comment.author.profilePictureUrl ?? undefined}
                                                         alt=""
                                                     />
                                                     <AvatarFallback className="text-[0.65rem]">
@@ -258,7 +260,7 @@ export default function CommentsSection({
                                                             {formatDateTime(comment.createdAt, locale)}
                                                         </span>
                                                     </p>
-                                                    {comment.deleted ? (
+                                                    {deleted ? (
                                                         <p className="text-sm italic text-muted-foreground">
                                                             {t('deletedComment')}
                                                         </p>

@@ -2735,7 +2735,7 @@ export type RecordCommentTargetType = 'person' | 'company' | 'deal';
 export type RecordCommentAuthor = {
     id: number;
     displayName: string;
-    profileImageUrl?: string | null;
+    profilePictureUrl?: string | null;
 };
 
 export type RecordComment = {
@@ -2744,17 +2744,22 @@ export type RecordComment = {
     author: RecordCommentAuthor;
     /** Null once the comment has been redacted; the row survives as a tombstone. */
     content: string | null;
-    deleted: boolean;
     createdAt: string;
+    deletedAt: string | null;
+    deletedByUserId?: number | null;
 };
 
 export type RecordCommentThread = {
     id: number;
     targetType: RecordCommentTargetType;
     targetId: number;
+    createdByUserId: number;
     state: 'open' | 'resolved';
+    resolvedByUserId?: number | null;
+    resolvedAt?: string | null;
     version: number;
     createdAt: string;
+    updatedAt: string;
     comments: RecordComment[];
 };
 
