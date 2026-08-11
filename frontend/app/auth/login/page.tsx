@@ -7,8 +7,10 @@ export default async function LoginPage({
 }: {
     searchParams: Promise<{ redirect?: string; sso_error?: string }>;
 }) {
-    const { redirect, sso_error } = await searchParams;
-    const capabilitiesResult = await toResult(getCapabilities());
+    const [{ redirect, sso_error }, capabilitiesResult] = await Promise.all([
+        searchParams,
+        toResult(getCapabilities()),
+    ]);
     const capabilities = capabilitiesResult.ok ? capabilitiesResult.data : null;
     return (
         <AuthForm
