@@ -16,6 +16,8 @@ import {
     SelectItem,
 } from "@/components/ui/select";
 import Panel from "@/app/components/overview/analytics/Panel";
+import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
 import SendStatusBadge from "@/app/components/marketing/campaigns/SendStatusBadge";
 import NewMessageDialog from "@/app/components/marketing/campaigns/NewMessageDialog";
@@ -40,6 +42,7 @@ import {
 import { canCreateSend, type CampaignAccess } from "@/app/lib/campaignAccess";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
+import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 
 const LOCALES: CampaignMessageLocale[] = ["en", "ja"];
 const EMPTY_MESSAGE_PAYLOAD: CampaignMessagePayload = { name: "", channel: "email" };
@@ -67,17 +70,18 @@ export default function CampaignDelivery({
     initialSends,
     snapshots,
     access,
-    deliveryEnabled,
+    deliveryAvailability,
 }: {
     campaignId: number;
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
     snapshots: CampaignAudienceSnapshotSummary[];
     access: CampaignAccess;
-    deliveryEnabled: boolean;
+    deliveryAvailability: CapabilityAvailability;
 }) {
     const t = useTranslations("CampaignMessages");
     const st = useTranslations("CampaignSends");
+    const tCapability = useTranslations("CapabilityUnavailable");
     const locale = useLocale();
 
     const [messages, setMessages] = useState<CampaignMessage[]>(initialMessages);
@@ -102,7 +106,8 @@ export default function CampaignDelivery({
     const [actionSendId, setActionSendId] = useState<number | null>(null);
     const [deliveryRefused, setDeliveryRefused] = useState(false);
 
-    const deliveryUnavailable = !deliveryEnabled || deliveryRefused;
+    const deliveryDisabled = deliveryAvailability === "disabled" || deliveryRefused;
+    const deliveryUnavailable = deliveryAvailability !== "enabled" || deliveryRefused;
     const canManage = access.manage;
     const canSend = access.send;
     const canMaterializeSend = canCreateSend(access);
@@ -507,15 +512,29 @@ export default function CampaignDelivery({
 
             <Panel title={st("title")} subtitle={st("subtitle")}>
                 <div className="flex flex-col gap-6">
-                    <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
-                        <InformationCircleIcon
-                            aria-hidden
-                            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                    {deliveryAvailability === "unavailable" ? (
+                        <PermissionsUnavailable
+                            variant="inline"
+                            title={tCapability("title")}
+                            body={tCapability("body")}
+                            action={(
+                                <WorkspaceUnavailableRetry
+                                    label={tCapability("retry")}
+                                    pendingLabel={tCapability("retrying")}
+                                />
+                            )}
                         />
-                        <p className="text-sm text-muted-foreground">
-                            {deliveryUnavailable ? st("deliveryUnavailable") : st("queueHint")}
-                        </p>
-                    </div>
+                    ) : (
+                        <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
+                            <InformationCircleIcon
+                                aria-hidden
+                                className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                {deliveryDisabled ? st("deliveryUnavailable") : st("queueHint")}
+                            </p>
+                        </div>
+                    )}
                     {canMaterializeSend && (
                         <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

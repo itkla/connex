@@ -17,19 +17,19 @@ describe('campaignDelivery is a first-class instance capability', () => {
         expect(DEFAULT_CAPABILITIES.campaignDelivery).toBe(false);
     });
 
-    it('reaches the campaign surface from the capability endpoint, not from a failed send', () => {
+    it('reaches the campaign surface as an explicit resolved-or-unavailable result', () => {
         const page = source(DETAIL_PAGE);
 
         expect(page).toContain('getCapabilities(');
-        expect(page).toContain('DEFAULT_CAPABILITIES');
-        expect(page).toContain('deliveryEnabled={capabilities.campaignDelivery}');
+        expect(page).toContain('toResult(getCapabilities(init))');
+        expect(page).toContain('deliveryAvailability={capabilityAvailability(');
     });
 });
 
 describe('the campaign delivery surface reflects whether delivery is available', () => {
     it('treats a delivery-disabled instance as unavailable before any request is made', () => {
         expect(source(DELIVERY_PANEL)).toContain(
-            'const deliveryUnavailable = !deliveryEnabled || deliveryRefused;',
+            'const deliveryUnavailable = deliveryAvailability !== "enabled" || deliveryRefused;',
         );
     });
 
@@ -40,7 +40,7 @@ describe('the campaign delivery surface reflects whether delivery is available',
     it('gates audience export on the same capability that gates sending', () => {
         const panel = source(EXPORT_PANEL);
 
-        expect(panel).toContain('const exportUnavailable = !deliveryEnabled || exportRefused;');
+        expect(panel).toContain('const exportUnavailable = deliveryAvailability !== "enabled" || exportRefused;');
         expect(panel).toContain('exportUnavailable');
     });
 });

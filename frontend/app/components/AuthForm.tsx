@@ -27,6 +27,9 @@ import {
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
+import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
+import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 
 type AuthMode = "login" | "register";
 type FieldKey = "username" | "email" | "displayName" | "password";
@@ -76,17 +79,20 @@ export function AuthForm({
     ssoError = false,
     ssoEnabled = false,
     socialProviders = {},
+    ssoAvailability = "disabled",
 }: {
     mode: AuthMode;
     redirectUrl: string | null;
     ssoError?: boolean;
     ssoEnabled?: boolean;
     socialProviders?: { google?: boolean; microsoft?: boolean };
+    ssoAvailability?: CapabilityAvailability;
 }) {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
     const tMode = useTranslations(mode === "login" ? "AuthLogin" : "AuthRegister");
     const tLogin = useTranslations("AuthLogin");
+    const tCapability = useTranslations("CapabilityUnavailable");
 
     const fields = FORM_FIELDS[mode];
     const altHref = ALT_HREF[mode];
@@ -425,7 +431,13 @@ export function AuthForm({
                             </button>
                         </form>
 
-                        {mode === "login" && (passkeySupported || ssoEnabled || socialProviders.google || socialProviders.microsoft) && (
+                        {mode === "login" && (
+                            passkeySupported
+                            || ssoEnabled
+                            || socialProviders.google
+                            || socialProviders.microsoft
+                            || ssoAvailability === "unavailable"
+                        ) && (
                             <div
                                 className="connex-rise mt-5"
                                 style={{ animationDelay: `${180 + fields.length * 60}ms` }}
@@ -454,6 +466,19 @@ export function AuthForm({
                                             {passkeySubmitting ? tLogin("passkeySigningIn") : tLogin("passkeyButton")}
                                         </button>
                                     )}
+                                    {ssoAvailability === "unavailable" ? (
+                                        <PermissionsUnavailable
+                                            variant="inline"
+                                            title={tCapability("title")}
+                                            body={tCapability("body")}
+                                            action={(
+                                                <WorkspaceUnavailableRetry
+                                                    label={tCapability("retry")}
+                                                    pendingLabel={tCapability("retrying")}
+                                                />
+                                            )}
+                                        />
+                                    ) : null}
                                     {ssoEnabled && (
                                         <button
                                             type="button"

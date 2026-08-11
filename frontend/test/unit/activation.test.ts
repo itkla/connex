@@ -28,7 +28,7 @@ const EMPTY_COUNTS: ActivationCounts = {
     connectedAccounts: 0,
     connectedCaptureReady: 0,
     connectedCaptureAvailable: false,
-    connectedAccountsAvailable: false,
+    connectedAccountsAvailability: "disabled",
     canImportContacts: true,
     canImportCompanies: true,
     canCreateActivities: true,
@@ -48,7 +48,7 @@ const FULL_COUNTS: ActivationCounts = {
     connectedAccounts: 0,
     connectedCaptureReady: 0,
     connectedCaptureAvailable: false,
-    connectedAccountsAvailable: false,
+    connectedAccountsAvailability: "disabled",
     canImportContacts: true,
     canImportCompanies: true,
     canCreateActivities: true,
@@ -258,7 +258,7 @@ describe("buildActivationSteps", () => {
     it("shows the mailbox step when a provider is configured", () => {
         const steps = buildActivationSteps({
             ...FULL_COUNTS,
-            connectedAccountsAvailable: true,
+            connectedAccountsAvailability: "enabled",
             connectedAccounts: 1,
         });
         expect(steps.find((step) => step.id === "connections")?.done).toBe(true);
@@ -267,7 +267,7 @@ describe("buildActivationSteps", () => {
     it("requires capture readiness instead of OAuth custody when capture is available", () => {
         const connectedOnly = buildActivationSteps({
             ...FULL_COUNTS,
-            connectedAccountsAvailable: true,
+            connectedAccountsAvailability: "enabled",
             connectedAccounts: 1,
             connectedCaptureAvailable: true,
             connectedCaptureReady: 0,
@@ -276,7 +276,7 @@ describe("buildActivationSteps", () => {
 
         const captureReady = buildActivationSteps({
             ...FULL_COUNTS,
-            connectedAccountsAvailable: true,
+            connectedAccountsAvailability: "enabled",
             connectedAccounts: 1,
             connectedCaptureAvailable: true,
             connectedCaptureReady: 1,

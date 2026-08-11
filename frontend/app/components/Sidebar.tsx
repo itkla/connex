@@ -31,6 +31,7 @@ import {
     BookOpenIcon,
     ChartBarIcon,
     PresentationChartLineIcon,
+    QuestionMarkCircleIcon,
     GlobeAltIcon,
     ClipboardDocumentListIcon,
     SunIcon,
@@ -85,6 +86,8 @@ type NavItem = {
     nested?: boolean;
     /** Overrides path-based active matching for hrefs that carry a query (e.g. pinned saved views). */
     active?: boolean;
+    /** Localized explanation shown when the item's capability could not be resolved. */
+    availabilityLabel?: string;
 };
 
 type NavSection = {
@@ -96,6 +99,7 @@ type NavSection = {
 
 function useSections(navAccess: NavAccess): NavSection[] {
     const t = useTranslations("CommonSidebar");
+    const tCapability = useTranslations("CapabilityUnavailable");
     const { activeWorkspace } = useWorkspace();
     const isOrgAdmin = activeWorkspace?.orgRole != null;
     const sectionPathname = usePathname() ?? "";
@@ -107,12 +111,15 @@ function useSections(navAccess: NavAccess): NavSection[] {
         ...(navAccess.workflows
             ? [{ label: t("navWorkflows"), href: "/workflows", icon: BoltIcon }]
             : []),
-        ...(navAccess.captureReviews
+        ...(navAccess.captureReviews !== "disabled"
             ? [{
                 label: t("navCaptureReviews"),
                 href: "/account/connections/reviews",
                 icon: InboxIcon,
                 active: captureReviewsActive,
+                availabilityLabel: navAccess.captureReviews === "unavailable"
+                    ? tCapability("title")
+                    : undefined,
             }]
             : []),
         { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
@@ -307,7 +314,9 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                aria-label={item.label}
+                aria-label={item.availabilityLabel
+                    ? `${item.label}: ${item.availabilityLabel}`
+                    : item.label}
                 className="group flex justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
                 <span
@@ -326,6 +335,12 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
                         />
                     )}
                     <Icon className="relative z-10 size-4 shrink-0" />
+                    {item.availabilityLabel ? (
+                        <QuestionMarkCircleIcon
+                            aria-hidden
+                            className="absolute right-0.5 top-0.5 z-10 size-3 text-muted-foreground"
+                        />
+                    ) : null}
                 </span>
             </Link>
         );
@@ -333,7 +348,11 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             <li>
                 <Tooltip>
                     <TooltipTrigger asChild>{link}</TooltipTrigger>
-                    <TooltipContent side="right">{item.label}</TooltipContent>
+                    <TooltipContent side="right">
+                        {item.availabilityLabel
+                            ? `${item.label} — ${item.availabilityLabel}`
+                            : item.label}
+                    </TooltipContent>
                 </Tooltip>
             </li>
         );
@@ -363,6 +382,15 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
                         }`}
                 />
                 <span className="relative z-10">{item.label}</span>
+                {item.availabilityLabel ? (
+                    <span
+                        className="relative z-10 inline-flex text-muted-foreground"
+                        title={item.availabilityLabel}
+                    >
+                        <QuestionMarkCircleIcon aria-hidden className="size-4" />
+                        <span className="sr-only">{item.availabilityLabel}</span>
+                    </span>
+                ) : null}
             </Link>
         </li>
     );

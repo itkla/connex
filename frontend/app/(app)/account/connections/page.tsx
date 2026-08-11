@@ -4,10 +4,11 @@ import { redirect } from "next/navigation";
 
 import {
     DEFAULT_CAPABILITIES,
-    getCapabilities,
+    getCapabilitiesResultFromCookie,
     getEffectivePermissionsResultFromCookie,
 } from "@/app/lib/api";
 import ConnectionsPanel from "@/app/components/account/ConnectionsPanel";
+import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
 import {
     captureConnectionsHref,
     parseCaptureRouteState,
@@ -47,8 +48,16 @@ export default async function AccountConnectionsPage({
     searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
     const cookie = (await headers()).get("cookie");
-    const capabilities = await getCapabilities(cookie ? { headers: { cookie } } : {})
-        .catch(() => DEFAULT_CAPABILITIES);
+    const capabilitiesResult = await getCapabilitiesResultFromCookie(cookie);
+    const capabilities = capabilitiesResult.ok
+        ? capabilitiesResult.data
+        : DEFAULT_CAPABILITIES;
+    const capabilitiesAvailability = capabilityAvailability(capabilitiesResult.ok
+        ? capabilities.connectedAccounts.google
+            || capabilities.connectedAccounts.microsoft
+            || capabilities.connectedCapture.google
+            || capabilities.connectedCapture.microsoft
+        : null);
     const captureEnabled =
         capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft;
     const permissionsResult = captureEnabled
@@ -58,9 +67,10 @@ export default async function AccountConnectionsPage({
     const permissionsStatus: PermissionsStatus = permissionsResult.ok ? "resolved" : "unavailable";
     const currentSearchParams = toSearchParams(await searchParams);
     const routeState = parseCaptureRouteState(currentSearchParams);
-    const routeUnavailable = routeState.provider
+    const routeUnavailable = capabilitiesResult.ok && routeState.provider
         && !providerCaptureEnabled(capabilities, routeState.provider);
-    const workspacePolicyForbidden = routeState.panel === "workspace-policy"
+    const workspacePolicyForbidden = capabilitiesResult.ok
+        && routeState.panel === "workspace-policy"
         && checkPermission(permissionsStatus, new Set(effectivePermissions), "WORKSPACE_SETTINGS")
             === "denied";
     const canonicalHref = captureConnectionsHref(
@@ -88,6 +98,7 @@ export default async function AccountConnectionsPage({
         >
             <ConnectionsPanel
                 capabilities={capabilities}
+                capabilitiesAvailability={capabilitiesAvailability}
                 effectivePermissions={effectivePermissions}
                 permissionsStatus={permissionsStatus}
             />

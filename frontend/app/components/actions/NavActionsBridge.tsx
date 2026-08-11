@@ -65,7 +65,7 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 },
             });
         }
-        if (navAccess.captureReviews) {
+        if (navAccess.captureReviews !== "disabled") {
             gated.push({
                 id: "navigate.capture-reviews",
                 group: "navigate",

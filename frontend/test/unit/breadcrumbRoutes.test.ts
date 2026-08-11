@@ -15,7 +15,7 @@ import { NO_NAV_ACCESS, resolveNavAccess, type NavAccess } from "@/app/lib/navAc
 const ALL_ACCESS: NavAccess = {
     goals: true,
     auditLog: true,
-    captureReviews: true,
+    captureReviews: "enabled",
     campaigns: true,
     workflows: true,
     diagnostics: true,
@@ -243,14 +243,25 @@ describe("breadcrumb route registry", () => {
     it.each([
         ["/overview/reports/goals", "goals"],
         ["/admin/logs", "auditLog"],
-        ["/account/connections/reviews", "captureReviews"],
         ["/marketing/campaigns", "campaigns"],
         ["/workflows", "workflows"],
         ["/settings/diagnostics", "diagnostics"],
     ] as const)("fails closed for inaccessible route %s", (pathname, access) => {
+        const navAccess: NavAccess = { ...ALL_ACCESS, [access]: false };
         expect(resolveBreadcrumbRoute(pathname, context({
-            navAccess: { ...ALL_ACCESS, [access]: false },
+            navAccess,
         }))).toEqual({ kind: "denied", crumbs: [] });
+    });
+
+    it.each([
+        ["enabled", "shell"],
+        ["disabled", "denied"],
+        ["unavailable", "shell"],
+    ] as const)("resolves capture-review breadcrumbs with %s availability as %s", (availability, kind) => {
+        expect(resolveBreadcrumbRoute(
+            "/account/connections/reviews",
+            context({ navAccess: { ...ALL_ACCESS, captureReviews: availability } }),
+        ).kind).toBe(kind);
     });
 
     it("does not link organization routes for a non-administrator", () => {

@@ -340,7 +340,7 @@ export function resolveBreadcrumbRoute(
         ]);
     }
     if (pathname === "/account/connections/reviews") {
-        if (!context.navAccess.captureReviews) return empty("denied");
+        if (context.navAccess.captureReviews === "disabled") return empty("denied");
         return shell([
             translatedCrumb("/account", "account", context),
             translatedCrumb("/account/connections", "connections", context),
