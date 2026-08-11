@@ -68,6 +68,7 @@ import {
 import AccessDenied from "@/app/components/AccessDenied";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatCurrency, formatDate } from "@/app/lib/utils";
+import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 
 const RECORD_TYPES: CampaignAudienceRecordType[] = ["person", "company", "deal"];
 
@@ -136,7 +137,7 @@ export default function CampaignDetail({
     initialEngagement,
     access,
     snapshotsRestricted,
-    deliveryEnabled,
+    deliveryAvailability,
 }: {
     campaign: Campaign;
     initialAudience: CampaignAudience | null;
@@ -147,7 +148,7 @@ export default function CampaignDetail({
     initialEngagement: CampaignEngagementData | null;
     access: CampaignAccess;
     snapshotsRestricted: boolean;
-    deliveryEnabled: boolean;
+    deliveryAvailability: CapabilityAvailability;
 }) {
     const t = useTranslations("CampaignDetail");
     const at = useTranslations("CampaignAudience");
@@ -576,7 +577,7 @@ export default function CampaignDetail({
                             initialSends={initialSends}
                             snapshots={snapshots}
                             access={access}
-                            deliveryEnabled={deliveryEnabled}
+                            deliveryAvailability={deliveryAvailability}
                         />
                     </TabsContent>
 
@@ -590,7 +591,7 @@ export default function CampaignDetail({
                             initialExports={initialExports}
                             snapshots={snapshots}
                             access={access}
-                            deliveryEnabled={deliveryEnabled}
+                            deliveryAvailability={deliveryAvailability}
                         />
                     </TabsContent>
                 </Tabs>

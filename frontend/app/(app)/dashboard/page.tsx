@@ -61,6 +61,10 @@ import type {
     WarmthSummary,
 } from '@/app/lib/types';
 import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
+import {
+    capabilityAvailability,
+    type CapabilityAvailability,
+} from '@/app/lib/capabilityAvailability';
 
 import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
 import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
@@ -181,16 +185,17 @@ function present<T>(value: T | null): value is T {
 /**
  * Loads the workspace-membership and connected-account inputs the setup checklist needs. It runs
  * only while a required setup step is still outstanding, so an established workspace pays nothing
- * for it. Any failed input returns an explicit unavailable result rather than fabricating a gap.
+ * for it. Required lookup failures return an unavailable result; a capability lookup failure stays
+ * scoped to the optional mailbox step.
  */
-async function loadActivationExtras(cookie: string | null): Promise<{
+export async function loadActivationExtras(cookie: string | null): Promise<{
     ok: true;
     data: {
         members: number;
         connectedAccounts: number;
         connectedCaptureReady: number;
         connectedCaptureAvailable: boolean;
-        connectedAccountsAvailable: boolean;
+        connectedAccountsAvailability: CapabilityAvailability;
         canImportContacts: boolean;
         canImportCompanies: boolean;
         canCreateActivities: boolean;
@@ -206,15 +211,17 @@ async function loadActivationExtras(cookie: string | null): Promise<{
         getCapabilitiesResultFromCookie(cookie),
         getEffectivePermissionsResultFromCookie(cookie),
     ]);
-    if (!membersResult.ok || !capabilitiesResult.ok || !effectivePermissionsResult.ok) {
+    if (!membersResult.ok || !effectivePermissionsResult.ok) {
         return { ok: false };
     }
-    const capabilities = capabilitiesResult.data;
     const effectivePermissions = effectivePermissionsResult.data;
+    const capabilities = capabilitiesResult.ok ? capabilitiesResult.data : null;
     const connectedAccountsAvailable =
-        capabilities.connectedAccounts.google || capabilities.connectedAccounts.microsoft;
+        capabilities !== null
+        && (capabilities.connectedAccounts.google || capabilities.connectedAccounts.microsoft);
     const connectedCaptureAvailable =
-        capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft;
+        capabilities !== null
+        && (capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft);
     const connectionsResult = connectedAccountsAvailable
         ? await getProviderConnectionsResultFromCookie(cookie)
         : { ok: true as const, data: [] };
@@ -235,7 +242,9 @@ async function loadActivationExtras(cookie: string | null): Promise<{
                 (provider) => provider.activationReady,
             ).length,
             connectedCaptureAvailable,
-            connectedAccountsAvailable: connectedAccountsAvailable || connectedCaptureAvailable,
+            connectedAccountsAvailability: capabilityAvailability(capabilities === null
+                ? null
+                : connectedAccountsAvailable || connectedCaptureAvailable),
             canImportContacts: effectivePermissions.includes('PERSON_CREATE'),
             canImportCompanies: effectivePermissions.includes('COMPANY_CREATE'),
             canCreateActivities: effectivePermissions.includes('ACTIVITY_CREATE'),
@@ -440,7 +449,7 @@ export default async function Dashboard() {
             connectedAccounts: 0,
             connectedCaptureReady: 0,
             connectedCaptureAvailable: false,
-            connectedAccountsAvailable: false,
+            connectedAccountsAvailability: capabilityAvailability(null),
             canImportContacts: false,
             canImportCompanies: false,
             canCreateActivities: false,

@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import CapturePolicyDialog from "@/app/components/account/connected-capture/CapturePolicyDialog";
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
 import CapturePurgeDialog, {
@@ -39,6 +40,7 @@ import {
     providerCaptureEnabled,
 } from "@/app/lib/connectedCapture";
 import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
+import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type {
     CaptureOverview,
@@ -131,19 +133,23 @@ function WorkspacePolicyUnavailable() {
  * Manages self-owned provider connections and the active workspace's explicit capture policy.
  *
  * @param capabilities the instance's connected-capture switches
+ * @param capabilitiesAvailability whether any provider capability is enabled, disabled, or unresolved
  * @param effectivePermissions the viewer's effective permission keys, empty when the lookup failed
  * @param permissionsStatus whether that lookup succeeded, so a refusal can say which one it is
  */
 export default function ConnectionsPanel({
     capabilities,
+    capabilitiesAvailability,
     effectivePermissions,
     permissionsStatus,
 }: {
     capabilities: InstanceCapabilities;
+    capabilitiesAvailability: CapabilityAvailability;
     effectivePermissions: string[];
     permissionsStatus: PermissionsStatus;
 }) {
     const t = useTranslations("AccountConnections");
+    const tCapability = useTranslations("CapabilityUnavailable");
     const tPolicy = useTranslations("AccountCapturePolicy");
     const tWorkspacePolicy = useTranslations("AccountWorkspaceCapturePolicy");
     const tCapture = useTranslations("AccountCaptureProvider");
@@ -469,6 +475,20 @@ export default function ConnectionsPanel({
                 <p className="max-w-2xl px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
             </div>
 
+            {capabilitiesAvailability === "unavailable" ? (
+                <PermissionsUnavailable
+                    variant="inline"
+                    title={tCapability("title")}
+                    body={tCapability("body")}
+                    action={(
+                        <WorkspaceUnavailableRetry
+                            label={tCapability("retry")}
+                            pendingLabel={tCapability("retrying")}
+                        />
+                    )}
+                />
+            ) : null}
+
             {connections === null ? (
                 <div className="grid gap-3">
                     <Skeleton className="h-28 w-full rounded-2xl" />
@@ -489,14 +509,14 @@ export default function ConnectionsPanel({
                         {t("retry")}
                     </Button>
                 </div>
-            ) : providersToShow.length === 0 ? (
+            ) : providersToShow.length === 0 && capabilitiesAvailability === "disabled" ? (
                 <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
                     <p className="text-sm font-medium text-foreground">{t("unavailableTitle")}</p>
                     <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
                         {t("unavailableBody")}
                     </p>
                 </div>
-            ) : (
+            ) : providersToShow.length > 0 ? (
                 <div className="grid gap-3">
                     {providersToShow.map((provider) => {
                         const connection = connectionOf(provider);
@@ -560,7 +580,7 @@ export default function ConnectionsPanel({
                         );
                     })}
                 </div>
-            )}
+            ) : null}
 
             {routeState.panel === "workspace-policy" && workspacePolicyCheck === "unavailable" ? (
                 <WorkspacePolicyUnavailable />

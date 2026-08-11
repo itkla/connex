@@ -1,10 +1,14 @@
 import type { InstanceCapabilities } from "@/app/lib/types";
+import {
+    capabilityAvailability,
+    type CapabilityAvailability,
+} from "@/app/lib/capabilityAvailability";
 
 /**
  * Whether the viewer may reach the navigation destinations that are gated on a capability or an
  * effective permission. Resolved once on the server so the sidebar and the command palette gate
- * identically; every field is fail-closed, so a failed lookup hides the entry rather than surfacing
- * a destination the backend will reject.
+ * identically. Permission gates fail closed; capability gates preserve an unavailable destination
+ * so its route can explain the failed lookup and offer recovery.
  */
 export type NavAccess = {
     /** Goals live under Reports and require {@code GOAL_READ}. */
@@ -12,7 +16,7 @@ export type NavAccess = {
     /** The workspace audit log requires {@code AUDIT_READ}. */
     auditLog: boolean;
     /** The connected-capture review queue requires at least one capture-enabled provider. */
-    captureReviews: boolean;
+    captureReviews: CapabilityAvailability;
     /**
      * Campaigns require {@code CAMPAIGN_VIEW}. Gated on the permission alone, not on the
      * {@code campaignDelivery} capability: planning a campaign, defining its audience and authoring
@@ -30,11 +34,11 @@ export type NavAccess = {
     diagnostics: boolean;
 };
 
-/** The fail-closed default applied when capabilities or permissions could not be loaded. */
+/** The no-access default used when no resolved navigation authority is available. */
 export const NO_NAV_ACCESS: NavAccess = {
     goals: false,
     auditLog: false,
-    captureReviews: false,
+    captureReviews: "disabled",
     campaigns: false,
     workflows: false,
     diagnostics: false,
@@ -44,19 +48,20 @@ export const NO_NAV_ACCESS: NavAccess = {
  * Derives the gated navigation entries from the instance capabilities and the viewer's effective
  * permissions.
  *
- * @param capabilities - the resolved instance capabilities
+ * @param capabilities - the resolved instance capabilities, or null when their lookup failed
  * @param effectivePermissions - the viewer's effective permission keys
  * @returns the destinations the viewer may see
  */
 export function resolveNavAccess(
-    capabilities: InstanceCapabilities,
+    capabilities: InstanceCapabilities | null,
     effectivePermissions: readonly string[],
 ): NavAccess {
     return {
         goals: effectivePermissions.includes("GOAL_READ"),
         auditLog: effectivePermissions.includes("AUDIT_READ"),
-        captureReviews:
-            capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft,
+        captureReviews: capabilityAvailability(capabilities === null
+            ? null
+            : capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft),
         campaigns: effectivePermissions.includes("CAMPAIGN_VIEW"),
         workflows: effectivePermissions.includes("RULE_MANAGE"),
         diagnostics: effectivePermissions.includes("WORKSPACE_SETTINGS"),

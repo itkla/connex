@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
+import { QuestionMarkCircleIcon } from "@heroicons/react/24/outline";
 
 import { usePermission } from "@/app/hooks/usePermissions";
+import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -27,15 +29,20 @@ const TABS = [
  * server-resolved effective permissions, which are fail-closed, and the panel keeps its own denial
  * state for the case where the permission is lost while the page is open.
  *
- * @param mailManaged - whether the instance owns mail delivery, which retires the Email tab
+ * @param mailManagementAvailability whether managed mail is enabled, disabled, or unresolved
  */
-export default function SettingsTabs({ mailManaged = false }: { mailManaged?: boolean }) {
+export default function SettingsTabs({
+    mailManagementAvailability = "disabled",
+}: {
+    mailManagementAvailability?: CapabilityAvailability;
+}) {
     const pathname = usePathname() ?? "";
     const t = useTranslations("WorkspaceSettings");
+    const tCapability = useTranslations("CapabilityUnavailable");
     const reduce = useReducedMotion() ?? false;
     const canManageSettings = usePermission("WORKSPACE_SETTINGS");
     const tabs = TABS.filter((tab) => {
-        if (tab.key === "tabEmail") return !mailManaged;
+        if (tab.key === "tabEmail") return mailManagementAvailability !== "enabled";
         if (tab.key === "tabGeneral") return canManageSettings;
         if (tab.key === "tabDiagnostics") return canManageSettings;
         return true;
@@ -46,6 +53,8 @@ export default function SettingsTabs({ mailManaged = false }: { mailManaged?: bo
             <div className="inline-flex w-max items-center gap-0.5 rounded-full bg-muted p-0.5 ring-1 ring-border/60">
                 {tabs.map((tab) => {
                     const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+                    const availabilityUnavailable = tab.key === "tabEmail"
+                        && mailManagementAvailability === "unavailable";
                     return (
                         <Link
                             key={tab.href}
@@ -66,7 +75,18 @@ export default function SettingsTabs({ mailManaged = false }: { mailManaged?: bo
                                     }
                                 />
                             )}
-                            <span className="relative z-10">{t(tab.key)}</span>
+                            <span className="relative z-10 inline-flex items-center gap-1.5">
+                                {t(tab.key)}
+                                {availabilityUnavailable ? (
+                                    <span
+                                        className="inline-flex text-muted-foreground"
+                                        title={tCapability("title")}
+                                    >
+                                        <QuestionMarkCircleIcon aria-hidden className="size-4" />
+                                        <span className="sr-only">{tCapability("title")}</span>
+                                    </span>
+                                ) : null}
+                            </span>
                         </Link>
                     );
                 })}

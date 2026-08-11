@@ -15,7 +15,7 @@ import { NO_NAV_ACCESS, resolveNavAccess, type NavAccess } from "@/app/lib/navAc
 const ALL_ACCESS: NavAccess = {
     goals: true,
     auditLog: true,
-    captureReviews: true,
+    captureReviews: "enabled",
     campaigns: true,
     workflows: true,
     diagnostics: true,
@@ -248,8 +248,11 @@ describe("breadcrumb route registry", () => {
         ["/workflows", "workflows"],
         ["/settings/diagnostics", "diagnostics"],
     ] as const)("fails closed for inaccessible route %s", (pathname, access) => {
+        const navAccess: NavAccess = access === "captureReviews"
+            ? { ...ALL_ACCESS, captureReviews: "disabled" }
+            : { ...ALL_ACCESS, [access]: false };
         expect(resolveBreadcrumbRoute(pathname, context({
-            navAccess: { ...ALL_ACCESS, [access]: false },
+            navAccess,
         }))).toEqual({ kind: "denied", crumbs: [] });
     });
 
