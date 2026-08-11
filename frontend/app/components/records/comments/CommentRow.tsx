@@ -11,6 +11,15 @@ import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
+const REACTION_KEYS = [
+    'thumbs_up',
+    'thumbs_down',
+    'heart',
+    'celebrate',
+    'eyes',
+    'laugh',
+] as const satisfies readonly RecordCommentReactionKey[];
+
 const REACTION_EMOJI: Record<RecordCommentReactionKey, string> = {
     thumbs_up: '👍',
     thumbs_down: '👎',
@@ -19,8 +28,6 @@ const REACTION_EMOJI: Record<RecordCommentReactionKey, string> = {
     eyes: '👀',
     laugh: '😄',
 };
-
-const REACTION_KEYS = Object.keys(REACTION_EMOJI) as RecordCommentReactionKey[];
 
 type Props = {
     comment: RecordComment;
@@ -93,7 +100,7 @@ export default function CommentRow({
                             <button
                                 key={summary.reaction}
                                 type="button"
-                                disabled={!canReact}
+                                disabled={!canReact || (deleted && !summary.reactedByMe)}
                                 onClick={() => onToggleReaction(comment, summary.reaction)}
                                 aria-label={t('reactionLabel', {
                                     reaction: t(`reaction_${summary.reaction}`),

@@ -222,7 +222,11 @@ function RecordPeekDrawer({
                                 <DrawerTitle className="truncate text-base">{label || (loading ? t('loading') : '')}</DrawerTitle>
                                 {target && commentCounts.get(target.id) ? (
                                     <Link
-                                        href={`/records/${PEEK_COLLECTIONS[target.type]}/${target.id}#${target.type === 'person' ? 'contact' : target.type}-detail-comments`}
+                                        href={`${recordDetailNavigationPath(
+                                            PEEK_COLLECTIONS[target.type],
+                                            target.id,
+                                            returnSelection,
+                                        )}#${target.type === 'person' ? 'contact' : target.type}-detail-comments`}
                                         className="shrink-0"
                                     >
                                         <CommentIndicatorChip count={commentCounts.get(target.id)} />

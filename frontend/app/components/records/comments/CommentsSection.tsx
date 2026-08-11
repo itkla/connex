@@ -262,12 +262,12 @@ export default function CommentsSection({
         }
     }, [submitting, replyThreadId, replyValue, t]);
 
-    const [reactionBusyIds, setReactionBusyIds] = useState<Set<number>>(new Set());
+    const reactionBusyIds = useRef<Set<number>>(new Set());
 
     const handleToggleReaction = useCallback(
         async (comment: RecordComment, reaction: RecordCommentReactionKey) => {
-            if (reactionBusyIds.has(comment.id)) return;
-            setReactionBusyIds((prev) => new Set(prev).add(comment.id));
+            if (reactionBusyIds.current.has(comment.id)) return;
+            reactionBusyIds.current.add(comment.id);
             const mine = comment.reactions?.some(
                 (summary) => summary.reaction === reaction && summary.reactedByMe,
             );
@@ -292,14 +292,10 @@ export default function CommentsSection({
             } catch {
                 toastError(t('reactionFailed'));
             } finally {
-                setReactionBusyIds((prev) => {
-                    const next = new Set(prev);
-                    next.delete(comment.id);
-                    return next;
-                });
+                reactionBusyIds.current.delete(comment.id);
             }
         },
-        [reactionBusyIds, t],
+        [t],
     );
 
     const confirmDelete = useCallback(async () => {

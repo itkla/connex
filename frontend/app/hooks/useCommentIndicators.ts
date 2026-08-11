@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getCommentIndicators } from '@/app/lib/api';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type { RecordCommentTargetType } from '@/app/lib/types';
 
 const BATCH_LIMIT = 100;
@@ -24,19 +25,20 @@ export function useCommentIndicators(
     targetType: RecordCommentTargetType,
     targetIds: number[],
 ): Map<number, number> {
+    const { activeWorkspaceId } = useWorkspace();
     const [result, setResult] = useState<IndicatorResult>({ key: '', counts: EMPTY_COUNTS });
     const idsKey = useMemo(
         () => {
             const ids = [...new Set(targetIds)].sort((a, b) => a - b).join(',');
-            return ids.length > 0 ? `${targetType}:${ids}` : '';
+            return ids.length > 0 ? `${activeWorkspaceId ?? 'none'}:${targetType}:${ids}` : '';
         },
-        [targetType, targetIds],
+        [activeWorkspaceId, targetType, targetIds],
     );
 
     useEffect(() => {
         if (idsKey.length === 0) return;
         let active = true;
-        const ids = idsKey.slice(idsKey.indexOf(':') + 1).split(',').map(Number);
+        const ids = idsKey.slice(idsKey.lastIndexOf(':') + 1).split(',').map(Number);
         const chunks: number[][] = [];
         for (let start = 0; start < ids.length; start += BATCH_LIMIT) {
             chunks.push(ids.slice(start, start + BATCH_LIMIT));
