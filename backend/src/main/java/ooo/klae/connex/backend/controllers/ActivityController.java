@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.util.AnalyticsPeriods;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.PageBounds;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
 import java.util.Optional;
@@ -41,6 +42,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/activities")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class ActivityController {
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 

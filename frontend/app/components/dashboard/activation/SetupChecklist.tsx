@@ -3,19 +3,33 @@
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { CheckCircleIcon as CheckCircleSolidIcon } from '@heroicons/react/24/solid';
-import { CheckCircleIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, QuestionMarkCircleIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useActions } from '@/app/hooks/useActions';
 import type { ActivationStep } from '@/app/lib/activation';
+import WorkspaceUnavailableRetry from '@/app/components/WorkspaceUnavailableRetry';
 import { cn } from '@/lib/utils';
 
 function StepAction({ step, emphasis }: { step: ActivationStep; emphasis: boolean }) {
     const t = useTranslations('DashboardActivation');
+    const tCapability = useTranslations('CapabilityUnavailable');
     const { run, pendingIds, getAction, openOverlay } = useActions();
     const label = t(`steps.${step.id}.cta`);
     const variant = emphasis ? 'brand' : 'outline';
+
+    if (step.availability === 'unavailable') {
+        return (
+            <WorkspaceUnavailableRetry
+                label={tCapability('retry')}
+                pendingLabel={tCapability('retrying')}
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto sm:shrink-0"
+            />
+        );
+    }
 
     if (step.href) {
         return (
@@ -59,6 +73,7 @@ function StepAction({ step, emphasis }: { step: ActivationStep; emphasis: boolea
  */
 export default function SetupChecklist({ steps }: { steps: ActivationStep[] }) {
     const t = useTranslations('DashboardActivation');
+    const tCapability = useTranslations('CapabilityUnavailable');
     const doneCount = steps.filter((step) => step.done).length;
     const firstOutstanding = steps.find((step) => !step.done && step.required)
         ?? steps.find((step) => !step.done);
@@ -75,7 +90,9 @@ export default function SetupChecklist({ steps }: { steps: ActivationStep[] }) {
                 {steps.map((step) => (
                     <li key={step.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-start">
                         <div className="flex min-w-0 flex-1 items-start gap-3">
-                            {step.done ? (
+                            {step.availability === 'unavailable' ? (
+                                <QuestionMarkCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+                            ) : step.done ? (
                                 <CheckCircleSolidIcon className="mt-0.5 size-5 shrink-0 text-brand-dark" aria-hidden />
                             ) : (
                                 <CheckCircleIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground/40" aria-hidden />
@@ -96,7 +113,9 @@ export default function SetupChecklist({ steps }: { steps: ActivationStep[] }) {
                                     ) : null}
                                 </p>
                                 <p className="mt-0.5 text-xs text-muted-foreground">
-                                    {step.done
+                                    {step.availability === 'unavailable'
+                                        ? tCapability('body')
+                                        : step.done
                                         ? t(`steps.${step.id}.done`, { count: step.count ?? 0 })
                                         : t(`steps.${step.id}.body`)}
                                 </p>

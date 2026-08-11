@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -85,7 +86,7 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "person@example.com",
                 "person@example.com",
                 "manual"));
-        assertThrows(
+        DataAccessException personKindFailure = assertThrows(
             DataAccessException.class,
             () -> insertPersonIdentity(
                 workspace.getId(),
@@ -94,7 +95,8 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "example.com",
                 "example.com",
                 "manual"));
-        assertThrows(
+        assertFalse(personKindFailure instanceof DataIntegrityViolationException);
+        DataAccessException companyKindFailure = assertThrows(
             DataAccessException.class,
             () -> insertCompanyIdentity(
                 workspace.getId(),
@@ -103,6 +105,7 @@ class IdentityMapperTest extends AbstractMapperTest {
                 "team@example.com",
                 "team@example.com",
                 "manual"));
+        assertFalse(companyKindFailure instanceof DataIntegrityViolationException);
     }
 
     @Test

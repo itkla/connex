@@ -51,6 +51,7 @@ import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
 import java.util.Map;
@@ -66,6 +67,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/persons")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class PersonController {
     private final PersonService personService;
     private final EmploymentService employmentService;

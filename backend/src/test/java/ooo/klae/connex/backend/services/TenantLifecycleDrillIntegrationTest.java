@@ -16,7 +16,9 @@ import java.nio.file.Path;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
@@ -60,6 +62,7 @@ import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties;
+import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 
 @SpringBootTest(
@@ -208,9 +211,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             target,
             currentUser.getId());
         assertTrue(residual.clean());
-        assertEquals(
-            TenantLifecycleRegistry.declarations().size(),
-            residual.tableRows().size());
+        Set<String> lifecycleTables = new HashSet<>(
+            TenantLifecycleRegistry.declarations().keySet());
+        lifecycleTables.addAll(ControlWorkspaceLifecycleRegistry.declarations().keySet());
+        assertEquals(lifecycleTables, residual.tableRows().keySet());
         assertEquals(0, residual.totalRows());
         assertTrue(residual.tableRows().values().stream().allMatch(count -> count == 0));
         assertEquals(0, rowCount("ai_chat_session"));

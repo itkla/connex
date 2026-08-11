@@ -171,8 +171,8 @@ describe('both delivery panels state availability to everyone who can see them',
     it('renders the export banner outside the permission gate', () => {
         const panel = source(EXPORT_PANEL);
 
-        expect(panel.indexOf('{exportUnavailable && (')).toBeGreaterThan(-1);
-        expect(panel.indexOf('{exportUnavailable && (')).toBeLessThan(
+        expect(panel.indexOf('{deliveryAvailability === "unavailable" ? (')).toBeGreaterThan(-1);
+        expect(panel.indexOf('{deliveryAvailability === "unavailable" ? (')).toBeLessThan(
             panel.indexOf('{canPushExport && ('),
         );
     });
@@ -180,25 +180,25 @@ describe('both delivery panels state availability to everyone who can see them',
     it('renders the delivery banner outside the permission gate', () => {
         const panel = source(DELIVERY_PANEL);
 
-        expect(panel.indexOf('st("deliveryUnavailable") : st("queueHint")')).toBeGreaterThan(-1);
-        expect(panel.indexOf('st("deliveryUnavailable") : st("queueHint")')).toBeLessThan(
+        expect(panel.indexOf('{deliveryAvailability === "unavailable" ? (')).toBeGreaterThan(-1);
+        expect(panel.indexOf('{deliveryAvailability === "unavailable" ? (')).toBeLessThan(
             panel.indexOf('{canMaterializeSend && ('),
         );
     });
 
     it('latches a stale capability snapshot exactly as the delivery panel does', () => {
         expect(source(EXPORT_PANEL)).toContain(
-            'const exportUnavailable = !deliveryEnabled || exportRefused;',
+            'const exportUnavailable = deliveryAvailability !== "enabled" || exportRefused;',
         );
         expect(source(DELIVERY_PANEL)).toContain(
-            'const deliveryUnavailable = !deliveryEnabled || deliveryRefused;',
+            'const deliveryUnavailable = deliveryAvailability !== "enabled" || deliveryRefused;',
         );
     });
 
     it('keeps the refusal path reachable rather than gating it on what it reports', () => {
         const panel = source(EXPORT_PANEL);
 
-        expect(panel).not.toContain('err.status === 403 && !deliveryEnabled');
+        expect(panel).not.toContain('err.status === 403 && deliveryAvailability !== "enabled"');
         expect(panel).toContain('setExportRefused(true);');
     });
 });

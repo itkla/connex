@@ -109,15 +109,24 @@ load_deploy() {
     mkdir -p "$RELEASES_DIR" "$RELEASE_QUARANTINE_DIR" "$(dirname "$LIVE_JAR")"
 }
 
+# Builds a fixture JAR carrying `sha` as its build identity. `layout` selects where build-info
+# sits: `boot` nests it under BOOT-INF/classes as older Spring Boot releases did, and `root`
+# places it at the archive root as Spring Boot 4's bootJar does. Both must read identically, or
+# the deploy refuses every real release as an identity mismatch.
 make_jar() {
-    local path="$1" sha="$2" root
+    local path="$1" sha="$2" layout="${3:-root}" root dir
     root="$path.root"
     rm -rf "$root"
-    mkdir -p "$root/BOOT-INF/classes/META-INF"
-    printf 'build.gitSha=%s\n' "$sha" > "$root/BOOT-INF/classes/META-INF/build-info.properties"
+    case "$layout" in
+        boot) dir="BOOT-INF/classes/META-INF" ;;
+        root) dir="META-INF" ;;
+        *) echo "make_jar: unknown layout $layout" >&2; return 1 ;;
+    esac
+    mkdir -p "$root/$dir"
+    printf 'build.gitSha=%s\n' "$sha" > "$root/$dir/build-info.properties"
     (
         cd "$root" || return 1
-        zip -q -r "$path" BOOT-INF
+        zip -q -r "$path" "${dir%%/*}"
     )
     rm -rf "$root"
 }
@@ -2328,6 +2337,57 @@ run_case case_stale_installed_wrapper_restores_prior_checkout
 run_case case_wrapper_selected_commit_survives_remote_advance
 run_case case_transaction_target_reexecs_recorded_logic
 run_case case_legacy_deleting_committed_recovery_uses_current_terminal_quarantine
+case_jar_identity_reads_every_build_layout() {
+    local sha=1111111111111111111111111111111111111111
+    local root="$SANDBOX/jar-identity"
+    rm -rf "$root"
+    mkdir -p "$root"
+    load_deploy "$root"
+
+    make_jar "$SANDBOX/root.jar" "$sha" root || return 1
+    assert_equals jar_root_layout "$sha" "$(jar_git_sha "$SANDBOX/root.jar")" || return 1
+
+    make_jar "$SANDBOX/boot.jar" "$sha" boot || return 1
+    assert_equals jar_boot_layout "$sha" "$(jar_git_sha "$SANDBOX/boot.jar")" || return 1
+
+    # A JAR carrying no identity, and a path that is not a JAR at all, must both fail loudly
+    # rather than yield an empty sha that reads as "identity mismatch".
+    mkdir -p "$SANDBOX/empty.root/META-INF"
+    printf 'build.version=0.0.1\n' > "$SANDBOX/empty.root/META-INF/build-info.properties"
+    ( cd "$SANDBOX/empty.root" && zip -q -r "$SANDBOX/empty.jar" META-INF )
+    jar_git_sha "$SANDBOX/empty.jar" >/dev/null 2>&1
+    assert_status jar_without_identity 1 $? || return 1
+
+    jar_git_sha "$SANDBOX/missing.jar" >/dev/null 2>&1
+    assert_status jar_missing_file 1 $? || return 1
+
+    # A present-but-broken unzip must fall through to another reader rather than report the JAR
+    # as identity-less, which would refuse every deploy.
+    local shim="$SANDBOX/no-unzip"
+    mkdir -p "$shim"
+    printf '#!/bin/sh\nexit 127\n' > "$shim/unzip"
+    chmod +x "$shim/unzip"
+    assert_equals jar_broken_unzip "$sha" \
+        "$(PATH="$shim:$PATH" jar_git_sha "$SANDBOX/root.jar")" || return 1
+
+    # The staging host has no unzip at all. Preflight must accept python3 or jar instead, or the
+    # fallback readers are unreachable in a real deployment.
+    local bare="$SANDBOX/bare-bin"
+    mkdir -p "$bare"
+    for tool in python3 jq zip sha256sum stat sed head cat mktemp rm mkdir printf; do
+        [ -x "$bare/$tool" ] || ln -sf "$(command -v "$tool" 2>/dev/null)" "$bare/$tool" 2>/dev/null
+    done
+    PATH="$bare" archive_reader_available
+    assert_status reader_available_without_unzip 0 $? || return 1
+    assert_equals jar_without_unzip_at_all "$sha" \
+        "$(PATH="$bare" jar_git_sha "$SANDBOX/root.jar")" || return 1
+
+    local empty_bin="$SANDBOX/empty-bin"
+    mkdir -p "$empty_bin"
+    PATH="$empty_bin" archive_reader_available
+    assert_status reader_absent_is_refused 1 $? || return 1
+}
+
 run_case case_pair_rollback_restores_exact_artifacts
 run_case case_smoke_credentials_require_safe_exact_schema
 run_case case_post_deploy_smoke_covers_all_gates
@@ -2342,6 +2402,7 @@ run_case case_recovery_commit_failure_rolls_back_and_restores_markers
 run_case case_frontend_stopped_transaction_rolls_back
 run_case case_alert_is_actionable_and_secret_free
 run_case case_frontend_launcher_uses_sealed_runtime
+run_case case_jar_identity_reads_every_build_layout
 
 if [ "$FAILURES" -ne 0 ]; then
     printf '%s case(s) failed\n' "$FAILURES" >&2

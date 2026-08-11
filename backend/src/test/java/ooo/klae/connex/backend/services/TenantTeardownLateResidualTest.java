@@ -27,9 +27,10 @@ import ooo.klae.connex.backend.services.TenantLifecycleAccess.Route;
 import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.AcquiredWorkspace;
 import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.OperationLease;
 import ooo.klae.connex.backend.storage.ObjectDeletionRetryQueue;
-import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
+import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
+import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class TenantTeardownLateResidualTest {
@@ -48,6 +49,8 @@ class TenantTeardownLateResidualTest {
         mock(TenantLifecycleAccess.class);
     private final TenantTeardownTenantTransaction tenantTransaction =
         mock(TenantTeardownTenantTransaction.class);
+    private final ControlWorkspaceLifecycleTransaction controlWorkspaceTransaction =
+        mock(ControlWorkspaceLifecycleTransaction.class);
     private final ObjectDeletionRetryQueue deletionRetryQueue =
         mock(ObjectDeletionRetryQueue.class);
     private final AuditService auditService = mock(AuditService.class);
@@ -66,6 +69,7 @@ class TenantTeardownLateResidualTest {
             controlOperations,
             lifecycleAccess,
             tenantTransaction,
+            controlWorkspaceTransaction,
             deletionRetryQueue,
             auditService,
             properties,
@@ -78,6 +82,37 @@ class TenantTeardownLateResidualTest {
             .thenReturn(List.of());
         when(tenantTransaction.storageResidual(anyInt()))
             .thenReturn(new TenantStorageResidual(0, 0, 0, 0, 0, 0, 0));
+    }
+
+    @Test
+    void lateControlWorkspaceResidualIsResweptAndVerifiedAfterRootDeletion() {
+        WorkspaceLifecycleRef workspace = new WorkspaceLifecycleRef(
+            WORKSPACE_ID, ORG_ID, "Workspace", "workspace", "active");
+        OperationLease lease = new OperationLease(
+            ORG_ID, WORKSPACE_ID, "teardown", "lease-token");
+        Route route = new Route(ORG_ID, WORKSPACE_ID, null);
+        ControlWorkspaceLifecycleRegistry.TableLifecycle clientError =
+            ControlWorkspaceLifecycleRegistry.declarations().get("client_error");
+        when(controlMapper.findWorkspaceOrCleanupInOrg(ORG_ID, WORKSPACE_ID))
+            .thenReturn(workspace);
+        when(controlOperations.acquireWorkspaceTeardown(ORG_ID, WORKSPACE_ID, ACTOR_ID))
+            .thenReturn(new AcquiredWorkspace(workspace, lease));
+        when(lifecycleAccess.capture(workspace, ORG_ID)).thenReturn(route);
+        when(controlWorkspaceTransaction.count(WORKSPACE_ID, clientError))
+            .thenReturn(0L, 1L, 0L);
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> service.teardownWorkspace(
+                ORG_ID, WORKSPACE_ID, ACTOR_ID, "workspace"));
+
+        assertTrue(exception.getMessage().contains("trusted cleanup clean=true"));
+        verify(controlWorkspaceTransaction, atLeast(2)).deleteBatch(
+            WORKSPACE_ID,
+            clientError,
+            properties.getTableBatchSize());
+        verify(controlOperations).completeWorkspaceCleanup(
+            ORG_ID, WORKSPACE_ID, ACTOR_ID, lease);
     }
 
     @Test

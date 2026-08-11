@@ -37,6 +37,7 @@ class RbacTest extends AbstractServiceTest {
         assertTrue(ownerPerms.contains(Permission.ROLE_MANAGE));
         assertTrue(ownerPerms.contains(Permission.CAMPAIGN_MANAGE));
         assertTrue(ownerPerms.contains(Permission.CONSENT_MANAGE));
+        assertTrue(ownerPerms.contains(Permission.AI_SESSION_ADMIN));
         assertFalse(ownerPerms.contains(Permission.WORKSPACE_DELETE));
         assertFalse(ownerPerms.contains(Permission.SSO_MANAGE));
 
@@ -54,6 +55,13 @@ class RbacTest extends AbstractServiceTest {
         assertFalse(memberPerms.contains(Permission.COMPANY_DELETE));
         assertFalse(memberPerms.contains(Permission.TAG_MANAGE));
         assertFalse(memberPerms.contains(Permission.MEMBER_MANAGE));
+        assertFalse(memberPerms.contains(Permission.AI_SESSION_ADMIN));
+
+        User admin = newUser();
+        workspaceMapper.addMember(ws.getId(), admin.getId(), "member");
+        workspaceMapper.updateMemberRole(ws.getId(), admin.getId(), "admin");
+        assertTrue(workspaceService.permissionsFor(ws.getId(), admin.getId())
+            .contains(Permission.AI_SESSION_ADMIN));
     }
 
     @Test
@@ -73,6 +81,24 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.requirePermission(ws.getId(), member.getId(), Permission.DEAL_DELETE));
         assertDoesNotThrow(
             () -> workspaceService.requirePermission(ws.getId(), member.getId(), Permission.COMPANY_CREATE));
+    }
+
+    @Test
+    void aiSessionAdminIsGrantableToACustomRole() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace(
+            "Assistant Oversight WS", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+
+        WorkspaceRole role = roleService.createRole(
+            ws.getId(), currentUser.getId(), "Assistant auditor",
+            List.of(Permission.AI_SESSION_ADMIN.name()));
+        workspaceService.assignCustomRole(
+            ws.getId(), currentUser.getId(), member.getId(), role.getId());
+
+        assertEquals(
+            Set.of(Permission.AI_SESSION_ADMIN),
+            workspaceService.permissionsFor(ws.getId(), member.getId()));
     }
 
     @Test

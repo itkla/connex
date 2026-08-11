@@ -70,6 +70,7 @@ import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
 import java.util.Map;
@@ -87,6 +88,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/deals")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class DealController {
     private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");

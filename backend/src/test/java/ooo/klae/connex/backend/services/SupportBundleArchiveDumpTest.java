@@ -17,6 +17,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import ooo.klae.connex.backend.config.AuditIntegrityProperties;
+import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleRequest;
 import tools.jackson.databind.ObjectMapper;
 
@@ -41,6 +44,7 @@ class SupportBundleArchiveDumpTest {
             Mockito.mock(MigrationHistoryService.class);
         ProductVersionService productVersionService = Mockito.mock(ProductVersionService.class);
         AuditService auditService = Mockito.mock(AuditService.class);
+        ClientErrorService clientErrorService = Mockito.mock(ClientErrorService.class);
 
         when(readinessService.readiness(anyInt())).thenReturn(Map.of(
             "source", "support_bundle_fallback",
@@ -53,9 +57,22 @@ class SupportBundleArchiveDumpTest {
         when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
             .thenReturn(new AuditService.AuditSlice(
                 "auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,"
-                    + "outcome,requestId,createdAt,contentFieldsOmitted\r\n"
-                    + "9001,workspace,7,3,person.archive,person,412,55,success,abcd1234efgh,"
+                    + "outcome,serverMintedRequestId,untrustedClientAssertedCorrelationHmac,"
+                    + "createdAt,contentFieldsOmitted\r\n"
+                    + "9001,workspace,7,3,person.archive,person,412,55,success,server-request-1,"
+                    + "abcd1234efgh,"
                     + "2026-07-31T04:05:06Z,true\r\n", 1, false));
+        when(clientErrorService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
+            .thenReturn(new ClientErrorService.ClientErrorSlice(List.of(
+                new ClientErrorSupportRowDto(
+                    71L,
+                    7,
+                    "disclosure-hmac",
+                    "/records/contacts/{id}",
+                    Instant.parse("2026-07-31T04:05:05Z"))), 1, false));
+
+        AuditIntegrityProperties integrityProperties = new AuditIntegrityProperties();
+        integrityProperties.setHmacSecret("archive-dump-test-secret-at-least-32-bytes");
 
         SupportBundleService service = new SupportBundleService(
             orgMemberService,
@@ -65,6 +82,8 @@ class SupportBundleArchiveDumpTest {
             migrationHistoryService,
             productVersionService,
             auditService,
+            clientErrorService,
+            new ClientAssertedCorrelationPseudonymizer(integrityProperties),
             new ObjectMapper(),
             Clock.fixed(Instant.parse("2026-07-31T05:00:00Z"), ZoneOffset.UTC));
 
@@ -74,7 +93,8 @@ class SupportBundleArchiveDumpTest {
         Files.deleteIfExists(archive);
         try (OutputStream output = Files.newOutputStream(archive)) {
             output.write(service
-                .generate(new SupportBundleRequest(3, null, null, null, null, null), 55)
+                .generate(new SupportBundleRequest(
+                    3, null, null, null, null, null), 55)
                 .content());
         }
 

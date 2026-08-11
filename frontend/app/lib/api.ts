@@ -1722,10 +1722,6 @@ export function getUsersFromCookie(cookie: string | null) {
     return safeReadWithCookie<Types.User>((init) => getUsers(init), cookie);
 }
 
-export function getUsersResultFromCookie(cookie: string | null) {
-    return resultWithCookie<Types.User[]>((init) => getUsers(init), cookie);
-}
-
 /*
 * == User-associated records
 */
@@ -5304,13 +5300,6 @@ export function getCampaignExport(id: number, exportId: number, init: RequestIni
 
 export function getCampaignEngagement(id: number, init: RequestInit = {}) {
     return getJson<Types.CampaignEngagement>(`/api/campaigns/${id}/engagement`, init);
-}
-
-export function getCampaignEngagementFromCookie(id: number, cookie: string | null) {
-    return resultWithCookie<Types.CampaignEngagement>(
-        (init) => getCampaignEngagement(id, init),
-        cookie,
-    );
 }
 
 /**

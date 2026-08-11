@@ -14,6 +14,8 @@ import {
     SelectItem,
 } from "@/components/ui/select";
 import Panel from "@/app/components/overview/analytics/Panel";
+import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
 import ExportStatusBadge from "@/app/components/marketing/campaigns/ExportStatusBadge";
 import { ApiError, createCampaignExport } from "@/app/lib/api";
@@ -24,6 +26,7 @@ import {
 import { canCreateExport, type CampaignAccess } from "@/app/lib/campaignAccess";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
+import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 
 const CONNECTORS = ["http_list"];
 
@@ -41,15 +44,16 @@ export default function CampaignExportPanel({
     initialExports,
     snapshots,
     access,
-    deliveryEnabled,
+    deliveryAvailability,
 }: {
     campaignId: number;
     initialExports: CampaignAudienceExport[];
     snapshots: CampaignAudienceSnapshotSummary[];
     access: CampaignAccess;
-    deliveryEnabled: boolean;
+    deliveryAvailability: CapabilityAvailability;
 }) {
     const t = useTranslations("CampaignExports");
+    const tCapability = useTranslations("CapabilityUnavailable");
     const locale = useLocale();
 
     const [exports, setExports] = useState<CampaignAudienceExport[]>(initialExports);
@@ -58,7 +62,8 @@ export default function CampaignExportPanel({
     const [isCreatingExport, setIsCreatingExport] = useState(false);
     const [exportRefused, setExportRefused] = useState(false);
 
-    const exportUnavailable = !deliveryEnabled || exportRefused;
+    const exportDisabled = deliveryAvailability === "disabled" || exportRefused;
+    const exportUnavailable = deliveryAvailability !== "enabled" || exportRefused;
     const canPushExport = canCreateExport(access);
 
     const chosenSnapshot = useMemo(
@@ -97,7 +102,19 @@ export default function CampaignExportPanel({
     return (
         <Panel title={t("title")} subtitle={t("subtitle")}>
             <div className="flex flex-col gap-6">
-                {exportUnavailable && (
+                {deliveryAvailability === "unavailable" ? (
+                    <PermissionsUnavailable
+                        variant="inline"
+                        title={tCapability("title")}
+                        body={tCapability("body")}
+                        action={(
+                            <WorkspaceUnavailableRetry
+                                label={tCapability("retry")}
+                                pendingLabel={tCapability("retrying")}
+                            />
+                        )}
+                    />
+                ) : exportDisabled ? (
                     <div className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3">
                         <InformationCircleIcon
                             aria-hidden
@@ -105,7 +122,7 @@ export default function CampaignExportPanel({
                         />
                         <p className="text-sm text-muted-foreground">{t("exportUnavailable")}</p>
                     </div>
-                )}
+                ) : null}
                 {canPushExport && (
                     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

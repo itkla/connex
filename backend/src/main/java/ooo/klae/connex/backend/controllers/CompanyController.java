@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
 import java.util.Map;
@@ -60,6 +61,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/companies")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class CompanyController {
     private final CompanyService companyService;
     private final BulkOperationService bulkOperationService;

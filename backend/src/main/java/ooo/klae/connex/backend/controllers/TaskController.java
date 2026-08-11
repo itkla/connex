@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.PageBounds;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
 
@@ -38,6 +39,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/tasks")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class TaskController {
     private final TaskService taskService;
     private final WorkspaceService workspaceService;

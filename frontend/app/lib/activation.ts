@@ -1,4 +1,5 @@
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import type { CapabilityAvailability } from '@/app/lib/capabilityAvailability';
 import type {
     Company,
     Contact,
@@ -35,6 +36,8 @@ export type ActivationStep = {
     count: number | null;
     /** Whether the launched activity must link a contact or deal to create relationship evidence. */
     requireRelationshipTarget: boolean;
+    /** The capability decision for steps that depend on an instance-level feature. */
+    availability?: CapabilityAvailability;
 };
 
 /** The counts the checklist is derived from. Every field is an exact server-side count. */
@@ -51,8 +54,8 @@ export type ActivationCounts = {
     connectedAccounts: number;
     connectedCaptureReady: number;
     connectedCaptureAvailable: boolean;
-    /** Whether the instance offers mailbox connections at all; the step is hidden when it does not. */
-    connectedAccountsAvailable: boolean;
+    /** Whether mailbox connections are available, disabled, or could not be resolved. */
+    connectedAccountsAvailability: CapabilityAvailability;
     canImportContacts: boolean;
     canImportCompanies: boolean;
     canCreateActivities: boolean;
@@ -259,17 +262,21 @@ export function buildActivationSteps(counts: ActivationCounts): ActivationStep[]
         });
     }
 
-    if (counts.connectedAccountsAvailable) {
+    if (counts.connectedAccountsAvailability !== 'disabled') {
         steps.push({
             id: 'connections',
-            done: counts.connectedCaptureAvailable
-                ? counts.connectedCaptureReady > 0
-                : counts.connectedAccounts > 0,
+            done: counts.connectedAccountsAvailability === 'enabled'
+                && (counts.connectedCaptureAvailable
+                    ? counts.connectedCaptureReady > 0
+                    : counts.connectedAccounts > 0),
             required: false,
             actionId: null,
-            href: '/account/connections',
+            href: counts.connectedAccountsAvailability === 'enabled'
+                ? '/account/connections'
+                : null,
             count: null,
             requireRelationshipTarget: false,
+            availability: counts.connectedAccountsAvailability,
         });
     }
 

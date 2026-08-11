@@ -1,0 +1,8 @@
+{
+  "Assistant": {
+    "disclosure": {
+      "sessionCreation": "Assistant sessions are workspace data. If you leave this workspace or delete your account, your sessions are retained and become accessible to workspace administrators.",
+      "sessionList": "Assistant sessions are workspace data. If you leave this workspace or delete your account, your sessions are retained and become accessible to workspace administrators."
+    }
+  }
+}

@@ -144,9 +144,15 @@ describe('a connected-capture deep link survives a failed permission lookup', ()
     const panel = source(CONNECTIONS_PANEL);
 
     it('strips the route state only when the check actually returned a refusal', () => {
-        expect(page).toMatch(
-            /const workspacePolicyForbidden = routeState\.panel === "workspace-policy"\s*&& checkPermission\([\s\S]*?\)\s*=== "denied"/,
+        const guard = page.slice(
+            page.indexOf('const workspacePolicyForbidden'),
+            page.indexOf('const canonicalHref'),
         );
+
+        expect(guard).toContain('routeState.panel === "workspace-policy"');
+        expect(guard).toContain('checkPermission(');
+        expect(guard).toContain('=== "denied"');
+        expect(guard).not.toMatch(/!==\s*"granted"/);
     });
 
     it('still resolves an unreadable lookup to no permissions, so nothing is widened', () => {

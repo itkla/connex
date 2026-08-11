@@ -21,8 +21,11 @@ BUNDLE_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 SANDBOX_PARENT="${CONNEX_SUPPORT_BUNDLE_TEST_ROOT:-/var/tmp/connex-support-bundle-tests}"
 FAILURES=0
 
-if ! command -v jq >/dev/null 2>&1 || ! command -v zip >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
-    printf 'harness error: jq, zip and unzip are required\n' >&2
+if ! command -v jq >/dev/null 2>&1 \
+    || ! command -v python3 >/dev/null 2>&1 \
+    || ! command -v zip >/dev/null 2>&1 \
+    || ! command -v unzip >/dev/null 2>&1; then
+    printf 'harness error: jq, python3, zip and unzip are required\n' >&2
     exit 1
 fi
 
@@ -111,24 +114,32 @@ JSON
     cat > "$directory/migrations.json" <<'JSON'
 [{"version":"139","description":"report snapshot origin","success":true,"installedOn":"2026-07-30T02:11:04Z"}]
 JSON
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$directory/audit-slice.csv"
-    printf '9001,workspace,7,3,person.archive,person,412,55,SUCCESS,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$directory/audit-slice.csv"
+    cat > "$directory/client-errors.json" <<'JSON'
+[{"id":71,"workspaceId":7,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","pagePath":"/records/contacts/{id}","reportedAt":"2026-07-31T04:05:05Z"}]
+JSON
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationHmac,createdAt,contentFieldsOmitted\r\n' > "$directory/audit-slice.csv"
+    printf '9001,workspace,7,3,person.archive,person,412,55,SUCCESS,server-request-1,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,2026-07-31T04:05:06Z,true\r\n' >> "$directory/audit-slice.csv"
     local files_json="[]"
     local path length hash
-    for path in readiness.json config.json migrations.json audit-slice.csv; do
+    for path in readiness.json config.json migrations.json audit-slice.csv client-errors.json; do
         length="$(stat -c '%s' "$directory/$path")"
         hash="$(sha256sum "$directory/$path" | awk '{print $1}')"
         files_json="$(printf '%s' "$files_json" | jq --arg path "$path" --argjson byte_length "$length" --arg sha256 "$hash" \
             '. += [{path: $path, mediaType: "application/json", byteLength: $byte_length, sha256: $sha256}]')"
     done
     jq -n --argjson files "$files_json" '{
-        schemaVersion: 1,
+        schemaVersion: 3,
         productVersion: "test",
         generatedAt: "2026-07-31T05:00:00Z",
         orgId: 3,
-        filters: {correlationId: "abcd1234efgh", entityType: "person", entityId: 412, resolvedWorkspaceId: 7, since: "2026-07-24T05:00:00Z", until: "2026-07-31T05:00:00Z"},
+        filters: {untrustedClientAssertedCorrelationHmac: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", entityType: "person", entityId: 412, resolvedWorkspaceId: 7, since: "2026-07-24T05:00:00Z", until: "2026-07-31T05:00:00Z"},
+        auditSliceIdentifiers: {serverMintedRequestId: "server_minted_non_spoofable", untrustedClientAssertedCorrelationHmac: "organization_scoped_domain_separated_hmac_sha256_of_untrusted_client_assertion"},
+        auditSliceCorrelationFilterField: "untrustedClientAssertedCorrelationHmac",
+        auditSliceRowCount: 1, auditSliceTruncated: false, auditSliceLimit: 10000,
+        auditSliceInconclusive: false,
+        clientErrorSliceRowCount: 1, clientErrorSliceTruncated: false, clientErrorSliceLimit: 10000,
         files: ($files | sort_by(.path)),
-        omissions: {"client-errors.json": "no_persisted_source", "job-runs.json": "job_run_not_available"}
+        omissions: {"job-runs.json": "job_run_not_available"}
     }' > "$directory/manifest.json"
     if [ -n "$archive" ]; then
         ( cd "$directory" && zip --quiet --no-dir-entries -X "$archive" ./* )
@@ -170,12 +181,11 @@ case_summary_lines() (
 case_exit_code_catalog() (
     # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
-    # 68 is deliberately absent: it belonged to the removed journal-collection step and is left
-    # unallocated so the surrounding codes stay stable for operators' automation.
     assert_equals exit_codes '64
 65
 66
 67
+68
 69' "$(support_bundle_exit_code_catalog)" || return 1
 )
 
@@ -250,6 +260,8 @@ case_redactor_fixtures() (
     assert_equals redact_future_credential '/api/future/{token}' "$(support_bundle_redact_path "/api/future/$token")" || return 1
     assert_equals redact_hex_webhook '/api/delivery/webhooks/sendgrid/{token}' "$(support_bundle_redact_path "/api/delivery/webhooks/sendgrid/$hex")" || return 1
     assert_equals redact_trailing_slash '/invite/{token}/' "$(support_bundle_redact_path '/invite/short/')" || return 1
+    assert_equals redact_query_and_fragment '/records/people/42' \
+        "$(support_bundle_redact_path '/records/people/42?email=private@example.com#notes')" || return 1
     assert_equals redact_empty '' "$(support_bundle_redact_path '')" || return 1
     assert_equals redact_root '/' "$(support_bundle_redact_path '/')" || return 1
     local preserved
@@ -464,27 +476,19 @@ case_collect_status_classification() (
 
 
 
-case_read_renders_and_filters() (
+case_read_renders_pseudonymized_bundle() (
     local work="$SANDBOX/read"
     make_bundle "$work/src" "$work/bundle.zip"
     local output
-    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --correlation-id abcd1234efgh 2>&1)"
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" 2>&1)"
     local status=$?
     assert_status read_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
     assert_contains read_summary 'event=support_bundle_read_summary status=success exit_code=0' <(printf '%s\n' "$output") || return 1
     assert_contains read_audit_row 'person.archive' <(printf '%s\n' "$output") || return 1
-    assert_contains read_omissions 'no_persisted_source' <(printf '%s\n' "$output") || return 1
+    assert_contains read_client_hmac 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' <(printf '%s\n' "$output") || return 1
+    assert_absent read_raw_correlation 'abcd1234efgh' <(printf '%s\n' "$output") || return 1
+    assert_absent read_digest_field '"digest"' <(printf '%s\n' "$output") || return 1
     assert_contains read_job_omission 'job_run_not_available' <(printf '%s\n' "$output") || return 1
-)
-
-case_read_no_matching_rows_is_success() (
-    local work="$SANDBOX/read-empty"
-    make_bundle "$work/src" "$work/bundle.zip"
-    local output
-    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --correlation-id ffffffffffff 2>&1)"
-    local status=$?
-    assert_status read_empty_ok 0 "$status" || { printf '%s\n' "$output"; return 1; }
-    assert_contains read_empty_message '(no matching rows)' <(printf '%s\n' "$output") || return 1
 )
 
 case_read_refuses_tampered_archive() (
@@ -507,6 +511,11 @@ case_read_rejects_bad_arguments() (
     assert_status read_missing_archive 67 "$status" || return 1
     output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" --section bogus 2>&1)"; status=$?
     assert_status read_bad_section 64 "$status" || return 1
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" --digest private@example.com 2>&1)"; status=$?
+    assert_status read_digest_option_removed 64 "$status" || return 1
+    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$SANDBOX" \
+        --correlation-id abcd1234efgh 2>&1)"; status=$?
+    assert_status read_correlation_option_removed 64 "$status" || return 1
 )
 
 # Regression: awk's IGNORECASE is a gawk extension that mawk (the default awk on Debian and
@@ -735,7 +744,7 @@ case_read_strips_terminal_control_sequences() (
     local work="$SANDBOX/ansi"
     make_bundle "$work/src" ""
     jq --arg v "$(printf 'x\033[2K\rts=2026-01-01T00:00:00Z level=info event=support_bundle_read_summary status=success exit_code=0')" \
-        '.omissions["client-errors.json"] = $v' "$work/src/manifest.json" > "$work/src/m.new"
+        '.omissions["job-runs.json"] = $v' "$work/src/manifest.json" > "$work/src/m.new"
     mv "$work/src/m.new" "$work/src/manifest.json"
     rebuild_archive "$work/src" "$work/bundle.zip"
     local output
@@ -925,8 +934,8 @@ case_hostile_entry_name_cannot_repaint_the_terminal() (
 case_read_parses_quoted_csv_fields() (
     local work="$SANDBOX/quoted-csv"
     make_bundle "$work/src" ""
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
-    printf '9001,workspace,7,3,"person.archive, bulk",person,412,55,success,req-1,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
+    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,serverMintedRequestId,untrustedClientAssertedCorrelationHmac,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
+    printf '9001,workspace,7,3,"person.archive, bulk",person,412,55,success,server-request-1,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
     local length hash
     length="$(stat -c '%s' "$work/src/audit-slice.csv")"
     hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
@@ -968,33 +977,6 @@ case_extract_refuses_an_oversized_archive() (
     rm -f "$work/bundle.zip"
 )
 
-# A correlation id is a prefix-free-less token: every 8-64 character prefix is itself valid, so a
-# substring search over the whole row presented an unrelated request as a match.
-case_read_matches_correlation_ids_exactly() (
-    local work="$SANDBOX/exact-correlation"
-    make_bundle "$work/src" ""
-    printf 'auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,createdAt,contentFieldsOmitted\r\n' > "$work/src/audit-slice.csv"
-    printf '9001,workspace,7,3,person.archive,person,412,55,success,abcd1234efgh,2026-07-31T04:05:06Z,true\r\n' >> "$work/src/audit-slice.csv"
-    printf '9002,workspace,7,3,person.update,person,413,56,success,abcd1234,2026-07-31T04:05:07Z,true\r\n' >> "$work/src/audit-slice.csv"
-    local length hash
-    length="$(stat -c '%s' "$work/src/audit-slice.csv")"
-    hash="$(sha256sum "$work/src/audit-slice.csv" | awk '{print $1}')"
-    jq --argjson len "$length" --arg sha "$hash" \
-        '.files = [.files[] | if .path == "audit-slice.csv" then .byteLength = $len | .sha256 = $sha else . end]' \
-        "$work/src/manifest.json" > "$work/src/m.new"
-    mv "$work/src/m.new" "$work/src/manifest.json"
-    rebuild_archive "$work/src" "$work/bundle.zip"
-    local output
-    output="$(bash "$BUNDLE_DIR/read.sh" --archive "$work/bundle.zip" --correlation-id abcd1234 --section audit 2>&1)"
-    assert_status exact_correlation_ok 0 "$?" || { printf '%s\n' "$output"; return 1; }
-    assert_contains exact_correlation_hit '9002' <(printf '%s\n' "$output") || return 1
-    # The longer id merely starts with the requested one and must not be presented as a match.
-    if printf '%s\n' "$output" | grep -q '9001'; then
-        printf 'a prefix match was rendered as an exact match\n'
-        return 1
-    fi
-)
-
 case_validate_instant_accepts_fractional_seconds() (
     # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
@@ -1033,7 +1015,7 @@ case_verify_requires_the_declared_bundle_entries() (
     length="$(stat -c '%s' "$work/src/foo")"
     hash="$(sha256sum "$work/src/foo" | awk '{print $1}')"
     jq -n --argjson len "$length" --arg sha "$hash" '{
-        schemaVersion: 1, productVersion: "x", generatedAt: "2026-07-31T05:00:00Z", orgId: 3,
+        schemaVersion: 3, productVersion: "x", generatedAt: "2026-07-31T05:00:00Z", orgId: 3,
         filters: {since: "a", until: "b"},
         files: [{path: "foo", mediaType: "application/json", byteLength: $len, sha256: $sha}],
         omissions: {}
@@ -1062,23 +1044,195 @@ case_verify_requires_each_core_entry_present_or_declared() (
     assert_contains core_entry_reason 'reason=required_entry_absent' <(printf '%s\n' "$output") || return 1
 )
 
-case_collect_has_no_journal_option() (
-    if grep -q -- '--include-journal' "$BUNDLE_DIR/collect.sh"; then
-        printf 'the journal option is still present; it cannot be scoped to one organization\n'
-        return 1
-    fi
-    local output
-    output="$(bash "$BUNDLE_DIR/collect.sh" --base-url https://connex.example.com --org-id 3 \
-        --cookie-file /dev/null --include-journal 2>&1 || true)"
-    assert_contains journal_option_rejected 'unknown_argument' <(printf '%s\n' "$output") || return 1
+case_journal_projection_filters_organization_before_projection() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    WORK_DIR="$SANDBOX/journal-cross-tenant"
+    JOURNAL_UNIT=connex-backend.service
+    CORRELATION_ID=shared_correlation_123
+    local correlation_hmac=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    mkdir -p "$WORK_DIR"
+    journalctl() {
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:06.123Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"message":"SENTINEL_RAW_MESSAGE","connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/persons/{id}","responseStatus":200,"eventClass":"http.request.completed","futureSecret":"SENTINEL_FUTURE_SECRET","error":{"stack_trace":"SENTINEL_STACK_TRACE"}}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:07Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":4,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"DELETE","requestPath":"/api/companies/{id}","responseStatus":204,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:08Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/deals/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:09Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":"3","untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/tasks/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:10Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/notes/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:11Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/search?email=SENTINEL_QUERY_SECRET","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:12Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/search#SENTINEL_FRAGMENT_SECRET","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+    }
+    local output="$WORK_DIR/journal-slice.jsonl"
+    local status=0
+    support_bundle_journal_projection \
+        2026-07-31T04:00:00Z 2026-07-31T05:00:00Z 3 "$correlation_hmac" "$output" || status=$?
+    assert_status journal_projection_status 0 "$status" || return 1
+    assert_equals journal_projection_count 1 "$(wc -l < "$output")" || return 1
+    assert_contains journal_target_path '"path":"/api/persons/{id}"' "$output" || return 1
+    assert_contains journal_shared_correlation \
+        '"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' \
+        "$output" || return 1
+    assert_absent journal_raw_correlation shared_correlation_123 "$output" || return 1
+    assert_absent journal_other_tenant '/api/companies/{id}' "$output" || return 1
+    assert_absent journal_unattributed '/api/deals/{id}' "$output" || return 1
+    assert_absent journal_string_org '/api/tasks/{id}' "$output" || return 1
+    assert_absent journal_duplicate_org '/api/notes/{id}' "$output" || return 1
+    assert_absent journal_raw_message SENTINEL_RAW_MESSAGE "$output" || return 1
+    assert_absent journal_future_field SENTINEL_FUTURE_SECRET "$output" || return 1
+    assert_absent journal_stack_trace SENTINEL_STACK_TRACE "$output" || return 1
+    assert_absent journal_query_string SENTINEL_QUERY_SECRET "$output" || return 1
+    assert_absent journal_fragment SENTINEL_FRAGMENT_SECRET "$output" || return 1
+    assert_absent journal_discriminator connexOrganizationId "$output" || return 1
+    jq -e 'length == 8 and (keys == ["eventClass", "level", "logger", "method", "path", "status", "timestamp", "untrustedClientAssertedCorrelationHmac"])' \
+        "$output" >/dev/null || return 1
 )
 
-run_case read_matches_correlation_ids_exactly case_read_matches_correlation_ids_exactly
+case_journal_append_updates_inventory_and_closed_schema() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    local work="$SANDBOX/journal-append"
+    WORK_DIR="$work/work"
+    JOURNAL_UNIT=connex-backend.service
+    CORRELATION_ID=abcd1234efgh
+    ORG_ID=3
+    mkdir -p "$WORK_DIR"
+    make_bundle "$work/staging" ""
+    journalctl() {
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:06Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/persons/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+    }
+    local status=0
+    support_bundle_append_journal "$work/staging" >/dev/null || status=$?
+    assert_status journal_append_status 0 "$status" || return 1
+    support_bundle_verify_inventory "$work/staging" >/dev/null || return 1
+    support_bundle_verify_journal_slice "$work/staging" >/dev/null || return 1
+    assert_equals journal_manifest_org 3 \
+        "$(jq -r '.journalSlice.organizationId' "$work/staging/manifest.json")" || return 1
+    assert_equals journal_manifest_discriminator connexOrganizationId \
+        "$(jq -r '.journalSlice.organizationDiscriminator' "$work/staging/manifest.json")" || return 1
+    jq -c '.futureSecret = "SENTINEL_FUTURE_SECRET"' "$work/staging/journal-slice.jsonl" \
+        > "$work/staging/journal.new"
+    mv "$work/staging/journal.new" "$work/staging/journal-slice.jsonl"
+    status=0
+    support_bundle_verify_journal_slice "$work/staging" >/dev/null 2>&1 || status=$?
+    assert_status journal_closed_schema 67 "$status" || return 1
+)
+
+case_journal_collection_failure_uses_exit_68() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    WORK_DIR="$SANDBOX/journal-failure"
+    JOURNAL_UNIT=connex-backend.service
+    CORRELATION_ID=
+    mkdir -p "$WORK_DIR"
+    journalctl() {
+        return 1
+    }
+    local status=0
+    support_bundle_journal_projection \
+        2026-07-31T04:00:00Z 2026-07-31T05:00:00Z 3 "" "$WORK_DIR/out.jsonl" \
+        >/dev/null 2>&1 || status=$?
+    assert_status journal_failure_exit_code 68 "$status" || return 1
+)
+
+case_collect_accepts_journal_arguments() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    support_bundle_parse_arguments \
+        --base-url https://connex.example.com \
+        --org-id 3 \
+        --cookie-file /secure/cookies.txt \
+        --include-journal \
+        --journal-unit connex@blue.service || return 1
+    assert_equals journal_enabled true "$INCLUDE_JOURNAL" || return 1
+    assert_equals journal_unit connex@blue.service "$JOURNAL_UNIT" || return 1
+)
+
+case_collect_journal_end_to_end() (
+    # shellcheck source=deploy/support-bundle/collect.sh
+    source "$SANDBOX/collect-lib.sh"
+    local work="$SANDBOX/journal-end-to-end"
+    local backend_archive="$work/backend.zip"
+    local cookie="$work/cookies.txt"
+    local published="$work/published.zip"
+    mkdir -p "$work"
+    make_bundle "$work/backend" "$backend_archive"
+    printf 'session\n' > "$cookie"
+    chmod 0600 "$cookie"
+    curl() {
+        local body="" headers=""
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --output) body="$2"; shift 2 ;;
+                --dump-header) headers="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        cp "$backend_archive" "$body"
+        printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "$headers"
+        printf '200'
+    }
+    journalctl() {
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:06Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"message":"SENTINEL_RAW_MESSAGE","connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/persons/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+    }
+
+    local collect_output status=0
+    collect_output="$(
+        main \
+            --base-url https://connex.example.com \
+            --org-id 3 \
+            --cookie-file "$cookie" \
+            --correlation-id abcd1234efgh \
+            --include-journal \
+            --journal-unit connex-backend.service \
+            --output "$published"
+    )" || status=$?
+    assert_status journal_collect_end_to_end 0 "$status" || return 1
+    assert_contains journal_collect_success 'status=success' <(printf '%s\n' "$collect_output") || return 1
+    [ -f "$published" ] || { printf 'journal bundle was not published\n'; return 1; }
+    assert_equals journal_archive_org 3 \
+        "$(unzip -p "$published" manifest.json | jq -r '.journalSlice.organizationId')" || return 1
+
+    local read_output
+    read_output="$(bash "$BUNDLE_DIR/read.sh" \
+        --archive "$published" \
+        --section journal 2>&1)"
+    assert_status journal_read_end_to_end 0 "$?" || return 1
+    assert_contains journal_read_path '/api/persons/{id}' <(printf '%s\n' "$read_output") || return 1
+    assert_contains journal_read_hmac \
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+        <(printf '%s\n' "$read_output") || return 1
+    assert_absent journal_read_raw_correlation abcd1234efgh <(printf '%s\n' "$read_output") || return 1
+    assert_absent journal_read_raw_message SENTINEL_RAW_MESSAGE <(printf '%s\n' "$read_output") || return 1
+
+    journalctl() {
+        return 1
+    }
+    local failed="$work/failed.zip"
+    status=0
+    collect_output="$(
+        main \
+            --base-url https://connex.example.com \
+            --org-id 3 \
+            --cookie-file "$cookie" \
+            --correlation-id abcd1234efgh \
+            --include-journal \
+            --journal-unit connex-backend.service \
+            --output "$failed" 2>&1
+    )" || status=$?
+    assert_status journal_collect_failure 68 "$status" || return 1
+    assert_contains journal_collect_failure_summary 'exit_code=68' \
+        <(printf '%s\n' "$collect_output") || return 1
+    [ ! -e "$failed" ] || { printf 'failed journal bundle was published\n'; return 1; }
+)
+
 run_case validate_instant_accepts_fractional_seconds case_validate_instant_accepts_fractional_seconds
 run_case base_url_rejects_query_fragment_and_userinfo case_base_url_rejects_query_fragment_and_userinfo
 run_case verify_requires_the_declared_bundle_entries case_verify_requires_the_declared_bundle_entries
 run_case verify_requires_each_core_entry_present_or_declared case_verify_requires_each_core_entry_present_or_declared
-run_case collect_has_no_journal_option case_collect_has_no_journal_option
+run_case journal_projection_filters_organization_before_projection case_journal_projection_filters_organization_before_projection
+run_case journal_append_updates_inventory_and_closed_schema case_journal_append_updates_inventory_and_closed_schema
+run_case journal_collection_failure_uses_exit_68 case_journal_collection_failure_uses_exit_68
+run_case collect_accepts_journal_arguments case_collect_accepts_journal_arguments
+run_case collect_journal_end_to_end case_collect_journal_end_to_end
 run_case read_parses_quoted_csv_fields case_read_parses_quoted_csv_fields
 run_case extract_refuses_an_oversized_archive case_extract_refuses_an_oversized_archive
 run_case log_escaper_strips_terminal_control_bytes case_log_escaper_strips_terminal_control_bytes
@@ -1120,8 +1274,7 @@ run_case manifest_self_listing_rejected case_manifest_self_listing_rejected
 run_case collect_rejects_partial_entity_filter case_collect_rejects_partial_entity_filter
 run_case collect_query_encoding case_collect_query_encoding
 run_case collect_status_classification case_collect_status_classification
-run_case read_renders_and_filters case_read_renders_and_filters
-run_case read_no_matching_rows_is_success case_read_no_matching_rows_is_success
+run_case read_renders_pseudonymized_bundle case_read_renders_pseudonymized_bundle
 run_case read_refuses_tampered_archive case_read_refuses_tampered_archive
 run_case read_rejects_bad_arguments case_read_rejects_bad_arguments
 

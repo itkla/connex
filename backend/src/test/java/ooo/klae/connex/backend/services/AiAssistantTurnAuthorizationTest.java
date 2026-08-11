@@ -88,6 +88,23 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
     }
 
     @Test
+    void adminParticipantCannotStartATurnOnARetainedSession() {
+        User author = newUser();
+        AiChatSession session = session(author, workspace);
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), currentUser.getId());
+        workspaceMapper.removeMember(workspace.getId(), author.getId());
+
+        ResourceNotFoundException inaccessible = assertThrows(
+            ResourceNotFoundException.class,
+            () -> turnService.start(session.getId(), request("Retained")));
+
+        assertEquals(INACCESSIBLE, inaccessible.getMessage());
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+        assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
+        verifyNoInteractions(generationService);
+    }
+
+    @Test
     void archivedOrAlreadyRunningSessionReturnsConflictWithoutGeneration() {
         AiChatSession archived = session(currentUser, workspace);
         chatMapper.updateSession(workspace.getId(), archived.getId(), null, "archived");

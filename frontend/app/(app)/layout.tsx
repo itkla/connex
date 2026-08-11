@@ -5,8 +5,7 @@ import SidebarFallback from "@/app/components/SidebarFallback";
 import ContentShell from "@/app/components/ContentShell";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import {
-    DEFAULT_CAPABILITIES,
-    getCapabilities,
+    getCapabilitiesResultFromCookie,
     getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     getMyWorkspacesResultFromCookie,
@@ -69,13 +68,16 @@ export default async function AppLayout({
         redirect('/onboarding');
     }
 
-    const [capabilities, permissionsResult] = await Promise.all([
-        getCapabilities(cookie ? { headers: { cookie } } : {}).catch(() => DEFAULT_CAPABILITIES),
+    const [capabilitiesResult, permissionsResult] = await Promise.all([
+        getCapabilitiesResultFromCookie(cookie),
         getEffectivePermissionsResultFromCookie(cookie),
     ]);
     const effectivePermissions = permissionsResult.ok ? permissionsResult.data : [];
     const permissionsStatus = permissionsResult.ok ? "resolved" : "unavailable";
-    const navAccess = resolveNavAccess(capabilities, effectivePermissions);
+    const navAccess = resolveNavAccess(
+        capabilitiesResult.ok ? capabilitiesResult.data : null,
+        effectivePermissions,
+    );
 
     return (
         <NowProvider value={requestNow()}>

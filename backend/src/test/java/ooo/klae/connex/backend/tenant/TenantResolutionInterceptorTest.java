@@ -26,6 +26,7 @@ import org.springframework.web.servlet.AsyncHandlerInterceptor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 class TenantResolutionInterceptorTest {
@@ -34,6 +35,8 @@ class TenantResolutionInterceptorTest {
     private final TenantCatalogResolver catalogResolver = mock(TenantCatalogResolver.class);
     private final WorkspaceRequestResolver requestResolver = mock(WorkspaceRequestResolver.class);
     private final WorkspaceCookie workspaceCookie = mock(WorkspaceCookie.class);
+    private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer =
+        mock(ClientAssertedCorrelationPseudonymizer.class);
     private final HttpServletResponse response = mock(HttpServletResponse.class);
     private final Object handler = new Object();
     private final TenantContext liveContext = new TenantContext();
@@ -48,13 +51,15 @@ class TenantResolutionInterceptorTest {
             tenantContext,
             catalogResolver,
             requestResolver,
-            workspaceCookie);
+            workspaceCookie,
+            correlationPseudonymizer);
         liveInterceptor = new TenantResolutionInterceptor(
             workspaceService,
             liveContext,
             catalogResolver,
             requestResolver,
-            workspaceCookie);
+            workspaceCookie,
+            correlationPseudonymizer);
         User member = new User();
         member.setId(7);
         authenticateAs(member);

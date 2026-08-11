@@ -2,7 +2,7 @@
 
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
-import { useTransition } from 'react';
+import { useTransition, type ComponentProps } from 'react';
 
 import { Button } from '@/components/ui/button';
 
@@ -14,10 +14,16 @@ export default function WorkspaceUnavailableRetry({
     label,
     pendingLabel,
     onRetry,
+    variant,
+    size,
+    className,
 }: {
     label: string;
     pendingLabel: string;
     onRetry?: () => Promise<void>;
+    variant?: ComponentProps<typeof Button>['variant'];
+    size?: ComponentProps<typeof Button>['size'];
+    className?: string;
 }) {
     const router = useRouter();
     const [isRetrying, startTransition] = useTransition();
@@ -32,6 +38,9 @@ export default function WorkspaceUnavailableRetry({
                 }
             })}
             disabled={isRetrying}
+            variant={variant}
+            size={size}
+            className={className}
         >
             <ArrowPathIcon
                 data-icon="inline-start"

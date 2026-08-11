@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ClientErrorMapper">
+
+  <insert id="insert">
+    INSERT INTO client_error (workspace_id, correlation_id, page_path)
+    VALUES (#{workspaceId}, #{untrustedClientAssertedCorrelationHmac}, #{pagePath})
+  </insert>
+
+  <sql id="supportColumns">
+    ce.id, ce.workspace_id, w.org_id,
+    ce.correlation_id AS stored_correlation_value,
+    ce.page_path, ce.reported_at
+  </sql>
+
+  <select id="findOrgSupportSlice"
+          resultType="ooo.klae.connex.backend.beans.ClientErrorMetadataRow" timeout="20">
+    SELECT <include refid="supportColumns"/>
+    FROM client_error ce
+    JOIN workspace w ON w.id = ce.workspace_id
+    WHERE w.org_id = #{orgId}
+      AND ce.reported_at &gt;= #{since}
+      AND ce.reported_at &lt;= #{until}
+      <if test="untrustedClientAssertedCorrelationHmac != null">
+        AND (
+          ce.correlation_id =
+            CONVERT(#{untrustedClientAssertedCorrelationHmac} USING ascii) COLLATE ascii_bin
+          OR ce.correlation_id =
+            CONVERT(#{legacyRawCorrelationId} USING ascii) COLLATE ascii_bin
+        )
+      </if>
+    ORDER BY ce.reported_at ASC, ce.id ASC
+    LIMIT #{limit}
+  </select>
+
+  <select id="findWorkspaceExportPage"
+          resultType="ooo.klae.connex.backend.beans.ClientErrorMetadataRow" timeout="20">
+    SELECT <include refid="supportColumns"/>
+    FROM client_error ce
+    JOIN workspace w ON w.id = ce.workspace_id
+    WHERE ce.workspace_id = #{workspaceId}
+      AND ce.id &gt; #{afterId}
+    ORDER BY ce.id
+    LIMIT #{limit}
+  </select>
+
+  <delete id="deleteExpired">
+    DELETE FROM client_error
+    WHERE reported_at &lt; DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 30 DAY)
+  </delete>
+
+</mapper>

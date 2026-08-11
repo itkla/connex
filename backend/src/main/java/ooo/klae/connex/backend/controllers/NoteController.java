@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.util.PageBounds;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
 
@@ -30,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/notes")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class NoteController {
     private final NoteService noteService;
 

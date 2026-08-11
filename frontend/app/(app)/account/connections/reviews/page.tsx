@@ -2,11 +2,11 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import {
-    DEFAULT_CAPABILITIES,
-    getCapabilities,
+    getCapabilitiesResultFromCookie,
     getCaptureOverviewResultFromCookie,
     getProviderConnectionsResultFromCookie,
 } from "@/app/lib/api";
+import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import type {
     ConnectedAccountProvider,
     ProviderCaptureOverview,
@@ -49,8 +49,11 @@ function providerWithMostPendingReviewsAmongUserConnections(
  */
 export default async function CaptureReviewsPage() {
     const cookie = (await headers()).get("cookie");
-    const capabilities = await getCapabilities(cookie ? { headers: { cookie } } : {})
-        .catch(() => DEFAULT_CAPABILITIES);
+    const capabilitiesResult = await getCapabilitiesResultFromCookie(cookie);
+    if (!capabilitiesResult.ok) {
+        return <CapabilityUnavailablePage />;
+    }
+    const capabilities = capabilitiesResult.data;
     const enabled = (["google", "microsoft"] as const).filter((provider) =>
         providerCaptureEnabled(capabilities, provider),
     );

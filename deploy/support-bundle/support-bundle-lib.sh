@@ -11,9 +11,8 @@
 # journal projection, and the read command is strictly read-only.
 #
 # Exit codes: 64 usage/configuration/dependency, 65 authentication or
-# authorization, 66 API transport, 67 bundle integrity, 69 reader failure.
-# 68 is deliberately unallocated: it belonged to the removed journal-collection
-# step, and the remaining codes are kept stable for operators' automation.
+# authorization, 66 API transport, 67 bundle integrity, 68 journal collection,
+# 69 reader failure.
 
 set -euo pipefail
 
@@ -39,15 +38,16 @@ declare -rx EXIT_USAGE=64
 declare -rx EXIT_AUTH=65
 declare -rx EXIT_API=66
 declare -rx EXIT_INTEGRITY=67
+declare -rx EXIT_JOURNAL=68
 declare -rx EXIT_READ=69
 
-declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=1
+declare -rx SUPPORT_BUNDLE_SCHEMA_VERSION=3
 
 # Mirrors the backend's own uncompressed ceiling.
 declare -rx SUPPORT_BUNDLE_MAX_UNCOMPRESSED_BYTES=67108864
 
 # The closed set of entries a bundle of this schema version may contain.
-declare -rx SUPPORT_BUNDLE_KNOWN_ENTRIES='["readiness.json","config.json","migrations.json","audit-slice.csv","job-runs.json","client-errors.json"]' 
+declare -rx SUPPORT_BUNDLE_KNOWN_ENTRIES='["readiness.json","config.json","migrations.json","audit-slice.csv","job-runs.json","client-errors.json","journal-slice.jsonl"]'
 
 SUPPORT_BUNDLE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPPORT_BUNDLE_STARTED_EPOCH="$(date +%s)"
@@ -60,6 +60,7 @@ support_bundle_exit_code_catalog() {
         "$EXIT_AUTH" \
         "$EXIT_API" \
         "$EXIT_INTEGRITY" \
+        "$EXIT_JOURNAL" \
         "$EXIT_READ"
 }
 
@@ -271,6 +272,7 @@ support_bundle_redact_path() {
                 || parent == "logo" || parent == "profile-picture"
         }
         BEGIN {
+            sub(/[?#].*$/, "", raw)
             count = split(raw, segments, "/")
             previous = ""
             output = ""
@@ -489,7 +491,7 @@ support_bundle_verify_inventory() {
     # Every entry the schema requires must be present or explicitly declared as omitted; silence
     # is not an acceptable third state for a diagnostic the reader promises to render.
     local required present_or_omitted
-    for required in readiness.json config.json migrations.json audit-slice.csv; do
+    for required in readiness.json config.json migrations.json audit-slice.csv client-errors.json; do
         present_or_omitted="$(jq -r --arg path "$required" \
             'if ([.files[].path] | index($path)) != null then "present"
              elif (.omissions | has($path)) then "omitted"
@@ -503,6 +505,109 @@ support_bundle_verify_inventory() {
     present="$(find "$directory" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | grep -vx 'manifest.json' | sort)"
     if [ "$listed" != "$present" ]; then
         support_bundle_log error integrity_failure reason inventory_mismatch
+        return "$EXIT_INTEGRITY"
+    fi
+}
+
+# An optional journal entry is accepted only in the exact shape produced by collect.sh. Parsing
+# every line again keeps read.sh fail-closed if an archive is modified after collection or a future
+# producer tries to widen the projection without updating the schema contract deliberately.
+support_bundle_verify_journal_slice() {
+    local directory="$1"
+    local manifest="$directory/manifest.json"
+    local slice="$directory/journal-slice.jsonl"
+    if [ ! -f "$slice" ]; then
+        if ! jq -e '.journalSlice == null' "$manifest" >/dev/null 2>&1; then
+            support_bundle_log error manifest_invalid reason journal_metadata_without_entry
+            return "$EXIT_INTEGRITY"
+        fi
+        return 0
+    fi
+    if ! jq -e '
+        (.orgId | type) == "number"
+        and .orgId > 0
+        and .orgId == (.orgId | floor)
+        and (.journalSlice | type) == "object"
+        and (.journalSlice | keys) == ["organizationDiscriminator", "organizationId", "projection", "redactor", "unit"]
+        and .journalSlice.organizationId == .orgId
+        and .journalSlice.organizationDiscriminator == "connexOrganizationId"
+        and .journalSlice.projection == "ecs_message_closed_fields_v2"
+        and .journalSlice.redactor == "request_path_redactor_v1"
+        and (.journalSlice.unit | type) == "string"
+    ' "$manifest" >/dev/null 2>&1; then
+        support_bundle_log error manifest_invalid reason journal_metadata_invalid
+        return "$EXIT_INTEGRITY"
+    fi
+    local unit
+    unit="$(jq -r '.journalSlice.unit' "$manifest")"
+    if [[ ! "$unit" =~ ^[A-Za-z0-9@._-]+$ ]]; then
+        support_bundle_log error manifest_invalid reason journal_unit_invalid
+        return "$EXIT_INTEGRITY"
+    fi
+    if ! python3 - "$slice" <<'PY'
+import json
+import re
+import sys
+import unicodedata
+
+ALLOWED_KEYS = {
+    "timestamp", "level", "logger", "untrustedClientAssertedCorrelationHmac",
+    "method", "path", "status", "eventClass",
+}
+CORRELATION_HMAC = re.compile(r"[0-9a-f]{64}\Z")
+TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z\Z")
+METHODS = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
+LOGGER = "ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"
+EVENT_CLASS = "http.request.completed"
+
+class DuplicateKey(ValueError):
+    pass
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateKey(key)
+        result[key] = value
+    return result
+
+def safe_path(value):
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 512
+        and value.startswith("/api/")
+        and "?" not in value
+        and "#" not in value
+        and all(unicodedata.category(character) not in {"Cc", "Zl", "Zp"} for character in value)
+    )
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    for line in source:
+        if len(line) > 4096:
+            raise ValueError("journal projection line exceeds the schema bound")
+        value = json.loads(line, object_pairs_hook=unique_object)
+        if not isinstance(value, dict) or set(value) != ALLOWED_KEYS:
+            raise ValueError("journal projection keys do not match the closed schema")
+        status = value["status"]
+        if (
+            not isinstance(value["timestamp"], str)
+            or TIMESTAMP.fullmatch(value["timestamp"]) is None
+            or value["level"] != "INFO"
+            or value["logger"] != LOGGER
+            or not isinstance(value["untrustedClientAssertedCorrelationHmac"], str)
+            or CORRELATION_HMAC.fullmatch(value["untrustedClientAssertedCorrelationHmac"]) is None
+            or value["method"] not in METHODS
+            or not safe_path(value["path"])
+            or isinstance(status, bool)
+            or not isinstance(status, int)
+            or status < 100
+            or status > 599
+            or value["eventClass"] != EVENT_CLASS
+        ):
+            raise ValueError("journal projection value violates the closed schema")
+PY
+    then
+        support_bundle_log error integrity_failure reason journal_projection_invalid
         return "$EXIT_INTEGRITY"
     fi
 }
@@ -560,4 +665,5 @@ support_bundle_verify_archive() {
     local directory="$2"
     support_bundle_extract "$archive" "$directory" || return "$EXIT_INTEGRITY"
     support_bundle_verify_inventory "$directory" || return "$EXIT_INTEGRITY"
+    support_bundle_verify_journal_slice "$directory" || return "$EXIT_INTEGRITY"
 }

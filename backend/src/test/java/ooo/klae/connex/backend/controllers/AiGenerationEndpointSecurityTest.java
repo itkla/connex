@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.DealRiskService;
@@ -88,6 +89,7 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private SessionSecurityService sessionSecurityService;
     @MockitoBean private BusinessCardRateLimiter businessCardRateLimiter;
     @MockitoBean private CapabilityEntitlement capabilityEntitlement;
+    @MockitoBean private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
     @MockitoBean private TenantCatalogResolver tenantCatalogResolver;
     @MockitoBean private TenantContext tenantContext;
     @MockitoBean private WorkspaceCookie workspaceCookie;

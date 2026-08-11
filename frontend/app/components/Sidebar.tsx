@@ -2,6 +2,7 @@
 
 import {
     ArrowRightStartOnRectangleIcon,
+    ArrowPathIcon,
     BellIcon,
     BriefcaseIcon,
     BuildingOffice2Icon,
@@ -23,12 +24,14 @@ import {
     UserGroupIcon,
     UsersIcon,
     EllipsisVerticalIcon,
+    ExclamationTriangleIcon,
     CalendarIcon,
     MapIcon,
     ArrowsRightLeftIcon,
     BookOpenIcon,
     ChartBarIcon,
     PresentationChartLineIcon,
+    QuestionMarkCircleIcon,
     GlobeAltIcon,
     ClipboardDocumentListIcon,
     SunIcon,
@@ -83,6 +86,8 @@ type NavItem = {
     nested?: boolean;
     /** Overrides path-based active matching for hrefs that carry a query (e.g. pinned saved views). */
     active?: boolean;
+    /** Localized explanation shown when the item's capability could not be resolved. */
+    availabilityLabel?: string;
 };
 
 type NavSection = {
@@ -94,6 +99,7 @@ type NavSection = {
 
 function useSections(navAccess: NavAccess): NavSection[] {
     const t = useTranslations("CommonSidebar");
+    const tCapability = useTranslations("CapabilityUnavailable");
     const { activeWorkspace } = useWorkspace();
     const isOrgAdmin = activeWorkspace?.orgRole != null;
     const sectionPathname = usePathname() ?? "";
@@ -105,12 +111,15 @@ function useSections(navAccess: NavAccess): NavSection[] {
         ...(navAccess.workflows
             ? [{ label: t("navWorkflows"), href: "/workflows", icon: BoltIcon }]
             : []),
-        ...(navAccess.captureReviews
+        ...(navAccess.captureReviews !== "disabled"
             ? [{
                 label: t("navCaptureReviews"),
                 href: "/account/connections/reviews",
                 icon: InboxIcon,
                 active: captureReviewsActive,
+                availabilityLabel: navAccess.captureReviews === "unavailable"
+                    ? tCapability("title")
+                    : undefined,
             }]
             : []),
         { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
@@ -305,7 +314,9 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                aria-label={item.label}
+                aria-label={item.availabilityLabel
+                    ? `${item.label}: ${item.availabilityLabel}`
+                    : item.label}
                 className="group flex justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
                 <span
@@ -324,6 +335,12 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
                         />
                     )}
                     <Icon className="relative z-10 size-4 shrink-0" />
+                    {item.availabilityLabel ? (
+                        <QuestionMarkCircleIcon
+                            aria-hidden
+                            className="absolute right-0.5 top-0.5 z-10 size-3 text-muted-foreground"
+                        />
+                    ) : null}
                 </span>
             </Link>
         );
@@ -331,7 +348,11 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
             <li>
                 <Tooltip>
                     <TooltipTrigger asChild>{link}</TooltipTrigger>
-                    <TooltipContent side="right">{item.label}</TooltipContent>
+                    <TooltipContent side="right">
+                        {item.availabilityLabel
+                            ? `${item.label} — ${item.availabilityLabel}`
+                            : item.label}
+                    </TooltipContent>
                 </Tooltip>
             </li>
         );
@@ -361,8 +382,67 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
                         }`}
                 />
                 <span className="relative z-10">{item.label}</span>
+                {item.availabilityLabel ? (
+                    <span
+                        className="relative z-10 inline-flex text-muted-foreground"
+                        title={item.availabilityLabel}
+                    >
+                        <QuestionMarkCircleIcon aria-hidden className="size-4" />
+                        <span className="sr-only">{item.availabilityLabel}</span>
+                    </span>
+                ) : null}
             </Link>
         </li>
+    );
+}
+
+function PinnedViewsUnavailable({
+    rail,
+    label,
+    retryLabel,
+    onRetry,
+}: {
+    rail: boolean;
+    label: string;
+    retryLabel: string;
+    onRetry: () => void;
+}) {
+    if (rail) {
+        return (
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <button
+                        type="button"
+                        onClick={onRetry}
+                        aria-label={`${label} ${retryLabel}`}
+                        className="mx-auto flex size-9 items-center justify-center rounded-lg text-warning outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-brand"
+                    >
+                        <ExclamationTriangleIcon className="size-4" aria-hidden />
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+            </Tooltip>
+        );
+    }
+
+    return (
+        <div
+            role="status"
+            className="rounded-md border border-sidebar-border bg-sidebar-accent/40 px-3 py-2 text-xs text-muted-foreground"
+        >
+            <div className="flex items-start gap-2">
+                <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+                <span>{label}</span>
+            </div>
+            <button
+                type="button"
+                onClick={onRetry}
+                className="mt-2 inline-flex items-center gap-1.5 font-medium text-sidebar-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+                <ArrowPathIcon className="size-3.5" aria-hidden />
+                {retryLabel}
+            </button>
+        </div>
     );
 }
 
@@ -572,7 +652,7 @@ export default function Sidebar({
     const sections = useSections(navAccess);
     const { activeWorkspaceId } = useWorkspace();
     const { isCollapsed, setCollapsed } = useSidebarSections(user.id, activeWorkspaceId);
-    const { pins } = usePinnedViews();
+    const { pins, status: pinnedViewsStatus, reload: reloadPinnedViews } = usePinnedViews();
     const { recents } = useRecentRecords();
     const searchParams = useSearchParams();
     const svParam = searchParams.get("sv");
@@ -667,6 +747,14 @@ export default function Sidebar({
                             onCollapsedChange={setCollapsed}
                         />
                     )}
+                    {pinnedViewsStatus === "unavailable" ? (
+                        <PinnedViewsUnavailable
+                            rail={rail}
+                            label={t("pinnedViewsUnavailable")}
+                            retryLabel={t("retryPinnedViews")}
+                            onRetry={() => { void reloadPinnedViews(); }}
+                        />
+                    ) : null}
                     {recentSection && (
                         <NavGroup
                             key={recentSection.id}

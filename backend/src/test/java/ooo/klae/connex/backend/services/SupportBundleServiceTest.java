@@ -36,11 +36,14 @@ import org.mockito.InOrder;
 import org.mockito.Mockito;
 
 import ooo.klae.connex.backend.dto.AuditSupportRowDto;
+import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.config.AuditIntegrityProperties;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundle;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleRequest;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -51,8 +54,9 @@ import tools.jackson.databind.ObjectMapper;
 class SupportBundleServiceTest {
     private static final String SENTINEL = "SENTINEL_SECRET_VALUE";
     private static final String SUPPORT_CSV_HEADER =
-        "auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,requestId,"
-            + "createdAt,contentFieldsOmitted";
+        "auditId,scope,workspaceId,orgId,action,entityType,entityId,actorId,outcome,"
+            + "serverMintedRequestId,untrustedClientAssertedCorrelationHmac,createdAt,"
+            + "contentFieldsOmitted";
     private static final Instant NOW = Instant.parse("2026-07-31T05:00:00Z");
     private static final int ORG_ID = 3;
     private static final int ACTOR_ID = 55;
@@ -64,11 +68,13 @@ class SupportBundleServiceTest {
     private MigrationHistoryService migrationHistoryService;
     private ProductVersionService productVersionService;
     private AuditService auditService;
+    private ClientErrorService clientErrorService;
     private ObjectMapper objectMapper;
     private SupportBundleService service;
     private ooo.klae.connex.backend.mappers.AuditLogMapper auditLogMapper;
     private AuditIntegrityService auditIntegrityService;
     private ooo.klae.connex.backend.tenant.TenantContext tenantContext;
+    private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
 
     @BeforeEach
     void setUp() {
@@ -79,9 +85,14 @@ class SupportBundleServiceTest {
         migrationHistoryService = Mockito.mock(MigrationHistoryService.class);
         productVersionService = Mockito.mock(ProductVersionService.class);
         auditService = Mockito.mock(AuditService.class);
+        clientErrorService = Mockito.mock(ClientErrorService.class);
         auditLogMapper = Mockito.mock(ooo.klae.connex.backend.mappers.AuditLogMapper.class);
         auditIntegrityService = Mockito.mock(AuditIntegrityService.class);
         tenantContext = Mockito.mock(ooo.klae.connex.backend.tenant.TenantContext.class);
+        AuditIntegrityProperties integrityProperties = new AuditIntegrityProperties();
+        integrityProperties.setHmacSecret("support-bundle-test-secret-at-least-32-bytes");
+        correlationPseudonymizer =
+            new ClientAssertedCorrelationPseudonymizer(integrityProperties);
         objectMapper = new ObjectMapper();
 
         when(readinessService.readiness(anyInt())).thenReturn(Map.of("profile", "on-prem"));
@@ -92,6 +103,8 @@ class SupportBundleServiceTest {
         when(productVersionService.version()).thenReturn("test");
         when(auditService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
             .thenReturn(new AuditService.AuditSlice("auditId,scope\r\n1,organization\r\n", 1, false));
+        when(clientErrorService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
+            .thenReturn(new ClientErrorService.ClientErrorSlice(List.of(), 0, false));
 
         service = new SupportBundleService(
             orgMemberService,
@@ -101,6 +114,8 @@ class SupportBundleServiceTest {
             migrationHistoryService,
             productVersionService,
             auditService,
+            clientErrorService,
+            correlationPseudonymizer,
             objectMapper,
             Clock.fixed(NOW, ZoneOffset.UTC));
     }
@@ -202,10 +217,12 @@ class SupportBundleServiceTest {
     }
 
     @Test
-    void declaresTheSourcesItDeliberatelyOmits() throws Exception {
+    void shipsClientErrorsAndDeclaresOnlyUnavailableSources() throws Exception {
+        Map<String, byte[]> entries = entriesOf(service.generate(request(null), ACTOR_ID));
         JsonNode omissions = manifestOf(service.generate(request(null), ACTOR_ID)).get("omissions");
 
-        assertEquals("no_persisted_source", omissions.get("client-errors.json").asString());
+        assertNotNull(entries.get("client-errors.json"));
+        assertNull(omissions.get("client-errors.json"));
         assertEquals("job_run_not_available", omissions.get("job-runs.json").asString());
     }
 
@@ -237,11 +254,13 @@ class SupportBundleServiceTest {
     void auditSliceFormatterEmitsActorIdAndNoPersonalName() {
         AuditService realAuditService = new AuditService(
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
-            new ClientIpResolver(""));
-        when(auditLogMapper.findOrgSupportSlice(anyInt(), any(), any(), any(), anyInt()))
+            new ClientIpResolver(""), correlationPseudonymizer);
+        when(auditLogMapper.findOrgSupportSlice(
+                anyInt(), any(), any(), any(), any(), anyInt()))
             .thenReturn(List.of(new AuditSupportRowDto(
                 9001L, 7, 3, "person.archive", "person", 412, 55, "success",
-                "req-1", Instant.parse("2026-07-31T04:05:06Z"))));
+                "server-request-1", "client-correlation-1",
+                Instant.parse("2026-07-31T04:05:06Z"))));
 
         AuditService.AuditSlice slice = realAuditService.supportSliceForOrg(
             3, NOW.minus(Duration.ofDays(7)), NOW, null, 10);
@@ -255,8 +274,8 @@ class SupportBundleServiceTest {
     }
 
     /**
-     * Pins the projection DTO's shape. The CSV formatter can only emit what this record carries,
-     * so widening it is the first step of any accidental disclosure and must fail here.
+     * Pins the narrow mapper projection consumed by the sanitizing CSV formatter. Widening the
+     * record is the first step of any accidental disclosure and must fail here.
      */
     @Test
     void theAuditProjectionExposesExactlyTheApprovedFields() {
@@ -265,9 +284,10 @@ class SupportBundleServiceTest {
             .toList();
 
         assertEquals(List.of("auditId", "workspaceId", "orgId", "action", "entityType", "entityId",
-            "actorId", "outcome", "requestId", "createdAt"), fields,
-            "The support projection changed. Every field here is disclosed to whoever receives the "
-                + "bundle, so a new field must be reviewed as a disclosure, not added for "
+            "actorId", "outcome", "serverMintedRequestId",
+            "storedCorrelationValue", "createdAt"), fields,
+            "The support projection changed. Every field here is reachable by the bundle "
+                + "formatter, so a new field must be reviewed as a disclosure, not added for "
                 + "convenience.");
     }
 
@@ -291,7 +311,9 @@ class SupportBundleServiceTest {
             .toList();
 
         assertEquals(List.of("al.id", "al.workspace_id", "al.org_id", "al.action", "al.entity_type",
-            "al.entity_id", "al.actor_id", "al.outcome", "al.request_id", "al.created_at"), columns,
+            "al.entity_id", "al.actor_id", "al.outcome", "al.request_id",
+            "al.untrusted_client_asserted_correlation_id AS stored_correlation_value",
+            "al.created_at"), columns,
             "The support SQL projection changed. Columns such as summary, changes, context, "
                 + "actor_label, target_label, ip_address, user_agent and session_id carry user "
                 + "data and must never be fetched for a bundle.");
@@ -319,21 +341,60 @@ class SupportBundleServiceTest {
     void sensitiveAuditContentCannotReachTheCsv() {
         AuditService realAuditService = new AuditService(
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
-            new ClientIpResolver(""));
-        when(auditLogMapper.findOrgSupportSlice(anyInt(), any(), any(), any(), anyInt()))
+            new ClientIpResolver(""), correlationPseudonymizer);
+        when(auditLogMapper.findOrgSupportSlice(
+                anyInt(), any(), any(), any(), any(), anyInt()))
             .thenReturn(List.of(new AuditSupportRowDto(
                 9001L, 7, 3, "person.archive", "person", 412, 55, "success",
-                "req-1", Instant.parse("2026-07-31T04:05:06Z"))));
+                "server-request-1", "client-correlation-1",
+                Instant.parse("2026-07-31T04:05:06Z"))));
 
         String csv = realAuditService.supportSliceForOrg(
             3, NOW.minus(Duration.ofDays(7)), NOW, null, 10).csv();
 
         assertFalse(csv.contains(SENTINEL));
+        assertFalse(csv.contains("client-correlation-1"));
+        assertTrue(csv.contains(
+            correlationPseudonymizer.forDisclosure(ORG_ID, "client-correlation-1")));
         for (String forbidden : List.of("actorLabel", "currentActorLabel", "targetLabel", "summary",
                 "changes", "context", "ipAddress", "userAgent", "sessionId", "prevHash",
                 "rowHash")) {
             assertFalse(csv.contains(forbidden), "CSV disclosed " + forbidden);
         }
+    }
+
+    @Test
+    void filteredAuditSliceNormalizesCurrentAndLegacyCorrelationRows() {
+        String rawCorrelation = "client-correlation-1";
+        String storageHmac = correlationPseudonymizer.forStorage(ORG_ID, rawCorrelation);
+        AuditService realAuditService = new AuditService(
+            auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
+            new ClientIpResolver(""), correlationPseudonymizer);
+        when(auditLogMapper.findOrgSupportSlice(
+                anyInt(), any(), any(), any(), any(), anyInt()))
+            .thenReturn(List.of(
+                new AuditSupportRowDto(
+                    9001L, null, ORG_ID, "organization.update", "organization", ORG_ID,
+                    55, "success", "server-request-1", storageHmac,
+                    Instant.parse("2026-07-31T04:05:06Z")),
+                new AuditSupportRowDto(
+                    9002L, null, ORG_ID, "organization.update", "organization", ORG_ID,
+                    55, "success", "server-request-2", rawCorrelation,
+                    Instant.parse("2026-07-31T04:05:07Z"))));
+
+        AuditService.AuditSlice slice = realAuditService.supportSliceForOrg(
+            ORG_ID, NOW.minus(Duration.ofDays(7)), NOW, rawCorrelation, 10);
+
+        String expectedDisclosure =
+            correlationPseudonymizer.forDisclosure(ORG_ID, storageHmac);
+        assertEquals(
+            List.of(expectedDisclosure, expectedDisclosure),
+            slice.csv().lines()
+                .skip(1)
+                .map(line -> line.split(",", -1)[10])
+                .toList());
+        assertFalse(slice.csv().contains(rawCorrelation));
+        assertFalse(slice.csv().contains(storageHmac));
     }
 
     /**
@@ -344,13 +405,15 @@ class SupportBundleServiceTest {
     void auditSliceReportsTruncationWithoutDisclosingTheExtraRow() {
         AuditService realAuditService = new AuditService(
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
-            new ClientIpResolver(""));
+            new ClientIpResolver(""), correlationPseudonymizer);
         List<AuditSupportRowDto> rows = new ArrayList<>();
         for (int index = 0; index < 4; index++) {
             rows.add(new AuditSupportRowDto((long) index, 7, 3, "person.update", "person", index,
-                55, "success", "req-" + index, Instant.parse("2026-07-31T04:05:06Z")));
+                55, "success", "server-request-" + index, "client-correlation-" + index,
+                Instant.parse("2026-07-31T04:05:06Z")));
         }
-        when(auditLogMapper.findOrgSupportSlice(anyInt(), any(), any(), any(), eq(4)))
+        when(auditLogMapper.findOrgSupportSlice(
+                anyInt(), any(), any(), any(), any(), eq(4)))
             .thenReturn(rows);
 
         AuditService.AuditSlice slice = realAuditService.supportSliceForOrg(
@@ -358,7 +421,74 @@ class SupportBundleServiceTest {
 
         assertTrue(slice.truncated());
         assertEquals(3, slice.rowCount());
-        assertFalse(slice.csv().contains("req-3"));
+        assertFalse(slice.csv().contains("server-request-3"));
+    }
+
+    @Test
+    void clientErrorJsonContainsOnlyTheApprovedMetadataProjection() throws Exception {
+        when(clientErrorService.supportSliceForOrg(anyInt(), any(), any(), any(), anyInt()))
+            .thenReturn(new ClientErrorService.ClientErrorSlice(List.of(
+                new ClientErrorSupportRowDto(
+                    71L,
+                    7,
+                    "disclosure-hmac",
+                    "/records/contacts/{id}",
+                    Instant.parse("2026-07-31T04:05:06Z"))), 1, false));
+
+        JsonNode errors = objectMapper.readTree(
+            entriesOf(service.generate(request(null), ACTOR_ID)).get("client-errors.json"));
+
+        assertEquals(1, errors.size());
+        assertEquals(
+            List.of(
+                "id",
+                "workspaceId",
+                "untrustedClientAssertedCorrelationHmac",
+                "pagePath",
+                "reportedAt"),
+            java.util.stream.StreamSupport.stream(errors.get(0).propertyNames().spliterator(), false)
+                .toList());
+        assertFalse(errors.toString().contains(SENTINEL));
+        for (String forbidden : List.of("message", "detail", "stack")) {
+            assertNull(errors.get(0).get(forbidden));
+        }
+    }
+
+    @Test
+    void manifestLabelsBothAuditIdentifiersAndThePseudonymizedFilterField() throws Exception {
+        JsonNode manifest = manifestOf(service.generate(request(null), ACTOR_ID));
+
+        assertEquals(3, manifest.get("schemaVersion").asInt());
+        assertEquals(
+            "server_minted_non_spoofable",
+            manifest.get("auditSliceIdentifiers").get("serverMintedRequestId").asString());
+        assertEquals(
+            "organization_scoped_domain_separated_hmac_sha256_of_untrusted_client_assertion",
+            manifest.get("auditSliceIdentifiers")
+                .get("untrustedClientAssertedCorrelationHmac").asString());
+        assertEquals(
+            "untrustedClientAssertedCorrelationHmac",
+            manifest.get("auditSliceCorrelationFilterField").asString());
+    }
+
+    @Test
+    void rawClientCorrelationNeverLeavesInTheArchive() throws Exception {
+        String rawCorrelation = "client-asserted-correlation-1234567890";
+        SupportBundleRequest filtered = new SupportBundleRequest(
+            ORG_ID, rawCorrelation, null, null, null, null);
+
+        Map<String, byte[]> entries = entriesOf(service.generate(filtered, ACTOR_ID));
+        JsonNode manifest = objectMapper.readTree(entries.get("manifest.json"));
+
+        for (byte[] content : entries.values()) {
+            assertFalse(new String(content, java.nio.charset.StandardCharsets.UTF_8)
+                .contains(rawCorrelation));
+        }
+        assertEquals(
+            correlationPseudonymizer.forDisclosure(
+                ORG_ID,
+                correlationPseudonymizer.forStorage(ORG_ID, rawCorrelation)),
+            manifest.get("filters").get("untrustedClientAssertedCorrelationHmac").asString());
     }
 
     @Test

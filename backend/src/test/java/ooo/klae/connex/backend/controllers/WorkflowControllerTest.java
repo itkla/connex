@@ -66,6 +66,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
@@ -113,6 +114,7 @@ class WorkflowControllerTest {
     @MockitoBean private SessionSecurityService sessionSecurityService;
     @MockitoBean private BusinessCardRateLimiter businessCardRateLimiter;
     @MockitoBean private CapabilityEntitlement capabilityEntitlement;
+    @MockitoBean private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
     @MockitoBean private TenantCatalogResolver tenantCatalogResolver;
     @MockitoBean private TenantContext tenantContext;
     @MockitoBean private WorkspaceCookie workspaceCookie;

@@ -1,7 +1,6 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
-    DEFAULT_CAPABILITIES,
     getCampaign,
     getCampaignAudienceFromCookie,
     getCampaignEngagement,
@@ -12,8 +11,10 @@ import {
     getCapabilities,
     getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
+    toResult,
     type CookieResult,
 } from "@/app/lib/api";
+import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import {
     type CampaignAudience,
@@ -68,7 +69,7 @@ export default async function CampaignDetailPage({
         exports,
         engagement,
         effectivePermissions,
-        capabilities,
+        capabilitiesResult,
     ]: [
         { ok: true; data: CampaignAudience | undefined } | { ok: false },
         CollectionAccess<CampaignAudienceSnapshotSummary>,
@@ -77,7 +78,7 @@ export default async function CampaignDetailPage({
         CampaignAudienceExport[],
         CampaignEngagement | null,
         CookieResult<string[]>,
-        InstanceCapabilities,
+        CookieResult<InstanceCapabilities>,
     ] = await Promise.all([
         getCampaignAudienceFromCookie(id, cookie),
         loadCollection(() => getCampaignSnapshots(id, init)),
@@ -86,7 +87,7 @@ export default async function CampaignDetailPage({
         getCampaignExports(id, init).catch(() => []),
         getCampaignEngagement(id, init).catch(() => null),
         getEffectivePermissionsResultFromCookie(cookie),
-        getCapabilities(init).catch(() => DEFAULT_CAPABILITIES),
+        toResult(getCapabilities(init)),
     ]);
     if (!effectivePermissions.ok) {
         return <PermissionsUnavailablePage />;
@@ -106,7 +107,9 @@ export default async function CampaignDetailPage({
             initialExports={exports}
             initialEngagement={engagement}
             access={resolveCampaignAccess(effectivePermissions.data)}
-            deliveryEnabled={capabilities.campaignDelivery}
+            deliveryAvailability={capabilityAvailability(
+                capabilitiesResult.ok ? capabilitiesResult.data.campaignDelivery : null,
+            )}
         />
     );
 }

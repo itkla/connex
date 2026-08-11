@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedTenantObject;
 import ooo.klae.connex.backend.tenant.TenantLifecycleProperties;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
+import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
@@ -121,7 +122,7 @@ public class TenantExportService {
                 orgId,
                 "workspace:" + acquired.workspace().id(),
                 "Tenant export authorized and streaming started",
-                Map.of("declaredTableCount", TenantLifecycleRegistry.declarations().size()));
+                Map.of("declaredTableCount", declaredTableCount()));
             TenantExportDownload download = new TenantExportDownload(
                 acquired.workspace().id(),
                 acquired.workspace().orgId(),
@@ -226,6 +227,12 @@ public class TenantExportService {
             }
         }
         return objectCount;
+    }
+
+    private static int declaredTableCount() {
+        return Math.addExact(
+            TenantLifecycleRegistry.declarations().size(),
+            ControlWorkspaceLifecycleRegistry.declarations().size());
     }
 
     private void writeObject(
