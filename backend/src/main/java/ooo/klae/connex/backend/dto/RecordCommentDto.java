@@ -5,13 +5,14 @@ import java.util.List;
 
 import ooo.klae.connex.backend.beans.RecordComment;
 
-/** Serialized immutable comment or retained redaction tombstone. */
+/** Serialized comment or retained redaction tombstone. */
 public record RecordCommentDto(
         long id,
         long threadId,
         UserReferenceDto author,
         String content,
         LocalDateTime createdAt,
+        LocalDateTime editedAt,
         LocalDateTime deletedAt,
         Integer deletedByUserId,
         List<ReferenceDto> references,
@@ -32,6 +33,7 @@ public record RecordCommentDto(
             author,
             comment.getContent(),
             comment.getCreatedAt(),
+            comment.getEditedAt(),
             comment.getDeletedAt(),
             comment.getDeletedByUserId(),
             comment.getReferences().stream().map(ReferenceDto::from).toList(),

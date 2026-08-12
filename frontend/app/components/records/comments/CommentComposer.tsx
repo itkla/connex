@@ -1,12 +1,37 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
+import { useFormDraft } from '@/app/hooks/useFormDraft';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { Button } from '@/components/ui/button';
+
+type CommentDraft = {
+    content: string;
+};
+
+/** Defer draft restoration past the hydration tick, mirroring DraftResumeBridge. */
+const DRAFT_RESTORE_DELAY_MS = 250;
+
+const DISABLED_DRAFT_KEY: DraftKeyParts = {
+    userId: null,
+    workspaceId: null,
+    formType: 'comment',
+    scope: 'disabled',
+};
+
+function isCommentDraft(value: unknown): value is CommentDraft {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'content' in value &&
+        typeof (value as { content: unknown }).content === 'string'
+    );
+}
 
 type Props = {
     value: string;
@@ -19,6 +44,14 @@ type Props = {
     disabled?: boolean;
     canSubmit: boolean;
     autoFocus?: boolean;
+    /**
+     * When set, the composer persists its value as a user+workspace-scoped
+     * draft: debounced writes while typing, silent restore shortly after the
+     * next mount with the same scope, and removal once the value returns to
+     * empty through a post or discard. The scope is fixed at first mount,
+     * matching {@link useFormDraft}'s origin semantics.
+     */
+    draftKeyParts?: DraftKeyParts;
 };
 
 /**
@@ -38,10 +71,61 @@ export default function CommentComposer({
     disabled = false,
     canSubmit,
     autoFocus,
+    draftKeyParts,
 }: Props) {
     const t = useTranslations('Comments');
     const [focused, setFocused] = useState(autoFocus ?? false);
     const engaged = focused || value.length > 0 || submitting;
+
+    const [draftOrigin] = useState<{ enabled: boolean; keyParts: DraftKeyParts }>(() => ({
+        enabled: draftKeyParts != null,
+        keyParts: draftKeyParts ?? DISABLED_DRAFT_KEY,
+    }));
+    const draft = useFormDraft<CommentDraft>({
+        keyParts: draftOrigin.keyParts,
+        version: DRAFT_VERSIONS.comment,
+    });
+    const restoreSettled = useRef(!draftOrigin.enabled);
+    const valueRef = useRef(value);
+    const onChangeRef = useRef(onChange);
+
+    useEffect(() => {
+        valueRef.current = value;
+        onChangeRef.current = onChange;
+    });
+
+    useEffect(() => {
+        if (!draftOrigin.enabled) return;
+        const timer = window.setTimeout(() => {
+            if (valueRef.current.length === 0) {
+                const stored = readDraft(draftOrigin.keyParts, {
+                    version: DRAFT_VERSIONS.comment,
+                });
+                if (stored && isCommentDraft(stored.data) && stored.data.content.length > 0) {
+                    onChangeRef.current(stored.data.content);
+                }
+            }
+            restoreSettled.current = true;
+        }, DRAFT_RESTORE_DELAY_MS);
+        return () => window.clearTimeout(timer);
+    }, [draftOrigin]);
+
+    useEffect(() => {
+        if (!draftOrigin.enabled || !restoreSettled.current) return;
+        if (value.length > 0) {
+            draft.persist({ content: value });
+        } else {
+            draft.clear();
+        }
+    }, [draftOrigin, value, draft]);
+
+    useEffect(() => {
+        return () => {
+            if (draftOrigin.enabled && restoreSettled.current && valueRef.current.length === 0) {
+                draft.clear();
+            }
+        };
+    }, [draftOrigin, draft]);
 
     return (
         <div

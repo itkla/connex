@@ -25,6 +25,7 @@
     <result property="content" column="content"/>
     <result property="clientToken" column="client_token"/>
     <result property="createdAt" column="created_at"/>
+    <result property="editedAt" column="edited_at"/>
     <result property="deletedAt" column="deleted_at"/>
     <result property="deletedByUserId" column="deleted_by_user_id"/>
   </resultMap>
@@ -43,7 +44,7 @@
 
   <sql id="commentColumns">
     id, workspace_id, thread_id, author_user_id, content, client_token,
-    created_at, deleted_at, deleted_by_user_id
+    created_at, edited_at, deleted_at, deleted_by_user_id
   </sql>
 
   <select id="getThreadPage" resultMap="ThreadResult">
@@ -179,6 +180,13 @@
       #{workspaceId}, #{threadId}, #{authorUserId}, #{content}, #{clientToken}
     )
   </insert>
+
+  <update id="updateCommentContent">
+    UPDATE record_comment
+    SET content = #{content},
+        edited_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND deleted_at IS NULL
+  </update>
 
   <select id="countCommentsInThread" resultType="int">
     SELECT COUNT(*)

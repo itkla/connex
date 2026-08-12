@@ -44,6 +44,14 @@
     "reaction_heart": "Heart",
     "reaction_celebrate": "Celebrate",
     "reaction_eyes": "Eyes",
-    "reaction_laugh": "Laugh"
+    "reaction_laugh": "Laugh",
+    "edit": "Edit comment",
+    "save": "Save",
+    "editedMarker": "(edited)",
+    "editSaved": "Comment updated",
+    "editFailed": "Couldn't update the comment",
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied",
+    "copyFailed": "Couldn't copy the link"
   }
 }

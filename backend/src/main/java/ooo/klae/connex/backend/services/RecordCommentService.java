@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -60,6 +61,7 @@ public class RecordCommentService {
     private static final int MAX_COMMENTS_PER_THREAD = 200;
     private static final int MAX_PAGE_LIMIT = 100;
     private static final int MAX_INDICATOR_TARGETS = 100;
+    private static final int EDIT_WINDOW_MINUTES = 15;
     private static final int SNIPPET_LENGTH = 140;
     private static final String MENTION_TYPE = "comment.mention";
     private static final String REPLY_TYPE = "comment.reply";
@@ -187,7 +189,7 @@ public class RecordCommentService {
         return hydrateThread(workspaceId, requireThread(workspaceId, thread.getId()));
     }
 
-    /** Appends an immutable reply after locking and reauthorizing the thread. */
+    /** Appends a reply after locking and reauthorizing the thread. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public RecordComment reply(long threadId, String contentRaw, String clientTokenRaw) {
@@ -302,6 +304,74 @@ public class RecordCommentService {
             Map.of("threadId", lockedThread.getId(), "commentId", commentId));
         notificationChanges.publish(
             workspaceId, ReferenceService.SOURCE_COMMENT, commentSourceId(commentId));
+    }
+
+    /** Edits an author's own comment within the bounded edit window. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMMENT_CREATE)
+    public RecordComment editComment(long commentId, String contentRaw) {
+        requirePositiveId(commentId, "Comment");
+        String content = requireContent(contentRaw);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        User actor = authService.getCurrentUser();
+        int actorId = actor.getId();
+        RecordComment initialComment = requireComment(workspaceId, commentId);
+        RecordCommentThread initialThread = requireThread(workspaceId, initialComment.getThreadId());
+        requireTargetVisible(
+            workspaceId,
+            TargetType.parse(initialThread.getTargetType()),
+            initialThread.getTargetId());
+        requireCommentAuthor(initialComment, actorId);
+
+        RecordCommentThread lockedThread = recordCommentMapper.getThreadByIdForUpdate(
+            workspaceId, initialComment.getThreadId());
+        if (lockedThread == null) {
+            throw new ResourceNotFoundException("Comment not found with id: " + commentId);
+        }
+        requireTargetVisible(
+            workspaceId,
+            TargetType.parse(lockedThread.getTargetType()),
+            lockedThread.getTargetId());
+        RecordComment lockedComment = recordCommentMapper.getCommentByIdForUpdate(workspaceId, commentId);
+        if (lockedComment == null || lockedComment.getThreadId() != lockedThread.getId()) {
+            throw new ResourceNotFoundException("Comment not found with id: " + commentId);
+        }
+        workspaceService.requirePermission(workspaceId, actorId, Permission.COMMENT_CREATE);
+        requireCommentAuthor(lockedComment, actorId);
+        requireEditWindowOpen(lockedComment);
+        if (lockedComment.getDeletedAt() != null) {
+            throw new BadRequestException("Redacted comments cannot be edited");
+        }
+        if (ThreadState.RESOLVED.wire().equals(lockedThread.getState())) {
+            throw new ConflictException("Thread is resolved; reopen it before editing");
+        }
+
+        int sourceId = commentSourceId(commentId);
+        Set<Integer> previouslyMentionedIds = mentionedMemberIds(referenceService.referencesFor(
+            workspaceId, ReferenceService.SOURCE_COMMENT, sourceId));
+        if (recordCommentMapper.updateCommentContent(workspaceId, commentId, content) != 1) {
+            throw new ResourceNotFoundException("Comment not found with id: " + commentId);
+        }
+        referenceService.syncReferences(
+            workspaceId, ReferenceService.SOURCE_COMMENT, sourceId, content);
+        Set<Integer> newlyMentionedIds = mentionedMemberIds(referenceService.referencesFor(
+            workspaceId, ReferenceService.SOURCE_COMMENT, sourceId));
+        newlyMentionedIds.removeAll(previouslyMentionedIds);
+
+        RecordComment updated = recordCommentMapper.getCommentById(workspaceId, commentId);
+        if (updated == null) {
+            throw new IllegalStateException("Updated comment could not be reloaded");
+        }
+        notifyMentionRecipients(
+            workspaceId, lockedThread, updated, actor, newlyMentionedIds);
+        auditService.record(
+            "comment.update",
+            lockedThread.getTargetType(),
+            lockedThread.getTargetId(),
+            targetLabel(lockedThread),
+            "Updated record comment",
+            Map.of("threadId", lockedThread.getId(), "commentId", commentId));
+        return hydrateComment(workspaceId, updated);
     }
 
     /** Ensures the caller's reaction is present; repeating the request is a no-op. */
@@ -454,6 +524,23 @@ public class RecordCommentService {
         replyRecipients.removeAll(mentionWinners);
         for (int recipientId : replyRecipients) {
             notifyRecipient(workspaceId, thread, comment, actor, recipientId, REPLY_TYPE);
+        }
+    }
+
+    private void notifyMentionRecipients(
+            int workspaceId,
+            RecordCommentThread thread,
+            RecordComment comment,
+            User actor,
+            Set<Integer> mentionedIds) {
+        if (!isTargetVisible(
+                workspaceId, TargetType.parse(thread.getTargetType()), thread.getTargetId())) {
+            return;
+        }
+        Set<Integer> recipients = new LinkedHashSet<>(mentionedIds);
+        recipients.remove(actor.getId());
+        for (int recipientId : recipients) {
+            notifyRecipient(workspaceId, thread, comment, actor, recipientId, MENTION_TYPE);
         }
     }
 
@@ -717,6 +804,30 @@ public class RecordCommentService {
             throw new BadRequestException("Comment content may contain at most 5000 characters");
         }
         return content;
+    }
+
+    private static void requireCommentAuthor(RecordComment comment, int actorId) {
+        if (!Objects.equals(comment.getAuthorUserId(), actorId)) {
+            throw new ForbiddenException("Only the comment author may edit this comment");
+        }
+    }
+
+    private static void requireEditWindowOpen(RecordComment comment) {
+        LocalDateTime createdAt = comment.getCreatedAt();
+        if (createdAt == null) {
+            throw new IllegalStateException("Comment creation time is unavailable");
+        }
+        LocalDateTime editDeadline = createdAt.plusMinutes(EDIT_WINDOW_MINUTES);
+        if (LocalDateTime.now(ZoneOffset.UTC).isAfter(editDeadline)) {
+            throw new BadRequestException("The edit window has closed");
+        }
+    }
+
+    private static Set<Integer> mentionedMemberIds(List<EntityReference> references) {
+        return references.stream()
+            .filter(reference -> "user".equals(reference.getRefType()))
+            .map(EntityReference::getRefId)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     private static String requireClientToken(String clientToken) {

@@ -3741,6 +3741,14 @@ export function replyToCommentThread(
 }
 
 /**
+ * Edits the caller's own comment within the 15-minute edit window and returns
+ * the updated comment with re-synced references.
+ */
+export function editRecordComment(commentId: number, content: string, init: RequestInit = {}) {
+    return patchJson<Types.RecordComment>(`/api/comments/${commentId}`, { content }, init);
+}
+
+/**
  * Redacts a comment. The row survives as a tombstone; authors may redact their
  * own comments, others need the moderate permission.
  */
