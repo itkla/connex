@@ -173,6 +173,7 @@ public final class TablePlaneRegistry {
         "provider_captured_participant",
         "provider_participant_decision",
         "record_comment",
+        "record_comment_reaction",
         "record_comment_thread",
         "report_definition",
         "report_goal",

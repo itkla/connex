@@ -1,14 +1,33 @@
 'use client';
 
-import type { Ref } from 'react';
+import { useState, type Ref } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { TrashIcon } from '@heroicons/react/24/outline';
+import { FaceSmileIcon, TrashIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
-import type { RecordComment } from '@/app/lib/types';
+import type { RecordComment, RecordCommentReactionKey } from '@/app/lib/types';
 import { formatDateTime } from '@/app/lib/utils';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+const REACTION_KEYS = [
+    'thumbs_up',
+    'thumbs_down',
+    'heart',
+    'celebrate',
+    'eyes',
+    'laugh',
+] as const satisfies readonly RecordCommentReactionKey[];
+
+const REACTION_EMOJI: Record<RecordCommentReactionKey, string> = {
+    thumbs_up: '👍',
+    thumbs_down: '👎',
+    heart: '❤️',
+    celebrate: '🎉',
+    eyes: '👀',
+    laugh: '😄',
+};
 
 type Props = {
     comment: RecordComment;
@@ -16,7 +35,9 @@ type Props = {
     highlighted: boolean;
     highlightRef?: Ref<HTMLLIElement>;
     canDelete: boolean;
+    canReact: boolean;
     onDelete: (comment: RecordComment) => void;
+    onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
 };
 
 /**
@@ -30,12 +51,16 @@ export default function CommentRow({
     highlighted,
     highlightRef,
     canDelete,
+    canReact,
     onDelete,
+    onToggleReaction,
 }: Props) {
     const t = useTranslations('Comments');
     const locale = useLocale();
+    const [pickerOpen, setPickerOpen] = useState(false);
     const deleted = comment.deletedAt != null;
     const authorName = comment.author?.displayName ?? t('formerMember');
+    const reactions = comment.reactions ?? [];
 
     return (
         <li
@@ -68,6 +93,66 @@ export default function CommentRow({
                         className="text-sm text-foreground"
                         block
                     />
+                )}
+                {(reactions.length > 0 || (canReact && !deleted)) && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {reactions.map((summary) => (
+                            <button
+                                key={summary.reaction}
+                                type="button"
+                                disabled={!canReact || (deleted && !summary.reactedByMe)}
+                                onClick={() => onToggleReaction(comment, summary.reaction)}
+                                aria-label={t('reactionLabel', {
+                                    reaction: t(`reaction_${summary.reaction}`),
+                                    count: summary.count,
+                                })}
+                                aria-pressed={summary.reactedByMe}
+                                className={cn(
+                                    'inline-flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 text-xs ring-1 ring-inset transition-colors',
+                                    summary.reactedByMe
+                                        ? 'bg-brand/10 ring-brand/40 text-foreground'
+                                        : 'bg-muted ring-border text-muted-foreground hover:bg-muted/70',
+                                    !canReact && 'pointer-events-none',
+                                )}
+                            >
+                                <span aria-hidden>{REACTION_EMOJI[summary.reaction]}</span>
+                                {summary.count}
+                            </button>
+                        ))}
+                        {canReact && !deleted && (
+                            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                                <PopoverTrigger
+                                    render={
+                                        <button
+                                            type="button"
+                                            aria-label={t('addReaction')}
+                                            title={t('addReaction')}
+                                            className="inline-flex cursor-pointer items-center rounded-full p-2 text-muted-foreground transition-[color,background-color,opacity] hover:bg-muted hover:text-foreground focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100"
+                                        >
+                                            <FaceSmileIcon className="size-4" />
+                                        </button>
+                                    }
+                                />
+                                <PopoverContent className="flex w-auto gap-1 p-1.5">
+                                    {REACTION_KEYS.map((reaction) => (
+                                        <button
+                                            key={reaction}
+                                            type="button"
+                                            aria-label={t(`reaction_${reaction}`)}
+                                            title={t(`reaction_${reaction}`)}
+                                            onClick={() => {
+                                                setPickerOpen(false);
+                                                onToggleReaction(comment, reaction);
+                                            }}
+                                            className="grid size-11 cursor-pointer place-items-center rounded-md text-lg transition-colors hover:bg-muted"
+                                        >
+                                            {REACTION_EMOJI[reaction]}
+                                        </button>
+                                    ))}
+                                </PopoverContent>
+                            </Popover>
+                        )}
+                    </div>
                 )}
             </div>
             {canDelete && (

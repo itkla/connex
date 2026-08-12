@@ -8,15 +8,22 @@ import { LoaderCircle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import {
+    addCommentReaction,
     ApiError,
     createCommentThread,
     deleteRecordComment,
     getCommentThreads,
+    removeCommentReaction,
     reopenCommentThread,
     replyToCommentThread,
     resolveCommentThread,
 } from '@/app/lib/api';
-import type { RecordComment, RecordCommentTargetType, RecordCommentThread } from '@/app/lib/types';
+import type {
+    RecordComment,
+    RecordCommentReactionKey,
+    RecordCommentTargetType,
+    RecordCommentThread,
+} from '@/app/lib/types';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import CommentDeleteDialog from '@/app/components/records/comments/CommentDeleteDialog';
@@ -255,6 +262,42 @@ export default function CommentsSection({
         }
     }, [submitting, replyThreadId, replyValue, t]);
 
+    const reactionBusyIds = useRef<Set<number>>(new Set());
+
+    const handleToggleReaction = useCallback(
+        async (comment: RecordComment, reaction: RecordCommentReactionKey) => {
+            if (reactionBusyIds.current.has(comment.id)) return;
+            reactionBusyIds.current.add(comment.id);
+            const mine = comment.reactions?.some(
+                (summary) => summary.reaction === reaction && summary.reactedByMe,
+            );
+            try {
+                const summary = mine
+                    ? await removeCommentReaction(comment.id, reaction)
+                    : await addCommentReaction(comment.id, reaction);
+                setThreads((prev) =>
+                    prev.map((thread) =>
+                        thread.id === comment.threadId
+                            ? {
+                                  ...thread,
+                                  comments: thread.comments.map((existing) =>
+                                      existing.id === comment.id
+                                          ? { ...existing, reactions: summary }
+                                          : existing,
+                                  ),
+                              }
+                            : thread,
+                    ),
+                );
+            } catch {
+                toastError(t('reactionFailed'));
+            } finally {
+                reactionBusyIds.current.delete(comment.id);
+            }
+        },
+        [t],
+    );
+
     const confirmDelete = useCallback(async () => {
         if (!pendingDelete || deleting) return;
         setDeleting(true);
@@ -385,6 +428,7 @@ export default function CommentsSection({
                                 }}
                                 onReplySubmit={handleReply}
                                 onDelete={setPendingDelete}
+                                onToggleReaction={handleToggleReaction}
                                 onResolve={() => handleStateTransition(thread, 'resolve')}
                                 onReopen={() => handleStateTransition(thread, 'reopen')}
                             />

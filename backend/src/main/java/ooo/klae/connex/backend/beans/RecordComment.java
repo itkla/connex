@@ -22,4 +22,5 @@ public class RecordComment {
     private String authorDisplayName;
     private String authorProfilePictureUrl;
     private List<EntityReference> references = List.of();
+    private List<RecordCommentReactionSummary> reactions = List.of();
 }

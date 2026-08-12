@@ -252,6 +252,7 @@ class UserOffboardingOrderTest {
         order.verify(recordCommentMapper).clearDeletersAnywhere(9);
         order.verify(recordCommentMapper).clearThreadCreatorsAnywhere(9);
         order.verify(recordCommentMapper).clearThreadResolversAnywhere(9);
+        order.verify(recordCommentMapper).deleteReactionsAnywhere(9);
         order.verify(suppressionMapper).clearCreatorsAnywhere(9);
         order.verify(relationshipSignalMapper).deleteActorStateAnywhere(9);
     }

@@ -5,7 +5,9 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.RecordComment;
+import ooo.klae.connex.backend.beans.RecordCommentReactionSummary;
 import ooo.klae.connex.backend.beans.RecordCommentThread;
+import ooo.klae.connex.backend.dto.RecordCommentIndicatorDto;
 
 /** Workspace-scoped persistence for record comment threads and immutable comments. */
 public interface RecordCommentMapper {
@@ -50,6 +52,29 @@ public interface RecordCommentMapper {
     RecordComment getCommentByClientToken(
         @Param("workspaceId") int workspaceId,
         @Param("clientToken") String clientToken);
+
+    List<RecordCommentReactionSummary> getReactionSummaries(
+        @Param("workspaceId") int workspaceId,
+        @Param("commentIds") List<Long> commentIds,
+        @Param("userId") int userId);
+
+
+    int insertReaction(
+        @Param("workspaceId") int workspaceId,
+        @Param("commentId") long commentId,
+        @Param("userId") int userId,
+        @Param("reaction") String reaction);
+
+    int deleteReaction(
+        @Param("workspaceId") int workspaceId,
+        @Param("commentId") long commentId,
+        @Param("userId") int userId,
+        @Param("reaction") String reaction);
+
+    List<RecordCommentIndicatorDto> getOpenThreadIndicators(
+        @Param("workspaceId") int workspaceId,
+        @Param("targetType") String targetType,
+        @Param("targetIds") List<Integer> targetIds);
 
     int insertThread(RecordCommentThread thread);
 
@@ -99,4 +124,7 @@ public interface RecordCommentMapper {
 
     /** Clears thread resolution provenance for a permanently erased account. */
     void clearThreadResolversAnywhere(@Param("userId") int userId);
+
+    /** Deletes reactions for a permanently erased account. */
+    void deleteReactionsAnywhere(@Param("userId") int userId);
 }

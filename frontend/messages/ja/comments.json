@@ -31,6 +31,16 @@
     "postFailed": "コメントを投稿できませんでした",
     "deleteFailed": "コメントを削除できませんでした",
     "posted": "コメントを投稿しました",
-    "deleted": "コメントを削除しました"
+    "deleted": "コメントを削除しました",
+    "openThreads": "未解決スレッド{count}件",
+    "addReaction": "リアクションを追加",
+    "reactionLabel": "{reaction}、{count}人",
+    "reactionFailed": "リアクションを更新できませんでした",
+    "reaction_thumbs_up": "いいね",
+    "reaction_thumbs_down": "よくないね",
+    "reaction_heart": "ハート",
+    "reaction_celebrate": "お祝い",
+    "reaction_eyes": "注目",
+    "reaction_laugh": "笑い"
   }
 }
