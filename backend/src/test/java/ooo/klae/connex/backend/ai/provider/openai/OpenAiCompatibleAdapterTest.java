@@ -44,6 +44,7 @@ import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
@@ -70,6 +71,20 @@ class OpenAiCompatibleAdapterTest {
     @Test
     void providerId_registersOpenAiCompatibleAdapter() {
         assertEquals("openai_compatible", adapter.providerId());
+        assertEquals(AiReasoningMode.TAGGED, adapter.reasoningCapability(null));
+        assertEquals(4_096, adapter.contextWindowTokens(null));
+        assertEquals(128_000, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemma-4-31b-it")));
+        assertEquals(128_000, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "google/gemma-4-31b-it")));
+        assertEquals(128_000, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemma-3-27b-it")));
+        assertEquals(32_768, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemma-3-1b-it")));
+        assertEquals(32_768, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemma-3-270m-it")));
+        assertEquals(32_768, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemma-3n-e4b-it")));
     }
 
     @Test
@@ -166,6 +181,38 @@ class OpenAiCompatibleAdapterTest {
         assertSame(deadlines.getAllValues().get(0), deadlines.getAllValues().get(2));
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
                 result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_taggedReasoningHonestlyUsesPromptOnlyStructuredEnforcement() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn(validResponse());
+        AiCompletionRequest base = schemaRequest();
+        AiCompletionRequest request = new AiCompletionRequest(
+                base.target(),
+                base.credentials(),
+                base.systemPrompt(),
+                base.messages(),
+                base.images(),
+                base.outputMode(),
+                base.responseSchema(),
+                AiReasoningMode.TAGGED,
+                base.providerAttemptExecutor(),
+                base.maxTokens(),
+                base.temperature());
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient).complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), body.capture(),
+                any(AiRequestDeadline.class));
+        assertFalse(objectMapper.readTree(body.getValue()).has("response_format"));
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
+                result.structuredOutputEnforcement());
+        assertEquals(AiReasoningMode.TAGGED, result.reasoningMode());
     }
 
     @Test

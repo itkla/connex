@@ -81,6 +81,7 @@ public class AiFeatureGate {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         return governanceService.isEnabled(workspaceId)
+                && workspaceService.isMember(workspaceId, actorId)
                 && workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE);
     }
 }

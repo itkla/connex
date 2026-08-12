@@ -12,6 +12,7 @@ import java.util.Objects;
  * @param images bounded embedded images attached to the first user message
  * @param outputMode requested provider response shape
  * @param responseSchema optional provider-neutral JSON Schema for structured enforcement
+ * @param reasoningMode provider reasoning protocol selected for this request
  * @param providerAttemptExecutor provider-send egress boundary
  * @param maxTokens provider output token cap
  * @param temperature provider sampling temperature
@@ -24,6 +25,7 @@ public record AiCompletionRequest(
         List<AiInputImage> images,
         AiOutputMode outputMode,
         AiResponseSchema responseSchema,
+        AiReasoningMode reasoningMode,
         AiProviderAttemptExecutor providerAttemptExecutor,
         int maxTokens,
         double temperature) {
@@ -34,6 +36,7 @@ public record AiCompletionRequest(
         messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
         images = List.copyOf(Objects.requireNonNull(images, "images"));
         Objects.requireNonNull(outputMode, "outputMode");
+        Objects.requireNonNull(reasoningMode, "reasoningMode");
         Objects.requireNonNull(providerAttemptExecutor, "providerAttemptExecutor");
         if (outputMode == AiOutputMode.TEXT && responseSchema != null) {
             throw new IllegalArgumentException("AI text completion cannot declare a response schema");
@@ -51,10 +54,25 @@ public record AiCompletionRequest(
             List<AiInputImage> images,
             AiOutputMode outputMode,
             AiResponseSchema responseSchema,
+            AiProviderAttemptExecutor providerAttemptExecutor,
             int maxTokens,
             double temperature) {
         this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema,
-                AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
+                AiReasoningMode.NONE, providerAttemptExecutor, maxTokens, temperature);
+    }
+
+    public AiCompletionRequest(
+            AiProviderTarget target,
+            AiCredentials credentials,
+            String systemPrompt,
+            List<AiMessage> messages,
+            List<AiInputImage> images,
+            AiOutputMode outputMode,
+            AiResponseSchema responseSchema,
+            int maxTokens,
+            double temperature) {
+        this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema,
+                AiReasoningMode.NONE, AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
     }
 
     public AiCompletionRequest(
@@ -67,7 +85,7 @@ public record AiCompletionRequest(
             int maxTokens,
             double temperature) {
         this(target, credentials, systemPrompt, messages, images, outputMode, null,
-                AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
+                AiReasoningMode.NONE, AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
     }
 
     @Override
@@ -76,6 +94,7 @@ public record AiCompletionRequest(
                 + ", credentials=<redacted>, systemPrompt=<redacted>, messages=<redacted>, maxTokens="
                 + maxTokens + ", images=<redacted>, outputMode=" + outputMode
                 + ", responseSchema=" + (responseSchema == null ? "none" : responseSchema.name())
+                + ", reasoningMode=" + reasoningMode
                 + ", temperature=" + temperature + "]";
     }
 }

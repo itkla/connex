@@ -124,7 +124,7 @@ public interface CompanyMapper {
     /** True only when the workspace owns the company AND it is archived; for restore write scoping. */
     boolean existsOwnedArchived(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<String> findMentionedNames(
+    List<Company> findMentionedRecords(
             @Param("workspaceId") int workspaceId,
             @Param("text") String text,
             @Param("limit") int limit);

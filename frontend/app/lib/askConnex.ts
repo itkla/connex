@@ -23,6 +23,12 @@ export type AskConnexMessageGroup = {
     messages: AiChatMessage[];
 };
 
+/** Viewer-safe transcript rows plus whether the compacted-history marker must be rendered. */
+export type AskConnexTranscript = {
+    messages: AiChatMessage[];
+    historySummarized: boolean;
+};
+
 /** Persisted descriptor needed to reconcile one accepted assistant turn after refresh. */
 export type StoredAskConnexTurn = {
     sessionId: number;
@@ -222,6 +228,18 @@ export function askConnexLatestMessages(
         .flatMap((page) => page)
         .toSorted((left, right) => left.seq - right.seq)
         .slice(-pageSize);
+}
+
+/** Removes server-only summary rows while retaining their visible transcript-marker state. */
+export function askConnexTranscript(
+    messages: readonly AiChatMessage[],
+    sessionHistorySummarized: boolean,
+): AskConnexTranscript {
+    return {
+        messages: messages.filter((message) => message.historySummarized !== true),
+        historySummarized: sessionHistorySummarized
+            || messages.some((message) => message.historySummarized === true),
+    };
 }
 
 /** Loads a stable newest-message window, retrying when concurrent writes move the page boundary. */

@@ -7,6 +7,7 @@ import {
     ArrowDownIcon,
     ArrowUpIcon,
     CheckIcon,
+    ChevronRightIcon,
     ClockIcon,
     EllipsisHorizontalIcon,
     ExclamationCircleIcon,
@@ -35,6 +36,7 @@ import type { AskConnexAttachment, AskConnexTurnState } from '@/app/lib/askConne
 import {
     askConnexCitationHref,
     askConnexCitations,
+    askConnexTranscript,
     groupAskConnexMessages,
     latestAskConnexSuggestions,
 } from '@/app/lib/askConnex';
@@ -129,6 +131,7 @@ type AskConnexDrawerLabels = {
     emptyBody: string;
     emptyTitle: string;
     formerMember: string;
+    historySummarized: string;
     invitation: string;
     invitations: string;
     invite: string;
@@ -164,6 +167,7 @@ type AskConnexDrawerLabels = {
     shared: string;
     shareTitle: string;
     suggestedFollowUps: string;
+    thinking: string;
     title: string;
     tooLong: string;
     typing: (names: string) => string;
@@ -301,6 +305,33 @@ function MessageSuggestions({
     );
 }
 
+function MessageReasoning({ reasoning, label }: { reasoning: string | null | undefined; label: string }) {
+    const content = reasoning?.trim();
+    if (!content) return null;
+
+    return (
+        <details className="group text-xs text-muted-foreground">
+            <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <ChevronRightIcon className="size-3.5 shrink-0 group-open:rotate-90" />
+                <span>{label}</span>
+            </summary>
+            <div className="ml-2 whitespace-pre-wrap break-words border-l border-border py-1 pl-4 leading-relaxed">
+                {content}
+            </div>
+        </details>
+    );
+}
+
+function HistorySummaryMarker({ label }: { label: string }) {
+    return (
+        <div role="note" className="flex items-center gap-3 py-1 text-xs text-muted-foreground">
+            <span aria-hidden className="h-px flex-1 bg-border" />
+            <span>{label}</span>
+            <span aria-hidden className="h-px flex-1 bg-border" />
+        </div>
+    );
+}
+
 function SenderAvatar({ user, label }: { user: boolean; label: string }) {
     const initial = label.trim().slice(0, 1).toLocaleUpperCase();
     return (
@@ -357,6 +388,7 @@ function TranscriptMessage({
                         {author}
                     </MessageHeader>
                 ) : null}
+                {!user ? <MessageReasoning reasoning={message.reasoning} label={labels.thinking} /> : null}
                 <motion.div
                     initial={animateEntrance ? (reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.375rem)' }) : false}
                     animate={{ opacity: 1, transform: 'translateY(0rem)' }}
@@ -635,12 +667,18 @@ function ConversationSurface({
     onRemoveAttachment,
     onSend,
 }: ConversationSurfaceProps) {
-    const groups = useMemo(() => groupAskConnexMessages(messages), [messages]);
+    const transcript = useMemo(
+        () => askConnexTranscript(messages, activeSession?.historySummarized === true),
+        [activeSession?.historySummarized, messages],
+    );
+    const visibleMessages = transcript.messages;
+    const groups = useMemo(() => groupAskConnexMessages(visibleMessages), [visibleMessages]);
     const suggestions = useMemo(
         () => latestAskConnexSuggestions(messages, working),
         [messages, working],
     );
-    const latestMessageId = messages.at(-1)?.id ?? null;
+    const latestMessageId = visibleMessages.at(-1)?.id ?? null;
+    const historySummarized = transcript.historySummarized;
     const canSend = composer.trim().length > 0
         && loadState === 'ready'
         && !contextOverflow
@@ -708,7 +746,12 @@ function ConversationSurface({
                                     />
                                 </MessageScrollerItem>
                             ) : null}
-                            {loadState === 'ready' && messages.length === 0 ? (
+                            {loadState === 'ready' && historySummarized ? (
+                                <MessageScrollerItem messageId="history-summary" className="px-4 pt-5">
+                                    <HistorySummaryMarker label={labels.historySummarized} />
+                                </MessageScrollerItem>
+                            ) : null}
+                            {loadState === 'ready' && visibleMessages.length === 0 ? (
                                 <MessageScrollerItem messageId="empty">
                                     <EmptyState
                                         icon={SparklesIcon}
@@ -737,7 +780,7 @@ function ConversationSurface({
                                     />
                                 </MessageScrollerItem>
                             ) : null}
-                            {loadState === 'ready' && messages.length > 0 ? (
+                            {loadState === 'ready' && visibleMessages.length > 0 ? (
                                 <>
                                     {groups.map((group) => {
                                         const first = group.messages[0];

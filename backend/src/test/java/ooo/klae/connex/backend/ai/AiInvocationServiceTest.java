@@ -4,11 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -20,6 +23,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
@@ -42,9 +47,11 @@ import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
@@ -73,6 +80,7 @@ class AiInvocationServiceTest {
     @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private AiProvider aiProvider;
     @Mock private AiProviderRouter aiProviderRouter;
+    @Mock private Runnable providerAttemptGuard;
     @Mock private Runnable providerTransport;
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
@@ -90,6 +98,7 @@ class AiInvocationServiceTest {
         service = new AiInvocationService(
                 aiFeatureGate, aiInvocationAdmissionService, aiMediaAdmissionService,
                 aiProviderConfigService, aiProviderRouter, restrictionEpoch,
+                new AiAssistantAccessFence(),
                 workspaceService, auditService, new ObjectMapper(), budgetCoordinator);
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
                 null, null, null, null, false, true,
@@ -101,8 +110,11 @@ class AiInvocationServiceTest {
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(ACTOR_ID);
         lenient().when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(resolved);
         lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
+        lenient().when(aiProvider.reasoningCapability(any())).thenReturn(AiReasoningMode.TAGGED);
+        lenient().when(aiProvider.contextWindowTokens(any())).thenReturn(4096);
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
-        lenient().when(budgetCoordinator.reserve(eq(ORG_ID), any(AiInvocation.class)))
+        lenient().when(budgetCoordinator.reserve(
+                eq(ORG_ID), any(AiInvocation.class), anyString()))
                 .thenReturn(budgetLease, fallbackBudgetLease);
     }
 
@@ -122,6 +134,38 @@ class AiInvocationServiceTest {
         assertNoContent(metadata);
         verify(aiProviderConfigService, never()).resolveForOrg(ORG_ID, ACTOR_ID);
         verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void currentProviderCapabilitiesResolveConfiguredAdapterWithoutEgress() {
+        when(aiProvider.structuredOutputCapability(resolved.target()))
+                .thenReturn(AiStructuredOutputEnforcement.PROMPT_ONLY);
+        when(aiProvider.reasoningCapability(resolved.target()))
+                .thenReturn(AiReasoningMode.NATIVE);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(200_000);
+
+        AiProviderCapabilities capabilities =
+                service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT);
+
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY, capabilities.structuredOutput());
+        assertEquals(AiReasoningMode.NATIVE, capabilities.reasoning());
+        assertEquals(200_000, capabilities.contextWindowTokens());
+        verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void completeRejectsPromptThatExceedsResolvedProviderContextWindow() {
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(65);
+        AiInvocation invocation = invocation("Summarize relationship state");
+
+        AiProviderException thrown = assertThrows(
+                AiProviderException.class,
+                () -> service.complete(invocation));
+
+        assertEquals("AI prompt exceeds the configured model context window", thrown.getMessage());
+        assertEquals("context_window", singleAuditMetadata().get("reason"));
+        verify(aiProvider, never()).complete(any());
+        verify(budgetCoordinator, never()).reserve(eq(ORG_ID), any(AiInvocation.class));
     }
 
     @Test
@@ -174,7 +218,7 @@ class AiInvocationServiceTest {
     @Test
     void complete_exhaustedOrganizationBudgetIsAnExplicitBlockedState() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(budgetCoordinator.reserve(ORG_ID, invocation))
+        when(budgetCoordinator.reserve(eq(ORG_ID), same(invocation), anyString()))
                 .thenThrow(new AiBudgetExhaustedException());
 
         AiBudgetExhaustedException exhausted = assertThrows(
@@ -234,7 +278,6 @@ class AiInvocationServiceTest {
         assertEquals("attempt", metadata.get("outcome"));
         assertNoContent(metadata);
         verify(aiMediaAdmissionService, never()).acquire(anyInt(), anyList());
-        verify(aiProviderRouter, never()).adapterFor(any());
         verify(aiProvider, never()).complete(any());
         verify(auditService, never()).recordIndependentScoped(
             any(), any(), any(), any(), any(), any(), any(), any());
@@ -457,6 +500,147 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void completeStructuredRepairableCapturesAndDemasksReasoningSeparately() throws Exception {
+        AiInvocation invocation = reasoningInvocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult(
+                "<thinking>Compare {{P1}} with the active renewal.</thinking>"
+                        + "{\"rationale\":\"Ping {{P1}}.\"}",
+                40, 15, "end_turn",
+                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                "",
+                AiReasoningMode.TAGGED));
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro_rationale",
+                new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        AiStructuredRepairAttempt<IntroRationaleContent> attempt =
+                service.completeStructuredRepairable(
+                        invocation,
+                        IntroRationaleContent.class,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        schema);
+
+        assertEquals("Ping Mina Patel.", asParsed(attempt.outcome()).value().rationale());
+        assertEquals(
+                "Compare Mina Patel with the active renewal.",
+                attempt.reasoning().orElseThrow());
+        ArgumentCaptor<AiCompletionRequest> request =
+                ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(request.capture());
+        assertEquals(AiReasoningMode.TAGGED, request.getValue().reasoningMode());
+        assertTrue(request.getValue().systemPrompt().contains("<thinking>"));
+    }
+
+    @Test
+    void completeStructuredRepairableFailsClosedOnAmbiguousReasoningBoundary() throws Exception {
+        AiInvocation invocation = reasoningInvocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult(
+                "<thinking>tagged plan</thinking>{\"rationale\":\"Ping {{P1}}.\"}",
+                40, 15, "end_turn",
+                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                "native plan",
+                AiReasoningMode.NATIVE));
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro_rationale",
+                new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        AiStructuredRepairAttempt<IntroRationaleContent> attempt =
+                service.completeStructuredRepairable(
+                        invocation,
+                        IntroRationaleContent.class,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        schema);
+
+        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertTrue(attempt.reasoning().isEmpty());
+        assertTrue(attempt.repair().isEmpty());
+    }
+
+    @Test
+    void completeStructuredRepairableFailsClosedOnTaggedReasoningInsideAnswer() throws Exception {
+        AiInvocation invocation = reasoningInvocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"<thinking>private plan</thinking>Ping {{P1}}.\"}",
+                40, 15, "end_turn",
+                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                "",
+                AiReasoningMode.TAGGED));
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro", new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        AiStructuredRepairAttempt<IntroRationaleContent> attempt =
+                service.completeStructuredRepairable(
+                        invocation,
+                        IntroRationaleContent.class,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        schema);
+
+        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertTrue(attempt.reasoning().isEmpty());
+        assertTrue(attempt.repair().isEmpty());
+    }
+
+    @Test
+    void completeStructuredRepairableFailsClosedOnReasoningTagInsideNativeAnswer() throws Exception {
+        AiInvocation invocation = reasoningInvocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"<thinking>private plan</thinking>Ping {{P1}}.\"}",
+                40, 15, "end_turn",
+                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                "native plan",
+                AiReasoningMode.NATIVE));
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro", new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        AiStructuredRepairAttempt<IntroRationaleContent> attempt =
+                service.completeStructuredRepairable(
+                        invocation,
+                        IntroRationaleContent.class,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        schema);
+
+        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertTrue(attempt.reasoning().isEmpty());
+        assertTrue(attempt.repair().isEmpty());
+    }
+
+    @Test
+    void structuredRepairAttemptToStringRedactsReasoning() {
+        AiStructuredRepairAttempt<IntroRationaleContent> attempt =
+                new AiStructuredRepairAttempt<>(
+                        new AiStructuredOutcome.Malformed<>("malformed", 1, 2, "stop"),
+                        Optional.empty(),
+                        Optional.of("PRIVATE_REASONING"));
+
+        assertFalse(attempt.toString().contains("PRIVATE_REASONING"));
+        assertTrue(attempt.toString().contains("reasoning=<redacted>"));
+    }
+
+    @Test
+    void completeStructuredRepairableRejectsReasoningWithDirectIdentifierLeak() throws Exception {
+        AiInvocation invocation = reasoningInvocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Ping {{P1}}.\"}",
+                40, 15, "end_turn",
+                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                "Contact ada@example.com before continuing.",
+                AiReasoningMode.NATIVE));
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro_rationale",
+                new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        AiStructuredRepairAttempt<IntroRationaleContent> attempt =
+                service.completeStructuredRepairable(
+                        invocation,
+                        IntroRationaleContent.class,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        schema);
+
+        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertTrue(attempt.reasoning().isEmpty());
+    }
+
+    @Test
     void completeStructured_success_emitsAttemptAndSuccessAuditWithoutContent() {
         AiInvocation invocation = invocation("Summarize relationship state");
         providerReturns(new AiCompletionResult(
@@ -511,6 +695,67 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void repairableProviderAttemptGuardRunsBeforeEveryProviderAttempt() throws Exception {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    providerTransport.run();
+                    throw new AiProviderRequestRejectedException("provider", 400);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                assertEquals("provider invocation failed with status 400", exception.getMessage());
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                return "fallback response";
+            });
+            return new AiCompletionResult(
+                    "{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn",
+                    AiStructuredOutputEnforcement.JSON_OBJECT);
+        });
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro_rationale",
+                new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        service.completeStructuredRepairable(
+                invocation, IntroRationaleContent.class,
+                AiRawOutputGuard.PERMIT_ALL, schema, directAdmission, providerAttemptGuard);
+
+        InOrder order = inOrder(
+                providerAttemptGuard, directAdmission, fallbackAdmission, providerTransport);
+        order.verify(providerAttemptGuard).run();
+        order.verify(directAdmission).commitInvocation();
+        order.verify(providerTransport).run();
+        order.verify(providerAttemptGuard).run();
+        order.verify(fallbackAdmission).commitInvocation();
+        order.verify(providerTransport).run();
+    }
+
+    @Test
+    void providerConfigurationChangeRefusesStaleResolvedCredentialsAtEgress() {
+        ResolvedAiProvider changed = new ResolvedAiProvider(
+                "openai_compatible", null, "gemma-4-31b-it",
+                "https://api.example.test/v1", null, null, null,
+                false, true, AiCredentials.of(Map.of("apiKey", "NEW_KEY")));
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
+                .thenReturn(resolved, changed);
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"done\"}", 20, 8, "stop"));
+
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> service.completeStructured(
+                        invocation("Summarize relationship state"),
+                        IntroRationaleContent.class));
+
+        assertEquals("AI provider configuration changed before egress", exception.getMessage());
+        verify(providerTransport, never()).run();
+    }
+
+    @Test
     void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressFence() {
         AiInvocation invocation = invocation("Summarize relationship state");
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
@@ -540,7 +785,8 @@ class AiInvocationServiceTest {
         verify(fallbackAdmission).commitInvocation();
         verify(fallbackAdmission).close();
         verify(providerTransport, times(2)).run();
-        verify(budgetCoordinator, times(2)).reserve(ORG_ID, invocation);
+        verify(budgetCoordinator, times(2)).reserve(
+                eq(ORG_ID), same(invocation), anyString());
         verify(budgetLease).close();
         verify(fallbackBudgetLease).settle(20, 8);
         verify(auditService, times(2)).recordStrictIndependentScoped(
@@ -719,6 +965,17 @@ class AiInvocationServiceTest {
                 .userTurn(maskedPromptText + " for " + person)
                 .build();
         return new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+    }
+
+    private AiInvocation reasoningInvocation(String maskedPromptText) {
+        AiInvocation invocation = invocation(maskedPromptText);
+        return new AiInvocation(
+                invocation.feature(),
+                invocation.context(),
+                invocation.prompt(),
+                invocation.maxTokens(),
+                invocation.temperature(),
+                true);
     }
 
     private static AiInvocation withImage(AiInvocation invocation) {

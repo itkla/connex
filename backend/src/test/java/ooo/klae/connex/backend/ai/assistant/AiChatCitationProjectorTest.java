@@ -88,6 +88,46 @@ class AiChatCitationProjectorTest {
                 projector.suggestions(3, 5, 11, List.of(message)).get(23));
     }
 
+    @Test
+    void reasoningIsVisibleToParticipantWhoRequestedTurnRatherThanSessionOwner() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson(
+                "{\"turnId\":7,\"reasoning\":\"Compared the authorized relationship signals.\"}");
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+                .thenReturn(List.of(turn(7, 12)));
+
+        assertEquals(
+                Map.of(23, "Compared the authorized relationship signals."),
+                projector.reasoning(3, 5, 12, List.of(message)));
+        assertEquals(
+                Map.of(),
+                projector.reasoning(3, 5, 11, List.of(message)));
+    }
+
+    @Test
+    void unsafeStoredReasoningIsNeverProjected() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson(
+                "{\"turnId\":7,\"reasoning\":\"Email ada@example.com next.\"}");
+
+        assertEquals(Map.of(), projector.reasoning(3, 5, 12, List.of(message)));
+    }
+
+    @Test
+    void storedReasoningWithAnUnresolvedPlaceholderIsNeverProjected() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson(
+                "{\"turnId\":7,\"reasoning\":\"Compare {{P1}} next.\"}");
+
+        assertEquals(Map.of(), projector.reasoning(3, 5, 12, List.of(message)));
+    }
+
     private AiChatTurn turn(int id, Integer requesterId) {
         AiChatTurn turn = new AiChatTurn();
         turn.setId(id);

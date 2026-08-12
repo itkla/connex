@@ -17,6 +17,7 @@ public class AiChatSessionDto {
     private String participationStatus;
     private boolean archived;
     private boolean ownedByCurrentUser;
+    private boolean historySummarized;
     private String lastMessageAt;
     private String archivedAt;
     private String createdAt;
@@ -34,6 +35,7 @@ public class AiChatSessionDto {
         dto.setParticipationStatus(session.getParticipationStatus());
         dto.setArchived("archived".equals(session.getStatus()));
         dto.setOwnedByCurrentUser(session.isOwnedByCurrentUser());
+        dto.setHistorySummarized(session.isHistorySummarized());
         dto.setLastMessageAt(session.getLastMessageAt());
         dto.setArchivedAt(session.getArchivedAt());
         dto.setCreatedAt(session.getCreatedAt());

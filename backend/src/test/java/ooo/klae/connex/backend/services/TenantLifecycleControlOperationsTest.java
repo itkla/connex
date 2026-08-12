@@ -55,7 +55,11 @@ class TenantLifecycleControlOperationsTest {
 
     @BeforeEach
     void setUp() {
-        operations = new TenantLifecycleControlOperations(mapper, userMapper);
+        operations = new TenantLifecycleControlOperations(
+                mapper,
+                userMapper,
+                org.mockito.Mockito.mock(
+                        ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence.class));
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
     }
 

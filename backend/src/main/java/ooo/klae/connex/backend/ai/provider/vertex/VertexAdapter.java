@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -51,9 +52,47 @@ public class VertexAdapter implements AiProvider {
 
     @Override
     public AiStructuredOutputEnforcement structuredOutputCapability(AiProviderTarget target) {
-        return target != null && target.modelId() != null && target.modelId().startsWith("gemini")
+        return target != null && target.modelId() != null
+                && target.modelId().startsWith("gemini")
+                && !isGeminiImageModel(target.modelId().toLowerCase(java.util.Locale.ROOT))
                 ? AiStructuredOutputEnforcement.JSON_SCHEMA
                 : AiStructuredOutputEnforcement.PROMPT_ONLY;
+    }
+
+    @Override
+    public AiReasoningMode reasoningCapability(AiProviderTarget target) {
+        if (target == null || target.modelId() == null) {
+            return AiReasoningMode.TAGGED;
+        }
+        String modelId = target.modelId();
+        return supportsGeminiNativeReasoning(modelId) || supportsClaudeNativeReasoning(modelId)
+                ? AiReasoningMode.NATIVE
+                : AiReasoningMode.TAGGED;
+    }
+
+    @Override
+    public int contextWindowTokens(AiProviderTarget target) {
+        if (target == null || target.modelId() == null) {
+            return 4_096;
+        }
+        String normalized = target.modelId().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.startsWith("gemini-2.5-flash-image")) {
+            return 32_768;
+        }
+        if (normalized.startsWith("gemini-3-pro-image")) {
+            return 65_536;
+        }
+        if (isSupportedGeminiTextModel(normalized)) {
+            return 128_000;
+        }
+        return normalized.contains("claude-3")
+                || normalized.contains("claude-sonnet-4")
+                || normalized.contains("claude-opus-4")
+                || normalized.contains("claude-haiku-4")
+                || normalized.contains("claude-mythos")
+                || normalized.contains("claude-fable")
+                ? 200_000
+                : 4_096;
     }
 
     @Override
@@ -77,7 +116,8 @@ public class VertexAdapter implements AiProvider {
                 throw new AiProviderException("Vertex model does not support image input in this region");
             }
             URI endpoint = endpoint(projectId, region, modelId, family);
-            AiStructuredOutputEnforcement enforcement = requestedEnforcement(request, family);
+            AiStructuredOutputEnforcement enforcement = requestedEnforcement(
+                    request, family, structuredOutputCapability(target));
             String requestBody = switch (family) {
                 case GEMINI -> buildGeminiRequest(request, enforcement);
                 case CLAUDE -> buildClaudeRequest(request);
@@ -88,8 +128,10 @@ public class VertexAdapter implements AiProvider {
                 return vertexClient.complete(endpoint, accessToken, requestBody, deadline);
             });
             return switch (family) {
-                case GEMINI -> parseGeminiResponse(responseBody, enforcement);
-                case CLAUDE -> parseClaudeResponse(responseBody, enforcement);
+                case GEMINI -> parseGeminiResponse(
+                        responseBody, enforcement, request.reasoningMode());
+                case CLAUDE -> parseClaudeResponse(
+                        responseBody, enforcement, request.reasoningMode());
             };
         } catch (AiProviderException exception) {
             throw exception;
@@ -142,6 +184,9 @@ public class VertexAdapter implements AiProvider {
         ObjectNode generationConfig = root.putObject("generationConfig");
         generationConfig.put("maxOutputTokens", request.maxTokens());
         generationConfig.put("temperature", request.temperature());
+        if (request.reasoningMode() == AiReasoningMode.NATIVE) {
+            generationConfig.putObject("thinkingConfig").put("includeThoughts", true);
+        }
         if (enforcement != AiStructuredOutputEnforcement.PROMPT_ONLY) {
             generationConfig.put("responseMimeType", "application/json");
         }
@@ -185,13 +230,18 @@ public class VertexAdapter implements AiProvider {
             throw new AiProviderException("AI images require a user message");
         }
         root.put("max_tokens", request.maxTokens());
-        root.put("temperature", request.temperature());
+        if (request.reasoningMode() == AiReasoningMode.NATIVE) {
+            addClaudeNativeReasoning(root, request.target().modelId(), request.maxTokens());
+        } else {
+            root.put("temperature", request.temperature());
+        }
         return objectMapper.writeValueAsString(root);
     }
 
     private AiCompletionResult parseGeminiResponse(
             String responseBody,
-            AiStructuredOutputEnforcement enforcement) {
+            AiStructuredOutputEnforcement enforcement,
+            AiReasoningMode reasoningMode) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             if (root == null || !root.isObject()) {
@@ -203,16 +253,20 @@ public class VertexAdapter implements AiProvider {
             }
             JsonNode candidate = candidates.path(0);
             JsonNode parts = candidate.path("content").path("parts");
-            String text = concatenateGeminiText(parts);
+            String text = concatenateGeminiText(parts, false);
+            String reasoning = concatenateGeminiText(parts, true);
             JsonNode usage = root.path("usageMetadata");
             if (!usage.isObject()) {
                 throw invalidResponse();
             }
             int inputTokens = readRequiredInt(usage.path("promptTokenCount"));
-            int outputTokens = readRequiredInt(usage.path("candidatesTokenCount"));
+            int outputTokens = addTokenCounts(
+                    readRequiredInt(usage.path("candidatesTokenCount")),
+                    readOptionalInt(usage.path("thoughtsTokenCount")));
             String stopReason = readRequiredText(candidate.path("finishReason"));
             return new AiCompletionResult(
-                    text, inputTokens, outputTokens, stopReason, enforcement);
+                    text, inputTokens, outputTokens, stopReason, enforcement,
+                    reasoning, reasoningMode);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -222,13 +276,15 @@ public class VertexAdapter implements AiProvider {
 
     private AiCompletionResult parseClaudeResponse(
             String responseBody,
-            AiStructuredOutputEnforcement enforcement) {
+            AiStructuredOutputEnforcement enforcement,
+            AiReasoningMode reasoningMode) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             if (root == null || !root.isObject()) {
                 throw invalidResponse();
             }
             String text = concatenateClaudeText(root.path("content"));
+            String reasoning = concatenateClaudeReasoning(root.path("content"));
             JsonNode usage = root.path("usage");
             if (!usage.isObject()) {
                 throw invalidResponse();
@@ -237,7 +293,8 @@ public class VertexAdapter implements AiProvider {
             int outputTokens = readRequiredInt(usage.path("output_tokens"));
             String stopReason = readRequiredText(root.path("stop_reason"));
             return new AiCompletionResult(
-                    text, inputTokens, outputTokens, stopReason, enforcement);
+                    text, inputTokens, outputTokens, stopReason, enforcement,
+                    reasoning, reasoningMode);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -245,18 +302,21 @@ public class VertexAdapter implements AiProvider {
         }
     }
 
-    private static String concatenateGeminiText(JsonNode parts) {
+    private static String concatenateGeminiText(JsonNode parts, boolean reasoning) {
         if (!parts.isArray()) {
             throw invalidResponse();
         }
         StringBuilder text = new StringBuilder();
         for (JsonNode part : parts) {
+            if (part.path("thought").asBoolean(false) != reasoning) {
+                continue;
+            }
             JsonNode textNode = part.path("text");
             if (textNode.isString()) {
                 text.append(textNode.asString());
             }
         }
-        if (text.isEmpty()) {
+        if (text.isEmpty() && !reasoning) {
             throw invalidResponse();
         }
         return text.toString();
@@ -278,6 +338,26 @@ public class VertexAdapter implements AiProvider {
             throw invalidResponse();
         }
         return text.toString();
+    }
+
+    private static String concatenateClaudeReasoning(JsonNode content) {
+        if (!content.isArray()) {
+            return "";
+        }
+        StringBuilder reasoning = new StringBuilder();
+        for (JsonNode block : content) {
+            if (!"thinking".equals(block.path("type").asString(null))) {
+                continue;
+            }
+            String value = block.path("thinking").asString(null);
+            if (value != null && !value.isBlank()) {
+                if (!reasoning.isEmpty()) {
+                    reasoning.append("\n\n");
+                }
+                reasoning.append(value.strip());
+            }
+        }
+        return reasoning.toString();
     }
 
     private static String geminiRole(String role) {
@@ -307,7 +387,14 @@ public class VertexAdapter implements AiProvider {
 
     private static AiStructuredOutputEnforcement requestedEnforcement(
             AiCompletionRequest request,
-            ModelFamily family) {
+            ModelFamily family,
+            AiStructuredOutputEnforcement capability) {
+        if (capability == AiStructuredOutputEnforcement.PROMPT_ONLY
+                || request.reasoningMode() == AiReasoningMode.TAGGED
+                || family == ModelFamily.CLAUDE
+                && request.reasoningMode() == AiReasoningMode.NATIVE) {
+            return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
         if (family != ModelFamily.GEMINI || request.outputMode() != AiOutputMode.JSON) {
             return AiStructuredOutputEnforcement.PROMPT_ONLY;
         }
@@ -322,6 +409,72 @@ public class VertexAdapter implements AiProvider {
             throw new AiProviderException("Invalid Vertex model id");
         }
         return value;
+    }
+
+    private static boolean supportsClaudeNativeReasoning(String modelId) {
+        String normalized = modelId.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("claude-3-7-sonnet")
+                || normalized.contains("claude-sonnet-4")
+                || normalized.contains("claude-opus-4")
+                || normalized.contains("claude-haiku-4-5")
+                || normalized.contains("claude-mythos")
+                || normalized.contains("claude-fable");
+    }
+
+    private static boolean supportsGeminiNativeReasoning(String modelId) {
+        String normalized = modelId.toLowerCase(java.util.Locale.ROOT);
+        return !normalized.startsWith("gemini-2.5-flash-image")
+                && (normalized.startsWith("gemini-2.5-pro")
+                || normalized.startsWith("gemini-2.5-flash")
+                || normalized.startsWith("gemini-3-pro")
+                || normalized.startsWith("gemini-3-flash")
+                || normalized.startsWith("gemini-2.0-flash-thinking"));
+    }
+
+    private static boolean isSupportedGeminiTextModel(String modelId) {
+        return modelId.startsWith("gemini-1.5-pro")
+                || modelId.startsWith("gemini-1.5-flash")
+                || modelId.startsWith("gemini-2.0-flash")
+                || modelId.startsWith("gemini-2.0-flash-lite")
+                || modelId.startsWith("gemini-2.5-pro")
+                || modelId.startsWith("gemini-2.5-flash")
+                || modelId.startsWith("gemini-3-pro")
+                || modelId.startsWith("gemini-3-flash");
+    }
+
+    private static boolean isGeminiImageModel(String modelId) {
+        return modelId.startsWith("gemini-2.5-flash-image")
+                || modelId.startsWith("gemini-3-pro-image");
+    }
+
+    private static void addClaudeNativeReasoning(
+            ObjectNode root, String modelId, int maxTokens) {
+        if (maxTokens <= 1_024) {
+            throw new AiProviderException("Vertex Claude reasoning requires more than 1024 output tokens");
+        }
+        String normalized = modelId.toLowerCase(java.util.Locale.ROOT);
+        ObjectNode thinking = root.putObject("thinking");
+        if (normalized.contains("claude-mythos")
+                || normalized.contains("claude-fable")
+                || normalized.contains("claude-opus-4-7")
+                || normalized.contains("claude-opus-4-6")
+                || normalized.contains("claude-sonnet-4-6")) {
+            thinking.put("type", "adaptive");
+            return;
+        }
+        thinking.put("type", "enabled");
+        thinking.put("budget_tokens", 1_024);
+    }
+
+    private static int readOptionalInt(JsonNode node) {
+        if (!node.isIntegralNumber() || !node.canConvertToInt()) {
+            return 0;
+        }
+        return Math.max(0, node.intValue());
+    }
+
+    private static int addTokenCounts(int left, int right) {
+        return right > Integer.MAX_VALUE - left ? Integer.MAX_VALUE : left + right;
     }
 
     private static String requirePattern(String value, Pattern pattern, String error) {

@@ -83,6 +83,37 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void durableHistorySummaryIsQueryableButProjectsOnlyTranscriptMarker() {
+        AiChatSession session = privateSession(currentUser, "Compacted history");
+        AiChatMessage summary = new AiChatMessage();
+        summary.setWorkspaceId(workspace.getId());
+        summary.setSessionId(session.getId());
+        summary.setSeq(1);
+        summary.setAuthorKind("system");
+        summary.setContent("Server-only early relationship facts");
+        summary.setStructuredJson(
+                "{\"kind\":\"history_summary\",\"sourceFromSeq\":1,"
+                        + "\"throughSeq\":4,\"resources\":[]}");
+        chatMapper.insertMessage(summary);
+        assistantMessage(session.getId(), 2, "Visible recent answer", "{\"turnId\":1}");
+
+        AiChatSessionDetailDto detail = service.get(session.getId(), 1, 50);
+
+        assertTrue(detail.session().isHistorySummarized());
+        assertTrue(detail.messages().items().getFirst().isHistorySummarized());
+        assertEquals("", detail.messages().items().getFirst().getContent());
+        assertEquals(
+                "Server-only early relationship facts",
+                chatMapper.getHistorySummary(workspace.getId(), session.getId()).getContent());
+        assertEquals(
+                List.of(2),
+                chatMapper.listMessagesForCompaction(
+                        workspace.getId(), session.getId(), 0, 3, 10).stream()
+                        .map(AiChatMessage::getSeq)
+                        .toList());
+    }
+
+    @Test
     void sessionCreationExplicitlyControlsAutomaticTitleEligibility() {
         AiChatSessionCreateRequest automaticRequest = createRequest("New conversation");
         automaticRequest.setAutoTitle(true);

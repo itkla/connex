@@ -6,6 +6,7 @@ import {
     askConnexCitations,
     askConnexLatestMessagePages,
     askConnexLatestMessages,
+    askConnexTranscript,
     askConnexMessageContent,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
@@ -327,5 +328,38 @@ describe('Ask Connex transcript grouping', () => {
             { authorKind: 'assistant', ids: [4] },
             { authorKind: 'user', ids: [5] },
         ]);
+    });
+
+    it('keeps compaction visible without exposing the durable summary row', () => {
+        const summary = {
+            id: 1,
+            sessionId: 4,
+            seq: 1,
+            authorKind: 'system',
+            authorUserId: null,
+            authorDisplayName: null,
+            content: '',
+            historySummarized: true,
+            createdAt: '2026-08-11T10:00:00Z',
+        };
+        const visible = {
+            id: 2,
+            sessionId: 4,
+            seq: 2,
+            authorKind: 'assistant',
+            authorUserId: null,
+            authorDisplayName: null,
+            content: 'Recent answer',
+            createdAt: '2026-08-11T10:01:00Z',
+        };
+
+        expect(askConnexTranscript([summary, visible], false)).toEqual({
+            messages: [visible],
+            historySummarized: true,
+        });
+        expect(askConnexTranscript([visible], true)).toEqual({
+            messages: [visible],
+            historySummarized: true,
+        });
     });
 });

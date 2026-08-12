@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.dto.OrganizationLifecycleRef;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
@@ -38,6 +39,7 @@ public class TenantLifecycleControlOperations {
 
     private final TenantLifecycleControlMapper mapper;
     private final UserMapper userMapper;
+    private final AiAssistantAccessFence assistantAccessFence;
 
     /** Atomically validates an active workspace and acquires an export lease. */
     @Transactional(
@@ -164,6 +166,7 @@ public class TenantLifecycleControlOperations {
             int orgId,
             int workspaceId,
             int actorId) {
+        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         lockActor(actorId);
         WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(workspaceId);
         boolean rootExists = workspace != null;
@@ -201,11 +204,18 @@ public class TenantLifecycleControlOperations {
      * shared lock on, so no request can be created into the fence window and
      * then cascade away with the organization root.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+        propagation = Propagation.REQUIRES_NEW,
+        isolation = Isolation.READ_COMMITTED)
     public void markOrganizationTearingDown(int orgId, int actorId) {
+        List<Integer> workspaceIds = organizationWorkspaceIds(orgId);
+        assistantAccessFence.retainMutationFencesUntilTransactionCompletion(workspaceIds);
         lockActor(actorId);
         if (mapper.lockOrganization(orgId) == null) {
             throw new ResourceNotFoundException("Organization not found");
+        }
+        if (!workspaceIds.equals(organizationWorkspaceIds(orgId))) {
+            throw new ConflictException("Organization workspaces changed; retry teardown");
         }
         requireOwner(orgId, actorId);
         requireNoOpenOrganizationSubjectRequests(orgId);
@@ -215,6 +225,14 @@ public class TenantLifecycleControlOperations {
         mapper.markOrganizationTearingDown(orgId);
     }
 
+    private List<Integer> organizationWorkspaceIds(int orgId) {
+        return mapper.findWorkspacesInOrgAfter(orgId, 0, Integer.MAX_VALUE).stream()
+                .map(WorkspaceLifecycleRef::id)
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
     /** Deletes an already verified workspace root and its cascading control rows. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void deleteWorkspaceRoot(
@@ -222,6 +240,7 @@ public class TenantLifecycleControlOperations {
             int workspaceId,
             int actorId,
             OperationLease teardownLease) {
+        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         lockActor(actorId);
         WorkspaceLifecycleRef workspace = mapper.lockWorkspaceInOrg(workspaceId);
         WorkspaceLifecycleRef tombstone = workspace == null

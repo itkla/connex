@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
  * @param images bounded embedded images to send with the first user turn
  * @param maxTokens provider output token cap
  * @param temperature provider sampling temperature
+ * @param reasoningRequested whether the feature requests display-only model reasoning
  */
 public record AiInvocation(
         AiFeature feature,
@@ -24,7 +25,8 @@ public record AiInvocation(
         MaskedPrompt prompt,
         List<AiInputImage> images,
         int maxTokens,
-        double temperature) {
+        double temperature,
+        boolean reasoningRequested) {
 
     public AiInvocation(
             AiFeature feature,
@@ -32,7 +34,27 @@ public record AiInvocation(
             MaskedPrompt prompt,
             int maxTokens,
             double temperature) {
-        this(feature, context, prompt, List.of(), maxTokens, temperature);
+        this(feature, context, prompt, List.of(), maxTokens, temperature, false);
+    }
+
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            int maxTokens,
+            double temperature,
+            boolean reasoningRequested) {
+        this(feature, context, prompt, List.of(), maxTokens, temperature, reasoningRequested);
+    }
+
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            List<AiInputImage> images,
+            int maxTokens,
+            double temperature) {
+        this(feature, context, prompt, images, maxTokens, temperature, false);
     }
 
     public AiInvocation {
@@ -61,6 +83,7 @@ public record AiInvocation(
                 + ", prompt=<redacted>"
                 + ", images=<redacted>"
                 + ", maxTokens=" + maxTokens
-                + ", temperature=" + temperature + "]";
+                + ", temperature=" + temperature
+                + ", reasoningRequested=" + reasoningRequested + "]";
     }
 }

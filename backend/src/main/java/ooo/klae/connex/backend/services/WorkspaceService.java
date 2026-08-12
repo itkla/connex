@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
@@ -68,6 +69,7 @@ public class WorkspaceService {
     private final AuditService auditService;
     private final SystemActor systemActor;
     private final SessionSecurityService sessionSecurityService;
+    private final AiAssistantAccessFence assistantAccessFence;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int WORKSPACE_NAME_MAX = 128;
@@ -774,6 +776,7 @@ public class WorkspaceService {
     /** Assigns a custom role to a member; managing roles requires the ROLE_MANAGE permission. */
     @Transactional
     public MemberDto assignCustomRole(int workspaceId, int actorId, int targetUserId, int roleId) {
+        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         LockedRoleMutation locks = lockRoleMutation(
@@ -829,6 +832,7 @@ public class WorkspaceService {
      */
     @Transactional
     public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
+        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         Role newRole = parseAssignableRole(roleRaw);
@@ -1017,6 +1021,7 @@ public class WorkspaceService {
      */
     @Transactional
     public void removeMember(int workspaceId, int actorId, int targetUserId) {
+        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
@@ -1084,6 +1089,15 @@ public class WorkspaceService {
         return workspaceMapper.getPendingMemberships(userId);
     }
 
+    /** Returns active workspace ids that can authorize user-scoped work. */
+    public List<Integer> workspaceIdsForUser(int userId) {
+        return workspaceMapper.getMembershipsForUser(userId).stream()
+                .map(WorkspaceMembershipDto::getId)
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
     /**
      * The user accepts a pending invitation, becoming an active member. The organization's
      * email-domain ceiling (#316) is re-applied at activation, so a pending row that predates a
@@ -1141,6 +1155,7 @@ public class WorkspaceService {
     /** The user leaves a workspace they belong to, unassigning their tasks and clearing deal ownership. */
     @Transactional
     public void leaveWorkspace(int workspaceId, int userId) {
+        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         String role = workspaceMapper.getRole(workspaceId, userId);
         if (role == null) {
             throw new ResourceNotFoundException("You are not a member of this workspace");

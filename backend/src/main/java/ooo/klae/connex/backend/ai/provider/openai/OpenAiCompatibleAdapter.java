@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
 import tools.jackson.databind.JsonNode;
@@ -50,6 +51,35 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     }
 
     @Override
+    public AiReasoningMode reasoningCapability(AiProviderTarget target) {
+        return AiReasoningMode.TAGGED;
+    }
+
+    @Override
+    public int contextWindowTokens(AiProviderTarget target) {
+        if (target != null && target.modelId() != null) {
+            String modelId = unqualifiedModelId(
+                    target.modelId().toLowerCase(java.util.Locale.ROOT));
+            if (modelId.startsWith("gemma-4") || isLargeGemmaThree(modelId)) {
+                return 128_000;
+            }
+            if (modelId.startsWith("gemma-3")) {
+                return 32_768;
+            }
+        }
+        return 4_096;
+    }
+
+    private static boolean isLargeGemmaThree(String modelId) {
+        return modelId.matches("^gemma-3-(4b|12b|27b)(?:[-.@].*)?$");
+    }
+
+    private static String unqualifiedModelId(String modelId) {
+        int separator = modelId.lastIndexOf('/');
+        return separator < 0 ? modelId : modelId.substring(separator + 1);
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
@@ -69,7 +99,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                             openAiCompatibleClient.complete(
                                     endpoint, target.allowInternalEndpoint(),
                                     request.credentials(), requestBody, deadline));
-                    return parseResponse(responseBody, enforcement);
+                    return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {
@@ -164,6 +194,9 @@ public class OpenAiCompatibleAdapter implements AiProvider {
 
     private static AiStructuredOutputEnforcement requestedEnforcement(
             AiCompletionRequest request) {
+        if (request.reasoningMode() != AiReasoningMode.NONE) {
+            return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
         if (request.outputMode() != AiOutputMode.JSON) {
             return AiStructuredOutputEnforcement.PROMPT_ONLY;
         }
@@ -202,7 +235,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
 
     private AiCompletionResult parseResponse(
             String responseBody,
-            AiStructuredOutputEnforcement enforcement) {
+            AiStructuredOutputEnforcement enforcement,
+            AiReasoningMode reasoningMode) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             if (root == null || !root.isObject()) {
@@ -225,12 +259,17 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 if (!usage.isObject()) {
                     throw invalidResponse();
                 }
-                inputTokens = readOptionalTokenCount(usage.path("prompt_tokens"));
-                outputTokens = readOptionalTokenCount(usage.path("completion_tokens"));
+                JsonNode promptTokens = usage.path("prompt_tokens");
+                JsonNode completionTokens = usage.path("completion_tokens");
+                if (validTokenCount(promptTokens) && validTokenCount(completionTokens)) {
+                    inputTokens = promptTokens.intValue();
+                    outputTokens = completionTokens.intValue();
+                }
             }
             String stopReason = readRequiredText(choice.path("finish_reason"));
             return new AiCompletionResult(
-                    text, inputTokens, outputTokens, stopReason, enforcement);
+                    text, inputTokens, outputTokens, stopReason, enforcement,
+                    "", reasoningMode);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -264,12 +303,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return value;
     }
 
-    private static int readOptionalTokenCount(JsonNode node) {
-        if (!node.isIntegralNumber() || !node.canConvertToInt()) {
-            return 0;
-        }
-        int value = node.intValue();
-        return value < 0 ? 0 : value;
+    private static boolean validTokenCount(JsonNode node) {
+        return node.isIntegralNumber() && node.canConvertToInt() && node.intValue() >= 0;
     }
 
     private static AiProviderException invalidEndpoint() {

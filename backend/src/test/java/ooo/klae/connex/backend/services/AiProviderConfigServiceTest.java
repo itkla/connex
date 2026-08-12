@@ -73,8 +73,11 @@ class AiProviderConfigServiceTest {
         service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, organizationMapper, userMapper,
                 workspaceMapper, orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
                 sessionSecurityService,
-                new ObjectMapper());
+                new ObjectMapper(),
+                org.mockito.Mockito.mock(
+                        ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence.class));
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
+        lenient().when(workspaceMapper.findByOrgId(ORG_ID)).thenReturn(java.util.List.of());
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(organizationMapper.lockById(ORG_ID)).thenReturn(ORG_ID);
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);

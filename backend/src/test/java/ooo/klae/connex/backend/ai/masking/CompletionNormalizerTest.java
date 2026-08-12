@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,6 +13,39 @@ class CompletionNormalizerTest {
         String output = "<thought>* Goal: write a brief\n* Grounded? yes</thought>**Who they are**\nSarif Industries.";
 
         assertEquals("**Who they are**\nSarif Industries.", CompletionNormalizer.stripReasoning(output));
+    }
+
+    @Test
+    void capturesTaggedReasoningSeparatelyFromAnswer() {
+        CompletionNormalizer.CapturedCompletion captured = CompletionNormalizer.captureReasoning(
+                "<thinking>Compare the two relationships.</thinking>{\"final\":\"Ada is warmer.\"}",
+                "");
+
+        assertEquals("Compare the two relationships.", captured.reasoning());
+        assertEquals("{\"final\":\"Ada is warmer.\"}", captured.answer());
+        assertFalse(captured.ambiguous());
+    }
+
+    @Test
+    void capturesNativeReasoningChannelWithoutChangingAnswer() {
+        CompletionNormalizer.CapturedCompletion captured = CompletionNormalizer.captureReasoning(
+                "{\"final\":\"Ada is warmer.\"}",
+                "Compare the two relationships.");
+
+        assertEquals("Compare the two relationships.", captured.reasoning());
+        assertEquals("{\"final\":\"Ada is warmer.\"}", captured.answer());
+        assertFalse(captured.ambiguous());
+    }
+
+    @Test
+    void failsClosedWhenNativeAndTaggedBoundariesConflict() {
+        CompletionNormalizer.CapturedCompletion captured = CompletionNormalizer.captureReasoning(
+                "<thinking>tagged reasoning</thinking>{\"final\":\"answer\"}",
+                "native reasoning");
+
+        assertTrue(captured.ambiguous());
+        assertEquals("", captured.reasoning());
+        assertEquals("", captured.answer());
     }
 
     @Test
@@ -53,6 +88,16 @@ class CompletionNormalizerTest {
         String output = "<thought>outer<thought>inner</thought>still reasoning</thought>Answer";
 
         assertEquals("Answer", CompletionNormalizer.stripReasoning(output));
+    }
+
+    @Test
+    void failsClosedOnMismatchedNestedReasoningTags() {
+        CompletionNormalizer.CapturedCompletion captured = CompletionNormalizer.captureReasoning(
+                "<thinking><think>plan</thinking></think>{\"ok\":true}", "");
+
+        assertEquals("", captured.answer());
+        assertEquals("", captured.reasoning());
+        assertTrue(captured.ambiguous());
     }
 
     @Test
@@ -125,5 +170,12 @@ class CompletionNormalizerTest {
     void returnsEmptyForNullAndBlank() {
         assertEquals("", CompletionNormalizer.stripReasoning(null));
         assertEquals("", CompletionNormalizer.stripReasoning("   \n  "));
+    }
+
+    @Test
+    void detectsReasoningProtocolTagsAnywhereInText() {
+        assertTrue(CompletionNormalizer.containsReasoningTag(
+                "{\"text\":\"<thinking>private</thinking>\"}"));
+        assertFalse(CompletionNormalizer.containsReasoningTag("Plain answer"));
     }
 }

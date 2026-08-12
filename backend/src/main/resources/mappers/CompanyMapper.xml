@@ -770,8 +770,8 @@
     LIMIT 10
   </select>
 
-  <select id="findMentionedNames" resultType="string">
-    SELECT c.name
+  <select id="findMentionedRecords" resultType="Company">
+    SELECT c.id, c.name
     FROM company c
     WHERE <include refid="visible"/>
       AND c.name IS NOT NULL

@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
@@ -59,6 +60,28 @@ class VertexAdapterTest {
     @Test
     void providerId_registersVertexAdapter() {
         assertEquals("vertex", adapter.providerId());
+    }
+
+    @Test
+    void reasoningCapabilityUsesNativeModeOnlyForKnownModels() {
+        assertEquals(AiReasoningMode.NATIVE,
+                adapter.reasoningCapability(target("gemini-2.5-flash")));
+        assertEquals(AiReasoningMode.TAGGED,
+                adapter.reasoningCapability(target("gemini-1.5-pro")));
+        assertEquals(AiReasoningMode.TAGGED,
+                adapter.reasoningCapability(target("gemini-2.5-flash-image")));
+        assertEquals(AiReasoningMode.NATIVE,
+                adapter.reasoningCapability(target("gemini-3-pro-image")));
+    }
+
+    @Test
+    void contextWindowUsesSafeDefaultForUnknownModelFamilies() {
+        assertEquals(128_000, adapter.contextWindowTokens(target("gemini-2.5-flash")));
+        assertEquals(32_768, adapter.contextWindowTokens(target("gemini-2.5-flash-image")));
+        assertEquals(65_536, adapter.contextWindowTokens(target("gemini-3-pro-image")));
+        assertEquals(4_096, adapter.contextWindowTokens(target("gemini-unknown")));
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
+                adapter.structuredOutputCapability(target("gemini-3-pro-image")));
     }
 
     @Test
@@ -152,6 +175,91 @@ class VertexAdapterTest {
         assertEquals("object", generationConfig.path("responseJsonSchema").path("type").asString());
         assertEquals(AiStructuredOutputEnforcement.JSON_SCHEMA,
                 result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_geminiImageModelUsesPromptOnlyStructuredOutput() throws Exception {
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn(geminiResponse());
+        AiCompletionRequest request = new AiCompletionRequest(
+                target("gemini-3-pro-image"),
+                credentials(),
+                null,
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                AiReasoningMode.NATIVE,
+                ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor.DIRECT,
+                64,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(vertexClient).complete(
+                any(URI.class), eq(ACCESS_TOKEN), body.capture(), any(AiRequestDeadline.class));
+        JsonNode generationConfig = objectMapper.readTree(body.getValue()).path("generationConfig");
+        assertFalse(generationConfig.has("responseMimeType"));
+        assertFalse(generationConfig.has("responseJsonSchema"));
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
+                result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_geminiNativeReasoningKeepsSchemaAndCountsThoughtTokens() throws Exception {
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "candidates":[{
+                            "content":{"parts":[
+                              {"thought":true,"text":"Compare the authorized signals."},
+                              {"text":"{\\\"final\\\":\\\"done\\\"}"}
+                            ]},
+                            "finishReason":"STOP"
+                          }],
+                          "usageMetadata":{
+                            "promptTokenCount":10,
+                            "candidatesTokenCount":7,
+                            "thoughtsTokenCount":11
+                          }
+                        }
+                        """);
+        AiCompletionRequest request = new AiCompletionRequest(
+                target("gemini-2.5-flash"),
+                credentials(),
+                null,
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                AiReasoningMode.NATIVE,
+                ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor.DIRECT,
+                64,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(vertexClient).complete(
+                any(URI.class), eq(ACCESS_TOKEN), body.capture(), any(AiRequestDeadline.class));
+        JsonNode generationConfig = objectMapper.readTree(body.getValue()).path("generationConfig");
+        assertEquals(true,
+                generationConfig.path("thinkingConfig").path("includeThoughts").asBoolean());
+        assertEquals("application/json", generationConfig.path("responseMimeType").asString());
+        assertEquals("object", generationConfig.path("responseJsonSchema").path("type").asString());
+        assertEquals("Compare the authorized signals.", result.reasoning());
+        assertEquals("{\"final\":\"done\"}", result.text());
+        assertEquals(18, result.outputTokens());
+        assertEquals(AiReasoningMode.NATIVE, result.reasoningMode());
     }
 
     @Test

@@ -118,10 +118,18 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
         if (citations.size() > MAX_CITATIONS) {
             return "final_citations";
         }
+        Set<String> citedHandles = new LinkedHashSet<>();
         for (JsonNode citation : citations) {
-            if (!citation.isString() || !HANDLE.matcher(citation.asString()).matches()) {
+            if (!citation.isString() || !HANDLE.matcher(citation.asString()).matches()
+                    || !citedHandles.add(citation.asString())) {
                 return "final_citations";
             }
+        }
+        var referencedHandles = HANDLE_REFERENCE.matcher(text.asString()).results()
+                .map(result -> result.group())
+                .collect(java.util.stream.Collectors.toSet());
+        if (!citedHandles.containsAll(referencedHandles)) {
+            return "final_citations";
         }
         if (suggestions.size() > MAX_SUGGESTIONS) {
             return "final_suggestions";
