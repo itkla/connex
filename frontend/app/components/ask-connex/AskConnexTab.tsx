@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, type Ref } from 'react';
 import { SparklesIcon } from '@heroicons/react/24/outline';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -9,6 +9,7 @@ const DRAG_THRESHOLD = 24;
 
 /** Desktop right-edge pull-tab that opens or closes the persistent Ask Connex panel. */
 export default function AskConnexTab({
+    buttonRef,
     label,
     closeLabel,
     open,
@@ -16,6 +17,7 @@ export default function AskConnexTab({
     onOpen,
     onClose,
 }: {
+    buttonRef: Ref<HTMLButtonElement>;
     label: string;
     closeLabel: string;
     open: boolean;
@@ -31,6 +33,7 @@ export default function AskConnexTab({
         <Tooltip>
             <TooltipTrigger asChild>
                 <button
+                    ref={buttonRef}
                     type="button"
                     aria-label={accessibleLabel}
                     aria-controls="ask-connex-desktop-panel"
