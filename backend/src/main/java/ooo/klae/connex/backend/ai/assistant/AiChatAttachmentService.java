@@ -12,10 +12,12 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
+import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.AttachmentWriteOperations;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
@@ -42,6 +44,7 @@ public class AiChatAttachmentService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
+    private final AiChatRealtimeDispatcher realtimeDispatcher;
 
     /** Returns every attachment visible through one currently authorized active session. */
     @Transactional(readOnly = true)
@@ -76,6 +79,18 @@ public class AiChatAttachmentService {
                 sessionId,
                 prepared,
                 authService.getCurrentUser());
+        realtimeDispatcher.sessionAfterCommit(
+                workspaceId,
+                sessionId,
+                new AiChatStepFrameDto(
+                        workspaceId,
+                        sessionId,
+                        0,
+                        0,
+                        "session",
+                        null,
+                        "attachments_changed",
+                        null));
         return AiChatAttachmentDto.from(attachment);
     }
 

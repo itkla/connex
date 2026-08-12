@@ -95,6 +95,7 @@ public class AiChatAttachmentContextService {
     }
 
     private ImageDescription describeImage(AiChatQueuedTurn turn, Attachment attachment) {
+        persistenceService.requireRunning(turn);
         AiInputImage image;
         try (ManagedContent managed = managedObjectService.openAttachment(
                 turn.workspaceId(), attachment)) {
@@ -116,7 +117,8 @@ public class AiChatAttachmentContextService {
                 IMAGE_TEMPERATURE);
         try (AiInvocationAdmissionService.DirectAdmission admission =
                 invocationAdmissionService.acquireDirect()) {
-            AiCompletionOutcome outcome = invocationService.complete(invocation, admission);
+            AiCompletionOutcome outcome = invocationService.complete(
+                    invocation, admission, turn.restrictionEpoch());
             if (outcome.demaskWarnings() != 0
                     || outcome.text().isBlank()
                     || outcome.text().length() > MAX_IMAGE_DESCRIPTION_CHARS) {

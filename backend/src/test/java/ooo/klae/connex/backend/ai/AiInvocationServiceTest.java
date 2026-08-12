@@ -206,6 +206,27 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void completeWithImageRejectsRestrictionEpochChangedBeforeEgress() {
+        AiInvocation invocation = withImage(invocation("Describe the image"));
+        long expectedEpoch = restrictionEpoch.current(WORKSPACE_ID);
+        restrictionEpoch.bump(WORKSPACE_ID);
+        providerReturns(new AiCompletionResult("Description", 12, 7, "end_turn"));
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.complete(invocation, directAdmission, expectedEpoch));
+
+        List<Map<?, ?>> audits = auditMetadata();
+        assertEquals("attempt", audits.get(0).get("outcome"));
+        assertEquals("blocked", audits.get(1).get("outcome"));
+        assertEquals("restriction_epoch", audits.get(1).get("reason"));
+        verify(directAdmission, never()).commitInvocation();
+        verify(providerTransport, never()).run();
+        verify(mediaLease).close();
+        verify(budgetLease).close();
+    }
+
+    @Test
     void completeStructured_staleAsyncRestrictionEpochSkipsQuotaAndProvider() {
         AiInvocation invocation = invocation("Summarize relationship state");
         long expectedEpoch = restrictionEpoch.current(WORKSPACE_ID);

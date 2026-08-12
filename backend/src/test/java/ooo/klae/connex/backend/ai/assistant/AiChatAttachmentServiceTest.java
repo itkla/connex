@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,11 +16,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.AttachmentWriteOperations;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
@@ -37,6 +41,8 @@ class AiChatAttachmentServiceTest {
     private AttachmentWriteOperations writeOperations;
     private AiChatAttachmentPolicy attachmentPolicy;
     private WorkspaceService workspaceService;
+    private AuthService authService;
+    private AiChatRealtimeDispatcher realtimeDispatcher;
     private AiChatAttachmentService service;
 
     @BeforeEach
@@ -46,6 +52,8 @@ class AiChatAttachmentServiceTest {
         writeOperations = mock(AttachmentWriteOperations.class);
         attachmentPolicy = mock(AiChatAttachmentPolicy.class);
         workspaceService = mock(WorkspaceService.class);
+        authService = mock(AuthService.class);
+        realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
         service = new AiChatAttachmentService(
                 chatMapper,
                 attachmentMapper,
@@ -53,8 +61,9 @@ class AiChatAttachmentServiceTest {
                 attachmentPolicy,
                 mock(ManagedObjectService.class),
                 workspaceService,
-                mock(AuthService.class),
-                mock(AuditService.class));
+                authService,
+                mock(AuditService.class),
+                realtimeDispatcher);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
     }
@@ -87,6 +96,46 @@ class AiChatAttachmentServiceTest {
         verify(attachmentPolicy, never()).prepare(source);
         verify(writeOperations, never()).uploadAssistantSession(
                 anyInt(), anyInt(), any(), any());
+    }
+
+    @Test
+    void uploadingAttachmentEmitsRealtimeInvalidationAfterCommit() {
+        AiChatSession session = activeSession();
+        User actor = mock(User.class);
+        when(actor.getId()).thenReturn(USER_ID);
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(actor));
+        when(chatMapper.getSessionByIdForUpdate(WORKSPACE_ID, USER_ID, SESSION_ID))
+                .thenReturn(session);
+        UploadSource source = UploadSource.from(
+                "notes.txt", "text/plain", "content".getBytes(StandardCharsets.UTF_8));
+        Attachment uploaded = new Attachment();
+        uploaded.setId(31);
+        uploaded.setWorkspaceId(WORKSPACE_ID);
+        uploaded.setEntityType("ai_chat_session");
+        uploaded.setEntityId(SESSION_ID);
+        uploaded.setFileName("notes.txt");
+        uploaded.setContentType("text/plain");
+        uploaded.setSize(7L);
+        when(attachmentPolicy.prepare(source)).thenReturn(source);
+        when(authService.getCurrentUser()).thenReturn(actor);
+        when(writeOperations.uploadAssistantSession(
+                eq(WORKSPACE_ID), eq(SESSION_ID), eq(source), eq(actor)))
+                .thenReturn(uploaded);
+
+        service.upload(SESSION_ID, source);
+
+        verify(realtimeDispatcher).sessionAfterCommit(
+                WORKSPACE_ID,
+                SESSION_ID,
+                new AiChatStepFrameDto(
+                        WORKSPACE_ID,
+                        SESSION_ID,
+                        0,
+                        0,
+                        "session",
+                        null,
+                        "attachments_changed",
+                        null));
     }
 
     private static AiChatSession activeSession() {

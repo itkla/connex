@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
@@ -113,6 +114,26 @@ public class AiInvocationService {
             return new AiCompletionOutcome(demasked.text(), demasked.warnings(),
                     result.inputTokens(), result.outputTokens(), result.stopReason());
         }
+    }
+
+    /**
+     * Completes a masked direct invocation under the restriction epoch captured before its inputs
+     * were assembled.
+     * @param invocation masked invocation request
+     * @param admission active direct invocation admission
+     * @param expectedRestrictionEpoch restriction epoch captured before input assembly
+     * @return demasked completion outcome
+     */
+    public AiCompletionOutcome complete(
+            AiInvocation invocation,
+            AiInvocationAdmissionService.DirectAdmission admission,
+            long expectedRestrictionEpoch) {
+        AtomicReference<AiCompletionOutcome> outcomeReference = new AtomicReference<>();
+        aiRestrictionEpoch.runWithExpectedEgressEpoch(
+                workspaceService.getCurrentWorkspaceId(),
+                expectedRestrictionEpoch,
+                () -> outcomeReference.set(complete(invocation, admission)));
+        return Objects.requireNonNull(outcomeReference.get(), "completion outcome");
     }
 
     /**
