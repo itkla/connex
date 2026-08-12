@@ -99,6 +99,9 @@ public class AiProperties {
     /** Maximum active single-flight identities retained by one replica. */
     private int invocationMaxActiveFlights = 10000;
 
+    /** Provider output-token cap for each Ask Connex model step. */
+    private int assistantMaxOutputTokens = 16384;
+
     /** Fixed worker count for request-detached AI generation. */
     private int generationWorkerThreads = 4;
 

@@ -142,11 +142,31 @@ public class AiAssistantStepSchema {
         ObjectNode answer = objectMapper.createObjectNode();
         answer.put("type", "object");
         ObjectNode properties = answer.putObject("properties");
-        properties.putObject("text").put("type", "string");
+        ObjectNode text = properties.putObject("text");
+        text.put("type", "string");
+        text.put("maxLength", 16000);
         ObjectNode citations = properties.putObject("citations");
         citations.put("type", "array");
+        citations.put("maxItems", 50);
         citations.putObject("items").put("type", "string");
-        answer.putArray("required").add("text").add("citations");
+        ObjectNode suggestions = properties.putObject("suggestions");
+        suggestions.put("type", "array");
+        suggestions.put("maxItems", AiAssistantStepGuard.MAX_SUGGESTIONS);
+        ObjectNode suggestion = suggestions.putObject("items");
+        suggestion.put("type", "string");
+        suggestion.put("minLength", 1);
+        suggestion.put("maxLength", AiAssistantStepGuard.MAX_SUGGESTION_CHARS);
+        ObjectNode title = properties.putObject("title");
+        ArrayNode titleAlternatives = title.putArray("anyOf");
+        titleAlternatives.addObject().put("type", "null");
+        ObjectNode titleText = titleAlternatives.addObject();
+        titleText.put("type", "string");
+        titleText.put("maxLength", 200);
+        answer.putArray("required")
+                .add("text")
+                .add("citations")
+                .add("suggestions")
+                .add("title");
         answer.put("additionalProperties", false);
         return answer;
     }

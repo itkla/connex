@@ -3,6 +3,10 @@ import type { AiChatCitation, AiChatMessage, AiChatPageContext } from '@/app/lib
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
+const RESOURCE_HANDLE = /(^|[^\p{L}\p{N}_])r[1-9]\d*($|[^\p{L}\p{N}_])/u;
+const CONTROL_INSTRUCTION = /ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?|system\s+prompt|developer\s+(?:message|instructions?)|tool\s+(?:call|command)|crm_data|model_output|step\s+schema/i;
+const ASK_CONNEX_SUGGESTION_LIMIT = 3;
+const ASK_CONNEX_SUGGESTION_LENGTH = 160;
 
 /** Maximum number of page-context records accepted by one assistant turn. */
 export const ASK_CONNEX_CONTEXT_LIMIT = 10;
@@ -200,6 +204,29 @@ export function askConnexCitations(
         if (unique.length === limit) break;
     }
     return unique;
+}
+
+/** Returns safe follow-up actions from only the latest settled assistant answer. */
+export function latestAskConnexSuggestions(
+    messages: readonly AiChatMessage[],
+    working: boolean,
+): string[] {
+    if (working) return [];
+    const latest = messages.at(-1);
+    if (latest?.authorKind !== 'assistant' || !latest.suggestions?.length) return [];
+    const unique = new Set<string>();
+    for (const suggestion of latest.suggestions) {
+        const value = suggestion.trim();
+        if (value.length === 0
+            || value.length > ASK_CONNEX_SUGGESTION_LENGTH
+            || value.includes('\n')
+            || value.includes('\r')
+            || RESOURCE_HANDLE.test(value)
+            || CONTROL_INSTRUCTION.test(value)) continue;
+        unique.add(value);
+        if (unique.size === ASK_CONNEX_SUGGESTION_LIMIT) break;
+    }
+    return [...unique];
 }
 
 /** Groups consecutive messages by sender without changing transcript order. */

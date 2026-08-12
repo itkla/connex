@@ -97,6 +97,7 @@ public class AiAssistantService {
         session.setWorkspaceId(workspaceId);
         session.setCreatedByUserId(userId);
         session.setTitle(requireTitle(request == null ? null : request.getTitle()));
+        session.setTitleUserSet(request == null || !request.isAutoTitle());
         session.setVisibility(PRIVATE);
         session.setStatus(ACTIVE);
         chatMapper.insertSession(session);
@@ -159,7 +160,9 @@ public class AiAssistantService {
         var citations = citationProjector.project(workspaceId, storedMessages);
         List<AiChatMessageDto> messages = storedMessages.stream()
             .map(message -> AiChatMessageDto.from(
-                    message, citations.getOrDefault(message.getId(), List.of())))
+                    message,
+                    citations.getOrDefault(message.getId(), List.of()),
+                    citationProjector.suggestions(message)))
             .toList();
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),

@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
@@ -55,12 +56,13 @@ public class AiChatAgentLoopService {
     private static final String INTERNAL_ERROR = "internal_error";
     private static final int MAX_HISTORY_MESSAGES = 50;
     private static final int MAX_HISTORY_CHARS = 64_000;
-    private static final int MAX_OUTPUT_TOKENS = 1200;
     private static final int MAX_FINAL_CHARS = 16_000;
+    private static final int MAX_GENERATED_TITLE_CHARS = 80;
     private static final double TEMPERATURE = 0.1;
 
     private final AiInvocationService invocationService;
     private final AiInvocationAdmissionService invocationAdmissionService;
+    private final AiProperties aiProperties;
     private final AiAssistantStepGuard stepGuard;
     private final AiAssistantStepSchema stepSchema;
     private final AiAssistantToolExecutor toolExecutor;
@@ -121,7 +123,7 @@ public class AiChatAgentLoopService {
                         maskingContext,
                         promptAssembler.assemble(
                                 history, pageContext, toolTurns, maskingContext, resources, repair),
-                        MAX_OUTPUT_TOKENS,
+                        aiProperties.getAssistantMaxOutputTokens(),
                         TEMPERATURE);
                 AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
                         maskingContext.tokenBindings().stream()
@@ -236,10 +238,11 @@ public class AiChatAgentLoopService {
                 }
                 resources.requireKnownCitations(finalAnswer.citations());
                 String metadata = promptAssembler.finalMetadata(
-                        finalAnswer.citations(), resources.snapshot());
+                        finalAnswer.citations(), finalAnswer.suggestions(), resources.snapshot());
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, finalAnswer.text(), metadata, inputTokens, outputTokens);
+                applyGeneratedTitle(turn, finalAnswer.title());
                 return AiGenerationTaskResult.resolved(
                         new AiChatTurnGenerationResult(turn.turnId(), "resolved"));
             }
@@ -275,6 +278,35 @@ public class AiChatAgentLoopService {
 
     private boolean restrictionsChanged(AiChatQueuedTurn turn) {
         return restrictionEpoch.current(turn.workspaceId()) != turn.restrictionEpoch();
+    }
+
+    private void applyGeneratedTitle(AiChatQueuedTurn turn, String title) {
+        String normalized = normalizeGeneratedTitle(title);
+        if (normalized == null) {
+            return;
+        }
+        try {
+            persistenceService.applyGeneratedTitle(turn, normalized);
+        } catch (RuntimeException ignored) {
+            return;
+        }
+    }
+
+    static String normalizeGeneratedTitle(String title) {
+        if (title == null) {
+            return null;
+        }
+        String normalized = title.strip().replaceAll("\\s+", " ");
+        if (normalized.isBlank()
+                || AiAssistantStepGuard.containsHandle(normalized)
+                || AiAssistantStepGuard.containsControlInstruction(normalized)) {
+            return null;
+        }
+        if (normalized.codePointCount(0, normalized.length()) <= MAX_GENERATED_TITLE_CHARS) {
+            return normalized;
+        }
+        int end = normalized.offsetByCodePoints(0, MAX_GENERATED_TITLE_CHARS);
+        return normalized.substring(0, end).stripTrailing();
     }
 
     private void requireCurrentAccess(AiChatQueuedTurn turn) {

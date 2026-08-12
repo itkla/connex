@@ -244,6 +244,28 @@ public class AiChatTurnPersistenceService {
         return true;
     }
 
+    /** Applies a first-exchange title only while the session remains auto-title eligible. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public boolean applyGeneratedTitle(AiChatQueuedTurn turn, String title) {
+        if (title == null || title.isBlank()) {
+            return false;
+        }
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            return false;
+        }
+        requireCurrentActor(turn);
+        AiChatSession session = chatMapper.getSessionByIdForUpdate(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null
+                || !Objects.equals(session.getCreatedByUserId(), turn.userId())
+                || session.isTitleUserSet()) {
+            return false;
+        }
+        return chatMapper.updateGeneratedTitle(
+                turn.workspaceId(), turn.sessionId(), title) == 1;
+    }
+
     /** Applies a generation-owned terminal transition without requiring request-thread state. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public boolean markTerminal(

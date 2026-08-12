@@ -153,6 +153,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [composer, setComposer] = useState('');
     const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
     const [turn, dispatchTurn] = useReducer(reduceAskConnexTurn, EMPTY_ASK_CONNEX_TURN);
 
@@ -160,6 +161,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
     const tempMessageIdRef = useRef(-1);
+    const submittingRef = useRef(false);
 
     const contextResult = useMemo(
         () => mergeAskConnexContext(context.record, composer),
@@ -174,7 +176,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [contextResult.attachments, implicitContext],
     );
     const contentTooLong = askConnexMessageContent(composer).length > 16_000;
-    const working = turn.phase === 'accepted' || turn.phase === 'running';
+    const working = submitting || turn.phase === 'accepted' || turn.phase === 'running';
     const scoped = stateIdentity === identity && !switching;
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
@@ -254,26 +256,27 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (signal.aborted) return;
             dispatchTurn({ type: 'status', status: durable.status, reason: durable.terminalReason });
 
-            if (isActiveTurnStatus(durable.status)) {
-                try {
-                    const initial = await getAiGenerationStatus<AiChatTurnGenerationResult>(
-                        stored.generationHandle,
-                        { signal },
-                    );
-                    if (initial.status === 'running') {
-                        dispatchTurn({ type: 'status', status: 'running' });
-                    }
-                    const result = await resolveAcceptedAiGeneration(initial, { signal });
-                    if (result.turnId !== stored.turnId) {
-                        throw new Error('Assistant generation resolved for a different turn');
-                    }
-                } catch (error) {
-                    if (signal.aborted) return;
-                    if (error instanceof ApiError && error.status === 403) throw error;
-                    if (!(error instanceof AiGenerationError)) {
-                        durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
-                    }
+            try {
+                const initial = await getAiGenerationStatus<AiChatTurnGenerationResult>(
+                    stored.generationHandle,
+                    { signal },
+                );
+                if (initial.status === 'running') {
+                    dispatchTurn({ type: 'status', status: 'running' });
                 }
+                const result = await resolveAcceptedAiGeneration(initial, { signal });
+                if (result.turnId !== stored.turnId) {
+                    throw new Error('Assistant generation resolved for a different turn');
+                }
+            } catch (error) {
+                if (signal.aborted) return;
+                if (error instanceof ApiError && error.status === 403) throw error;
+                if (!(error instanceof AiGenerationError)) {
+                    durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
+                }
+            }
+
+            if (isActiveTurnStatus(durable.status)) {
                 durable = await pollDurableTurn(stored.sessionId, stored.turnId, signal, durable);
             }
 
@@ -320,6 +323,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             setComposer('');
             setUnavailableReason(null);
             setSubmissionBlocked(false);
+            submittingRef.current = false;
+            setSubmitting(false);
             dispatchTurn({ type: 'reset' });
             setLoadState('loading');
             setLoadError(null);
@@ -388,6 +393,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setFreshMessageIds(new Set());
         setComposer('');
         setSubmissionBlocked(false);
+        submittingRef.current = false;
+        setSubmitting(false);
         dispatchTurn({ type: 'reset' });
         setLoadState('loading');
         try {
@@ -416,6 +423,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setFreshMessageIds(new Set());
         setComposer('');
         setSubmissionBlocked(false);
+        submittingRef.current = false;
+        setSubmitting(false);
         dispatchTurn({ type: 'reset' });
         setLoadState('ready');
         setLoadError(null);
@@ -447,8 +456,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [activeSession, newChat, t, working]);
 
-    const send = useCallback(async () => {
-        const content = askConnexMessageContent(composer);
+    const send = useCallback(async (contentOverride?: string) => {
+        const requestContent = contentOverride ?? composer;
+        const content = askConnexMessageContent(requestContent);
+        const requestContext = mergeAskConnexContext(context.record, requestContent);
         const activeSignal = identityControllerRef.current?.signal;
         if (
             !activeSignal
@@ -456,37 +467,45 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || permission !== 'granted'
             || unavailableReason !== null
             || submissionBlocked
-            || working
-            || contextResult.overflow
+            || submittingRef.current
+            || turn.phase === 'accepted'
+            || turn.phase === 'running'
+            || requestContext.overflow
             || content.length === 0
             || content.length > 16_000
         ) return;
 
+        submittingRef.current = true;
+        setSubmitting(true);
         let session = activeSession;
-        if (session === null) {
-            try {
-                const createdSession = await createAiChatSession(t('newChatTitle'), { signal: activeSignal });
-                if (activeSignal.aborted) return;
-                session = createdSession;
-                setActiveSession(createdSession);
-                setSessions((current) => [
-                    createdSession,
-                    ...current.filter((item) => item.id !== createdSession.id),
-                ]);
-                safeStorageSet(sessionKey, String(createdSession.id));
-                setLoadState('ready');
-            } catch (error) {
-                if (!activeSignal.aborted) {
-                    toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
-                }
-                return;
-            }
-        }
-
         try {
+            if (session === null) {
+                try {
+                    const createdSession = await createAiChatSession(
+                        t('newChatTitle'),
+                        true,
+                        { signal: activeSignal },
+                    );
+                    if (activeSignal.aborted) return;
+                    session = createdSession;
+                    setActiveSession(createdSession);
+                    setSessions((current) => [
+                        createdSession,
+                        ...current.filter((item) => item.id !== createdSession.id),
+                    ]);
+                    safeStorageSet(sessionKey, String(createdSession.id));
+                    setLoadState('ready');
+                } catch (error) {
+                    if (!activeSignal.aborted) {
+                        toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+                    }
+                    return;
+                }
+            }
+
             const accepted = await startAiChatTurn(session.id, {
                 content,
-                pageContext: contextResult.pageContext,
+                pageContext: requestContext.pageContext,
             });
             if (activeSignal.aborted) return;
             const stored = {
@@ -531,11 +550,16 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 reason: error instanceof ApiError ? error.message : 'request_failed',
             });
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
-            try {
-                await refreshTranscript(session.id, activeSignal, true);
-            } catch {}
+            if (session !== null) {
+                try {
+                    await refreshTranscript(session.id, activeSignal, true);
+                } catch {}
+            }
+        } finally {
+            submittingRef.current = false;
+            setSubmitting(false);
         }
-    }, [activeSession, composer, contextResult.overflow, contextResult.pageContext, followTurn, permission, refreshTranscript, sessionKey, submissionBlocked, t, turnKey, unavailableReason, userId, working]);
+    }, [activeSession, composer, context.record, followTurn, permission, refreshTranscript, sessionKey, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userId]);
 
     const removeAttachment = useCallback((attachment: AskConnexAttachment) => {
         setComposer((current) => removeAskConnexAttachment(current, attachment));
@@ -600,6 +624,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         renameTitle: t('renameTitle'),
         retry: t('retry'),
         send: t('send'),
+        suggestedFollowUps: t('suggestedFollowUps'),
         title: t('title'),
         tooLong: t('tooLong'),
         turnAccepted: t('turnAccepted'),
@@ -633,6 +658,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 attachments={scoped ? visibleAttachments : []}
                 contextOverflow={scoped && contextResult.overflow}
                 contentTooLong={scoped && contentTooLong}
+                working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
                 unavailable={unavailable}
                 starterPrompts={starterPrompts}
@@ -647,7 +673,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onRetry={() => setReloadVersion((version) => version + 1)}
                 onComposerChange={setComposer}
                 onRemoveAttachment={removeAttachment}
-                onSend={() => void send()}
+                onSend={(content) => void send(content)}
             />
         </AskConnexContext.Provider>
     );

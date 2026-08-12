@@ -43,6 +43,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertNotNull(foundSession);
         assertEquals(owner.getId(), foundSession.getCreatedByUserId());
         assertEquals("Quarterly planning", foundSession.getTitle());
+        assertTrue(foundSession.isTitleUserSet());
         assertEquals("private", foundSession.getVisibility());
         assertEquals("active", foundSession.getStatus());
         assertTrue(foundSession.isOwnedByCurrentUser());
@@ -102,6 +103,36 @@ class AiChatMapperTest extends AbstractMapperTest {
             List.of(tiedHigherId.getId(), tiedLowerId.getId(), oldest.getId()),
             participantRows.stream().map(AiChatSession::getId).toList());
         assertFalse(participantRows.getFirst().isOwnedByCurrentUser());
+    }
+
+    @Test
+    void generatedTitleCannotReplaceATitleAfterManualRename() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "New conversation", "private");
+        session.setTitleUserSet(false);
+        jdbcTemplate.update(
+                "UPDATE ai_chat_session SET title_user_set = FALSE WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), session.getId());
+        AiChatMessage answer = new AiChatMessage();
+        answer.setWorkspaceId(workspace.getId());
+        answer.setSessionId(session.getId());
+        answer.setSeq(1);
+        answer.setAuthorKind("assistant");
+        answer.setContent("Resolved answer");
+        chatMapper.insertMessage(answer);
+
+        assertEquals(1, chatMapper.updateGeneratedTitle(
+                workspace.getId(), session.getId(), "Pipeline review"));
+        assertEquals(1, chatMapper.updateSession(
+                workspace.getId(), session.getId(), "My renewal notes", null));
+        assertEquals(0, chatMapper.updateGeneratedTitle(
+                workspace.getId(), session.getId(), "Overwritten title"));
+
+        AiChatSession stored = chatMapper.getSessionById(
+                workspace.getId(), owner.getId(), session.getId());
+        assertNotNull(stored);
+        assertEquals("My renewal notes", stored.getTitle());
+        assertTrue(stored.isTitleUserSet());
     }
 
     @Test

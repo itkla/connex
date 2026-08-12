@@ -54,6 +54,43 @@ public class AiChatCitationProjector {
         return Map.copyOf(projected);
     }
 
+    /** Returns validated demasked follow-up suggestions stored with one assistant message. */
+    public List<String> suggestions(AiChatMessage message) {
+        if (!"assistant".equals(message.getAuthorKind())
+                || message.getStructuredJson() == null) {
+            return List.of();
+        }
+        try {
+            JsonNode suggestions = objectMapper.readTree(message.getStructuredJson())
+                    .get("suggestions");
+            if (suggestions == null || !suggestions.isArray()) {
+                return List.of();
+            }
+            Set<String> projected = new LinkedHashSet<>();
+            for (JsonNode suggestion : suggestions) {
+                if (!suggestion.isString()) {
+                    continue;
+                }
+                String value = suggestion.asString().strip();
+                if (value.isBlank()
+                        || value.length() > AiAssistantStepGuard.MAX_SUGGESTION_CHARS
+                        || value.indexOf('\n') >= 0
+                        || value.indexOf('\r') >= 0
+                        || AiAssistantStepGuard.containsHandle(value)
+                        || AiAssistantStepGuard.containsControlInstruction(value)) {
+                    continue;
+                }
+                projected.add(value);
+                if (projected.size() == AiAssistantStepGuard.MAX_SUGGESTIONS) {
+                    break;
+                }
+            }
+            return List.copyOf(projected);
+        } catch (JacksonException exception) {
+            return List.of();
+        }
+    }
+
     private List<StoredCitation> storedCitations(AiChatMessage message) {
         if (!"assistant".equals(message.getAuthorKind())
                 || message.getStructuredJson() == null) {

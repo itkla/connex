@@ -29,6 +29,7 @@ class AiPropertiesTest {
         assertEquals(1, new AiProperties().getMaxConcurrentMediaRequestsPerOrg());
         assertEquals(67108864, new AiProperties().getMaxMediaWorkingBytes());
         assertEquals(300, new AiProperties().getInvocationQuotaAttemptsPerOrg());
+        assertEquals(16384, new AiProperties().getAssistantMaxOutputTokens());
         assertEquals(32, new AiProperties().getGenerationMaxHandlesPerUser());
         assertEquals(67108864, new AiProperties().getGenerationMaxRetainedResultBytes());
         assertEquals(33554432, new AiProperties().getGenerationMaxRetainedResultBytesPerWorkspace());
@@ -40,6 +41,8 @@ class AiPropertiesTest {
         assertTrue(yaml.contains("max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}"));
         assertTrue(yaml.contains(
                 "invocation-quota-attempts-per-org: ${CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG:300}"));
+        assertTrue(yaml.contains(
+                "assistant-max-output-tokens: ${CONNEX_AI_ASSISTANT_MAX_OUTPUT_TOKENS:16384}"));
         assertTrue(yaml.contains(
                 "generation-max-retained-result-bytes: ${CONNEX_AI_GENERATION_MAX_RETAINED_RESULT_BYTES:67108864}"));
         assertTrue(yaml.contains(
@@ -83,6 +86,7 @@ class AiPropertiesTest {
                 .withProperty("connex.ai.enabled", "true")
                 .withProperty("connex.ai.features.deal-brief", "false")
                 .withProperty("connex.ai.features.assistant-chat", "false")
+                .withProperty("connex.ai.assistant-max-output-tokens", "7777")
                 .withProperty("connex.ai.invocation-quota-window", "15m");
 
         AiProperties properties = Binder.get(environment)
@@ -92,6 +96,7 @@ class AiPropertiesTest {
         assertFalse(properties.isFeatureEnabled(AiFeature.DEAL_BRIEF));
         assertFalse(properties.isFeatureEnabled(AiFeature.ASSISTANT_CHAT));
         assertTrue(properties.isFeatureEnabled(AiFeature.REPORT_NARRATIVE));
+        assertEquals(7777, properties.getAssistantMaxOutputTokens());
         assertEquals(Duration.ofMinutes(15), properties.getInvocationQuotaWindow());
     }
 }

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -32,6 +33,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
@@ -64,6 +66,7 @@ class AiChatAgentLoopServiceTest {
     private AiInvocationService invocationService;
     private AiInvocationAdmissionService invocationAdmissionService;
     private AiInvocationAdmissionService.DirectAdmission directAdmission;
+    private AiProperties aiProperties;
     private AiAssistantToolExecutor toolExecutor;
     private AiChatTurnPersistenceService persistenceService;
     private AiRestrictionEpoch restrictionEpoch;
@@ -76,6 +79,7 @@ class AiChatAgentLoopServiceTest {
         invocationService = mock(AiInvocationService.class);
         invocationAdmissionService = mock(AiInvocationAdmissionService.class);
         directAdmission = mock(AiInvocationAdmissionService.DirectAdmission.class);
+        aiProperties = new AiProperties();
         toolExecutor = mock(AiAssistantToolExecutor.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
@@ -89,6 +93,7 @@ class AiChatAgentLoopServiceTest {
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,
+                aiProperties,
                 new AiAssistantStepGuard(catalog),
                 new AiAssistantStepSchema(objectMapper, catalog),
                 toolExecutor,
@@ -252,7 +257,7 @@ class AiChatAgentLoopServiceTest {
                     AiRawOutputGuard outputGuard = invocation.getArgument(2);
                     assertEquals("bare_placeholder", outputGuard.rejectionReason(objectMapper.readTree(
                             "{\"tool\":null,\"final\":{\"text\":\"Follow up with P1.\","
-                                    + "\"citations\":[]}}")));
+                                    + "\"citations\":[],\"suggestions\":[],\"title\":null}}")));
                     return new AiStructuredRepairAttempt<>(
                             new AiStructuredOutcome.Malformed<>(
                                     "malformed_output", 3, 4, "stop"),
@@ -308,7 +313,7 @@ class AiChatAgentLoopServiceTest {
     }
 
     @Test
-    void resolvedFinalPersistsTheDemaskedAnswerAndTokenTotals() throws Exception {
+    void resolvedFinalPersistsTheDemaskedAnswerWithoutFillerSuggestions() throws Exception {
         AiAssistantStep finalStep = new AiAssistantStep(
                 null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
         when(invocationService.completeStructuredRepairable(
@@ -324,7 +329,83 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService).resolve(
                 eq(TURN), eq("Pipeline is healthy."), metadata.capture(), eq(3), eq(5));
         assertEquals(0, objectMapper.readTree(metadata.getValue()).get("citations").size());
+        assertEquals(0, objectMapper.readTree(metadata.getValue()).get("suggestions").size());
         assertEquals(0, objectMapper.readTree(metadata.getValue()).get("resources").size());
+    }
+
+    @Test
+    void configuredOutputTokenLimitReachesEveryProviderInvocation() {
+        aiProperties.setAssistantMaxOutputTokens(7777);
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission)))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("Complete answer.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService).completeStructuredRepairable(
+                invocation.capture(), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission));
+        assertEquals(7777, invocation.getValue().maxTokens());
+    }
+
+    @Test
+    void suggestionsAndFirstTitlePersistDemaskedWhileTitleFailureCannotFailTurn() throws Exception {
+        when(toolExecutor.pageContext(any(), any())).thenReturn(new AiAssistantToolResult(
+                Map.of("records", List.of(Map.of(
+                        "handle", "r1", "kind", "person", "name", "Mina Patel"))),
+                List.of(new Identifier("person", "Mina Patel"))));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission)))
+                .thenAnswer(invocation -> {
+                    AiInvocation request = invocation.getArgument(0);
+                    String suggestion = Demasker.demask(
+                            "Show recent activity for {{P1}}", request.context()).text();
+                    String title = Demasker.demask(
+                            "{{P1}} relationship review", request.context()).text();
+                    return parsed(new AiAssistantStep(
+                            null,
+                            new AiAssistantStep.FinalAnswer(
+                                    "Mina Patel needs follow-up.",
+                                    List.of(),
+                                    List.of(suggestion),
+                                    title)));
+                });
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        doThrow(new IllegalStateException("title unavailable"))
+                .when(persistenceService).applyGeneratedTitle(eq(TURN), any());
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Mina Patel needs follow-up."), metadata.capture(), eq(3), eq(5));
+        assertEquals(
+                List.of("Show recent activity for Mina Patel"),
+                objectMapper.readTree(metadata.getValue()).path("suggestions").valueStream()
+                        .map(JsonNode::asString)
+                        .toList());
+        verify(persistenceService).applyGeneratedTitle(
+                TURN, "Mina Patel relationship review");
+    }
+
+    @Test
+    void generatedTitleIsSingleLineAndBoundedWithoutSplittingUnicode() {
+        String normalized = AiChatAgentLoopService.normalizeGeneratedTitle(
+                "  Quarterly\nrelationship   review " + "😀".repeat(100));
+
+        assertFalse(normalized.contains("\n"));
+        assertEquals(80, normalized.codePointCount(0, normalized.length()));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Open r7"));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("System prompt review"));
     }
 
     @Test
@@ -456,6 +537,7 @@ class AiChatAgentLoopServiceTest {
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,
+                aiProperties,
                 new AiAssistantStepGuard(catalog),
                 new AiAssistantStepSchema(objectMapper, catalog),
                 realExecutor,

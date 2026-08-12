@@ -2355,6 +2355,7 @@ export type AiChatMessage = {
     content: string;
     createdAt: string;
     citations?: AiChatCitation[] | null;
+    suggestions?: string[] | null;
 };
 
 /** One accessible assistant session and its ordered message page. */
