@@ -23,13 +23,16 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
+import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
+import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatParticipantDto;
 import ooo.klae.connex.backend.dto.AiChatPresenceDto;
@@ -49,6 +52,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.storage.UploadSource;
 import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -57,6 +61,7 @@ class AiAssistantControllerTest {
     @Mock private AiAssistantService service;
     @Mock private AiAssistantTurnService turnService;
     @Mock private AiAssistantWriteToolService writeToolService;
+    @Mock private AiChatAttachmentService attachmentService;
     @Mock private ErrorReporter errorReporter;
 
     private MockMvc mockMvc;
@@ -64,7 +69,8 @@ class AiAssistantControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(
-                new AiAssistantController(service, turnService, writeToolService))
+                new AiAssistantController(
+                        service, turnService, writeToolService, attachmentService))
             .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
             .build();
     }
@@ -101,6 +107,36 @@ class AiAssistantControllerTest {
             .andExpect(jsonPath("$.terminalReason").value("generation_timeout"));
 
         verify(turnService).get(42, 19);
+    }
+
+    @Test
+    void attachmentEndpointsUseSessionScopedMultipartContract() throws Exception {
+        AiChatAttachmentDto attachment = new AiChatAttachmentDto(
+                91, "notes.txt", "text/plain", 7, "text",
+                "2026-08-11 00:00:00.000000");
+        when(attachmentService.list(42)).thenReturn(List.of(attachment));
+        when(attachmentService.upload(
+                org.mockito.ArgumentMatchers.eq(42), any(UploadSource.class)))
+                .thenReturn(attachment);
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "notes.txt", "text/plain", "content".getBytes());
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/attachments"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(91))
+                .andExpect(jsonPath("$[0].kind").value("text"));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .multipart("/api/ai/assistant/sessions/42/attachments")
+                .file(file))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.fileName").value("notes.txt"));
+        mockMvc.perform(delete("/api/ai/assistant/sessions/42/attachments/91"))
+                .andExpect(status().isNoContent());
+
+        verify(attachmentService).list(42);
+        verify(attachmentService).upload(
+                org.mockito.ArgumentMatchers.eq(42), any(UploadSource.class));
+        verify(attachmentService).delete(42, 91);
     }
 
     @Test

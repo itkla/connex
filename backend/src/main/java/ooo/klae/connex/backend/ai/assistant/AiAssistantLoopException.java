@@ -30,4 +30,9 @@ public class AiAssistantLoopException extends RuntimeException {
     public static AiAssistantLoopException accessRevoked(String detailReason) {
         return new AiAssistantLoopException("access_revoked", detailReason);
     }
+
+    /** Returns a turn-deadline failure with a stable internal detail. */
+    public static AiAssistantLoopException deadlineExceeded() {
+        return new AiAssistantLoopException("turn_deadline_exceeded", "turn_deadline_exceeded");
+    }
 }

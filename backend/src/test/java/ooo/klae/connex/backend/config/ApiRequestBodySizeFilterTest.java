@@ -137,6 +137,7 @@ class ApiRequestBodySizeFilterTest {
     void appliesDedicatedUploadLimitToManagedMultipartRoutes() throws Exception {
         List<String> paths = List.of(
             "/api/attachments/upload",
+            "/api/ai/assistant/sessions/7/attachments",
             "/api/users/me/profile-picture",
             "/api/persons/7/profile-picture",
             "/api/companies/7/logo");

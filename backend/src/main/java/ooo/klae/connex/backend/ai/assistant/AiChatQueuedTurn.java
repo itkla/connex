@@ -14,9 +14,11 @@ public record AiChatQueuedTurn(
         int userMessageSeq,
         long restrictionEpoch,
         boolean includePrivateNotes,
-        List<AiChatPageContextDto> pageContext) {
+        List<AiChatPageContextDto> pageContext,
+        List<Integer> attachmentIds) {
 
     public AiChatQueuedTurn {
         pageContext = List.copyOf(pageContext);
+        attachmentIds = List.copyOf(attachmentIds);
     }
 }

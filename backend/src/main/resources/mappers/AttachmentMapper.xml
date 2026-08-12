@@ -48,6 +48,7 @@
       COALESCE(c.name, p.name, d.name) AS entity_label
     <include refid="tenantAttachJoins"/>
     WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
     ORDER BY a.created_at DESC
   </select>
 
@@ -86,6 +87,45 @@
     LIMIT 1
   </select>
 
+  <select id="getAssistantSessionAttachments" resultMap="AttachmentResult">
+    SELECT <include refid="attachmentColumns"/>
+    FROM attachment a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type = 'ai_chat_session'
+      AND a.entity_id = #{sessionId}
+    ORDER BY a.created_at ASC, a.id ASC
+  </select>
+
+  <select id="getAssistantSessionAttachmentsByIds" resultMap="AttachmentResult">
+    SELECT <include refid="attachmentColumns"/>
+    FROM attachment a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type = 'ai_chat_session'
+      AND a.entity_id = #{sessionId}
+      AND a.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+    ORDER BY a.created_at ASC, a.id ASC
+  </select>
+
+  <select id="getAssistantSessionAttachment" resultMap="AttachmentResult">
+    SELECT <include refid="attachmentColumns"/>
+    FROM attachment a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type = 'ai_chat_session'
+      AND a.entity_id = #{sessionId}
+      AND a.id = #{id}
+  </select>
+
+  <select id="countAssistantSessionAttachments" resultType="int">
+    SELECT COUNT(*)
+    FROM attachment a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type = 'ai_chat_session'
+      AND a.entity_id = #{sessionId}
+  </select>
+
   <select id="countUrlInOtherWorkspaces" resultType="int">
     SELECT COUNT(*) FROM attachment
     WHERE url = #{url} AND workspace_id != #{workspaceId}
@@ -108,6 +148,7 @@
     FROM attachment a
     LEFT JOIN app_user u ON u.id = a.uploaded_by_id
     WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
       AND (a.file_name LIKE #{query}
       OR a.content_type LIKE #{query}
       OR u.display_name LIKE #{query})
@@ -158,6 +199,7 @@
   <sql id="attachPageWhere">
     <where>
       AND a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
       <if test="query != null">
         AND (a.file_name LIKE #{query} OR a.content_type LIKE #{query}
           OR COALESCE(c.name, p.name, d.name, eu.display_name) LIKE #{query}
@@ -211,6 +253,7 @@
     SELECT a.entity_type AS `key`, COUNT(*) AS count
     FROM attachment a
     WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
     GROUP BY a.entity_type
   </select>
 
@@ -218,6 +261,7 @@
     SELECT <include refid="kindExpr"/> AS `key`, COUNT(*) AS count
     FROM attachment a
     WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
     GROUP BY `key`
   </select>
 
@@ -226,21 +270,26 @@
     FROM attachment_tag att
     JOIN attachment a ON a.id = att.attachment_id
     WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
     GROUP BY att.tag_id
   </select>
 
   <select id="countOrphaned" resultType="long">
     SELECT COUNT(*)
     <include refid="attachJoins"/>
-    WHERE a.workspace_id = #{workspaceId} AND COALESCE(c.name, p.name, d.name, eu.display_name) IS NULL
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
+      AND COALESCE(c.name, p.name, d.name, eu.display_name) IS NULL
   </select>
 
   <select id="totalCount" resultType="long">
-    SELECT COUNT(*) FROM attachment a WHERE a.workspace_id = #{workspaceId}
+    SELECT COUNT(*) FROM attachment a
+    WHERE a.workspace_id = #{workspaceId} AND a.entity_type != 'ai_chat_session'
   </select>
 
   <select id="totalSize" resultType="long">
-    SELECT COALESCE(SUM(a.size), 0) FROM attachment a WHERE a.workspace_id = #{workspaceId}
+    SELECT COALESCE(SUM(a.size), 0) FROM attachment a
+    WHERE a.workspace_id = #{workspaceId} AND a.entity_type != 'ai_chat_session'
   </select>
 
   <insert id="addTag">
@@ -294,7 +343,10 @@
 
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
-      SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND id = #{id}
+      SELECT 1 FROM attachment
+      WHERE workspace_id = #{workspaceId}
+        AND id = #{id}
+        AND entity_type != 'ai_chat_session'
     )
   </select>
 

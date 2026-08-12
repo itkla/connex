@@ -314,6 +314,8 @@ type Props = {
     onRunAction?: (actionId: string) => void;
     onSubmit?: () => void;
     mentionTypes?: Partial<Record<'@' | '#', readonly NoteReferenceType[]>>;
+    /** Monotonic request value that opens the existing record picker at the editor end. */
+    recordPickerRequest?: number;
     /** Request context inherited from the host overlay, including its workspace header and abort signal. */
     requestInit?: RequestInit;
     /** Receives the imperative {@link MentionEditorHandle} for caret-safe programmatic inserts. */
@@ -349,6 +351,7 @@ export default function MentionEditor({
     onRunAction,
     onSubmit,
     mentionTypes,
+    recordPickerRequest,
     requestInit,
     handleRef,
 }: Props) {
@@ -357,6 +360,7 @@ export default function MentionEditor({
     const lastValue = useRef<string | null>(null);
     const savedRange = useRef<Range | null>(null);
     const composingRef = useRef(false);
+    const handledRecordPickerRequest = useRef(recordPickerRequest ?? 0);
     const listboxId = useId();
     const reduceMotion = useReducedMotion();
     const activeWorkspaceKey = requestWorkspaceKey(requestInit);
@@ -631,6 +635,27 @@ export default function MentionEditor({
         }
         closeMenu();
     }, [closeMenu, hasCommands, pickerScope, requestInit]);
+
+    useEffect(() => {
+        if (recordPickerRequest == null
+                || recordPickerRequest <= handledRecordPickerRequest.current) return;
+        handledRecordPickerRequest.current = recordPickerRequest;
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.focus();
+        const selection = window.getSelection();
+        if (!selection) return;
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const serialized = serialize(editor);
+        const prefix = serialized.length > 0 && !/\s$/.test(serialized) ? ' #' : '#';
+        document.execCommand('insertText', false, prefix);
+        emit();
+        detectQuery();
+    }, [detectQuery, emit, recordPickerRequest]);
 
     const handleInput = useCallback(() => {
         emit();

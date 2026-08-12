@@ -4863,6 +4863,110 @@ export function archiveAiChatSession(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/ai/assistant/sessions/${id}`, init);
 }
 
+export function getAiChatAttachments(sessionId: number, init: RequestInit = {}) {
+    return getJson<Types.AiChatAttachment[]>(
+        `/api/ai/assistant/sessions/${sessionId}/attachments`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+function isAiChatAttachment(value: unknown): value is Types.AiChatAttachment {
+    return typeof value === 'object'
+        && value !== null
+        && 'id' in value
+        && typeof value.id === 'number'
+        && Number.isSafeInteger(value.id)
+        && value.id > 0
+        && 'fileName' in value
+        && typeof value.fileName === 'string'
+        && 'contentType' in value
+        && typeof value.contentType === 'string'
+        && 'size' in value
+        && typeof value.size === 'number'
+        && Number.isSafeInteger(value.size)
+        && value.size >= 0
+        && 'kind' in value
+        && (value.kind === 'text' || value.kind === 'image')
+        && 'createdAt' in value
+        && typeof value.createdAt === 'string';
+}
+
+/** Uploads one assistant context file and reports browser upload progress. */
+export async function uploadAiChatAttachment(
+    sessionId: number,
+    file: File,
+    onProgress: (progress: number) => void,
+    init: RequestInit = {},
+): Promise<Types.AiChatAttachment> {
+    const path = `/api/ai/assistant/sessions/${sessionId}/attachments`;
+    const locale = requestLocale(init);
+    const workspaceId = clientWorkspaceId();
+    const send = async (forceRefresh: boolean): Promise<Response> => {
+        const csrf = await csrfHeader(forceRefresh);
+        const formData = new FormData();
+        formData.append('file', file);
+        return new Promise<Response>((resolve, reject) => {
+            const request = new XMLHttpRequest();
+            const abort = () => request.abort();
+            request.open('POST', `${API_BASE}${path}`);
+            request.withCredentials = true;
+            request.setRequestHeader('Accept-Language', locale);
+            if (workspaceId) request.setRequestHeader('X-Workspace-Id', workspaceId);
+            Object.entries(csrf).forEach(([name, value]) => request.setRequestHeader(name, value));
+            new Headers(init.headers).forEach((value, name) => request.setRequestHeader(name, value));
+            request.upload.addEventListener('progress', (event) => {
+                if (!event.lengthComputable || event.total <= 0) return;
+                onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+            });
+            request.addEventListener('load', () => {
+                init.signal?.removeEventListener('abort', abort);
+                resolve(new Response(request.responseText, {
+                    status: request.status,
+                    statusText: request.statusText,
+                }));
+            });
+            request.addEventListener('error', () => {
+                init.signal?.removeEventListener('abort', abort);
+                reject(new TypeError('Assistant attachment upload failed'));
+            });
+            request.addEventListener('abort', () => {
+                init.signal?.removeEventListener('abort', abort);
+                reject(init.signal?.reason ?? new DOMException('Upload aborted', 'AbortError'));
+            });
+            if (init.signal?.aborted) {
+                reject(init.signal.reason);
+                return;
+            }
+            init.signal?.addEventListener('abort', abort, { once: true });
+            request.send(formData);
+        });
+    };
+    let response = await send(false);
+    if (await shouldRetryWithFreshCsrf(path, response, true)) {
+        response = await send(true);
+    }
+    if (!response.ok) throw await getApiError(response);
+    const text = await response.text();
+    if (!text) throw new TypeError('Assistant attachment response was empty');
+    const attachment: unknown = JSON.parse(text);
+    if (!isAiChatAttachment(attachment)) {
+        throw new TypeError('Assistant attachment response was invalid');
+    }
+    onProgress(100);
+    return attachment;
+}
+
+export function deleteAiChatAttachment(
+    sessionId: number,
+    attachmentId: number,
+    init: RequestInit = {},
+) {
+    return deleteJson<void>(
+        `/api/ai/assistant/sessions/${sessionId}/attachments/${attachmentId}`,
+        init,
+    );
+}
+
 export function setAiChatSessionShared(id: number, shared: boolean, init: RequestInit = {}) {
     return patchJson<Types.AiChatSession>(
         `/api/ai/assistant/sessions/${id}/sharing`,

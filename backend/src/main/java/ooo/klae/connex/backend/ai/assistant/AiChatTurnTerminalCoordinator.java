@@ -18,12 +18,14 @@ public class AiChatTurnTerminalCoordinator {
     private static final String INTERNAL_ERROR = "internal_error";
     private static final Set<String> FAILED_REASONS = Set.of(
             "provider_error",
+            "image_input_unsupported",
             "quota_exhausted",
             "budget_exhausted",
             "org_invocation_quota_exhausted",
             "invocation_capacity_exhausted",
             "malformed_output",
             "schema_repair_failed",
+            "attachment_auto_write_blocked",
             "no_progress",
             "agent_backstop_exceeded",
             "step_cap_exceeded",

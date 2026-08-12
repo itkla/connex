@@ -12,6 +12,9 @@ import {
     ExclamationCircleIcon,
     LinkIcon,
     MapPinIcon,
+    DocumentTextIcon,
+    PaperClipIcon,
+    PhotoIcon,
     PencilSquareIcon,
     PlusIcon,
     SparklesIcon,
@@ -31,14 +34,16 @@ import ErrorState from '@/app/components/ErrorState';
 import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
-import type { AskConnexAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
+import type { AskConnexAttachment, AskConnexFileAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
 import {
     askConnexCitationHref,
     askConnexCitations,
     groupAskConnexMessages,
+    hasPendingAskConnexFileOperation,
     latestAskConnexSuggestions,
 } from '@/app/lib/askConnex';
 import { easeOut, instant, springSmooth } from '@/app/lib/motion';
+import { formatFileSize } from '@/app/lib/utils';
 import type {
     AiChatCitation,
     AiChatMessage,
@@ -114,11 +119,15 @@ type UnavailableState = {
 
 type AskConnexDrawerLabels = {
     assistantAuthor: string;
+    addContext: string;
+    addRecordContext: string;
     archive: string;
+    attachFile: string;
     budgetExhausted: string;
     citations: string;
     disclosureCreation: string;
     disclosureList: string;
+    imageDisclosure: string;
     citationKind: (kind: AiChatCitation['kind']) => string;
     close: string;
     composerAria: string;
@@ -148,6 +157,7 @@ type AskConnexDrawerLabels = {
     presence: string;
     recentSessions: string;
     removeContext: (label: string) => string;
+    removeFile: (label: string) => string;
     removeParticipant: (name: string) => string;
     rename: string;
     renameCancel: string;
@@ -170,9 +180,12 @@ type AskConnexDrawerLabels = {
     unshare: string;
     turnAccepted: string;
     turnFailed: string;
+    turnImageUnsupported: string;
     turnResolved: string;
     turnTimedOut: string;
     turnWorking: string;
+    uploadProgress: (progress: number) => string;
+    uploadRemoving: string;
 };
 
 type AskConnexDrawerProps = {
@@ -194,6 +207,9 @@ type AskConnexDrawerProps = {
     composer: string;
     implicitContext: AskConnexAttachment | null;
     attachments: AskConnexAttachment[];
+    fileAttachments: AskConnexFileAttachment[];
+    canAttachFiles: boolean;
+    canRemoveFiles: boolean;
     contextOverflow: boolean;
     contentTooLong: boolean;
     working: boolean;
@@ -216,12 +232,14 @@ type AskConnexDrawerProps = {
     onRetry: () => void;
     onComposerChange: (value: string) => void;
     onRemoveAttachment: (attachment: AskConnexAttachment) => void;
+    onAttachFiles: (files: File[]) => void;
+    onRemoveFileAttachment: (attachment: AskConnexFileAttachment) => void;
     onSend: (content?: string) => void;
 };
 
 type ConversationSurfaceProps = Omit<
     AskConnexDrawerProps,
-    'open' | 'instantOpen' | 'isMobile' | 'showTab' | 'onOpenChange' | 'onOpenChangeComplete' | 'onKeyboardClose' | 'onRename'
+    'instantOpen' | 'isMobile' | 'showTab' | 'onOpenChange' | 'onOpenChangeComplete' | 'onKeyboardClose' | 'onRename'
 > & {
     closeButton: ReactNode;
     onBeginRename: () => void;
@@ -431,7 +449,11 @@ function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskC
         return (
             <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-destructive">
                 <ExclamationCircleIcon className="size-3.5" />
-                <span>{turn.reason === 'budget_exhausted' ? labels.budgetExhausted : labels.turnFailed}</span>
+                <span>{turn.reason === 'image_input_unsupported'
+                    ? labels.turnImageUnsupported
+                    : turn.reason === 'budget_exhausted'
+                        ? labels.budgetExhausted
+                        : labels.turnFailed}</span>
             </div>
         );
     }
@@ -454,17 +476,25 @@ function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskC
 function ContextChips({
     implicitContext,
     attachments,
+    fileAttachments,
+    canRemoveFiles,
+    fileOperationPending,
     overflow,
     labels,
     onRemove,
+    onRemoveFile,
 }: {
     implicitContext: AskConnexAttachment | null;
     attachments: AskConnexAttachment[];
+    fileAttachments: AskConnexFileAttachment[];
+    canRemoveFiles: boolean;
+    fileOperationPending: boolean;
     overflow: boolean;
     labels: AskConnexDrawerLabels;
     onRemove: (attachment: AskConnexAttachment) => void;
+    onRemoveFile: (attachment: AskConnexFileAttachment) => void;
 }) {
-    if (!implicitContext && attachments.length === 0 && !overflow) return null;
+    if (!implicitContext && attachments.length === 0 && fileAttachments.length === 0 && !overflow) return null;
 
     return (
         <div role="group" className="mb-2" aria-label={labels.context}>
@@ -488,6 +518,51 @@ function ContextChips({
                         </button>
                     </Badge>
                 ))}
+                {fileAttachments.map((attachment) => {
+                    const FileIcon = attachment.kind === 'image' ? PhotoIcon : DocumentTextIcon;
+                    const detail = attachment.status === 'uploading'
+                        ? labels.uploadProgress(attachment.progress)
+                        : attachment.status === 'removing'
+                            ? labels.uploadRemoving
+                        : attachment.status === 'failed'
+                            ? attachment.error
+                            : formatFileSize(attachment.size);
+                    return (
+                        <Badge
+                            key={attachment.clientId}
+                            variant={attachment.status === 'failed' ? 'destructive' : 'outline'}
+                            aria-invalid={attachment.status === 'failed' || undefined}
+                            className="h-auto max-w-56 shrink-0 py-1 pr-1"
+                        >
+                            <FileIcon />
+                            <span className="min-w-0">
+                                <span className="block truncate">{attachment.fileName}</span>
+                                <span
+                                    role={attachment.status === 'failed'
+                                        ? 'alert'
+                                        : attachment.status === 'uploading' || attachment.status === 'removing'
+                                            ? 'status'
+                                            : undefined}
+                                    className="block truncate text-[10px] font-normal opacity-70"
+                                >
+                                    {detail}
+                                </span>
+                            </span>
+                            <button
+                                type="button"
+                                aria-label={labels.removeFile(attachment.fileName)}
+                                disabled={!canRemoveFiles
+                                    || fileOperationPending
+                                    || attachment.status === 'uploading'
+                                    || attachment.status === 'removing'}
+                                onClick={() => onRemoveFile(attachment)}
+                                className="rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                                <XMarkIcon className="size-3" />
+                            </button>
+                        </Badge>
+                    );
+                })}
             </div>
             {overflow ? <p role="alert" className="mt-1.5 text-xs text-destructive">{labels.contextLimit}</p> : null}
         </div>
@@ -615,6 +690,9 @@ function ConversationSurface({
     composer,
     implicitContext,
     attachments,
+    fileAttachments,
+    canAttachFiles,
+    canRemoveFiles,
     contextOverflow,
     contentTooLong,
     working,
@@ -633,19 +711,27 @@ function ConversationSurface({
     onRetry,
     onComposerChange,
     onRemoveAttachment,
+    onAttachFiles,
+    onRemoveFileAttachment,
     onSend,
+    open,
 }: ConversationSurfaceProps) {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [recordPickerRequest, setRecordPickerRequest] = useState(0);
     const groups = useMemo(() => groupAskConnexMessages(messages), [messages]);
+    const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
+    const busy = working || fileOperationPending;
     const suggestions = useMemo(
-        () => latestAskConnexSuggestions(messages, working),
-        [messages, working],
+        () => latestAskConnexSuggestions(messages, busy),
+        [busy, messages],
     );
     const latestMessageId = messages.at(-1)?.id ?? null;
     const canSend = composer.trim().length > 0
         && loadState === 'ready'
         && !contextOverflow
         && !contentTooLong
-        && !working
+        && !fileOperationPending
+        && !busy
         && unavailable === null;
 
     return (
@@ -659,7 +745,7 @@ function ConversationSurface({
                     invitations={invitations}
                     activeSession={activeSession}
                     canShare={canShare}
-                    working={working}
+                    working={busy}
                     labels={labels}
                     onSelectSession={onSelectSession}
                     onNewChat={onNewChat}
@@ -684,7 +770,7 @@ function ConversationSurface({
             >
                 <MessageScroller className="min-h-0 flex-1">
                     <MessageScrollerViewport aria-label={labels.messages}>
-                        <MessageScrollerContent aria-busy={working}>
+                        <MessageScrollerContent aria-busy={busy}>
                             {loadState === 'loading' ? (
                                 <MessageScrollerItem messageId="loading">
                                     <TranscriptSkeleton />
@@ -800,10 +886,19 @@ function ConversationSurface({
                     <ContextChips
                         implicitContext={implicitContext}
                         attachments={attachments}
+                        fileAttachments={fileAttachments}
+                        canRemoveFiles={canRemoveFiles}
+                        fileOperationPending={fileOperationPending}
                         overflow={contextOverflow}
                         labels={labels}
                         onRemove={onRemoveAttachment}
+                        onRemoveFile={onRemoveFileAttachment}
                     />
+                    {fileAttachments.some((attachment) => attachment.kind === 'image') ? (
+                        <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
+                            {labels.imageDisclosure}
+                        </p>
+                    ) : null}
                     <div data-base-ui-swipe-ignore className="rounded-2xl border border-input bg-background p-2 focus-within:ring-2 focus-within:ring-ring/50">
                         <MentionEditor
                             value={composer}
@@ -814,9 +909,52 @@ function ConversationSurface({
                             placeholder={labels.composerPlaceholder}
                             ariaLabel={labels.composerAria}
                             mentionTypes={ASK_CONNEX_MENTION_TYPES}
+                            recordPickerRequest={recordPickerRequest}
                             className="min-h-16 max-h-36 overflow-y-auto px-1 py-1 text-sm leading-5"
                         />
-                        <div className="mt-2 flex items-end justify-between gap-3">
+                        <div className="mt-2 flex items-end gap-2">
+                            {open ? (
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    multiple
+                                    accept=".txt,.md,.markdown,.csv,.json,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,text/csv,application/json,image/jpeg,image/png,image/webp"
+                                    className="sr-only"
+                                    tabIndex={-1}
+                                    aria-label={labels.attachFile}
+                                    onChange={(event) => {
+                                        const files = Array.from(event.target.files ?? []);
+                                        event.target.value = '';
+                                        if (files.length > 0) onAttachFiles(files);
+                                    }}
+                                />
+                            ) : null}
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        aria-label={labels.addContext}
+                                        disabled={busy || loadState !== 'ready' || unavailable !== null}
+                                    >
+                                        <PlusIcon className="size-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start" side="top" className="w-52">
+                                    <DropdownMenuItem
+                                        disabled={!canAttachFiles}
+                                        onSelect={() => fileInputRef.current?.click()}
+                                    >
+                                        <PaperClipIcon />
+                                        {labels.attachFile}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => setRecordPickerRequest((value) => value + 1)}>
+                                        <LinkIcon />
+                                        {labels.addRecordContext}
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                             <div className="min-w-0 text-xs text-muted-foreground">
                                 {contentTooLong ? (
                                     <p role="alert" className="text-destructive">{labels.tooLong}</p>
@@ -824,7 +962,7 @@ function ConversationSurface({
                                     <p>{labels.composerHint}</p>
                                 )}
                             </div>
-                            <Button type="submit" size="icon-sm" aria-label={labels.send} disabled={!canSend}>
+                            <Button className="ml-auto" type="submit" size="icon-sm" aria-label={labels.send} disabled={!canSend}>
                                 <ArrowUpIcon className="size-4" />
                             </Button>
                         </div>
@@ -928,7 +1066,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         if (invited) setSelectedMemberId('');
     };
 
-    const surfaceProps: ConversationSurfaceProps = {
+    const surfaceProps: Omit<ConversationSurfaceProps, 'open'> = {
         sessions: props.sessions,
         invitations: props.invitations,
         activeSession: props.activeSession,
@@ -943,6 +1081,9 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         composer: props.composer,
         implicitContext: props.implicitContext,
         attachments: props.attachments,
+        fileAttachments: props.fileAttachments,
+        canAttachFiles: props.canAttachFiles,
+        canRemoveFiles: props.canRemoveFiles,
         contextOverflow: props.contextOverflow,
         contentTooLong: props.contentTooLong,
         working: props.working,
@@ -964,6 +1105,8 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onRetry: props.onRetry,
         onComposerChange: props.onComposerChange,
         onRemoveAttachment: props.onRemoveAttachment,
+        onAttachFiles: props.onAttachFiles,
+        onRemoveFileAttachment: props.onRemoveFileAttachment,
         onSend: props.onSend,
     };
 
@@ -996,6 +1139,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
             >
                 <ConversationSurface
                     {...surfaceProps}
+                    open={open}
                     closeButton={(
                         <Button
                             type="button"
@@ -1040,6 +1184,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                         <DrawerDescription className="sr-only">{labels.title}</DrawerDescription>
                         <ConversationSurface
                             {...surfaceProps}
+                            open
                             closeButton={(
                                 <DrawerClose render={<Button variant="ghost" size="icon-sm" aria-label={labels.close} />}>
                                     <XMarkIcon className="size-4" />

@@ -4,20 +4,20 @@ package ooo.klae.connex.backend.ai;
  * AI features with their stable audit/cache wire keys and input capabilities.
  */
 public enum AiFeature {
-    DEAL_BRIEF("deal.brief", false),
-    DEAL_RISK_RATIONALE("deal.risk_rationale", false),
-    INTRO_RATIONALE("intro.rationale", false),
-    REPORT_COMPOSER("report.composer", false),
-    REPORT_NARRATIVE("report.narrative", false),
-    ASSISTANT_CHAT("assistant.chat", false),
-    BUSINESS_CARD_EXTRACTION("business_card.scan", true);
+    DEAL_BRIEF("deal.brief", ImageInput.NONE),
+    DEAL_RISK_RATIONALE("deal.risk_rationale", ImageInput.NONE),
+    INTRO_RATIONALE("intro.rationale", ImageInput.NONE),
+    REPORT_COMPOSER("report.composer", ImageInput.NONE),
+    REPORT_NARRATIVE("report.narrative", ImageInput.NONE),
+    ASSISTANT_CHAT("assistant.chat", ImageInput.OPTIONAL),
+    BUSINESS_CARD_EXTRACTION("business_card.scan", ImageInput.REQUIRED);
 
     private final String wireKey;
-    private final boolean imageInputRequired;
+    private final ImageInput imageInput;
 
-    AiFeature(String wireKey, boolean imageInputRequired) {
+    AiFeature(String wireKey, ImageInput imageInput) {
         this.wireKey = wireKey;
-        this.imageInputRequired = imageInputRequired;
+        this.imageInput = imageInput;
     }
 
     /**
@@ -33,6 +33,20 @@ public enum AiFeature {
      * @return true for embedded-image features
      */
     public boolean requiresImageInput() {
-        return imageInputRequired;
+        return imageInput == ImageInput.REQUIRED;
+    }
+
+    /**
+     * Returns whether this feature accepts an embedded image when one is available.
+     * @return true for optional and required embedded-image features
+     */
+    public boolean acceptsImageInput() {
+        return imageInput != ImageInput.NONE;
+    }
+
+    private enum ImageInput {
+        NONE,
+        OPTIONAL,
+        REQUIRED
     }
 }
