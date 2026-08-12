@@ -43,6 +43,7 @@ class AiFeatureGateTest {
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentOrgId()).thenReturn(3);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(42);
+        lenient().when(workspaceService.isMember(7, 42)).thenReturn(true);
         lenient().when(governanceService.isEnabled(7)).thenReturn(true);
     }
 

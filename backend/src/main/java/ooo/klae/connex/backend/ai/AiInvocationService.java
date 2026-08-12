@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.masking.AiJson;
+import ooo.klae.connex.backend.ai.masking.AiGeneratedContentScreen;
 import ooo.klae.connex.backend.ai.masking.CompletionNormalizer;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
@@ -30,7 +32,10 @@ import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptBlockedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProvider;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
@@ -60,6 +65,11 @@ public class AiInvocationService {
     private static final String UNKNOWN_TARGET = "unresolved";
     private static final String PARSE_OUTCOME_PARSED = "parsed";
     private static final Set<String> TRUNCATION_STOP_REASONS = Set.of("length", "max_tokens");
+    private static final int MAX_REASONING_CHARS = 16_000;
+    private static final String TAGGED_REASONING_INSTRUCTION = """
+            Before the final response, reason inside exactly one <thinking>...</thinking> block. \
+            After the closing tag, emit only the requested final response shape. Never put answer \
+            text inside the thinking block and never put thinking outside it.""";
     private static final Runnable NO_INVOCATION_COMMITMENT = () -> {};
 
     private final AiFeatureGate aiFeatureGate;
@@ -74,13 +84,49 @@ public class AiInvocationService {
     private final AiOrganizationBudgetCoordinator budgetCoordinator;
 
     /**
+     * Resolves adapter-declared capabilities for the current organization provider configuration.
+     * @param feature feature whose provider gate must be satisfied
+     * @return exact configured-target capabilities without performing provider egress
+     */
+    public AiProviderCapabilities currentProviderCapabilities(AiFeature feature) {
+        Objects.requireNonNull(feature, "feature");
+        aiFeatureGate.requireAiUsable(feature);
+        int orgId = workspaceService.getCurrentOrgId();
+        ResolvedAiProvider resolved = aiProviderConfigService.resolveForOrg(
+                orgId, workspaceService.getCurrentUserId());
+        AiProvider adapter = aiProviderRouter.adapterFor(resolved.provider());
+        return new AiProviderCapabilities(
+                adapter.structuredOutputCapability(resolved.target()),
+                adapter.reasoningCapability(resolved.target()),
+                adapter.contextWindowTokens(resolved.target()));
+    }
+
+    /**
+     * Measures the exact UTF-8 bytes used by Connex's serialized provider-neutral prompt envelope.
+     * @param prompt masked prompt whose fixed envelope is measured
+     * @param responseSchema structured response schema included in the envelope
+     * @param reasoningMode provider reasoning protocol included in the system prompt
+     * @return exact serialized UTF-8 byte count
+     */
+    public int serializedPromptBytes(
+            MaskedPrompt prompt,
+            AiResponseSchema responseSchema,
+            AiReasoningMode reasoningMode) {
+        Objects.requireNonNull(prompt, "prompt");
+        Objects.requireNonNull(reasoningMode, "reasoningMode");
+        return serializeProviderInput(prompt, responseSchema, reasoningMode)
+                .getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    /**
      * Completes a masked AI invocation and returns demasked text.
      * @param invocation masked invocation request
      * @return demasked completion outcome
      */
     public AiCompletionOutcome complete(AiInvocation invocation) {
         try (RawInvocation raw = invokeRaw(
-                invocation, AiOutputMode.TEXT, null, NO_INVOCATION_COMMITMENT)) {
+                invocation, AiOutputMode.TEXT, null,
+                NO_INVOCATION_COMMITMENT, NO_INVOCATION_COMMITMENT)) {
             AiCompletionResult result = raw.result();
             Demasker.DemaskResult demasked = Demasker.demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
@@ -104,7 +150,8 @@ public class AiInvocationService {
             AiInvocationAdmissionService.DirectAdmission admission) {
         Objects.requireNonNull(admission, "admission");
         try (RawInvocation raw = invokeRaw(
-                invocation, AiOutputMode.TEXT, null, admission::commitInvocation)) {
+                invocation, AiOutputMode.TEXT, null,
+                admission::commitInvocation, NO_INVOCATION_COMMITMENT)) {
             AiCompletionResult result = raw.result();
             Demasker.DemaskResult demasked = Demasker.demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
@@ -148,7 +195,7 @@ public class AiInvocationService {
     public <T> AiStructuredOutcome<T> completeStructured(AiInvocation invocation, Class<T> type) {
         return completeStructuredAttemptWithCommitment(
                 invocation, type, AiRawOutputGuard.PERMIT_ALL, null,
-                NO_INVOCATION_COMMITMENT, false).outcome();
+                NO_INVOCATION_COMMITMENT, NO_INVOCATION_COMMITMENT, false).outcome();
     }
 
     /**
@@ -167,7 +214,7 @@ public class AiInvocationService {
         Objects.requireNonNull(admission, "admission");
         return completeStructuredAttemptWithCommitment(
                 invocation, type, AiRawOutputGuard.PERMIT_ALL, null,
-                admission::commitLeaderInvocation, false).outcome();
+                admission::commitLeaderInvocation, NO_INVOCATION_COMMITMENT, false).outcome();
     }
 
     /**
@@ -184,7 +231,7 @@ public class AiInvocationService {
             AiInvocation invocation, Class<T> type, AiRawOutputGuard guard) {
         return completeStructuredAttemptWithCommitment(
                 invocation, type, guard, null,
-                NO_INVOCATION_COMMITMENT, false).outcome();
+                NO_INVOCATION_COMMITMENT, NO_INVOCATION_COMMITMENT, false).outcome();
     }
 
     /**
@@ -205,7 +252,7 @@ public class AiInvocationService {
         Objects.requireNonNull(admission, "admission");
         return completeStructuredAttemptWithCommitment(
                 invocation, type, guard, null,
-                admission::commitLeaderInvocation, false).outcome();
+                admission::commitLeaderInvocation, NO_INVOCATION_COMMITMENT, false).outcome();
     }
 
     /**
@@ -225,7 +272,7 @@ public class AiInvocationService {
             AiResponseSchema responseSchema) {
         return completeStructuredAttemptWithCommitment(
                 invocation, type, guard, Objects.requireNonNull(responseSchema, "responseSchema"),
-                NO_INVOCATION_COMMITMENT, true);
+                NO_INVOCATION_COMMITMENT, NO_INVOCATION_COMMITMENT, true);
     }
 
     /**
@@ -248,7 +295,32 @@ public class AiInvocationService {
         Objects.requireNonNull(admission, "admission");
         return completeStructuredAttemptWithCommitment(
                 invocation, type, guard, Objects.requireNonNull(responseSchema, "responseSchema"),
-                admission::commitInvocation, true);
+                admission::commitInvocation, NO_INVOCATION_COMMITMENT, true);
+    }
+
+    /**
+     * Completes a repairable invocation with a caller-owned access check before every provider send.
+     * @param invocation masked invocation request
+     * @param type content type to bind the parsed object to
+     * @param guard pre-demask validator run on the masked output
+     * @param responseSchema provider-neutral response schema
+     * @param admission active direct invocation admission
+     * @param providerAttemptGuard access check run immediately before each provider attempt
+     * @param <T> content type
+     * @return parsed outcome or malformed outcome with an optional repair payload
+     */
+    public <T> AiStructuredRepairAttempt<T> completeStructuredRepairable(
+            AiInvocation invocation,
+            Class<T> type,
+            AiRawOutputGuard guard,
+            AiResponseSchema responseSchema,
+            AiInvocationAdmissionService.DirectAdmission admission,
+            Runnable providerAttemptGuard) {
+        Objects.requireNonNull(admission, "admission");
+        return completeStructuredAttemptWithCommitment(
+                invocation, type, guard, Objects.requireNonNull(responseSchema, "responseSchema"),
+                admission::commitInvocation,
+                Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard"), true);
     }
 
     private <T> AiStructuredRepairAttempt<T> completeStructuredAttemptWithCommitment(
@@ -257,14 +329,28 @@ public class AiInvocationService {
             AiRawOutputGuard guard,
             AiResponseSchema responseSchema,
             Runnable invocationCommitment,
+            Runnable providerAttemptGuard,
             boolean captureRepair) {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(guard, "guard");
         Objects.requireNonNull(invocationCommitment, "invocationCommitment");
+        Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard");
         try (RawInvocation raw = invokeRaw(
-                invocation, AiOutputMode.JSON, responseSchema, invocationCommitment)) {
+                invocation, AiOutputMode.JSON, responseSchema,
+                invocationCommitment, providerAttemptGuard)) {
             AiCompletionResult result = raw.result();
-            String stripped = CompletionNormalizer.stripReasoning(result.text());
+            CompletionNormalizer.CapturedCompletion captured =
+                    CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
+            if ((captured.ambiguous() && captured.answer().isBlank())
+                    || CompletionNormalizer.containsReasoningTag(captured.answer())) {
+                return malformed(
+                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                        "reasoning_boundary", "", false, false);
+            }
+            String stripped = captured.answer();
+            ReasoningNormalization reasoning = captured.ambiguous()
+                    ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
+                    : normalizeReasoning(captured.reasoning(), invocation);
             ObjectNode object = AiJson.extractObject(stripped, objectMapper);
             if (object == null) {
                 return malformed(
@@ -297,7 +383,9 @@ public class AiInvocationService {
             return new AiStructuredRepairAttempt<>(
                     new AiStructuredOutcome.Parsed<>(value, warnings,
                             result.inputTokens(), result.outputTokens(), result.stopReason()),
-                    Optional.empty());
+                    Optional.empty(), reasoning.rejectionReason() == null
+                            ? reasoning.content()
+                            : Optional.empty());
         }
     }
 
@@ -321,20 +409,23 @@ public class AiInvocationService {
         return new AiStructuredRepairAttempt<>(
                 new AiStructuredOutcome.Malformed<>(parseOutcome,
                         result.inputTokens(), result.outputTokens(), result.stopReason()),
-                repair);
+                repair, Optional.empty());
     }
 
     private RawInvocation invokeRaw(
             AiInvocation invocation,
             AiOutputMode outputMode,
             AiResponseSchema responseSchema,
-            Runnable invocationCommitment) {
+            Runnable invocationCommitment,
+            Runnable providerAttemptGuard) {
         Objects.requireNonNull(invocation, "invocation");
         Objects.requireNonNull(outputMode, "outputMode");
         Objects.requireNonNull(invocationCommitment, "invocationCommitment");
+        Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard");
         boolean structured = outputMode == AiOutputMode.JSON;
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int orgId = workspaceService.getCurrentOrgId();
+        int userId = workspaceService.getCurrentUserId();
         String correlationId = UUID.randomUUID().toString();
 
         try {
@@ -347,7 +438,8 @@ public class AiInvocationService {
 
         return invokeAdmitted(
                 invocation, outputMode, responseSchema,
-                workspaceId, orgId, correlationId, invocationCommitment);
+                workspaceId, orgId, userId, correlationId,
+                invocationCommitment, providerAttemptGuard);
     }
 
     private AiMediaAdmissionService.Lease acquireMedia(
@@ -371,13 +463,15 @@ public class AiInvocationService {
             AiResponseSchema responseSchema,
             int workspaceId,
             int orgId,
+            int userId,
             String correlationId,
-            Runnable invocationCommitment) {
+            Runnable invocationCommitment,
+            Runnable providerAttemptGuard) {
         boolean structured = outputMode == AiOutputMode.JSON;
 
         ResolvedAiProvider resolved;
         try {
-            resolved = aiProviderConfigService.resolveForOrg(orgId, workspaceService.getCurrentUserId());
+            resolved = aiProviderConfigService.resolveForOrg(orgId, userId);
         } catch (ForbiddenException | AiProviderException exception) {
             emitAudit(workspaceId, orgId, null, invocation, correlationId, "blocked",
                     null, null, null, null, "provider", structured, null);
@@ -390,13 +484,26 @@ public class AiInvocationService {
             throw new AiImageInputUnsupportedException();
         }
 
+        AiProvider adapter = aiProviderRouter.adapterFor(resolved.provider());
+        AiReasoningMode reasoningMode = invocation.reasoningRequested()
+                ? adapter.reasoningCapability(resolved.target())
+                : AiReasoningMode.NONE;
+
         String serializedPrompt;
         try {
-            serializedPrompt = serializePrompt(invocation.prompt());
+            serializedPrompt = serializeProviderInput(
+                    invocation.prompt(), responseSchema, reasoningMode);
         } catch (AiProviderException exception) {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null);
             throw exception;
+        }
+
+        if (serializedPrompt.getBytes(StandardCharsets.UTF_8).length > providerInputByteCeiling(
+                adapter.contextWindowTokens(resolved.target()), invocation.maxTokens())) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "context_window", structured, null);
+            throw new AiProviderException("AI prompt exceeds the configured model context window");
         }
 
         try {
@@ -409,7 +516,7 @@ public class AiInvocationService {
 
         AiOrganizationBudgetCoordinator.Lease budgetLease;
         try {
-            budgetLease = budgetCoordinator.reserve(orgId, invocation);
+            budgetLease = budgetCoordinator.reserve(orgId, invocation, serializedPrompt);
         } catch (AiBudgetExhaustedException exception) {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "budget_exhausted", structured, null);
@@ -426,16 +533,17 @@ public class AiInvocationService {
 
         MediaLeaseGuard mediaLease = MediaLeaseGuard.none();
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
-                workspaceId, orgId, resolved, invocation, correlationId,
-                structured, invocationCommitment, budgetLease);
+                workspaceId, orgId, userId, resolved, invocation, correlationId,
+                structured, invocationCommitment, providerAttemptGuard,
+                serializedPrompt, budgetLease);
         try {
             if (!invocation.images().isEmpty()) {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
                         workspaceId, orgId, correlationId, invocation, structured));
             }
-            AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
-                    .complete(request(
-                            resolved, invocation, outputMode, responseSchema, attemptTracker));
+            AiCompletionResult result = withConservativeUsage(adapter.complete(request(
+                    resolved, invocation, outputMode, responseSchema,
+                    reasoningMode, attemptTracker)), invocation, serializedPrompt);
             attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
@@ -479,10 +587,35 @@ public class AiInvocationService {
         };
     }
 
+    private static AiCompletionResult withConservativeUsage(
+            AiCompletionResult result,
+            AiInvocation invocation,
+            String serializedPrompt) {
+        if (result.inputTokens() != 0 || result.outputTokens() != 0) {
+            return result;
+        }
+        long inputCeiling = serializedPrompt.getBytes(StandardCharsets.UTF_8).length;
+        for (AiInputImage image : invocation.images()) {
+            inputCeiling = Math.min(Integer.MAX_VALUE, inputCeiling + image.size());
+        }
+        return new AiCompletionResult(
+                result.text(),
+                (int) Math.max(1, inputCeiling),
+                invocation.maxTokens(),
+                result.stopReason(),
+                result.structuredOutputEnforcement(),
+                result.reasoning(),
+                result.reasoningMode());
+    }
+
     private static String truncationReason(String stopReason) {
         return TRUNCATION_STOP_REASONS.contains(stopReason)
                 ? AiStructuredOutcome.REASON_TRUNCATED
                 : AiStructuredOutcome.REASON_MALFORMED;
+    }
+
+    private static int providerInputByteCeiling(int contextTokens, int outputTokens) {
+        return Math.max(1, contextTokens - Math.min(contextTokens - 1, outputTokens));
     }
 
     private AiCompletionRequest request(
@@ -490,26 +623,71 @@ public class AiInvocationService {
             AiInvocation invocation,
             AiOutputMode outputMode,
             AiResponseSchema responseSchema,
+            AiReasoningMode reasoningMode,
             AiProviderAttemptExecutor providerAttemptExecutor) {
         List<AiMessage> messages = invocation.prompt().getMessages().stream()
                 .map(message -> new AiMessage(message.getRole(), message.getContent()))
                 .toList();
-        return new AiCompletionRequest(resolved.target(), resolved.credentials(), invocation.prompt().getSystemPrompt(),
-                messages, invocation.images(), outputMode, responseSchema,
+        return new AiCompletionRequest(
+                resolved.target(), resolved.credentials(), systemPrompt(invocation.prompt(), reasoningMode),
+                messages, invocation.images(), outputMode, responseSchema, reasoningMode,
                 providerAttemptExecutor, invocation.maxTokens(), invocation.temperature());
     }
 
-    private String serializePrompt(MaskedPrompt prompt) {
+    private ReasoningNormalization normalizeReasoning(
+            String maskedReasoning, AiInvocation invocation) {
+        if (maskedReasoning == null || maskedReasoning.isBlank()) {
+            return new ReasoningNormalization(Optional.empty(), null);
+        }
+        if (maskedReasoning.length() > MAX_REASONING_CHARS) {
+            return new ReasoningNormalization(Optional.empty(), "reasoning_length");
+        }
+        if (AiGeneratedContentScreen.containsBarePlaceholder(maskedReasoning)) {
+            return new ReasoningNormalization(Optional.empty(), "reasoning_placeholder");
+        }
+        String maskedRejection = AiGeneratedContentScreen.rejectionReason(maskedReasoning);
+        if (maskedRejection != null) {
+            return new ReasoningNormalization(Optional.empty(), maskedRejection);
+        }
+        try {
+            OutboundLeakScan.assertNoLeak(maskedReasoning, invocation.context(), objectMapper);
+        } catch (MaskingLeakException exception) {
+            return new ReasoningNormalization(Optional.empty(), "reasoning_identifier_leak");
+        }
+        Demasker.DemaskResult demasked = Demasker.demask(
+                maskedReasoning, invocation.context());
+        if (demasked.warnings() != 0) {
+            return new ReasoningNormalization(Optional.empty(), "reasoning_placeholder");
+        }
+        String demaskedRejection = AiGeneratedContentScreen.rejectionReason(demasked.text());
+        return demaskedRejection == null
+                ? new ReasoningNormalization(Optional.of(demasked.text()), null)
+                : new ReasoningNormalization(Optional.empty(), demaskedRejection);
+    }
+
+    private String serializeProviderInput(
+            MaskedPrompt prompt,
+            AiResponseSchema responseSchema,
+            AiReasoningMode reasoningMode) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("system", prompt.getSystemPrompt());
+        payload.put("system", systemPrompt(prompt, reasoningMode));
         payload.put("messages", prompt.getMessages().stream()
                 .map(AiInvocationService::messagePayload)
                 .toList());
+        if (responseSchema != null) {
+            payload.put("responseSchema", responseSchema.schema());
+        }
         try {
             return objectMapper.writeValueAsString(payload);
         } catch (Exception exception) {
             throw new AiProviderException("AI prompt serialization failed");
         }
+    }
+
+    private static String systemPrompt(MaskedPrompt prompt, AiReasoningMode reasoningMode) {
+        return reasoningMode == AiReasoningMode.TAGGED
+                ? prompt.getSystemPrompt() + "\n\n" + TAGGED_REASONING_INSTRUCTION
+                : prompt.getSystemPrompt();
     }
 
     private static Map<String, String> messagePayload(MaskedMessage message) {
@@ -566,6 +744,7 @@ public class AiInvocationService {
                     .toList());
         }
         metadata.put("structured", structured);
+        metadata.put("reasoningRequested", invocation.reasoningRequested());
         if (structured && enforcement != null) {
             metadata.put("structuredEnforcement", enforcement.name().toLowerCase(java.util.Locale.ROOT));
         }
@@ -620,11 +799,14 @@ public class AiInvocationService {
     private final class ProviderAttemptTracker implements AiProviderAttemptExecutor {
         private final int workspaceId;
         private final int orgId;
+        private final int userId;
         private final ResolvedAiProvider resolved;
         private final AiInvocation invocation;
         private final String correlationId;
         private final boolean structured;
         private final Runnable initialCommitment;
+        private final Runnable providerAttemptGuard;
+        private final String serializedPrompt;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
         private boolean firstAttempt = true;
         private boolean failureAudited;
@@ -632,19 +814,26 @@ public class AiInvocationService {
         private ProviderAttemptTracker(
                 int workspaceId,
                 int orgId,
+                int userId,
                 ResolvedAiProvider resolved,
                 AiInvocation invocation,
                 String correlationId,
                 boolean structured,
                 Runnable initialCommitment,
+                Runnable providerAttemptGuard,
+                String serializedPrompt,
                 AiOrganizationBudgetCoordinator.Lease budgetLease) {
             this.workspaceId = workspaceId;
             this.orgId = orgId;
+            this.userId = userId;
             this.resolved = resolved;
             this.invocation = invocation;
             this.correlationId = correlationId;
             this.structured = structured;
             this.initialCommitment = initialCommitment;
+            this.providerAttemptGuard = providerAttemptGuard;
+            this.serializedPrompt = Objects.requireNonNull(
+                    serializedPrompt, "serializedPrompt");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
         }
 
@@ -677,7 +866,9 @@ public class AiInvocationService {
                             null, null, null, null, null, structured, null);
                 }
                 return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
+                    requireCurrentProviderSnapshot();
                     aiFeatureGate.requireAiUsable(invocation.feature());
+                    providerAttemptGuard.run();
                     attemptCommitment.run();
                     return providerAttempt.get();
                 });
@@ -712,10 +903,19 @@ public class AiInvocationService {
             }
         }
 
+        private void requireCurrentProviderSnapshot() {
+            ResolvedAiProvider current = aiProviderConfigService.resolveForOrg(orgId, userId);
+            if (!resolved.equals(current)) {
+                throw new AiProviderException(
+                        "AI provider configuration changed before egress");
+            }
+        }
+
         private void reserveFallbackBudget() {
             closeBudget();
             try {
-                budgetLease = budgetCoordinator.reserve(orgId, invocation);
+                budgetLease = budgetCoordinator.reserve(
+                        orgId, invocation, serializedPrompt);
             } catch (AiBudgetExhaustedException exception) {
                 failureAudited = true;
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
@@ -759,6 +959,11 @@ public class AiInvocationService {
             String schemaRule,
             int outputLength,
             boolean objectExtracted) {
+    }
+
+    private record ReasoningNormalization(
+            Optional<String> content,
+            String rejectionReason) {
     }
 
     private record RawInvocation(

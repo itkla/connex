@@ -11,6 +11,7 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.masking.AiGeneratedContentScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Person;
@@ -93,6 +94,60 @@ public class AiChatCitationProjector {
         return Map.copyOf(projected);
     }
 
+    /** Returns validated demasked reasoning only to each turn's original asker. */
+    public Map<Integer, String> reasoning(
+            int workspaceId,
+            int sessionId,
+            int userId,
+            List<AiChatMessage> messages) {
+        Map<Integer, StoredReasoning> storedByMessage = new LinkedHashMap<>();
+        Set<Integer> turnIds = new LinkedHashSet<>();
+        for (AiChatMessage message : messages) {
+            StoredReasoning stored = storedReasoning(message);
+            if (stored == null) {
+                continue;
+            }
+            storedByMessage.put(message.getId(), stored);
+            turnIds.add(stored.turnId());
+        }
+        if (turnIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Integer, Integer> requesterByTurn = requesterByTurn(
+                workspaceId, sessionId, turnIds);
+        Map<Integer, String> projected = new LinkedHashMap<>();
+        storedByMessage.forEach((messageId, stored) -> {
+            if (Objects.equals(requesterByTurn.get(stored.turnId()), userId)) {
+                projected.put(messageId, stored.value());
+            }
+        });
+        return Map.copyOf(projected);
+    }
+
+    private StoredReasoning storedReasoning(AiChatMessage message) {
+        if (!"assistant".equals(message.getAuthorKind())
+                || message.getStructuredJson() == null) {
+            return null;
+        }
+        try {
+            JsonNode metadata = objectMapper.readTree(message.getStructuredJson());
+            JsonNode turnId = metadata.get("turnId");
+            JsonNode reasoning = metadata.get("reasoning");
+            if (turnId == null || !turnId.isIntegralNumber()
+                    || !turnId.canConvertToInt() || turnId.asInt() <= 0
+                    || reasoning == null || !reasoning.isString()
+                    || reasoning.asString().isBlank()
+                    || reasoning.asString().length() > 16_000
+                    || AiGeneratedContentScreen.containsPlaceholder(reasoning.asString())
+                    || AiGeneratedContentScreen.rejectionReason(reasoning.asString()) != null) {
+                return null;
+            }
+            return new StoredReasoning(turnId.asInt(), reasoning.asString());
+        } catch (JacksonException exception) {
+            return null;
+        }
+    }
+
     private StoredSuggestions storedSuggestions(AiChatMessage message) {
         if (!"assistant".equals(message.getAuthorKind())
                 || message.getStructuredJson() == null) {
@@ -118,6 +173,18 @@ public class AiChatCitationProjector {
         } catch (JacksonException exception) {
             return null;
         }
+    }
+
+    private Map<Integer, Integer> requesterByTurn(
+            int workspaceId, int sessionId, Set<Integer> turnIds) {
+        Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
+        for (AiChatTurn turn : chatMapper.listTurnsByIds(
+                workspaceId, sessionId, List.copyOf(turnIds))) {
+            if (turn.getRequestedByUserId() != null) {
+                requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
+            }
+        }
+        return Map.copyOf(requesterByTurn);
     }
 
     private List<StoredCitation> storedCitations(AiChatMessage message) {
@@ -193,6 +260,9 @@ public class AiChatCitationProjector {
     }
 
     private record StoredSuggestions(int turnId, List<String> values) {
+    }
+
+    private record StoredReasoning(int turnId, String value) {
     }
 
     private record RecordKey(String kind, int id) {

@@ -17,6 +17,8 @@ public class AiChatMessageDto {
     private Integer authorUserId;
     private String authorDisplayName;
     private String content;
+    private String reasoning;
+    private boolean historySummarized;
     private String createdAt;
     private List<AiChatCitationDto> citations = List.of();
     private List<String> suggestions = List.of();
@@ -54,6 +56,17 @@ public class AiChatMessageDto {
             List<AiChatCitationDto> citations,
             List<String> suggestions,
             String authorDisplayName) {
+        return from(
+                message, citations, suggestions, authorDisplayName, null);
+    }
+
+    /** Maps a persisted message with all viewer-authorized private generated content. */
+    public static AiChatMessageDto from(
+            AiChatMessage message,
+            List<AiChatCitationDto> citations,
+            List<String> suggestions,
+            String authorDisplayName,
+            String reasoning) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
@@ -61,7 +74,10 @@ public class AiChatMessageDto {
         dto.setAuthorKind(message.getAuthorKind());
         dto.setAuthorUserId(message.getAuthorUserId());
         dto.setAuthorDisplayName(authorDisplayName);
-        dto.setContent(message.getContent());
+        boolean historySummarized = "system".equals(message.getAuthorKind());
+        dto.setContent(historySummarized ? "" : message.getContent());
+        dto.setReasoning(reasoning);
+        dto.setHistorySummarized(historySummarized);
         dto.setCreatedAt(message.getCreatedAt());
         dto.setCitations(List.copyOf(citations));
         dto.setSuggestions(List.copyOf(suggestions));

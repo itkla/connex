@@ -24,10 +24,12 @@ import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -49,6 +51,7 @@ public class AiChatTurnPersistenceService {
     private static final int RESOLVE_TIMEOUT_SECONDS = 30;
     private static final String USER = "user";
     private static final String ASSISTANT = "assistant";
+    private static final String SYSTEM = "system";
     private static final String PROPOSED = "proposed";
     private static final String INACCESSIBLE = "AI assistant session is not accessible";
 
@@ -57,6 +60,9 @@ public class AiChatTurnPersistenceService {
     private final WorkspaceService workspaceService;
     private final AiProperties aiProperties;
     private final AiRestrictionEpoch restrictionEpoch;
+    private final AiWorkspaceGovernanceService governanceService;
+    private final AiAssistantIdentifierResolver identifierResolver;
+    private final AiAssistantToolExecutor toolExecutor;
     private final Clock clock;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final ObjectMapper objectMapper;
@@ -68,6 +74,7 @@ public class AiChatTurnPersistenceService {
             int sessionId, AiChatTurnCreateRequest request, long restrictionEpoch) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
+        requireActiveAiAccess(workspaceId, userId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
@@ -102,6 +109,13 @@ public class AiChatTurnPersistenceService {
         message.setAuthorKind(USER);
         message.setAuthorUserId(userId);
         message.setContent(request.content());
+        AiChatResourceRegistry messageResources = new AiChatResourceRegistry();
+        if (!request.pageContext().isEmpty()) {
+            toolExecutor.pageContext(request.pageContext(), messageResources);
+        }
+        identifierResolver.mentionedResources(request.content()).forEach(resource ->
+                messageResources.register(resource.kind(), resource.id()));
+        message.setStructuredJson(userMessageMetadata(messageResources.snapshot()));
         chatMapper.insertMessage(message);
 
         AiChatTurn turn = new AiChatTurn();
@@ -130,6 +144,7 @@ public class AiChatTurnPersistenceService {
     public AiChatTurn readTurn(int sessionId, int turnId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
+        requireActiveAiAccess(workspaceId, userId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
@@ -162,6 +177,127 @@ public class AiChatTurnPersistenceService {
         }
         return chatMapper.listRecentMessages(
                 turn.workspaceId(), turn.sessionId(), turn.userMessageSeq(), limit);
+    }
+
+    /** Loads the single durable session summary after current access revalidation. */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public AiChatMessage loadHistorySummary(AiChatQueuedTurn turn) {
+        requireCurrentActorRead(turn);
+        AiChatSession session = chatMapper.getAccessibleSessionById(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null) {
+            throw inaccessible();
+        }
+        return chatMapper.getHistorySummary(turn.workspaceId(), turn.sessionId());
+    }
+
+    /** Loads whole chronological transcript messages eligible for the next compaction step. */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public List<AiChatMessage> loadCompactionCandidates(
+            AiChatQueuedTurn turn,
+            int afterSeq,
+            int beforeSeq,
+            int limit) {
+        requireCurrentActorRead(turn);
+        AiChatSession session = chatMapper.getAccessibleSessionById(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null) {
+            throw inaccessible();
+        }
+        return chatMapper.listMessagesForCompaction(
+                turn.workspaceId(), turn.sessionId(), afterSeq, beforeSeq, limit);
+    }
+
+    /** Inserts or incrementally updates the durable demasked session summary. */
+    @Transactional(
+        isolation = Isolation.READ_COMMITTED,
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = RESOLVE_TIMEOUT_SECONDS)
+    public AiChatMessage upsertHistorySummary(
+            AiChatQueuedTurn turn,
+            Integer existingSummaryId,
+            int expectedThroughSeq,
+            String content,
+            String structuredJson,
+            int inputTokens,
+            int outputTokens) {
+        requireActiveTransaction();
+        requireCurrentActor(turn);
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            throw new AiAssistantLoopException(
+                    "restrictions_changed", "restrictions_changed");
+        }
+        lockAuthorizedTurn(turn, RUNNING);
+        AiChatMessage currentSummary = chatMapper.getHistorySummary(
+                turn.workspaceId(), turn.sessionId());
+        if (existingSummaryId == null) {
+            if (expectedThroughSeq != 0 || currentSummary != null) {
+                throw new ConflictException("Assistant history summary changed during compaction");
+            }
+        } else if (currentSummary == null
+                || currentSummary.getId() != existingSummaryId
+                || historySummaryThroughSeq(currentSummary) != expectedThroughSeq) {
+            throw new ConflictException("Assistant history summary changed during compaction");
+        }
+        int messageId;
+        if (existingSummaryId == null) {
+            AiChatMessage summary = new AiChatMessage();
+            summary.setWorkspaceId(turn.workspaceId());
+            summary.setSessionId(turn.sessionId());
+            summary.setSeq(chatMapper.nextMessageSequence(
+                    turn.workspaceId(), turn.sessionId()));
+            summary.setAuthorKind(SYSTEM);
+            summary.setAuthorUserId(null);
+            summary.setContent(content);
+            summary.setStructuredJson(structuredJson);
+            summary.setInputTokens(inputTokens);
+            summary.setOutputTokens(outputTokens);
+            chatMapper.insertMessage(summary);
+            messageId = summary.getId();
+            realtimeDispatcher.sessionAfterCommit(
+                    turn.workspaceId(), turn.sessionId(), new AiChatStepFrameDto(
+                            turn.workspaceId(), turn.sessionId(), turn.turnId(), summary.getSeq(),
+                            "message", null, "created", null));
+        } else {
+            AiChatMessage existing = chatMapper.getMessageById(
+                    turn.workspaceId(), turn.sessionId(), existingSummaryId);
+            if (existing == null || !SYSTEM.equals(existing.getAuthorKind())) {
+                throw new IllegalStateException("Assistant history summary is unavailable");
+            }
+            if (chatMapper.updateHistorySummary(
+                    turn.workspaceId(), turn.sessionId(), existingSummaryId,
+                    content, structuredJson, inputTokens, outputTokens) != 1) {
+                throw new IllegalStateException("Assistant history summary update was lost");
+            }
+            messageId = existingSummaryId;
+        }
+        AiChatMessage stored = chatMapper.getMessageById(
+                turn.workspaceId(), turn.sessionId(), messageId);
+        if (stored == null) {
+            throw new IllegalStateException("Assistant history summary is unavailable");
+        }
+        return stored;
+    }
+
+    private int historySummaryThroughSeq(AiChatMessage summary) {
+        if (!SYSTEM.equals(summary.getAuthorKind()) || summary.getStructuredJson() == null) {
+            throw new IllegalStateException("Assistant history summary metadata is invalid");
+        }
+        try {
+            var metadata = objectMapper.readTree(summary.getStructuredJson());
+            var kind = metadata.get("kind");
+            var throughSeq = metadata.get("throughSeq");
+            if (kind == null || !kind.isString() || !"history_summary".equals(kind.asString())
+                    || throughSeq == null || !throughSeq.isIntegralNumber()
+                    || !throughSeq.canConvertToInt() || throughSeq.asInt() <= 0) {
+                throw new IllegalStateException("Assistant history summary metadata is invalid");
+            }
+            return throughSeq.asInt();
+        } catch (JacksonException exception) {
+            throw new IllegalStateException(
+                    "Assistant history summary metadata is invalid", exception);
+        }
     }
 
     /** Loads current session-private attachment metadata after fresh actor authorization. */
@@ -245,6 +381,24 @@ public class AiChatTurnPersistenceService {
         return "turn-" + turnId + "-step-" + stepNumber;
     }
 
+    private String userMessageMetadata(
+            java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources) {
+        try {
+            List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
+                    .map(entry -> java.util.Map.<String, Object>of(
+                            "handle", entry.getKey(),
+                            "kind", entry.getValue().kind(),
+                            "id", entry.getValue().id()))
+                    .toList();
+            return objectMapper.writeValueAsString(java.util.Map.of(
+                    "kind", "user_message",
+                    "resources", storedResources));
+        } catch (JacksonException exception) {
+            throw new IllegalStateException(
+                    "Assistant user message metadata could not be serialized", exception);
+        }
+    }
+
     /** Requires the turn to remain running immediately before a proposed tool executes. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public void requireRunning(AiChatQueuedTurn turn) {
@@ -259,12 +413,12 @@ public class AiChatTurnPersistenceService {
             int toolCallId,
             String status,
             String resultJson) {
+        requireCurrentActor(turn);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
         return chatMapper.updateToolCall(
                 turn.workspaceId(), turn.userMessageId(), toolCallId, status,
@@ -303,12 +457,12 @@ public class AiChatTurnPersistenceService {
             int inputTokens,
             int outputTokens) {
         requireActiveTransaction();
+        requireCurrentActor(turn);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(turn.workspaceId());
@@ -336,11 +490,11 @@ public class AiChatTurnPersistenceService {
         if (title == null || title.isBlank()) {
             return false;
         }
+        requireCurrentActor(turn);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             return false;
         }
-        requireCurrentActor(turn);
         AiChatSession session = chatMapper.getSessionByIdForUpdate(
                 turn.workspaceId(), turn.userId(), turn.sessionId());
         if (session == null
@@ -377,13 +531,24 @@ public class AiChatTurnPersistenceService {
                 || workspaceService.getCurrentUserId() != turn.userId()) {
             throw inaccessible();
         }
+        requireActiveAiAccess(turn.workspaceId(), turn.userId());
         workspaceService.lockAndRequireMember(turn.workspaceId(), turn.userId());
         workspaceService.requirePermission(turn.workspaceId(), turn.userId(), Permission.AI_USE);
+    }
+
+    private void requireActiveAiAccess(int workspaceId, int userId) {
+        if (!workspaceService.isMember(workspaceId, userId)) {
+            throw inaccessible();
+        }
+        if (!governanceService.isEnabled(workspaceId)) {
+            throw new ForbiddenException("AI is disabled for this workspace");
+        }
     }
 
     private void requireCurrentActorRead(AiChatQueuedTurn turn) {
         if (workspaceService.getCurrentWorkspaceId() != turn.workspaceId()
                 || workspaceService.getCurrentUserId() != turn.userId()
+                || !workspaceService.isMember(turn.workspaceId(), turn.userId())
                 || !workspaceService.permissionsFor(turn.workspaceId(), turn.userId())
                         .contains(Permission.AI_USE)) {
             throw inaccessible();

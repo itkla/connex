@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
 import tools.jackson.databind.JsonNode;
@@ -55,6 +56,25 @@ public class AzureOpenAiAdapter implements AiProvider {
     }
 
     @Override
+    public AiReasoningMode reasoningCapability(AiProviderTarget target) {
+        return AiReasoningMode.TAGGED;
+    }
+
+    @Override
+    public int contextWindowTokens(AiProviderTarget target) {
+        String modelId = target == null ? null : target.modelId();
+        if (modelId == null) {
+            return 4_096;
+        }
+        String normalized = modelId.toLowerCase(Locale.ROOT);
+        return normalized.contains("gpt-5") || normalized.contains("gpt-4.1")
+                || normalized.contains("gpt-4o") || normalized.contains("o3")
+                || normalized.contains("o4")
+                ? 128_000
+                : 4_096;
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
@@ -73,7 +93,7 @@ public class AzureOpenAiAdapter implements AiProvider {
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             azureOpenAiClient.complete(
                                     endpoint, request.credentials(), requestBody, deadline));
-                    return parseResponse(responseBody, enforcement);
+                    return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {
@@ -146,6 +166,9 @@ public class AzureOpenAiAdapter implements AiProvider {
 
     private static AiStructuredOutputEnforcement requestedEnforcement(
             AiCompletionRequest request) {
+        if (request.reasoningMode() != AiReasoningMode.NONE) {
+            return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
         if (request.outputMode() != AiOutputMode.JSON) {
             return AiStructuredOutputEnforcement.PROMPT_ONLY;
         }
@@ -184,7 +207,8 @@ public class AzureOpenAiAdapter implements AiProvider {
 
     private AiCompletionResult parseResponse(
             String responseBody,
-            AiStructuredOutputEnforcement enforcement) {
+            AiStructuredOutputEnforcement enforcement,
+            AiReasoningMode reasoningMode) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             if (root == null || !root.isObject()) {
@@ -208,7 +232,8 @@ public class AzureOpenAiAdapter implements AiProvider {
             int outputTokens = readRequiredInt(usage.path("completion_tokens"));
             String stopReason = readRequiredText(choice.path("finish_reason"));
             return new AiCompletionResult(
-                    text, inputTokens, outputTokens, stopReason, enforcement);
+                    text, inputTokens, outputTokens, stopReason, enforcement,
+                    "", reasoningMode);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {

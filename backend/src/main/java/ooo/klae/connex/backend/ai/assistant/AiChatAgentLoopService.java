@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -56,9 +57,8 @@ public class AiChatAgentLoopService {
     private static final Duration TURN_DEADLINE = Duration.ofSeconds(70);
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     private static final String INTERNAL_ERROR = "internal_error";
-    private static final int MAX_HISTORY_MESSAGES = 50;
-    private static final int MAX_HISTORY_CHARS = 64_000;
     private static final int MAX_FINAL_CHARS = 16_000;
+    private static final int MAX_REASONING_CHARS = 16_000;
     private static final int MAX_GENERATED_TITLE_CHARS = 80;
     private static final double TEMPERATURE = 0.1;
 
@@ -70,8 +70,8 @@ public class AiChatAgentLoopService {
     private final AiAssistantStepSchema stepSchema;
     private final AiAssistantToolExecutor toolExecutor;
     private final AiAssistantWriteToolService writeToolService;
-    private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantPromptAssembler promptAssembler;
+    private final AiChatMemoryService memoryService;
     private final AiChatAttachmentContextService attachmentContextService;
     private final AiChatTurnPersistenceService persistenceService;
     private final AiRestrictionEpoch restrictionEpoch;
@@ -98,18 +98,17 @@ public class AiChatAgentLoopService {
             publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "state", null, "running", null));
-            List<AiChatMessage> history = boundedHistory(
-                    persistenceService.loadHistory(turn, MAX_HISTORY_MESSAGES), turn);
-            AiChatAttachmentContext attachmentContext =
-                    attachmentContextService.prepare(turn, deadline);
             AiChatResourceRegistry resources = new AiChatResourceRegistry();
             MaskingContext maskingContext = new MaskingContext();
+            AiChatMemory memory = memoryService.prepare(turn, maskingContext, deadline);
+            AiChatAttachmentContext attachmentContext =
+                    attachmentContextService.prepare(turn, deadline);
+            List<AiChatMessage> history = memory.history();
             AiChatMessage initiatingMessage = history.stream()
                     .filter(message -> message.getId() == turn.userMessageId())
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException(
                             "Assistant initiating message is unavailable"));
-            identifierResolver.seed(initiatingMessage.getContent(), maskingContext);
             List<AiChatPageContextDto> promptContext =
                     new ArrayList<>(turn.pageContext());
             promptContext.addAll(promptAssembler.replayPageContext(history));
@@ -118,10 +117,12 @@ public class AiChatAgentLoopService {
             List<ToolTurn> toolTurns = new ArrayList<>();
             Map<String, AiAssistantToolResult> toolResultCache = new HashMap<>();
             Set<String> seenToolResults = new HashSet<>();
+            List<String> reasoningParts = new ArrayList<>();
+            boolean reasoningRejected = false;
             AiStructuredRepair repair = null;
             int noProgressSteps = 0;
-            int inputTokens = attachmentContext.inputTokens();
-            int outputTokens = attachmentContext.outputTokens();
+            int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
+            int outputTokens = addTokens(memory.outputTokens(), attachmentContext.outputTokens());
             int maxSteps = Math.min(
                     governanceService.assistantMaxSteps(turn.workspaceId()), HARD_MAX_STEPS);
 
@@ -140,9 +141,11 @@ public class AiChatAgentLoopService {
                                 maskingContext,
                                 resources,
                                 attachmentContext.data(),
+                                memory.budget(),
                                 repair),
-                        aiProperties.getAssistantMaxOutputTokens(),
-                        TEMPERATURE);
+                        memory.budget().maxOutputTokens(),
+                        TEMPERATURE,
+                        aiProperties.isAssistantThinkingEnabled());
                 AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
                         maskingContext.tokenBindings().stream()
                                 .map(Map.Entry::getKey)
@@ -155,9 +158,20 @@ public class AiChatAgentLoopService {
                             AiAssistantStep.class,
                             outputGuard,
                             stepSchema.responseSchema(),
-                            admission);
+                            admission,
+                            () -> {
+                                requireWorkspaceEnabled(turn);
+                                persistenceService.requireRunning(turn);
+                            });
                 }
                 AiStructuredOutcome<AiAssistantStep> outcome = attempt.outcome();
+                if (aiProperties.isAssistantThinkingEnabled() && !reasoningRejected
+                        && attempt.reasoning().isPresent()
+                        && !appendReasoning(
+                                reasoningParts, attempt.reasoning().orElseThrow())) {
+                    reasoningParts.clear();
+                    reasoningRejected = true;
+                }
                 requireWorkspaceEnabled(turn);
                 inputTokens = addTokens(inputTokens, inputTokens(outcome));
                 outputTokens = addTokens(outputTokens, outputTokens(outcome));
@@ -319,7 +333,10 @@ public class AiChatAgentLoopService {
                 List<String> suggestions = AiAssistantStepGuard.filterSuggestions(
                         finalAnswer.suggestions());
                 String metadata = promptAssembler.finalMetadata(
-                        turn.turnId(), finalAnswer.citations(), suggestions, resources.snapshot());
+                        turn.turnId(), finalAnswer.citations(), suggestions, resources.snapshot(),
+                        reasoningParts.isEmpty()
+                                ? Optional.empty()
+                                : Optional.of(String.join("\n\n", reasoningParts)));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, finalAnswer.text(), metadata, inputTokens, outputTokens);
@@ -409,6 +426,9 @@ public class AiChatAgentLoopService {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
         try {
+            if (!workspaceService.isMember(turn.workspaceId(), turn.userId())) {
+                throw new ForbiddenException("Workspace membership is no longer active");
+            }
             workspaceService.requirePermission(
                     turn.workspaceId(), turn.userId(), Permission.AI_USE);
         } catch (ForbiddenException exception) {
@@ -507,52 +527,17 @@ public class AiChatAgentLoopService {
                 : current + additional;
     }
 
-    static List<AiChatMessage> boundedHistory(
-            List<AiChatMessage> history, AiChatQueuedTurn turn) {
-        AiChatMessage initiatingMessage = history.stream()
-                .filter(message -> message.getId() == turn.userMessageId())
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        "Assistant initiating message is unavailable"));
-        int remaining = Math.max(
-                0, MAX_HISTORY_CHARS - initiatingMessage.getContent().length());
-        List<AiChatMessage> selected = new ArrayList<>();
-        for (int index = history.size() - 1; index >= 0; index--) {
-            AiChatMessage message = history.get(index);
-            if (message.getId() == turn.userMessageId()) {
-                selected.add(message);
-                continue;
-            }
-            if (remaining == 0) {
-                continue;
-            }
-            String content = message.getContent();
-            if (content.length() <= remaining) {
-                selected.add(message);
-                remaining -= content.length();
-                continue;
-            }
-            selected.add(copyWithContent(
-                    message, content.substring(content.length() - remaining)));
-            remaining = 0;
+    private static boolean appendReasoning(
+            List<String> reasoningParts, String reasoning) {
+        int used = reasoningParts.stream().mapToInt(String::length).sum()
+                + reasoningParts.size() * 2;
+        if (reasoning.isBlank()) {
+            return true;
         }
-        java.util.Collections.reverse(selected);
-        return List.copyOf(selected);
-    }
-
-    private static AiChatMessage copyWithContent(AiChatMessage source, String content) {
-        AiChatMessage copy = new AiChatMessage();
-        copy.setId(source.getId());
-        copy.setWorkspaceId(source.getWorkspaceId());
-        copy.setSessionId(source.getSessionId());
-        copy.setSeq(source.getSeq());
-        copy.setAuthorKind(source.getAuthorKind());
-        copy.setAuthorUserId(source.getAuthorUserId());
-        copy.setContent(content);
-        copy.setStructuredJson(source.getStructuredJson());
-        copy.setInputTokens(source.getInputTokens());
-        copy.setOutputTokens(source.getOutputTokens());
-        copy.setCreatedAt(source.getCreatedAt());
-        return copy;
+        if (reasoning.length() > MAX_REASONING_CHARS - used) {
+            return false;
+        }
+        reasoningParts.add(reasoning);
+        return true;
     }
 }

@@ -31,9 +31,11 @@ import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
+import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
@@ -133,6 +135,43 @@ class AzureOpenAiAdapterTest {
         assertEquals("object", responseFormat.path("json_schema").path("schema")
                 .path("type").asString());
         assertEquals(AiStructuredOutputEnforcement.JSON_SCHEMA,
+                result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_taggedReasoningHonestlyUsesPromptOnlyStructuredEnforcement() throws Exception {
+        when(azureOpenAiClient.complete(
+                any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn(validResponse());
+        AiProviderTarget target = new AiProviderTarget(
+                "azure_openai", null, "gpt-5.2",
+                "https://connex.openai.azure.com",
+                "2025-01-01-preview", "contacts-prod", null, false);
+        AiCompletionRequest request = new AiCompletionRequest(
+                target,
+                credentials(),
+                "Return one step",
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                AiReasoningMode.TAGGED,
+                AiProviderAttemptExecutor.DIRECT,
+                64,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(azureOpenAiClient).complete(
+                any(URI.class), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class));
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        assertFalse(body.has("response_format"));
+        assertEquals(AiReasoningMode.TAGGED, adapter.reasoningCapability(target));
+        assertEquals(AiReasoningMode.TAGGED, result.reasoningMode());
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
                 result.structuredOutputEnforcement());
     }
 

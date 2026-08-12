@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
@@ -81,6 +82,16 @@ class BedrockAnthropicAdapterTest {
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
         assertEquals("end_turn", result.stopReason());
+    }
+
+    @Test
+    void contextWindowUsesSafeDefaultForUnknownModelFamilies() {
+        assertEquals(200_000, adapter.contextWindowTokens(new AiProviderTarget(
+                "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+                null, null, null, null, false)));
+        assertEquals(4_096, adapter.contextWindowTokens(new AiProviderTarget(
+                "bedrock", "us-east-1", "third-party.unknown-model",
+                null, null, null, null, false)));
     }
 
     @Test
@@ -141,6 +152,54 @@ class BedrockAnthropicAdapterTest {
         assertEquals("object", format.path("schema").path("type").asString());
         assertEquals(AiStructuredOutputEnforcement.JSON_SCHEMA,
                 result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_nativeReasoningUsesThinkingChannelAndParsesItSeparately() throws Exception {
+        String modelId = "anthropic.claude-sonnet-4-5-20250929-v1:0";
+        when(bedrockClient.invokeModel(
+                eq(BedrockRegion.US_EAST_1), eq(modelId),
+                any(AiCredentials.class), anyString()))
+                .thenReturn("""
+                        {
+                          "content": [
+                            {"type":"thinking","thinking":"Compare the authorized signals."},
+                            {"type":"text","text":"{\\\"final\\\":\\\"done\\\"}"}
+                          ],
+                          "usage": {"input_tokens":12,"output_tokens":33},
+                          "stop_reason":"end_turn"
+                        }
+                        """);
+        AiCompletionRequest request = new AiCompletionRequest(
+                new AiProviderTarget("bedrock", "us-east-1", modelId,
+                        null, null, null, null, false),
+                credentials(),
+                "Return JSON",
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                AiReasoningMode.NATIVE,
+                ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor.DIRECT,
+                2_048,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(bedrockClient).invokeModel(
+                eq(BedrockRegion.US_EAST_1), eq(modelId),
+                any(AiCredentials.class), bodyCaptor.capture());
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        assertEquals("enabled", body.path("thinking").path("type").asString());
+        assertEquals(1_024, body.path("thinking").path("budget_tokens").asInt());
+        assertFalse(body.has("temperature"));
+        assertFalse(body.has("output_config"));
+        assertEquals("Compare the authorized signals.", result.reasoning());
+        assertEquals("{\"final\":\"done\"}", result.text());
+        assertEquals(AiReasoningMode.NATIVE, result.reasoningMode());
+        assertEquals(33, result.outputTokens());
     }
 
     @Test

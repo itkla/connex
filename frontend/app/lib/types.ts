@@ -2336,6 +2336,7 @@ export type AiChatSession = {
     status: string;
     archived: boolean;
     ownedByCurrentUser: boolean;
+    historySummarized: boolean;
     participationStatus: 'invited' | 'joined' | null;
     lastMessageAt: string | null;
     archivedAt: string | null;
@@ -2365,6 +2366,8 @@ export type AiChatMessage = {
     authorUserId: number | null;
     authorDisplayName: string | null;
     content: string;
+    reasoning?: string | null;
+    historySummarized?: boolean;
     createdAt: string;
     citations?: AiChatCitation[] | null;
     suggestions?: string[] | null;

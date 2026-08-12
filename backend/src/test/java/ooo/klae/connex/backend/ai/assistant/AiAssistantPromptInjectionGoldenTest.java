@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -67,11 +69,14 @@ class AiAssistantPromptInjectionGoldenTest {
         DealMapper dealMapper = mock(DealMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(personMapper.findMentionedNames(7, "What is happening with Kenji Sato?", 21))
-                .thenReturn(List.of("Kenji Sato"));
-        when(companyMapper.findMentionedNames(7, "What is happening with Kenji Sato?", 21))
+        Person mentioned = new Person();
+        mentioned.setId(31);
+        mentioned.setName("Kenji Sato");
+        when(personMapper.findMentionedRecords(7, "What is happening with Kenji Sato?", 21))
+                .thenReturn(List.of(mentioned));
+        when(companyMapper.findMentionedRecords(7, "What is happening with Kenji Sato?", 21))
                 .thenReturn(List.of());
-        when(dealMapper.findMentionedNames(7, "What is happening with Kenji Sato?", 21))
+        when(dealMapper.findMentionedRecords(7, "What is happening with Kenji Sato?", 21))
                 .thenReturn(List.of());
         MaskingContext context = new MaskingContext();
         new AiAssistantIdentifierResolver(
@@ -126,7 +131,7 @@ class AiAssistantPromptInjectionGoldenTest {
         when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
         when(providerConfigService.resolveForOrg(9, 11)).thenReturn(resolved);
         var budgetCoordinator = mock(AiOrganizationBudgetCoordinator.class);
-        when(budgetCoordinator.reserve(eq(9), any(AiInvocation.class)))
+        when(budgetCoordinator.reserve(eq(9), any(AiInvocation.class), anyString()))
                 .thenReturn(mock(AiOrganizationBudgetCoordinator.Lease.class));
         var invocationService = new AiInvocationService(
                 featureGate,
@@ -289,6 +294,11 @@ class AiAssistantPromptInjectionGoldenTest {
         @Override
         public AiStructuredOutputEnforcement structuredOutputCapability(AiProviderTarget target) {
             return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
+
+        @Override
+        public int contextWindowTokens(AiProviderTarget target) {
+            return 128_000;
         }
 
         @Override

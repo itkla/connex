@@ -652,8 +652,8 @@
     LIMIT 10
   </select>
 
-  <select id="findMentionedNames" resultType="string">
-    SELECT p.name
+  <select id="findMentionedRecords" resultMap="PersonResult">
+    SELECT p.id, p.name
     FROM person p
     WHERE <include refid="visible"/>
       AND p.suspended_at IS NULL

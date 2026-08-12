@@ -179,6 +179,26 @@ public interface AiChatMapper {
         @Param("maxSeq") int maxSeq,
         @Param("limit") int limit);
 
+    AiChatMessage getHistorySummary(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
+    List<AiChatMessage> listMessagesForCompaction(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("afterSeq") int afterSeq,
+        @Param("beforeSeq") int beforeSeq,
+        @Param("limit") int limit);
+
+    int updateHistorySummary(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("content") String content,
+        @Param("structuredJson") String structuredJson,
+        @Param("inputTokens") int inputTokens,
+        @Param("outputTokens") int outputTokens);
+
     long countMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);

@@ -12,14 +12,17 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
@@ -32,9 +35,12 @@ import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -46,6 +52,7 @@ class AiChatTurnPersistenceServiceTest {
     private AttachmentMapper attachmentMapper;
     private WorkspaceService workspaceService;
     private AiRestrictionEpoch restrictionEpoch;
+    private AiWorkspaceGovernanceService governanceService;
     private AiChatTurnPersistenceService service;
 
     @BeforeEach
@@ -55,12 +62,16 @@ class AiChatTurnPersistenceServiceTest {
         workspaceService = mock(WorkspaceService.class);
         AiProperties aiProperties = mock(AiProperties.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
+        governanceService = mock(AiWorkspaceGovernanceService.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
                 workspaceService,
                 aiProperties,
                 restrictionEpoch,
+                governanceService,
+                mock(AiAssistantIdentifierResolver.class),
+                mock(AiAssistantToolExecutor.class),
                 Clock.systemUTC(),
                 mock(AiChatRealtimeDispatcher.class),
                 JsonMapper.builder().build());
@@ -79,6 +90,8 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(storedTurn);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
         when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
+        when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         User actor = new User();
         actor.setId(TURN.userId());
         when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(actor));
@@ -125,12 +138,20 @@ class AiChatTurnPersistenceServiceTest {
     void sharedSessionWithoutParticipantsNeverEnablesPrivateNotes() {
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         AiChatRealtimeDispatcher dispatcher = mock(AiChatRealtimeDispatcher.class);
+        AiAssistantIdentifierResolver identifierResolver =
+                mock(AiAssistantIdentifierResolver.class);
+        AiAssistantToolExecutor toolExecutor = mock(AiAssistantToolExecutor.class);
+        AiWorkspaceGovernanceService governanceService =
+                mock(AiWorkspaceGovernanceService.class);
         AiChatTurnPersistenceService queueService = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
                 workspaceService,
                 new AiProperties(),
                 mock(AiRestrictionEpoch.class),
+                governanceService,
+                identifierResolver,
+                toolExecutor,
                 Clock.systemUTC(),
                 dispatcher,
                 JsonMapper.builder().build());
@@ -144,20 +165,36 @@ class AiChatTurnPersistenceServiceTest {
         session.setStatus("active");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
         when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
+        when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.listActiveTurnsBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
         when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(1);
+        when(identifierResolver.mentionedResources("Question"))
+                .thenReturn(List.of(new AiChatPageContextDto("person", 31)));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            AiChatResourceRegistry registry = invocation.getArgument(1);
+            registry.register("deal", 47);
+            return new AiAssistantToolResult(Map.of(), List.of());
+        }).when(toolExecutor).pageContext(any(), any());
         when(attachmentMapper.getAssistantSessionAttachments(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
 
         AiChatQueuedTurn queued = queueService.queue(
-                TURN.sessionId(), new AiChatTurnCreateRequest("Question", List.of()),
+                TURN.sessionId(), new AiChatTurnCreateRequest(
+                        "Question", List.of(new AiChatPageContextDto("deal", 47))),
                 TURN.restrictionEpoch());
 
         assertFalse(queued.includePrivateNotes());
+        verify(chatMapper).insertMessage(argThat(message ->
+                message.getStructuredJson() != null
+                        && message.getStructuredJson().contains("\"kind\":\"person\"")
+                        && message.getStructuredJson().contains("\"id\":31")
+                        && message.getStructuredJson().contains("\"kind\":\"deal\"")
+                        && message.getStructuredJson().contains("\"id\":47")));
     }
 
     @Test
@@ -191,6 +228,59 @@ class AiChatTurnPersistenceServiceTest {
 
         verify(chatMapper, never()).updateGeneratedTitle(
                 TURN.workspaceId(), TURN.sessionId(), "Stale model title");
+    }
+
+    @Test
+    void governanceDisableBeforeFinalAnswerBlocksPersistence() {
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(
+                    ForbiddenException.class,
+                    () -> service.resolve(TURN, "Answer", null, 5, 3));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        verify(chatMapper, never()).insertMessage(any());
+    }
+
+    @Test
+    void lifecycleTeardownBeforeAccessCheckBlocksQueueAndLazyRead() {
+        when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(false);
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.queue(
+                        TURN.sessionId(), new AiChatTurnCreateRequest("Question", List.of()),
+                        TURN.restrictionEpoch()));
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.readTurn(TURN.sessionId(), TURN.turnId()));
+
+        verify(chatMapper, never()).insertMessage(any());
+        verify(chatMapper, never()).getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+    }
+
+    @Test
+    void governanceDisableBeforeAccessCheckBlocksQueueAndLazyRead() {
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.queue(
+                        TURN.sessionId(), new AiChatTurnCreateRequest("Question", List.of()),
+                        TURN.restrictionEpoch()));
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.readTurn(TURN.sessionId(), TURN.turnId()));
+
+        verify(chatMapper, never()).insertMessage(any());
+        verify(chatMapper, never()).getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
     }
 
     @Test

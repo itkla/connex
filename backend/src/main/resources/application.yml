@@ -324,6 +324,7 @@ connex:
         invocation-refresh-max-identities: ${CONNEX_AI_INVOCATION_REFRESH_MAX_IDENTITIES:10000}
         invocation-max-active-flights: ${CONNEX_AI_INVOCATION_MAX_ACTIVE_FLIGHTS:10000}
         assistant-max-output-tokens: ${CONNEX_AI_ASSISTANT_MAX_OUTPUT_TOKENS:16384}
+        assistant-thinking-enabled: ${CONNEX_AI_ASSISTANT_THINKING_ENABLED:true}
         generation-worker-threads: ${CONNEX_AI_GENERATION_WORKER_THREADS:4}
         generation-queue-capacity: ${CONNEX_AI_GENERATION_QUEUE_CAPACITY:60}
         generation-max-handles: ${CONNEX_AI_GENERATION_MAX_HANDLES:2048}

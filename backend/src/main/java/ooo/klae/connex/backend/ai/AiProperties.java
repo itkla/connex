@@ -107,6 +107,9 @@ public class AiProperties {
     @Min(1)
     private int assistantMaxOutputTokens = 16384;
 
+    /** Whether Ask Connex requests provider reasoning for each model step. */
+    private boolean assistantThinkingEnabled = true;
+
     /** Fixed worker count for request-detached AI generation. */
     private int generationWorkerThreads = 4;
 

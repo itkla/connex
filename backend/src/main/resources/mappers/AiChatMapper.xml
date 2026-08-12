@@ -13,6 +13,7 @@
     <result property="status" column="status"/>
     <result property="participationStatus" column="participation_status"/>
     <result property="ownedByCurrentUser" column="owned_by_current_user"/>
+    <result property="historySummarized" column="history_summarized"/>
     <result property="lastMessageAt" column="last_message_at"/>
     <result property="archivedAt" column="archived_at"/>
     <result property="createdAt" column="created_at"/>
@@ -81,6 +82,13 @@
         AND p.session_id = s.id
         AND p.user_id = #{userId}) AS participation_status,
     CASE WHEN s.created_by_user_id = #{userId} THEN TRUE ELSE FALSE END AS owned_by_current_user,
+    EXISTS (
+      SELECT 1
+      FROM ai_chat_message summary_message
+      WHERE summary_message.workspace_id = s.workspace_id
+        AND summary_message.session_id = s.id
+        AND summary_message.author_kind = 'system'
+    ) AS history_summarized,
     s.last_message_at, s.archived_at, s.created_at, s.updated_at
   </sql>
 
@@ -94,6 +102,19 @@
           AND p.user_id = #{userId}
           AND p.status = 'joined'
       )))
+  </sql>
+
+  <sql id="lockedSessionColumns">
+    s.id, s.workspace_id, s.created_by_user_id, s.title, s.title_user_set,
+    s.visibility, s.status,
+    (SELECT p.status
+       FROM ai_chat_session_participant p
+      WHERE p.workspace_id = #{workspaceId}
+        AND p.session_id = s.id
+        AND p.user_id = #{userId}) AS participation_status,
+    CASE WHEN s.created_by_user_id = #{userId} THEN TRUE ELSE FALSE END AS owned_by_current_user,
+    FALSE AS history_summarized,
+    s.last_message_at, s.archived_at, s.created_at, s.updated_at
   </sql>
 
   <sql id="retainedSession">
@@ -188,7 +209,7 @@
   </select>
 
   <select id="getSessionByIdForUpdate" resultMap="sessionResult">
-    SELECT <include refid="sessionColumns"/>
+    SELECT <include refid="lockedSessionColumns"/>
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
       AND s.id = #{id}
@@ -436,11 +457,48 @@
       WHERE workspace_id = #{workspaceId}
         AND session_id = #{sessionId}
         AND seq &lt;= #{maxSeq}
+        AND author_kind IN ('user', 'assistant')
       ORDER BY seq DESC
       LIMIT #{limit}
     ) recent
     ORDER BY recent.seq ASC
   </select>
+
+  <select id="getHistorySummary" resultMap="messageResult">
+    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
+           structured_json, input_tokens, output_tokens, created_at
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND author_kind = 'system'
+    ORDER BY seq ASC
+    LIMIT 1
+  </select>
+
+  <select id="listMessagesForCompaction" resultMap="messageResult">
+    SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
+           structured_json, input_tokens, output_tokens, created_at
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND seq &gt; #{afterSeq}
+      AND seq &lt; #{beforeSeq}
+      AND author_kind IN ('user', 'assistant')
+    ORDER BY seq ASC
+    LIMIT #{limit}
+  </select>
+
+  <update id="updateHistorySummary">
+    UPDATE ai_chat_message
+    SET content = #{content},
+        structured_json = #{structuredJson,jdbcType=VARCHAR},
+        input_tokens = LEAST(2147483647, COALESCE(input_tokens, 0) + #{inputTokens}),
+        output_tokens = LEAST(2147483647, COALESCE(output_tokens, 0) + #{outputTokens})
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND author_kind = 'system'
+  </update>
 
   <select id="countMessages" resultType="long">
     SELECT COUNT(*)

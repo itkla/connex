@@ -48,6 +48,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.ActivityService;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
@@ -83,6 +84,7 @@ class AiAssistantWriteToolServiceTest {
     private TagService tagService;
     private PipelineService pipelineService;
     private AiRestrictionEpoch restrictionEpoch;
+    private AiWorkspaceGovernanceService governanceService;
     private AiAssistantWriteToolService service;
     private AiChatToolCall storedToolCall;
 
@@ -104,6 +106,7 @@ class AiAssistantWriteToolServiceTest {
         tagService = mock(TagService.class);
         pipelineService = mock(PipelineService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
+        governanceService = mock(AiWorkspaceGovernanceService.class);
         AuthService authService = mock(AuthService.class);
         User actor = new User();
         actor.setId(TURN.userId());
@@ -111,6 +114,8 @@ class AiAssistantWriteToolServiceTest {
         when(authService.getCurrentUser()).thenReturn(actor);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
         when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
+        when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
@@ -147,6 +152,7 @@ class AiAssistantWriteToolServiceTest {
                 dealService,
                 pipelineService,
                 restrictionEpoch,
+                governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
                 CLOCK);
@@ -617,9 +623,33 @@ class AiAssistantWriteToolServiceTest {
 
         doThrow(new ForbiddenException("revoked")).when(workspaceService)
                 .lockAndRequireMember(99, 77);
-        assertThrows(ForbiddenException.class, () -> service.reject(TURN.sessionId(), 29));
+        assertThrows(ResourceNotFoundException.class, () -> service.reject(TURN.sessionId(), 29));
         verify(dealService, never()).changeStage(
                 any(DealService.LockedStageChange.class));
+    }
+
+    @Test
+    void lifecycleTeardownBeforeToolDecisionBlocksEveryToolDecision() {
+        when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(false);
+
+        assertThrows(ResourceNotFoundException.class, () -> service.executeAuto(TURN, 29));
+        assertThrows(ResourceNotFoundException.class, () -> service.approve(TURN.sessionId(), 29));
+        assertThrows(ResourceNotFoundException.class, () -> service.reject(TURN.sessionId(), 29));
+        assertThrows(ResourceNotFoundException.class, () -> service.undo(TURN.sessionId(), 29));
+
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29);
+    }
+
+    @Test
+    void governanceDisableBeforeToolDecisionBlocksToolMutations() {
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
+
+        assertThrows(ForbiddenException.class, () -> service.executeAuto(TURN, 29));
+        assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29);
     }
 
     private AiAssistantPreparedWrite prepared(

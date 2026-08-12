@@ -13,13 +13,17 @@ import java.util.Set;
  * @param outputTokens provider-reported output token count
  * @param stopReason normalized stop reason drawn from a closed vocabulary
  * @param structuredOutputEnforcement provider-native structured enforcement actually applied
+ * @param reasoning masked display-only reasoning from a native provider channel, or an empty string
+ * @param reasoningMode provider reasoning protocol actually applied
  */
 public record AiCompletionResult(
         String text,
         int inputTokens,
         int outputTokens,
         String stopReason,
-        AiStructuredOutputEnforcement structuredOutputEnforcement) {
+        AiStructuredOutputEnforcement structuredOutputEnforcement,
+        String reasoning,
+        AiReasoningMode reasoningMode) {
 
     private static final String STOP_REASON_OTHER = "other";
     private static final Set<String> KNOWN_STOP_REASONS = Set.of(
@@ -47,11 +51,23 @@ public record AiCompletionResult(
         text = Objects.requireNonNull(text, "text");
         stopReason = normalizeStopReason(stopReason);
         Objects.requireNonNull(structuredOutputEnforcement, "structuredOutputEnforcement");
+        reasoning = Objects.requireNonNull(reasoning, "reasoning");
+        Objects.requireNonNull(reasoningMode, "reasoningMode");
+    }
+
+    public AiCompletionResult(
+            String text,
+            int inputTokens,
+            int outputTokens,
+            String stopReason,
+            AiStructuredOutputEnforcement structuredOutputEnforcement) {
+        this(text, inputTokens, outputTokens, stopReason, structuredOutputEnforcement,
+                "", AiReasoningMode.NONE);
     }
 
     public AiCompletionResult(String text, int inputTokens, int outputTokens, String stopReason) {
         this(text, inputTokens, outputTokens, stopReason,
-                AiStructuredOutputEnforcement.PROMPT_ONLY);
+                AiStructuredOutputEnforcement.PROMPT_ONLY, "", AiReasoningMode.NONE);
     }
 
     private static String normalizeStopReason(String stopReason) {
@@ -66,6 +82,7 @@ public record AiCompletionResult(
     public String toString() {
         return "AiCompletionResult[text=<redacted>, inputTokens=" + inputTokens
                 + ", outputTokens=" + outputTokens + ", stopReason=" + stopReason
-                + ", structuredOutputEnforcement=" + structuredOutputEnforcement + "]";
+                + ", structuredOutputEnforcement=" + structuredOutputEnforcement
+                + ", reasoning=<redacted>, reasoningMode=" + reasoningMode + "]";
     }
 }

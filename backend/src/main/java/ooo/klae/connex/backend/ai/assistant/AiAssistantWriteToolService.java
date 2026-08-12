@@ -49,9 +49,11 @@ import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.ActivityService;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.NoteService;
@@ -93,6 +95,7 @@ public class AiAssistantWriteToolService {
     private final DealService dealService;
     private final PipelineService pipelineService;
     private final AiRestrictionEpoch restrictionEpoch;
+    private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
     private final Validator validator;
     private final Clock clock;
@@ -181,6 +184,7 @@ public class AiAssistantWriteToolService {
     /** Executes or replays one auto-tier proposal while the originating turn remains active. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public WriteExecution executeAuto(AiChatQueuedTurn turn, int toolCallId) {
+        requireMutationAllowed(turn.workspaceId(), turn.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 turn.workspaceId(), turn.userId(), turn.sessionId(), toolCallId, null);
         AiChatTurn storedTurn = chatMapper.getTurnByIdForUpdate(
@@ -232,6 +236,7 @@ public class AiAssistantWriteToolService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto approve(int sessionId, int toolCallId) {
         Actor actor = currentActor();
+        requireMutationAllowed(actor.workspaceId(), actor.userId());
         OwnerAssignment owner = preliminaryOwnerAssignment(actor, sessionId, toolCallId);
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId,
@@ -269,6 +274,7 @@ public class AiAssistantWriteToolService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto reject(int sessionId, int toolCallId) {
         Actor actor = currentActor();
+        requireActiveMembership(actor.workspaceId(), actor.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId, null);
         if (REJECTED.equals(toolCall.getStatus())) {
@@ -300,6 +306,7 @@ public class AiAssistantWriteToolService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto undo(int sessionId, int toolCallId) {
         Actor actor = currentActor();
+        requireActiveMembership(actor.workspaceId(), actor.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId, null);
         requireStatus(toolCall, EXECUTED);
@@ -515,6 +522,19 @@ public class AiAssistantWriteToolService {
             throw inaccessible();
         }
         return toolCall;
+    }
+
+    private void requireMutationAllowed(int workspaceId, int userId) {
+        requireActiveMembership(workspaceId, userId);
+        if (!governanceService.isEnabled(workspaceId)) {
+            throw new ForbiddenException("AI is disabled for this workspace");
+        }
+    }
+
+    private void requireActiveMembership(int workspaceId, int userId) {
+        if (!workspaceService.isMember(workspaceId, userId)) {
+            throw inaccessible();
+        }
     }
 
     private OwnerAssignment preliminaryOwnerAssignment(

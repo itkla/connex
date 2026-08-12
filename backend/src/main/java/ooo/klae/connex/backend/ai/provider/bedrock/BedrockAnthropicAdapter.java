@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -46,6 +47,29 @@ public class BedrockAnthropicAdapter implements AiProvider {
     }
 
     @Override
+    public AiReasoningMode reasoningCapability(AiProviderTarget target) {
+        return target != null && supportsNativeReasoning(target.modelId())
+                ? AiReasoningMode.NATIVE
+                : AiReasoningMode.TAGGED;
+    }
+
+    @Override
+    public int contextWindowTokens(AiProviderTarget target) {
+        if (target == null || target.modelId() == null) {
+            return 4_096;
+        }
+        String normalized = target.modelId().toLowerCase(Locale.ROOT);
+        return normalized.contains("claude-3")
+                || normalized.contains("claude-sonnet-4")
+                || normalized.contains("claude-opus-4")
+                || normalized.contains("claude-haiku-4")
+                || normalized.contains("claude-mythos")
+                || normalized.contains("claude-fable")
+                ? 200_000
+                : 4_096;
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
@@ -61,7 +85,7 @@ public class BedrockAnthropicAdapter implements AiProvider {
             String responseBody = request.providerAttemptExecutor().execute(() ->
                     bedrockClient.invokeModel(
                             region, target.modelId(), request.credentials(), requestBody));
-            return parseResponse(responseBody, enforcement);
+            return parseResponse(responseBody, enforcement, request.reasoningMode());
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -75,7 +99,11 @@ public class BedrockAnthropicAdapter implements AiProvider {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("anthropic_version", ANTHROPIC_VERSION);
         root.put("max_tokens", request.maxTokens());
-        root.put("temperature", request.temperature());
+        if (request.reasoningMode() == AiReasoningMode.NATIVE) {
+            addNativeReasoning(root, request.target().modelId(), request.maxTokens());
+        } else {
+            root.put("temperature", request.temperature());
+        }
         if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
             root.put("system", request.systemPrompt());
         }
@@ -116,18 +144,24 @@ public class BedrockAnthropicAdapter implements AiProvider {
 
     private AiCompletionResult parseResponse(
             String responseBody,
-            AiStructuredOutputEnforcement enforcement) throws Exception {
+            AiStructuredOutputEnforcement enforcement,
+            AiReasoningMode reasoningMode) throws Exception {
         JsonNode root = objectMapper.readTree(responseBody);
         String text = readText(root);
+        String reasoning = readReasoning(root);
         int inputTokens = readRequiredInt(root.path("usage").path("input_tokens"), "input token count");
         int outputTokens = readRequiredInt(root.path("usage").path("output_tokens"), "output token count");
         String stopReason = root.path("stop_reason").asString(null);
         return new AiCompletionResult(
-                text, inputTokens, outputTokens, stopReason, enforcement);
+                text, inputTokens, outputTokens, stopReason, enforcement,
+                reasoning, reasoningMode);
     }
 
     private AiStructuredOutputEnforcement requestedEnforcement(
             AiCompletionRequest request) {
+        if (request.reasoningMode() != AiReasoningMode.NONE) {
+            return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
         return request.outputMode() == AiOutputMode.JSON
                 && request.responseSchema() != null
                 ? structuredOutputCapability(request.target())
@@ -143,6 +177,38 @@ public class BedrockAnthropicAdapter implements AiProvider {
                 || normalized.contains("claude-haiku-4-5")
                 || normalized.contains("claude-opus-4-5")
                 || normalized.contains("claude-opus-4-6");
+    }
+
+    private static boolean supportsNativeReasoning(String modelId) {
+        if (modelId == null) {
+            return false;
+        }
+        String normalized = modelId.toLowerCase(Locale.ROOT);
+        return normalized.contains("claude-3-7-sonnet")
+                || normalized.contains("claude-sonnet-4")
+                || normalized.contains("claude-opus-4")
+                || normalized.contains("claude-haiku-4-5")
+                || normalized.contains("claude-mythos")
+                || normalized.contains("claude-fable");
+    }
+
+    private static void addNativeReasoning(
+            ObjectNode root, String modelId, int maxTokens) {
+        if (maxTokens <= 1_024) {
+            throw new AiProviderException("Bedrock reasoning requires more than 1024 output tokens");
+        }
+        String normalized = modelId == null ? "" : modelId.toLowerCase(Locale.ROOT);
+        ObjectNode thinking = root.putObject("thinking");
+        if (normalized.contains("claude-mythos")
+                || normalized.contains("claude-fable")
+                || normalized.contains("claude-opus-4-7")
+                || normalized.contains("claude-opus-4-6")
+                || normalized.contains("claude-sonnet-4-6")) {
+            thinking.put("type", "adaptive");
+            return;
+        }
+        thinking.put("type", "enabled");
+        thinking.put("budget_tokens", 1_024);
     }
 
     private static String readText(JsonNode root) {
@@ -162,6 +228,27 @@ public class BedrockAnthropicAdapter implements AiProvider {
             throw new AiProviderException("Bedrock Anthropic response did not include text");
         }
         return text.toString();
+    }
+
+    private static String readReasoning(JsonNode root) {
+        JsonNode content = root.path("content");
+        if (!content.isArray()) {
+            return "";
+        }
+        StringBuilder reasoning = new StringBuilder();
+        for (JsonNode block : content) {
+            if (!"thinking".equals(block.path("type").asString(null))) {
+                continue;
+            }
+            String value = block.path("thinking").asString(null);
+            if (value != null && !value.isBlank()) {
+                if (!reasoning.isEmpty()) {
+                    reasoning.append("\n\n");
+                }
+                reasoning.append(value.strip());
+            }
+        }
+        return reasoning.toString();
     }
 
     private static int readRequiredInt(JsonNode node, String fieldName) {

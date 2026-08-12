@@ -24,8 +24,8 @@ public class AiOrganizationBudgetCoordinator {
     private final Clock clock;
 
     /** Reserves a conservative token ceiling before a provider call. */
-    public Lease reserve(int orgId, AiInvocation invocation) {
-        long reservedTokens = estimatedTokenCeiling(invocation);
+    public Lease reserve(int orgId, AiInvocation invocation, String serializedPrompt) {
+        long reservedTokens = estimatedTokenCeiling(invocation, serializedPrompt);
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         LocalDate usageDay = now.toLocalDate();
         Reservation reservation = controlAccess.execute(() -> operations.reserve(
@@ -36,6 +36,11 @@ public class AiOrganizationBudgetCoordinator {
                 now,
                 now.plus(RESERVATION_TTL)));
         return new Lease(this, reservation);
+    }
+
+    /** Reserves a conservative ceiling for callers without an enriched serialized envelope. */
+    public Lease reserve(int orgId, AiInvocation invocation) {
+        return reserve(orgId, invocation, invocation.prompt().getSystemPrompt());
     }
 
     private void settle(Reservation reservation, long consumedTokens) {
@@ -70,6 +75,17 @@ public class AiOrganizationBudgetCoordinator {
         return Math.max(1, estimate);
     }
 
+    static long estimatedTokenCeiling(AiInvocation invocation, String serializedPrompt) {
+        long estimate = invocation.maxTokens();
+        estimate = saturatedAdd(
+                estimate,
+                serializedPrompt.getBytes(StandardCharsets.UTF_8).length);
+        for (var image : invocation.images()) {
+            estimate = saturatedAdd(estimate, image.size());
+        }
+        return Math.max(1, estimate);
+    }
+
     private static long saturatedAdd(long first, long second) {
         return second > Long.MAX_VALUE - first ? Long.MAX_VALUE : first + second;
     }
@@ -89,8 +105,11 @@ public class AiOrganizationBudgetCoordinator {
         /** Replaces the reservation with actual input and output token usage. */
         public synchronized void settle(int inputTokens, int outputTokens) {
             if (closed) return;
-            settlementTokens = saturatedAdd(
+            long reportedTokens = saturatedAdd(
                     Math.max(0, inputTokens), Math.max(0, outputTokens));
+            settlementTokens = reportedTokens == 0 && reservation.metered()
+                    ? reservation.reservedTokens()
+                    : reportedTokens;
             coordinator.settle(reservation, settlementTokens);
             closed = true;
         }

@@ -192,6 +192,8 @@ public class AiAssistantService {
         Map<Integer, String> authorNames = authorNames(storedMessages);
         var suggestions = citationProjector.suggestions(
                 workspaceId, id, userId, storedMessages);
+        var reasoning = citationProjector.reasoning(
+                workspaceId, id, userId, storedMessages);
         List<AiChatMessageDto> messages = storedMessages.stream()
             .map(message -> AiChatMessageDto.from(
                     message,
@@ -199,7 +201,8 @@ public class AiAssistantService {
                     suggestions.getOrDefault(message.getId(), List.of()),
                     message.getAuthorUserId() == null
                             ? null
-                            : authorNames.get(message.getAuthorUserId())))
+                            : authorNames.get(message.getAuthorUserId()),
+                    reasoning.get(message.getId())))
             .toList();
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),

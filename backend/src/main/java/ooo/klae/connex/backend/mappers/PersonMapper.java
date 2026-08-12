@@ -75,7 +75,7 @@ public interface PersonMapper {
     /** True only when the workspace owns the contact AND it is archived; for restore write scoping. */
     boolean existsOwnedArchived(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<String> findMentionedNames(
+    List<Person> findMentionedRecords(
             @Param("workspaceId") int workspaceId,
             @Param("text") String text,
             @Param("limit") int limit);
