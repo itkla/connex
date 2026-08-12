@@ -1,12 +1,16 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Service;
 
@@ -16,6 +20,7 @@ import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry.ResourceRef;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
@@ -44,6 +49,10 @@ public class AiAssistantToolExecutor {
     private static final Set<Integer> ANALYTICS_DAYS = Set.of(30, 90, 365);
     private static final int DEFAULT_LIMIT = 10;
     private static final int MAX_NOTES = 10;
+    private static final int MAX_NOTE_FIELD_CHARS = 4_000;
+    private static final int MAX_NOTE_RESULT_TEXT_CHARS = 16_000;
+    private static final DateTimeFormatter MYSQL_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final AiAssistantToolCatalog toolCatalog;
     private final SearchService searchService;
@@ -57,6 +66,7 @@ public class AiAssistantToolExecutor {
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
+    private final AiAssistantDateResolver dateResolver;
 
     /** Executes one validated, enabled tool call. */
     public AiAssistantToolResult execute(
@@ -75,6 +85,7 @@ public class AiAssistantToolExecutor {
                 case "list_activities" -> listActivities(args, resources);
                 case "list_tasks" -> listTasks(args, resources);
                 case "aggregate_metric" -> aggregateMetric(args);
+                case "find_schedule_conflicts" -> findScheduleConflicts(args, resources);
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
             };
         } catch (ResourceNotFoundException exception) {
@@ -100,6 +111,8 @@ public class AiAssistantToolExecutor {
         Set<String> acceptedKinds = switch (name) {
             case "get_deal_brief" -> Set.of("deal");
             case "find_schedule_conflicts" -> Set.of("person");
+            case "create_activity", "create_task", "create_note" -> Set.of("person", "deal");
+            case "change_deal_stage" -> Set.of("deal");
             default -> RECORD_KINDS;
         };
         resources.resolve(handle.asString(), acceptedKinds);
@@ -213,12 +226,21 @@ public class AiAssistantToolExecutor {
         List<Activity> activities = switch (resource.kind()) {
             case "person" -> {
                 requireProcessable(personService.getPersonById(resource.id()));
-                yield activityService.getActivitiesByPersonId(resource.id());
+                yield filterRestrictedLinkedPeople(
+                        activityService.getActivitiesByPersonId(resource.id()),
+                        Activity::getPerson,
+                        Activity::getReferences);
             }
-            case "company" -> companyService.getCompanyTimeline(resource.id(), limit).activities();
+            case "company" -> filterRestrictedLinkedPeople(
+                    companyService.getCompanyTimeline(resource.id(), limit).activities(),
+                    Activity::getPerson,
+                    Activity::getReferences);
             case "deal" -> {
                 dealService.getDealById(resource.id());
-                yield activityService.getActivitiesByDealId(resource.id());
+                yield filterRestrictedLinkedPeople(
+                        activityService.getActivitiesByDealId(resource.id()),
+                        Activity::getPerson,
+                        Activity::getReferences);
             }
             default -> throw AiAssistantLoopException.malformed("wrong_handle_kind");
         };
@@ -235,12 +257,21 @@ public class AiAssistantToolExecutor {
         List<Task> tasks = switch (resource.kind()) {
             case "person" -> {
                 requireProcessable(personService.getPersonById(resource.id()));
-                yield taskService.getTasksByPersonId(resource.id());
+                yield filterRestrictedLinkedPeople(
+                        taskService.getTasksByPersonId(resource.id()),
+                        Task::getPerson,
+                        Task::getReferences);
             }
-            case "company" -> companyService.getCompanyTimeline(resource.id(), limit).tasks();
+            case "company" -> filterRestrictedLinkedPeople(
+                    companyService.getCompanyTimeline(resource.id(), limit).tasks(),
+                    Task::getPerson,
+                    Task::getReferences);
             case "deal" -> {
                 dealService.getDealById(resource.id());
-                yield taskService.getTasksByDealId(resource.id());
+                yield filterRestrictedLinkedPeople(
+                        taskService.getTasksByDealId(resource.id()),
+                        Task::getPerson,
+                        Task::getReferences);
             }
             default -> throw AiAssistantLoopException.malformed("wrong_handle_kind");
         };
@@ -270,6 +301,38 @@ public class AiAssistantToolExecutor {
             default -> throw AiAssistantLoopException.malformed("unknown_metric");
         };
         return result(Map.of("metric", metric, "value", value), List.of());
+    }
+
+    private AiAssistantToolResult findScheduleConflicts(
+            JsonNode args, AiChatResourceRegistry resources) {
+        ResourceRef resource = resources.resolve(requiredText(args, "handle"), Set.of("person"));
+        AiAssistantDateResolver.ResolvedDateTime start =
+                dateResolver.resolveDateTime(requiredText(args, "start"));
+        AiAssistantDateResolver.ResolvedDateTime end =
+                dateResolver.resolveDateTime(requiredText(args, "end"));
+        if (!end.utc().isAfter(start.utc())) {
+            throw AiAssistantLoopException.malformed("invalid_schedule_window");
+        }
+        return findScheduleConflicts(resource.id(), start.utc(), end.utc());
+    }
+
+    /** Finds point-in-time activities for a processable person inside one UTC meeting window. */
+    public AiAssistantToolResult findScheduleConflicts(
+            int personId, LocalDateTime startUtc, LocalDateTime endUtc) {
+        requireProcessable(personService.getPersonById(personId));
+        List<Map<String, Object>> conflicts = filterRestrictedLinkedPeople(
+                    activityService.getActivitiesByPersonId(personId),
+                    Activity::getPerson,
+                    Activity::getReferences)
+                .stream()
+                .filter(activity -> isWithin(activity.getTimestamp(), startUtc, endUtc))
+                .map(AiAssistantToolExecutor::activityData)
+                .toList();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("start", MYSQL_TIMESTAMP.format(startUtc));
+        data.put("end", MYSQL_TIMESTAMP.format(endUtc));
+        data.put("conflicts", conflicts);
+        return result(data, List.of());
     }
 
     private RecordResult readRecord(
@@ -317,7 +380,15 @@ public class AiAssistantToolExecutor {
             identifiers.add(new Identifier("company", person.getCompany().getName()));
         }
         if (includeNotes) {
-            data.put("notes", noteData(person.getNotes(), includePrivateNotes));
+            List<Note> notes = person.getNotes() == null
+                    ? List.of()
+                    : Arrays.asList(person.getNotes());
+            data.put("notes", noteData(
+                    filterRestrictedLinkedPeople(
+                            notes,
+                            Note::getPerson,
+                            Note::getReferences).toArray(Note[]::new),
+                    includePrivateNotes));
         }
         return new RecordResult(data, identifiers);
     }
@@ -339,7 +410,10 @@ public class AiAssistantToolExecutor {
             CompanyService.CompanyTimelineData timeline = companyService.getCompanyTimeline(
                     company.getId(), MAX_NOTES);
             data.put("notes", noteData(
-                    timeline.notes().toArray(Note[]::new), includePrivateNotes));
+                    filterRestrictedLinkedPeople(
+                            timeline.notes(), Note::getPerson, Note::getReferences)
+                            .toArray(Note[]::new),
+                    includePrivateNotes));
         }
         return new RecordResult(data, List.of(new Identifier("company", company.getName())));
     }
@@ -386,7 +460,11 @@ public class AiAssistantToolExecutor {
         }
         if (includeNotes) {
             data.put("notes", noteData(
-                    dealService.getNotesByDealId(deal.getId()).toArray(Note[]::new),
+                    filterRestrictedLinkedPeople(
+                            dealService.getNotesByDealId(deal.getId()),
+                            Note::getPerson,
+                            Note::getReferences)
+                            .toArray(Note[]::new),
                     includePrivateNotes));
         }
         return new RecordResult(data, identifiers);
@@ -442,18 +520,89 @@ public class AiAssistantToolExecutor {
         if (notes == null) {
             return List.of();
         }
-        return Arrays.stream(notes)
+        TextBudget budget = new TextBudget(MAX_NOTE_RESULT_TEXT_CHARS);
+        List<Map<String, Object>> result = new ArrayList<>();
+        Arrays.stream(notes)
                 .filter(note -> note != null)
                 .filter(note -> includePrivateNotes || "workspace".equals(note.getVisibility()))
                 .limit(MAX_NOTES)
-                .map(note -> {
+                .forEach(note -> {
+                    if (budget.remaining() == 0) {
+                        return;
+                    }
                     Map<String, Object> data = new LinkedHashMap<>();
-                    putIfPresent(data, "title", note.getTitle());
-                    putIfPresent(data, "content", note.getContent());
-                    putIfPresent(data, "createdAt", note.getCreatedAt());
-                    return data;
+                    putBounded(data, "title", note.getTitle(), budget);
+                    putBounded(data, "createdAt", note.getCreatedAt(), budget);
+                    boolean complete = putBounded(data, "content", note.getContent(), budget);
+                    if (!complete) {
+                        data.put("contentTruncated", true);
+                    }
+                    result.add(data);
+                });
+        return List.copyOf(result);
+    }
+
+    private <T> List<T> filterRestrictedLinkedPeople(
+            List<T> records,
+            Function<T, Person> personReference,
+            Function<T, List<EntityReference>> structuredReferences) {
+        Set<Integer> personIds = new LinkedHashSet<>();
+        for (T record : records) {
+            if (record == null) {
+                continue;
+            }
+            Person person = personReference.apply(record);
+            if (person != null && person.getId() > 0) {
+                personIds.add(person.getId());
+            }
+            List<EntityReference> references = structuredReferences.apply(record);
+            if (references != null) {
+                references.stream()
+                        .filter(Objects::nonNull)
+                        .filter(reference -> "person".equals(reference.getRefType()))
+                        .map(EntityReference::getRefId)
+                        .filter(id -> id > 0)
+                        .forEach(personIds::add);
+            }
+        }
+        if (personIds.isEmpty()) {
+            return List.copyOf(records);
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Set<Integer> processableIds = personMapper.getByIds(
+                        workspaceId, List.copyOf(personIds)).stream()
+                .filter(AiAssistantToolExecutor::isProcessable)
+                .map(Person::getId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return records.stream()
+                .filter(Objects::nonNull)
+                .filter(record -> {
+                    Person person = personReference.apply(record);
+                    if (person != null && !processableIds.contains(person.getId())) {
+                        return false;
+                    }
+                    List<EntityReference> references = structuredReferences.apply(record);
+                    return references == null || references.stream()
+                            .filter(Objects::nonNull)
+                            .filter(reference -> "person".equals(reference.getRefType()))
+                            .map(EntityReference::getRefId)
+                            .allMatch(processableIds::contains);
                 })
                 .toList();
+    }
+
+    private static boolean putBounded(
+            Map<String, Object> data, String key, String value, TextBudget budget) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        int retained = Math.min(
+                value.length(), Math.min(MAX_NOTE_FIELD_CHARS, budget.remaining()));
+        if (retained > 0) {
+            data.put(key, value.substring(0, retained));
+            budget.consume(retained);
+        }
+        return retained == value.length();
     }
 
     private static void requireProcessable(Person person) {
@@ -519,11 +668,40 @@ public class AiAssistantToolExecutor {
         }
     }
 
+    private static boolean isWithin(
+            String timestamp, LocalDateTime startUtc, LocalDateTime endUtc) {
+        if (timestamp == null || timestamp.isBlank()) {
+            return false;
+        }
+        try {
+            LocalDateTime value = LocalDateTime.parse(timestamp, MYSQL_TIMESTAMP);
+            return !value.isBefore(startUtc) && value.isBefore(endUtc);
+        } catch (java.time.format.DateTimeParseException exception) {
+            return false;
+        }
+    }
+
     private static AiAssistantToolResult result(
             Map<String, Object> data, List<Identifier> identifiers) {
         return new AiAssistantToolResult(data, identifiers);
     }
 
     private record RecordResult(Map<String, Object> data, List<Identifier> identifiers) {
+    }
+
+    private static final class TextBudget {
+        private int remaining;
+
+        private TextBudget(int remaining) {
+            this.remaining = remaining;
+        }
+
+        private int remaining() {
+            return remaining;
+        }
+
+        private void consume(int characters) {
+            remaining -= characters;
+        }
     }
 }

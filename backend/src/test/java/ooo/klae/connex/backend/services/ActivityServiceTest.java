@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 
@@ -18,6 +20,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.util.AnalyticsPeriods;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
@@ -51,6 +54,21 @@ class ActivityServiceTest extends AbstractServiceTest {
         Activity found = activityMapper.getActivityById(workspace.getId(), created.getId());
         assertNotNull(found.getTimestamp());
         assertFalse(found.getTimestamp().isBlank());
+    }
+
+    @Test
+    void conditionalDeleteRefusesChangedStateAndDeletesMatchingState() {
+        Activity created = activityService.create(draft(
+            "conditional", null, "2024-01-01 09:00:00"));
+
+        assertThrows(
+            ConflictException.class,
+            () -> activityService.deleteIf(created.getId(), current -> false));
+        assertNotNull(activityMapper.getActivityById(workspace.getId(), created.getId()));
+
+        activityService.deleteIf(created.getId(), current -> "conditional".equals(current.getSubject()));
+
+        assertNull(activityMapper.getActivityById(workspace.getId(), created.getId()));
     }
 
     @Test

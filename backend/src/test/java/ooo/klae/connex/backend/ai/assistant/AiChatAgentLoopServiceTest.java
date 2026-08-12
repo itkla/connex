@@ -65,6 +65,7 @@ class AiChatAgentLoopServiceTest {
     private AiInvocationAdmissionService invocationAdmissionService;
     private AiInvocationAdmissionService.DirectAdmission directAdmission;
     private AiAssistantToolExecutor toolExecutor;
+    private AiAssistantWriteToolService writeToolService;
     private AiChatTurnPersistenceService persistenceService;
     private AiRestrictionEpoch restrictionEpoch;
     private WorkspaceService workspaceService;
@@ -77,6 +78,7 @@ class AiChatAgentLoopServiceTest {
         invocationAdmissionService = mock(AiInvocationAdmissionService.class);
         directAdmission = mock(AiInvocationAdmissionService.DirectAdmission.class);
         toolExecutor = mock(AiAssistantToolExecutor.class);
+        writeToolService = mock(AiAssistantWriteToolService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         workspaceService = mock(WorkspaceService.class);
@@ -90,8 +92,10 @@ class AiChatAgentLoopServiceTest {
                 invocationService,
                 invocationAdmissionService,
                 new AiAssistantStepGuard(catalog),
+                catalog,
                 new AiAssistantStepSchema(objectMapper, catalog),
                 toolExecutor,
+                writeToolService,
                 identifierResolver,
                 promptAssembler,
                 persistenceService,
@@ -140,6 +144,75 @@ class AiChatAgentLoopServiceTest {
                 eq("search_records"), any(JsonNode.class), any(), eq(true));
         verify(persistenceService, never()).resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void repeatedIdenticalAutoWritesExecuteOnlyOnceThenStopForNoProgress() throws Exception {
+        JsonNode args = objectMapper.readTree(
+                "{\"handle\":\"r1\",\"content\":\"Follow up\"}");
+        AiAssistantStep toolStep = new AiAssistantStep(
+                new AiAssistantStep.Tool("create_note", args), null);
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
+                .thenReturn(parsed(toolStep));
+        AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
+                "create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        AiAssistantToolProposal proposal =
+                new AiAssistantToolProposal(29, "proposed", null, true);
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("toolCallId", 29, "status", "executed"), List.of());
+        when(writeToolService.prepare(
+                eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch())))
+                .thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 1, write)).thenReturn(proposal);
+        when(writeToolService.executeAuto(TURN, 29)).thenReturn(
+                new AiAssistantWriteToolService.WriteExecution(null, toolResult));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("no_progress", result.reason());
+        verify(invocationService, times(3)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
+        verify(persistenceService).proposeWriteTool(TURN, 1, write);
+        verify(writeToolService).executeAuto(TURN, 29);
+    }
+
+    @Test
+    void confirmTierToolPersistsApprovalCardWithoutAutoExecution() throws Exception {
+        JsonNode args = objectMapper.readTree(
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}");
+        AiAssistantStep toolStep = new AiAssistantStep(
+                new AiAssistantStep.Tool("assign_owner", args), null);
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Approval is required.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
+                .thenReturn(parsed(toolStep), parsed(finalStep));
+        AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
+                "assign_owner", AiAssistantToolCatalog.ToolTier.CONFIRM,
+                "deal", 41, "{\"resolved\":true}");
+        AiAssistantToolProposal proposal =
+                new AiAssistantToolProposal(29, "proposed", null, true);
+        when(writeToolService.prepare(
+                eq("assign_owner"), eq(args), any(), eq(TURN.restrictionEpoch())))
+                .thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 1, write)).thenReturn(proposal);
+        when(writeToolService.proposalResult(write, proposal)).thenReturn(
+                new AiAssistantToolResult(
+                        Map.of("toolCallId", 29, "status", "approval_required"), List.of()));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService).proposeWriteTool(TURN, 1, write);
+        verify(writeToolService, never()).executeAuto(TURN, 29);
     }
 
     @Test
@@ -286,7 +359,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("agent_backstop_exceeded", result.reason());
-        verify(invocationService, times(AiChatAgentLoopService.HARD_MAX_STEPS))
+        verify(invocationService, times(AiChatAgentLoopService.MAX_STEPS))
                 .completeStructuredRepairable(
                         any(AiInvocation.class), eq(AiAssistantStep.class),
                         any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
@@ -439,8 +512,9 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void unknownToolHandleFailsBeforeDurableProposalOrDomainExecution() throws Exception {
+        var catalog = new AiAssistantToolCatalog();
         AiAssistantToolExecutor realExecutor = new AiAssistantToolExecutor(
-                new AiAssistantToolCatalog(),
+                catalog,
                 mock(ooo.klae.connex.backend.services.SearchService.class),
                 mock(ooo.klae.connex.backend.services.PersonService.class),
                 mock(ooo.klae.connex.backend.services.CompanyService.class),
@@ -451,14 +525,16 @@ class AiChatAgentLoopServiceTest {
                 workspaceService,
                 mock(PersonMapper.class),
                 mock(CompanyMapper.class),
-                mock(DealMapper.class));
-        var catalog = new AiAssistantToolCatalog();
+                mock(DealMapper.class),
+                mock(AiAssistantDateResolver.class));
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,
                 new AiAssistantStepGuard(catalog),
+                catalog,
                 new AiAssistantStepSchema(objectMapper, catalog),
                 realExecutor,
+                writeToolService,
                 mock(AiAssistantIdentifierResolver.class),
                 new AiAssistantPromptAssembler(objectMapper, catalog),
                 persistenceService,

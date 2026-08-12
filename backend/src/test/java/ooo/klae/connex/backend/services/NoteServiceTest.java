@@ -1,12 +1,15 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 
 class NoteServiceTest extends AbstractServiceTest {
@@ -27,6 +30,24 @@ class NoteServiceTest extends AbstractServiceTest {
         Note created = noteService.create(draft("hi", other));
         Note found = noteMapper.getNoteById(workspace.getId(), created.getId());
         assertEquals(currentUser.getId(), found.getAuthor().getId());
+    }
+
+    @Test
+    void conditionalDeleteRefusesChangedStateAndDeletesMatchingState() {
+        Note created = noteService.create(draft("conditional", null));
+
+        assertThrows(
+            ConflictException.class,
+            () -> noteService.deleteIf(created.getId(), current -> false));
+        assertEquals(
+            "conditional",
+            noteMapper.getNoteById(workspace.getId(), created.getId()).getContent());
+
+        noteService.deleteIf(
+            created.getId(),
+            current -> "conditional".equals(current.getContent()));
+
+        assertNull(noteMapper.getNoteById(workspace.getId(), created.getId()));
     }
 
     @Test

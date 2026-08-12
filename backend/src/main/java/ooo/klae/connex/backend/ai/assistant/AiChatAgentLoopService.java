@@ -49,7 +49,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Service
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
-    static final int HARD_MAX_STEPS = 64;
+    static final int MAX_STEPS = 64;
     private static final Duration TURN_DEADLINE = Duration.ofSeconds(70);
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     private static final String INTERNAL_ERROR = "internal_error";
@@ -62,8 +62,10 @@ public class AiChatAgentLoopService {
     private final AiInvocationService invocationService;
     private final AiInvocationAdmissionService invocationAdmissionService;
     private final AiAssistantStepGuard stepGuard;
+    private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantStepSchema stepSchema;
     private final AiAssistantToolExecutor toolExecutor;
+    private final AiAssistantWriteToolService writeToolService;
     private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiChatTurnPersistenceService persistenceService;
@@ -112,7 +114,7 @@ public class AiChatAgentLoopService {
             int inputTokens = 0;
             int outputTokens = 0;
 
-            for (int stepNumber = 1; stepNumber <= HARD_MAX_STEPS; stepNumber++) {
+            for (int stepNumber = 1; stepNumber <= MAX_STEPS; stepNumber++) {
                 if (deadlineReached(deadline)) {
                     return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                 }
@@ -176,6 +178,62 @@ public class AiChatAgentLoopService {
                         }
                         toolTurns.add(new ToolTurn(
                                 stepNumber, step.tool().name(), cachedResult));
+                        continue;
+                    }
+                    if (toolCatalog.isWrite(step.tool().name())) {
+                        AiAssistantPreparedWrite write = writeToolService.prepare(
+                                step.tool().name(), step.tool().args(), resources,
+                                turn.restrictionEpoch());
+                        AiAssistantToolProposal proposal =
+                                persistenceService.proposeWriteTool(turn, stepNumber, write);
+                        int toolCallId = proposal.id();
+                        publish(turn.userId(), new AiChatStepFrameDto(
+                                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                stepNumber, "step", step.tool().name(),
+                                "proposed", null, toolCallId));
+                        try {
+                            requireCurrentToolExecution(turn);
+                            AiAssistantToolResult toolResult = write.tier()
+                                    == AiAssistantToolCatalog.ToolTier.AUTO
+                                    ? writeToolService.executeAuto(turn, toolCallId).toolResult()
+                                    : writeToolService.proposalResult(write, proposal);
+                            String status = write.tier() == AiAssistantToolCatalog.ToolTier.AUTO
+                                    ? "executed"
+                                    : ("executed".equals(proposal.status())
+                                            ? "executed"
+                                            : "approval_required");
+                            publish(turn.userId(), new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "step", step.tool().name(),
+                                    status, null, toolCallId));
+                            String resultJson = promptAssembler.durableToolResult(toolResult);
+                            toolResultCache.put(toolCallKey, toolResult);
+                            if (seenToolResults.add(resultJson)) {
+                                noProgressSteps = 0;
+                            } else {
+                                noProgressSteps++;
+                            }
+                            toolTurns.add(new ToolTurn(
+                                    stepNumber, step.tool().name(), toolResult));
+                            if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
+                                return AiGenerationTaskResult.failed("no_progress");
+                            }
+                        } catch (AiAssistantLoopException exception) {
+                            failTool(turn, toolCallId, exception.detailReason());
+                            publish(turn.userId(), new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "step", step.tool().name(),
+                                    "failed", exception.detailReason(), toolCallId));
+                            return AiGenerationTaskResult.failed(exception.terminalReason());
+                        } catch (RuntimeException exception) {
+                            String reason = toolFailureReason(exception);
+                            failTool(turn, toolCallId, reason);
+                            publish(turn.userId(), new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "step", step.tool().name(),
+                                    "failed", reason, toolCallId));
+                            return AiGenerationTaskResult.failed(reason);
+                        }
                         continue;
                     }
                     int toolCallId = persistenceService.proposeTool(
