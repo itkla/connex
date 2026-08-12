@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -27,7 +26,6 @@ public class RoleService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
-    private final AiAssistantAccessFence assistantAccessFence;
 
     public List<WorkspaceRole> listRoles(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
@@ -58,7 +56,6 @@ public class RoleService {
 
     @Transactional
     public WorkspaceRole updateRole(int workspaceId, int actorId, int roleId, String name, List<String> permissions) {
-        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         List<String> valid = validatePermissions(permissions);
@@ -75,7 +72,6 @@ public class RoleService {
 
     @Transactional
     public void deleteRole(int workspaceId, int actorId, int roleId) {
-        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         workspaceService.lockRoleDeletionAuthorization(workspaceId, actorId, roleId);

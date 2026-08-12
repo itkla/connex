@@ -95,7 +95,6 @@ public class AiAssistantWriteToolService {
     private final DealService dealService;
     private final PipelineService pipelineService;
     private final AiRestrictionEpoch restrictionEpoch;
-    private final AiAssistantAccessFence accessFence;
     private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
     private final Validator validator;
@@ -185,7 +184,6 @@ public class AiAssistantWriteToolService {
     /** Executes or replays one auto-tier proposal while the originating turn remains active. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public WriteExecution executeAuto(AiChatQueuedTurn turn, int toolCallId) {
-        accessFence.retainReadFenceUntilTransactionCompletion(turn.workspaceId());
         requireMutationAllowed(turn.workspaceId(), turn.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 turn.workspaceId(), turn.userId(), turn.sessionId(), toolCallId, null);
@@ -238,7 +236,6 @@ public class AiAssistantWriteToolService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto approve(int sessionId, int toolCallId) {
         Actor actor = currentActor();
-        accessFence.retainReadFenceUntilTransactionCompletion(actor.workspaceId());
         requireMutationAllowed(actor.workspaceId(), actor.userId());
         OwnerAssignment owner = preliminaryOwnerAssignment(actor, sessionId, toolCallId);
         AiChatToolCall toolCall = lockAuthorizedToolCall(
@@ -277,7 +274,6 @@ public class AiAssistantWriteToolService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto reject(int sessionId, int toolCallId) {
         Actor actor = currentActor();
-        accessFence.retainReadFenceUntilTransactionCompletion(actor.workspaceId());
         requireActiveMembership(actor.workspaceId(), actor.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId, null);
@@ -310,7 +306,6 @@ public class AiAssistantWriteToolService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto undo(int sessionId, int toolCallId) {
         Actor actor = currentActor();
-        accessFence.retainReadFenceUntilTransactionCompletion(actor.workspaceId());
         requireActiveMembership(actor.workspaceId(), actor.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId, null);

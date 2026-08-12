@@ -14,7 +14,6 @@ import java.util.function.Supplier;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.ai.masking.AiJson;
 import ooo.klae.connex.backend.ai.masking.AiGeneratedContentScreen;
 import ooo.klae.connex.backend.ai.masking.CompletionNormalizer;
@@ -77,7 +76,6 @@ public class AiInvocationService {
     private final AiProviderConfigService aiProviderConfigService;
     private final AiProviderRouter aiProviderRouter;
     private final AiRestrictionEpoch aiRestrictionEpoch;
-    private final AiAssistantAccessFence aiAssistantAccessFence;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -822,14 +820,12 @@ public class AiInvocationService {
                     emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
                             null, null, null, null, null, structured, null);
                 }
-                return aiAssistantAccessFence.invokeAtEgress(workspaceId, userId, () -> {
-                    return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
-                        requireCurrentProviderSnapshot();
-                        aiFeatureGate.requireAiUsable(invocation.feature());
-                        providerAttemptGuard.run();
-                        attemptCommitment.run();
-                        return providerAttempt.get();
-                    });
+                return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
+                    requireCurrentProviderSnapshot();
+                    aiFeatureGate.requireAiUsable(invocation.feature());
+                    providerAttemptGuard.run();
+                    attemptCommitment.run();
+                    return providerAttempt.get();
                 });
             } catch (AiRestrictionEpoch.EgressRejectedException exception) {
                 closeBudget();

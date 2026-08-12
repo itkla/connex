@@ -56,7 +56,6 @@ public class AiChatTurnPersistenceService {
     private final WorkspaceService workspaceService;
     private final AiProperties aiProperties;
     private final AiRestrictionEpoch restrictionEpoch;
-    private final AiAssistantAccessFence accessFence;
     private final AiWorkspaceGovernanceService governanceService;
     private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantToolExecutor toolExecutor;
@@ -71,7 +70,6 @@ public class AiChatTurnPersistenceService {
             int sessionId, AiChatTurnCreateRequest request, long restrictionEpoch) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
-        accessFence.retainReadFenceUntilTransactionCompletion(workspaceId);
         requireActiveAiAccess(workspaceId, userId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
@@ -133,7 +131,6 @@ public class AiChatTurnPersistenceService {
     public AiChatTurn readTurn(int sessionId, int turnId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
-        accessFence.retainReadFenceUntilTransactionCompletion(workspaceId);
         requireActiveAiAccess(workspaceId, userId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
@@ -497,7 +494,6 @@ public class AiChatTurnPersistenceService {
     }
 
     private void requireCurrentActor(AiChatQueuedTurn turn) {
-        accessFence.retainReadFenceUntilTransactionCompletion(turn.workspaceId());
         if (workspaceService.getCurrentWorkspaceId() != turn.workspaceId()
                 || workspaceService.getCurrentUserId() != turn.userId()) {
             throw inaccessible();

@@ -140,7 +140,6 @@ class AiAssistantPromptInjectionGoldenTest {
                 providerConfigService,
                 new AiProviderRouter(List.of(provider)),
                 new AiRestrictionEpoch(),
-                new AiAssistantAccessFence(),
                 workspaceService,
                 mock(AuditService.class),
                 objectMapper,

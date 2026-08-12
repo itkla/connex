@@ -23,7 +23,6 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 
 import java.util.List;
 import java.util.Map;
@@ -58,7 +57,6 @@ public class UserService implements UserDetailsService {
     private final ProviderAccountOffboardingService providerAccountOffboardingService;
     private final UserAccountCatalogOffboardingService catalogOffboardingService;
     private final UserDeletionTransaction userDeletionTransaction;
-    private final AiAssistantAccessFence assistantAccessFence;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -172,14 +170,6 @@ public class UserService implements UserDetailsService {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void delete(int id) {
         workspaceService.requireSelf(id);
-        assistantAccessFence.runWithUserMutationFence(id, () -> {
-            List<Integer> workspaceIds = workspaceService.workspaceIdsForUser(id);
-            assistantAccessFence.runWithMutationFences(
-                    workspaceIds, () -> deleteFenced(id));
-        });
-    }
-
-    private void deleteFenced(int id) {
         String reservationOwner = UUID.randomUUID().toString();
         tenantWorkScope.unrouted(() -> {
             userDeletionTransaction.reserve(id, reservationOwner);

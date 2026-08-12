@@ -61,7 +61,6 @@ class AiChatTurnPersistenceServiceTest {
                 workspaceService,
                 mock(AiProperties.class),
                 restrictionEpoch,
-                mock(AiAssistantAccessFence.class),
                 governanceService,
                 mock(AiAssistantIdentifierResolver.class),
                 mock(AiAssistantToolExecutor.class),
@@ -137,7 +136,6 @@ class AiChatTurnPersistenceServiceTest {
                 workspaceService,
                 new AiProperties(),
                 mock(AiRestrictionEpoch.class),
-                mock(AiAssistantAccessFence.class),
                 governanceService,
                 identifierResolver,
                 toolExecutor,
@@ -218,7 +216,7 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
-    void governanceDisableAfterFenceWaitBlocksFinalAnswerPersistence() {
+    void governanceDisableBeforeFinalAnswerBlocksPersistence() {
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
         TransactionSynchronizationManager.setActualTransactionActive(true);
         TransactionSynchronizationManager.initSynchronization();
@@ -235,7 +233,7 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
-    void lifecycleTeardownBeforeFenceAcquisitionBlocksQueueAndLazyRead() {
+    void lifecycleTeardownBeforeAccessCheckBlocksQueueAndLazyRead() {
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(false);
 
         assertThrows(
@@ -253,7 +251,7 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
-    void governanceDisableBeforeFenceAcquisitionBlocksQueueAndLazyRead() {
+    void governanceDisableBeforeAccessCheckBlocksQueueAndLazyRead() {
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
 
         assertThrows(

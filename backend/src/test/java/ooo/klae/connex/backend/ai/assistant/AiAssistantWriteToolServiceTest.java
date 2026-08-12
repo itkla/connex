@@ -152,7 +152,6 @@ class AiAssistantWriteToolServiceTest {
                 dealService,
                 pipelineService,
                 restrictionEpoch,
-                mock(AiAssistantAccessFence.class),
                 governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
@@ -630,7 +629,7 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
-    void lifecycleTeardownBeforeFenceAcquisitionBlocksEveryToolDecision() {
+    void lifecycleTeardownBeforeToolDecisionBlocksEveryToolDecision() {
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class, () -> service.executeAuto(TURN, 29));
@@ -643,7 +642,7 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
-    void governanceDisableBeforeFenceAcquisitionBlocksToolMutations() {
+    void governanceDisableBeforeToolDecisionBlocksToolMutations() {
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
 
         assertThrows(ForbiddenException.class, () -> service.executeAuto(TURN, 29));

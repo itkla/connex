@@ -6,7 +6,6 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -15,11 +14,9 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderReadiness;
@@ -33,7 +30,6 @@ import ooo.klae.connex.backend.beans.AiProviderConfig;
 import ooo.klae.connex.backend.dto.AiProviderConfigDto;
 import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -104,7 +100,6 @@ public class AiProviderConfigService implements AiProviderReadiness {
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
     private final ObjectMapper objectMapper;
-    private final AiAssistantAccessFence assistantAccessFence;
 
     /**
      * Returns the AI provider settings for the acting workspace's organization.
@@ -126,10 +121,9 @@ public class AiProviderConfigService implements AiProviderReadiness {
      * @param request the submitted provider settings
      * @return the saved masked provider settings view
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Transactional
     public AiProviderConfigDto save(int workspaceId, int actorId, AiProviderConfigRequest request) {
         int orgId = requireAdministrableOrg(workspaceId, actorId);
-        List<Integer> workspaceIds = retainProviderMutationFences(orgId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         if (request == null) {
             throw new BadRequestException("AI provider configuration is required");
@@ -137,7 +131,6 @@ public class AiProviderConfigService implements AiProviderReadiness {
 
         String provider = resolveProvider(request.getProvider());
         AiProviderConfig existing = lockCurrentConfig(orgId, actorId);
-        requireStableWorkspaceSet(orgId, workspaceIds);
         boolean sameProvider = existing != null && provider.equals(existing.getProvider());
         AiProviderConfig config = new AiProviderConfig();
         config.setOrgId(orgId);
@@ -183,13 +176,11 @@ public class AiProviderConfigService implements AiProviderReadiness {
      * @param workspaceId the acting workspace
      * @param actorId the requesting user
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Transactional
     public void revoke(int workspaceId, int actorId) {
         int orgId = requireAdministrableOrg(workspaceId, actorId);
-        List<Integer> workspaceIds = retainProviderMutationFences(orgId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         AiProviderConfig existing = lockCurrentConfig(orgId, actorId);
-        requireStableWorkspaceSet(orgId, workspaceIds);
         aiProviderConfigMapper.deleteByOrg(orgId);
         if (existing != null && !isBlank(existing.getCredentialRef())) {
             aiProviderSecretCipher.deleteCredentialReference(orgId, existing.getCredentialRef());
@@ -472,27 +463,6 @@ public class AiProviderConfigService implements AiProviderReadiness {
         }
         orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
         return aiProviderConfigMapper.findByOrgForUpdate(orgId);
-    }
-
-    private List<Integer> retainProviderMutationFences(int orgId) {
-        List<Integer> workspaceIds = workspaceMapper.findByOrgId(orgId).stream()
-                .map(ooo.klae.connex.backend.beans.Workspace::getId)
-                .distinct()
-                .sorted()
-                .toList();
-        assistantAccessFence.retainMutationFencesUntilTransactionCompletion(workspaceIds);
-        return workspaceIds;
-    }
-
-    private void requireStableWorkspaceSet(int orgId, List<Integer> expected) {
-        List<Integer> current = workspaceMapper.findByOrgId(orgId).stream()
-                .map(ooo.klae.connex.backend.beans.Workspace::getId)
-                .distinct()
-                .sorted()
-                .toList();
-        if (!expected.equals(current)) {
-            throw new ConflictException("Organization workspaces changed; retry provider update");
-        }
     }
 
     private static String resolveProvider(String requested) {

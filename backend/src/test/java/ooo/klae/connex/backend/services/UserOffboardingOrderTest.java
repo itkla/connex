@@ -311,8 +311,7 @@ class UserOffboardingOrderTest {
             tenantWorkScope,
             providerOffboardingService,
             catalogOffboardingService,
-            deletionTransaction,
-            new ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence()
+            deletionTransaction
         );
 
         userService.delete(9);

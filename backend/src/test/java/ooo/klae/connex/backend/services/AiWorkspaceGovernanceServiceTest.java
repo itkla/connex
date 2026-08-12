@@ -35,8 +35,7 @@ class AiWorkspaceGovernanceServiceTest {
             auditService,
             userMapper,
             workspaceMapper,
-            organizationMapper,
-            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence.class));
+            organizationMapper);
 
     @Test
     void permissionRevokedBetweenPrecheckAndLockedGovernanceWriteBlocksMutation() {

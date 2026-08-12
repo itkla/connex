@@ -35,7 +35,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
@@ -98,7 +97,6 @@ class AiInvocationServiceTest {
         service = new AiInvocationService(
                 aiFeatureGate, aiInvocationAdmissionService, aiMediaAdmissionService,
                 aiProviderConfigService, aiProviderRouter, restrictionEpoch,
-                new AiAssistantAccessFence(),
                 workspaceService, auditService, new ObjectMapper(), budgetCoordinator);
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
                 null, null, null, null, false, true,
@@ -756,7 +754,7 @@ class AiInvocationServiceTest {
     }
 
     @Test
-    void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressFence() {
+    void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressChecks() {
         AiInvocation invocation = invocation("Summarize relationship state");
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {

@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.beans.AiWorkspaceGovernance;
 import ooo.klae.connex.backend.dto.AiWorkspaceGovernanceDto;
 import ooo.klae.connex.backend.dto.AiWorkspaceGovernanceRequest;
@@ -31,7 +30,6 @@ public class AiWorkspaceGovernanceService {
     private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
     private final OrganizationMapper organizationMapper;
-    private final AiAssistantAccessFence assistantAccessFence;
 
     /** Returns administrator-visible governance for the active workspace. */
     @Transactional(readOnly = true)
@@ -46,7 +44,6 @@ public class AiWorkspaceGovernanceService {
             int workspaceId,
             int actorId,
             AiWorkspaceGovernanceRequest request) {
-        assistantAccessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         int orgId = requireAdministrator(workspaceId, actorId);
         if (request == null || request.enabled() == null || request.assistantMaxSteps() == null
                 || request.assistantMaxSteps() < 1 || request.assistantMaxSteps() > 12) {

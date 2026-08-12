@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantAccessFence;
 import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
 import ooo.klae.connex.backend.ai.assistant.AiChatPresenceRegistry;
 import ooo.klae.connex.backend.beans.AiChatMessage;
@@ -66,7 +65,6 @@ public class AiAssistantService {
     private final UserMapper userMapper;
     private final AiChatPresenceRegistry presenceRegistry;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
-    private final AiAssistantAccessFence accessFence;
 
     /** Returns an ordered page of caller-owned and explicitly shared sessions. */
     @Transactional
@@ -224,7 +222,6 @@ public class AiAssistantService {
         String title = request.getTitle() == null ? null : requireTitle(request.getTitle());
         String status = Boolean.TRUE.equals(request.getArchived()) ? ARCHIVED : null;
         int workspaceId = currentWorkspaceId();
-        accessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
@@ -242,7 +239,6 @@ public class AiAssistantService {
     @RequirePermission(Permission.AI_USE)
     public void archive(int id) {
         int workspaceId = currentWorkspaceId();
-        accessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
@@ -260,7 +256,6 @@ public class AiAssistantService {
     @RequirePermission(Permission.AI_SESSION_SHARE)
     public AiChatSessionDto setShared(int id, boolean shared) {
         int workspaceId = currentWorkspaceId();
-        accessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         int userId = currentUserId();
         workspaceService.lockAndRequirePermissions(
                 workspaceId,
@@ -376,7 +371,6 @@ public class AiAssistantService {
     @RequirePermission(Permission.AI_USE)
     public void leave(int id) {
         int workspaceId = currentWorkspaceId();
-        accessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         int userId = currentUserId();
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
@@ -395,7 +389,6 @@ public class AiAssistantService {
     @RequirePermission(Permission.AI_SESSION_SHARE)
     public void removeParticipant(int id, int targetUserId) {
         int workspaceId = currentWorkspaceId();
-        accessFence.retainMutationFenceUntilTransactionCompletion(workspaceId);
         int userId = currentUserId();
         if (targetUserId == userId) {
             throw inaccessible();
