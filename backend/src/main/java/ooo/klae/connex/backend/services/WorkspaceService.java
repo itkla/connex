@@ -86,6 +86,7 @@ public class WorkspaceService {
             Permission.DEAL_CREATE, Permission.DEAL_UPDATE, Permission.DEAL_DELETE,
             Permission.ACTIVITY_CREATE, Permission.ACTIVITY_UPDATE, Permission.ACTIVITY_DELETE,
             Permission.NOTE_CREATE, Permission.NOTE_UPDATE, Permission.NOTE_DELETE,
+            Permission.COMMENT_CREATE, Permission.COMMENT_MODERATE,
             Permission.TASK_CREATE, Permission.TASK_UPDATE, Permission.TASK_DELETE,
             Permission.ATTACHMENT_CREATE, Permission.ATTACHMENT_DELETE,
             Permission.REPORT_READ, Permission.REPORT_CREATE, Permission.REPORT_UPDATE,

@@ -33,6 +33,7 @@ class TenantJournalAttributionArchTest {
         "ooo.klae.connex.backend.controllers.DealController",
         "ooo.klae.connex.backend.controllers.NoteController",
         "ooo.klae.connex.backend.controllers.PersonController",
+        "ooo.klae.connex.backend.controllers.RecordCommentController",
         "ooo.klae.connex.backend.controllers.TaskController");
     private static final Pattern EXPLICIT_TENANT_TARGET = Pattern.compile(
         "(?:^|/)(?:org|orgs|organization|organizations|workspace|workspaces)/\\{[^/]+}",

@@ -9,10 +9,12 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,7 +43,10 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
@@ -59,16 +64,21 @@ class AiInvocationServiceTest {
     private static final AiFeature FEATURE = AiFeature.DEAL_BRIEF;
 
     @Mock private AiFeatureGate aiFeatureGate;
+    @Mock private AiInvocationAdmissionService aiInvocationAdmissionService;
     @Mock private AiInvocationAdmissionService.Admission invocationAdmission;
+    @Mock private AiInvocationAdmissionService.DirectAdmission directAdmission;
+    @Mock private AiInvocationAdmissionService.DirectAdmission fallbackAdmission;
     @Mock private AiMediaAdmissionService aiMediaAdmissionService;
     @Mock private AiMediaAdmissionService.Lease mediaLease;
     @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private AiProvider aiProvider;
     @Mock private AiProviderRouter aiProviderRouter;
+    @Mock private Runnable providerTransport;
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
     @Mock private AiOrganizationBudgetCoordinator budgetCoordinator;
     @Mock private AiOrganizationBudgetCoordinator.Lease budgetLease;
+    @Mock private AiOrganizationBudgetCoordinator.Lease fallbackBudgetLease;
 
     private AiInvocationService service;
     private AiRestrictionEpoch restrictionEpoch;
@@ -77,9 +87,10 @@ class AiInvocationServiceTest {
     @BeforeEach
     void setUp() {
         restrictionEpoch = new AiRestrictionEpoch();
-        service = new AiInvocationService(aiFeatureGate, aiMediaAdmissionService, aiProviderConfigService,
-                aiProviderRouter, restrictionEpoch, workspaceService, auditService, new ObjectMapper(),
-                budgetCoordinator);
+        service = new AiInvocationService(
+                aiFeatureGate, aiInvocationAdmissionService, aiMediaAdmissionService,
+                aiProviderConfigService, aiProviderRouter, restrictionEpoch,
+                workspaceService, auditService, new ObjectMapper(), budgetCoordinator);
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
                 null, null, null, null, false, true,
                 AiCredentials.of(Map.of(
@@ -92,7 +103,7 @@ class AiInvocationServiceTest {
         lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
         lenient().when(budgetCoordinator.reserve(eq(ORG_ID), any(AiInvocation.class)))
-                .thenReturn(budgetLease);
+                .thenReturn(budgetLease, fallbackBudgetLease);
     }
 
     @Test
@@ -136,8 +147,8 @@ class AiInvocationServiceTest {
     @Test
     void complete_success_demasksAndAuditsAttemptAndSuccess() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
 
         AiCompletionOutcome outcome = service.complete(invocation);
 
@@ -184,6 +195,8 @@ class AiInvocationServiceTest {
         AiInvocation invocation = invocation("Summarize relationship state");
         long expectedEpoch = restrictionEpoch.current(WORKSPACE_ID);
         restrictionEpoch.bump(WORKSPACE_ID);
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
 
         assertThrows(IllegalStateException.class, () -> restrictionEpoch.runWithExpectedEgressEpoch(
                 WORKSPACE_ID,
@@ -197,7 +210,8 @@ class AiInvocationServiceTest {
         assertEquals("restriction_epoch", audits.get(1).get("reason"));
         assertNoContent(audits.get(1));
         verify(invocationAdmission, never()).commitLeaderInvocation();
-        verify(aiProvider, never()).complete(any());
+        verify(providerTransport, never()).run();
+        verify(budgetLease).close();
     }
 
     @Test
@@ -224,6 +238,7 @@ class AiInvocationServiceTest {
         verify(aiProvider, never()).complete(any());
         verify(auditService, never()).recordIndependentScoped(
             any(), any(), any(), any(), any(), any(), any(), any());
+        verify(budgetLease).close();
     }
 
     @Test
@@ -233,12 +248,12 @@ class AiInvocationServiceTest {
                 "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
         AiInvocation invocation = new AiInvocation(
                 AiFeature.BUSINESS_CARD_EXTRACTION, base.context(), base.prompt(), List.of(image), 64, 0.2);
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
 
         service.complete(invocation);
 
-        verify(aiFeatureGate).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
+        verify(aiFeatureGate, times(2)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
         ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
         verify(aiProvider).complete(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().images().size());
@@ -272,6 +287,7 @@ class AiInvocationServiceTest {
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
         verify(aiProvider, never()).complete(any());
+        verify(budgetLease).close();
     }
 
     @Test
@@ -303,8 +319,7 @@ class AiInvocationServiceTest {
     @Test
     void completeStructuredWithImageReleasesAdmissionBeforeMalformedTerminalAudit() {
         AiInvocation invocation = withImage(invocation("Summarize relationship state"));
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("not json", 10, 3, "end_turn"));
+        providerReturns(new AiCompletionResult("not json", 10, 3, "end_turn"));
 
         AiStructuredOutcome<IntroRationaleContent> outcome =
                 service.completeStructured(invocation, IntroRationaleContent.class);
@@ -321,8 +336,7 @@ class AiInvocationServiceTest {
     @Test
     void completeStructuredWithImageReleasesAdmissionAfterBindingFailure() {
         AiInvocation invocation = withImage(invocation("Summarize relationship state"));
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("{\"rationale\":{}}", 10, 3, "end_turn"));
+        providerReturns(new AiCompletionResult("{\"rationale\":{}}", 10, 3, "end_turn"));
 
         AiStructuredOutcome<IntroRationaleContent> outcome =
                 service.completeStructured(invocation, IntroRationaleContent.class);
@@ -335,7 +349,7 @@ class AiInvocationServiceTest {
     void complete_adapterThrows_auditsFailureAndPropagates() {
         AiInvocation invocation = invocation("Summarize relationship state");
         AiProviderException expected = new AiProviderException("transport unavailable");
-        when(aiProvider.complete(any(AiCompletionRequest.class))).thenThrow(expected);
+        providerThrows(expected);
 
         AiProviderException thrown = assertThrows(AiProviderException.class, () -> service.complete(invocation));
 
@@ -345,13 +359,14 @@ class AiInvocationServiceTest {
         assertEquals("failure", audits.get(1).get("outcome"));
         assertEquals("provider_exception", audits.get(1).get("reason"));
         assertNoContent(audits.get(1));
+        verify(budgetLease).close();
     }
 
     @Test
     void completeStructured_cleanObject_returnsParsedDemaskedValue() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("{\"rationale\":\"Follow up with {{P1}} soon.\"}", 30, 12, "end_turn"));
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Follow up with {{P1}} soon.\"}", 30, 12, "end_turn"));
 
         AiStructuredOutcome<IntroRationaleContent> outcome =
                 service.completeStructured(invocation, IntroRationaleContent.class);
@@ -370,8 +385,8 @@ class AiInvocationServiceTest {
     @Test
     void completeStructured_nonJsonProse_returnsMalformedOutput() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("Sorry, I cannot produce a structured answer.", 10, 3, "end_turn"));
+        providerReturns(new AiCompletionResult(
+                "Sorry, I cannot produce a structured answer.", 10, 3, "end_turn"));
 
         AiStructuredOutcome<IntroRationaleContent> outcome =
                 service.completeStructured(invocation, IntroRationaleContent.class);
@@ -382,10 +397,42 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void completeStructuredRepairableReturnsBoundedMaskedOutputAndRedactedDiagnostic() throws Exception {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        String providerOutput = "{\"rationale\":\"Follow up with {{P1}} soon.\"}";
+        providerReturns(new AiCompletionResult(
+                providerOutput, 10, 3, "end_turn",
+                AiStructuredOutputEnforcement.JSON_SCHEMA));
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro_rationale",
+                new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        AiStructuredRepairAttempt<IntroRationaleContent> attempt =
+                service.completeStructuredRepairable(
+                        invocation, IntroRationaleContent.class, output -> false, schema);
+
+        AiStructuredOutcome.Malformed<IntroRationaleContent> malformed =
+                asMalformed(attempt.outcome());
+        assertEquals(AiStructuredOutcome.REASON_MALFORMED, malformed.reason());
+        assertEquals("raw_guard_rejected", attempt.repair().orElseThrow().schemaRule());
+        assertEquals(providerOutput, attempt.repair().orElseThrow().offendingOutput());
+        ArgumentCaptor<AiCompletionRequest> request = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(request.capture());
+        assertEquals("intro_rationale", request.getValue().responseSchema().name());
+        List<Map<?, ?>> audits = auditMetadata();
+        Map<?, ?> terminal = audits.get(1);
+        assertEquals("raw_guard_rejected", terminal.get("schemaRule"));
+        assertEquals(providerOutput.length(), terminal.get("outputLength"));
+        assertEquals(Boolean.TRUE, terminal.get("objectExtracted"));
+        assertEquals("json_schema", terminal.get("structuredEnforcement"));
+        assertNoContent(terminal);
+    }
+
+    @Test
     void completeStructured_truncatedObjectAtTokenLimit_returnsTruncated() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("{\"rationale\":\"Follow up with {{P1}}", 64, 64, "max_tokens"));
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Follow up with {{P1}}", 64, 64, "max_tokens"));
 
         AiStructuredOutcome<IntroRationaleContent> outcome =
                 service.completeStructured(invocation, IntroRationaleContent.class);
@@ -398,9 +445,9 @@ class AiInvocationServiceTest {
     @Test
     void completeStructured_stripsLeadingReasoningPreambleBeforeJson() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult(
-                        "<thought>plan the reply first</thought>{\"rationale\":\"Ping {{P1}}.\"}", 40, 15, "end_turn"));
+        providerReturns(new AiCompletionResult(
+                "<thought>plan the reply first</thought>{\"rationale\":\"Ping {{P1}}.\"}",
+                40, 15, "end_turn"));
 
         AiStructuredOutcome<IntroRationaleContent> outcome =
                 service.completeStructured(invocation, IntroRationaleContent.class);
@@ -412,8 +459,8 @@ class AiInvocationServiceTest {
     @Test
     void completeStructured_success_emitsAttemptAndSuccessAuditWithoutContent() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
 
         service.completeStructured(invocation, IntroRationaleContent.class);
 
@@ -429,17 +476,189 @@ class AiInvocationServiceTest {
     @Test
     void completeStructuredWithAdmissionCommitsQuotaImmediatelyBeforeProviderAttempt() {
         AiInvocation invocation = invocation("Summarize relationship state");
-        when(aiProvider.complete(any(AiCompletionRequest.class)))
-                .thenReturn(new AiCompletionResult("{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
 
         service.completeStructured(invocation, IntroRationaleContent.class, invocationAdmission);
 
-        InOrder order = inOrder(auditService, invocationAdmission, aiProvider);
+        InOrder order = inOrder(auditService, invocationAdmission, providerTransport);
         order.verify(auditService).recordStrictIndependentScoped(
                 eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
                 any(), any(), any());
         order.verify(invocationAdmission).commitLeaderInvocation();
-        order.verify(aiProvider).complete(any());
+        order.verify(providerTransport).run();
+    }
+
+    @Test
+    void completeStructuredRepairableCommitsDirectQuotaImmediatelyBeforeProviderAttempt() throws Exception {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
+        AiResponseSchema schema = new AiResponseSchema(
+                "intro_rationale",
+                new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        service.completeStructuredRepairable(
+                invocation, IntroRationaleContent.class,
+                AiRawOutputGuard.PERMIT_ALL, schema, directAdmission);
+
+        InOrder order = inOrder(auditService, directAdmission, providerTransport);
+        order.verify(auditService).recordStrictIndependentScoped(
+                eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+                any(), any(), any());
+        order.verify(directAdmission).commitInvocation();
+        order.verify(providerTransport).run();
+    }
+
+    @Test
+    void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressFence() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    providerTransport.run();
+                    throw new AiProviderRequestRejectedException("provider", 400);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                assertEquals("provider invocation failed with status 400", exception.getMessage());
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                return "fallback response";
+            });
+            return new AiCompletionResult(
+                    "{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn",
+                    AiStructuredOutputEnforcement.JSON_OBJECT);
+        });
+
+        service.completeStructured(
+                invocation, IntroRationaleContent.class, invocationAdmission);
+
+        verify(invocationAdmission).commitLeaderInvocation();
+        verify(fallbackAdmission).commitInvocation();
+        verify(fallbackAdmission).close();
+        verify(providerTransport, times(2)).run();
+        verify(budgetCoordinator, times(2)).reserve(ORG_ID, invocation);
+        verify(budgetLease).close();
+        verify(fallbackBudgetLease).settle(20, 8);
+        verify(auditService, times(2)).recordStrictIndependentScoped(
+                eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+                any(), any(), any());
+        verify(auditService, times(2)).recordIndependentScoped(
+                eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+                any(), any(), any());
+    }
+
+    @Test
+    void restrictionEpochIsRecheckedBeforeFallbackProviderEgress() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        long expectedEpoch = restrictionEpoch.current(WORKSPACE_ID);
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    providerTransport.run();
+                    throw new AiProviderRequestRejectedException("provider", 400);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                assertEquals("provider invocation failed with status 400", exception.getMessage());
+            }
+            restrictionEpoch.bump(WORKSPACE_ID);
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                return "forbidden fallback";
+            });
+            throw new IllegalStateException("Restriction fence did not reject fallback egress");
+        });
+
+        assertThrows(IllegalStateException.class, () ->
+                restrictionEpoch.runWithExpectedEgressEpoch(
+                        WORKSPACE_ID,
+                        expectedEpoch,
+                        () -> service.completeStructured(
+                                invocation, IntroRationaleContent.class, invocationAdmission)));
+
+        verify(invocationAdmission).commitLeaderInvocation();
+        verify(fallbackAdmission, never()).commitInvocation();
+        verify(fallbackAdmission).close();
+        verify(providerTransport).run();
+    }
+
+    @Test
+    void featureGateIsRecheckedBeforeFallbackProviderEgress() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        ForbiddenException disabled = new ForbiddenException("AI features are not available");
+        doNothing().doNothing().doThrow(disabled)
+                .when(aiFeatureGate).requireAiUsable(FEATURE);
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    providerTransport.run();
+                    throw new AiProviderRequestRejectedException("provider", 400);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                assertEquals("provider invocation failed with status 400", exception.getMessage());
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                return "forbidden fallback";
+            });
+            throw new IllegalStateException("Feature gate did not reject fallback egress");
+        });
+
+        ForbiddenException thrown = assertThrows(
+                ForbiddenException.class,
+                () -> service.completeStructured(
+                        invocation, IntroRationaleContent.class, invocationAdmission));
+
+        assertEquals(disabled, thrown);
+        verify(invocationAdmission).commitLeaderInvocation();
+        verify(fallbackAdmission, never()).commitInvocation();
+        verify(fallbackAdmission).close();
+        verify(providerTransport).run();
+        verify(budgetLease).close();
+        verify(fallbackBudgetLease).close();
+    }
+
+    @Test
+    void strictFallbackAttemptAuditFailureReleasesReservedQuota() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        IllegalStateException failure = new IllegalStateException("audit unavailable");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        doNothing().doThrow(failure).when(auditService).recordStrictIndependentScoped(
+                eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
+                any(), any(), any());
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    providerTransport.run();
+                    throw new AiProviderRequestRejectedException("provider", 400);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                assertEquals("provider invocation failed with status 400", exception.getMessage());
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                return "fallback response";
+            });
+            throw new IllegalStateException("Strict fallback audit failure was not propagated");
+        });
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> service.completeStructured(
+                        invocation, IntroRationaleContent.class, invocationAdmission));
+
+        assertEquals(failure, thrown);
+        verify(fallbackAdmission, never()).commitInvocation();
+        verify(fallbackAdmission).close();
+        verify(providerTransport).run();
     }
 
     @Test
@@ -454,6 +673,28 @@ class AiInvocationServiceTest {
         verify(invocationAdmission, never()).commitLeaderInvocation();
         verify(aiProviderConfigService, never()).resolveForOrg(ORG_ID, ACTOR_ID);
         verify(aiProvider, never()).complete(any());
+    }
+
+    private void providerReturns(AiCompletionResult result) {
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
+            AiCompletionRequest request = invocation.getArgument(0);
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                return "provider response";
+            });
+            return result;
+        });
+    }
+
+    private void providerThrows(RuntimeException failure) {
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
+            AiCompletionRequest request = invocation.getArgument(0);
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                throw failure;
+            });
+            throw new IllegalStateException("Provider failure was not propagated");
+        });
     }
 
     private static <T> AiStructuredOutcome.Parsed<T> asParsed(AiStructuredOutcome<T> outcome) {

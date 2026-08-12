@@ -86,8 +86,15 @@ public class AuditService {
     private static final Set<String> AI_OUTCOMES = Set.of("attempt", "success", "failure", "blocked");
     private static final Set<String> AI_REASONS = Set.of(
             "gate", "media_admission", "provider", "provider_capability", "serialization", "leak",
-            "provider_exception");
+            "provider_exception", "restriction_epoch", "invocation_exception",
+            "organization_quota", "invocation_capacity");
     private static final Set<String> AI_PARSE_OUTCOMES = Set.of("parsed", "truncated", "malformed_output");
+    private static final Set<String> AI_STRUCTURED_ENFORCEMENTS = Set.of(
+            "prompt_only", "json_object", "json_schema");
+    private static final Set<String> AI_SCHEMA_RULES = Set.of(
+            "json_object_missing", "raw_guard_rejected", "binding_failed",
+            "top_level_fields", "exclusive_step", "tool_fields", "tool_name",
+            "tool_arguments", "final_fields", "final_shape", "final_citations");
     private static final Set<String> AI_STOP_REASONS = Set.of(
             "stop", "length", "content_filter", "tool_calls", "function_call", "end_turn",
             "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal", "safety",
@@ -653,11 +660,15 @@ public class AuditService {
         copyNumber(source, projected, "mediaBytes");
         copyKnownStringList(source, projected, "mediaTypes", AI_MEDIA_TYPES);
         copyBoolean(source, projected, "structured");
+        copyKnownString(source, projected, "structuredEnforcement", AI_STRUCTURED_ENFORCEMENTS);
         copyNumber(source, projected, "inputTokens");
         copyNumber(source, projected, "outputTokens");
         copyKnownString(source, projected, "stopReason", AI_STOP_REASONS);
         copyNumber(source, projected, "demaskWarnings");
         copyKnownString(source, projected, "parseOutcome", AI_PARSE_OUTCOMES);
+        copyKnownString(source, projected, "schemaRule", AI_SCHEMA_RULES);
+        copyNumber(source, projected, "outputLength");
+        copyBoolean(source, projected, "objectExtracted");
         copyKnownString(source, projected, "reason", AI_REASONS);
         return projected;
     }

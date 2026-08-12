@@ -12,8 +12,14 @@ import java.util.Set;
  * @param inputTokens provider-reported input token count
  * @param outputTokens provider-reported output token count
  * @param stopReason normalized stop reason drawn from a closed vocabulary
+ * @param structuredOutputEnforcement provider-native structured enforcement actually applied
  */
-public record AiCompletionResult(String text, int inputTokens, int outputTokens, String stopReason) {
+public record AiCompletionResult(
+        String text,
+        int inputTokens,
+        int outputTokens,
+        String stopReason,
+        AiStructuredOutputEnforcement structuredOutputEnforcement) {
 
     private static final String STOP_REASON_OTHER = "other";
     private static final Set<String> KNOWN_STOP_REASONS = Set.of(
@@ -37,11 +43,15 @@ public record AiCompletionResult(String text, int inputTokens, int outputTokens,
             "language",
             STOP_REASON_OTHER);
 
+    public AiCompletionResult {
+        text = Objects.requireNonNull(text, "text");
+        stopReason = normalizeStopReason(stopReason);
+        Objects.requireNonNull(structuredOutputEnforcement, "structuredOutputEnforcement");
+    }
+
     public AiCompletionResult(String text, int inputTokens, int outputTokens, String stopReason) {
-        this.text = Objects.requireNonNull(text, "text");
-        this.inputTokens = inputTokens;
-        this.outputTokens = outputTokens;
-        this.stopReason = normalizeStopReason(stopReason);
+        this(text, inputTokens, outputTokens, stopReason,
+                AiStructuredOutputEnforcement.PROMPT_ONLY);
     }
 
     private static String normalizeStopReason(String stopReason) {
@@ -55,6 +65,7 @@ public record AiCompletionResult(String text, int inputTokens, int outputTokens,
     @Override
     public String toString() {
         return "AiCompletionResult[text=<redacted>, inputTokens=" + inputTokens
-                + ", outputTokens=" + outputTokens + ", stopReason=" + stopReason + "]";
+                + ", outputTokens=" + outputTokens + ", stopReason=" + stopReason
+                + ", structuredOutputEnforcement=" + structuredOutputEnforcement + "]";
     }
 }

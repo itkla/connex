@@ -4,6 +4,8 @@
  * Deal keeps compact stakeholder rows in the left rail beside profile before metrics. Contact and
  * Company keep interactive people surfaces (`related`) in the main column after pipeline work
  * because warm-path controls and the contacts card grid need width.
+ * Team discussion (`comments`, #906) sits after the people surfaces and before files so the
+ * record's working conversation stays near — but never inside — the immutable chronology.
  * Aggregate engagement charts belong in `history`, not above decision bands.
  */
 export const RECORD_DETAIL_SECTION_ORDER = [
@@ -15,6 +17,7 @@ export const RECORD_DETAIL_SECTION_ORDER = [
     'relationship',
     'activity',
     'related',
+    'comments',
     'files',
     'history',
 ] as const;

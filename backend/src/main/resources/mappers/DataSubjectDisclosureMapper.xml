@@ -151,6 +151,40 @@
     ORDER BY n.created_at DESC, n.id DESC
   </select>
 
+  <select id="findRecordCommentThreads"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$RecordCommentThreadDisclosureDto">
+    SELECT rct.id, rct.workspace_id, rct.target_type, rct.target_id,
+           rct.created_by_user_id, rct.state,
+           rct.resolved_by_user_id, rct.resolved_at, rct.version,
+           rct.created_at, rct.updated_at
+    FROM person p
+    JOIN record_comment_thread rct
+      ON rct.target_type = 'person' AND rct.target_id = p.id
+      AND rct.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY rct.created_at DESC, rct.id DESC
+  </select>
+
+  <select id="findRecordComments"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$RecordCommentDisclosureDto">
+    SELECT rc.id, rc.workspace_id, rc.thread_id, rc.author_user_id,
+           rc.content, rc.created_at, rc.deleted_at, rc.deleted_by_user_id
+    FROM person p
+    JOIN record_comment_thread rct
+      ON rct.target_type = 'person' AND rct.target_id = p.id
+      AND rct.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    JOIN record_comment rc
+      ON rc.workspace_id = rct.workspace_id AND rc.thread_id = rct.id
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY rc.thread_id, rc.id
+  </select>
+
   <select id="findTasks"
           resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$TaskDto">
     SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,

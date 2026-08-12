@@ -44,7 +44,7 @@ import lombok.RequiredArgsConstructor;
  * current tenant. Members ({@code user}) drive mention notifications; contacts
  * ({@code person}), deals, and companies are stored as inline record references
  * (no notification). The source entity is polymorphic ({@code sourceType} /
- * {@code sourceId}): notes, tasks, activities, and introductions share this machinery.
+ * {@code sourceId}): notes, tasks, activities, comments, and introductions share this machinery.
  */
 @Service
 @RequiredArgsConstructor
@@ -63,6 +63,7 @@ public class ReferenceService {
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
     public static final String SOURCE_ACTIVITY = "activity";
+    public static final String SOURCE_COMMENT = "comment";
     public static final String SOURCE_INTRODUCTION = "introduction";
     public static final String SOURCE_DEAL = "deal";
 
@@ -114,7 +115,7 @@ public class ReferenceService {
      * {@code workspaceId}.
      *
      * @param workspaceId the owning workspace
-     * @param sourceType  the entity type the references belong to ({@code note}, {@code task})
+     * @param sourceType  the entity type the references belong to ({@code note}, {@code task}, {@code comment})
      * @param sourceId    the entity whose references are being synced
      * @param content     the entity's current prose content
      * @return the user IDs newly referenced by this sync
@@ -172,6 +173,14 @@ public class ReferenceService {
      */
     public void deleteReferences(int workspaceId, String sourceType, int sourceId) {
         entityReferenceMapper.deleteBySource(workspaceId, sourceType, sourceId);
+    }
+
+    /** Removes every stored reference for a batch of same-type sources in one statement. */
+    public void deleteReferencesForSources(int workspaceId, String sourceType, List<Integer> sourceIds) {
+        if (sourceIds.isEmpty()) {
+            return;
+        }
+        entityReferenceMapper.deleteBySourceIds(workspaceId, sourceType, sourceIds);
     }
 
     /**

@@ -139,6 +139,41 @@ class MaskingEngineTest {
     }
 
     @Test
+    void repairMaskingPreservesIssuedTokensWithoutAllowingCrossBoundarySensitiveValues() {
+        MaskingContext ctx = new MaskingContext();
+        String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);
+
+        assertEquals(
+                "Ask " + person + " about the renewal",
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "Ask {{ P1 }} about the renewal", ctx));
+        assertEquals(MaskingEngine.REDACTED,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "Mina{{P1}} Patel", ctx));
+        assertEquals(MaskingEngine.REDACTED,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "jane@exa{{P1}}mple.com", ctx));
+        assertEquals(MaskingEngine.REDACTED,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "https://exa{{P1}}mple.com/private", ctx));
+        assertEquals(MaskingEngine.REDACTED,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "123{{P1}}456789", ctx));
+        assertEquals(MaskingEngine.REDACTED,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "+1 415{{P1}} 555 0100", ctx));
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "diag{{P1}}nosis", ctx));
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "medical {{P1}} history", ctx));
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY,
+                MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        "labor {{P1}} union", ctx));
+    }
+
+    @Test
     void maskFreeText_screensSpecialCareHiddenByInjectedDelimiters() {
         MaskingContext ctx = new MaskingContext();
 

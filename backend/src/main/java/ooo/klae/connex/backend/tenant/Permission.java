@@ -26,6 +26,9 @@ public enum Permission {
     NOTE_CREATE,
     NOTE_UPDATE,
     NOTE_DELETE,
+    COMMENT_CREATE,
+    /** Required to redact another author's comment; authors may always redact their own. */
+    COMMENT_MODERATE,
     TASK_CREATE,
     TASK_UPDATE,
     TASK_DELETE,

@@ -3627,6 +3627,128 @@ export function getAttachmentsFromCookie(entityType: string, entityId: number, c
 }
 
 /**
+ * Lists one bounded page of comment threads for a record, newest thread first,
+ * each thread carrying its comments in chronological order. The feed is
+ * workspace-local: threads authored in other workspaces of a shared record are
+ * never returned. The server caps {@code limit} at 100.
+ */
+export function getCommentThreads(
+    targetType: Types.RecordCommentTargetType,
+    targetId: number,
+    page: { limit?: number; offset?: number; state?: Types.RecordCommentStateFilter } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.RecordCommentThread[]>(
+        `/api/comment-threads${buildQuery({
+            targetType,
+            targetId,
+            state: page.state ?? 'all',
+            limit: page.limit ?? 10,
+            offset: page.offset ?? 0,
+        })}`,
+        init,
+    );
+}
+
+/**
+ * Resolves an open comment thread. {@code expectedVersion} must match the
+ * thread's current version or the server answers 409.
+ */
+export function resolveCommentThread(threadId: number, expectedVersion: number, init: RequestInit = {}) {
+    return postJson<Types.RecordCommentThread>(
+        `/api/comment-threads/${threadId}/resolve`,
+        { expectedVersion },
+        init,
+    );
+}
+
+/**
+ * Reopens a resolved comment thread. {@code expectedVersion} must match the
+ * thread's current version or the server answers 409.
+ */
+export function reopenCommentThread(threadId: number, expectedVersion: number, init: RequestInit = {}) {
+    return postJson<Types.RecordCommentThread>(
+        `/api/comment-threads/${threadId}/reopen`,
+        { expectedVersion },
+        init,
+    );
+}
+
+/**
+ * Ensures the caller's reaction is present on a comment; repeating the request
+ * is a no-op. Returns the comment's updated per-reaction aggregate.
+ */
+export function addCommentReaction(
+    commentId: number,
+    reaction: Types.RecordCommentReactionKey,
+    init: RequestInit = {},
+) {
+    return putJson<Types.RecordCommentReactionSummary[]>(
+        `/api/comments/${commentId}/reactions/${reaction}`,
+        {},
+        init,
+    );
+}
+
+/**
+ * Ensures the caller's reaction is absent from a comment; removing an absent
+ * reaction is a no-op. Returns the comment's updated per-reaction aggregate.
+ */
+export function removeCommentReaction(
+    commentId: number,
+    reaction: Types.RecordCommentReactionKey,
+    init: RequestInit = {},
+) {
+    return deleteJson<Types.RecordCommentReactionSummary[]>(
+        `/api/comments/${commentId}/reactions/${reaction}`,
+        init,
+    );
+}
+
+/**
+ * Batch open-thread counts for up to 100 records of one type. Ids whose target
+ * is not visible to the active workspace are silently omitted.
+ */
+export function getCommentIndicators(
+    targetType: Types.RecordCommentTargetType,
+    targetIds: number[],
+    init: RequestInit = {},
+) {
+    return getJson<Types.RecordCommentIndicator[]>(
+        `/api/comment-threads/indicators${buildQuery({ targetType, targetIds: targetIds.join(',') })}`,
+        init,
+    );
+}
+
+/**
+ * Opens a new comment thread on a record. {@code clientToken} makes retries of
+ * the same submission idempotent.
+ */
+export function createCommentThread(payload: Types.CreateCommentThreadPayload, init: RequestInit = {}) {
+    return postJson<Types.RecordCommentThread>(`/api/comment-threads`, payload, init);
+}
+
+/**
+ * Replies to an existing comment thread. {@code clientToken} makes retries of
+ * the same submission idempotent.
+ */
+export function replyToCommentThread(
+    threadId: number,
+    payload: Types.CreateCommentReplyPayload,
+    init: RequestInit = {},
+) {
+    return postJson<Types.RecordComment>(`/api/comment-threads/${threadId}/comments`, payload, init);
+}
+
+/**
+ * Redacts a comment. The row survives as a tombstone; authors may redact their
+ * own comments, others need the moderate permission.
+ */
+export function deleteRecordComment(commentId: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/comments/${commentId}`, init);
+}
+
+/**
  * Lists every attachment across all entities, each carrying its resolved
  * {@code entityLabel}. Powers the Files library page.
  */

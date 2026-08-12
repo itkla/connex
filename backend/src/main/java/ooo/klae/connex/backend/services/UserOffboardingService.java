@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
+import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -82,6 +83,7 @@ public class UserOffboardingService {
     private final ConsentMapper consentMapper;
     private final ReportMapper reportMapper;
     private final RelationshipSignalMapper relationshipSignalMapper;
+    private final RecordCommentMapper recordCommentMapper;
     private final ShareMapper shareMapper;
     private final SuppressionMapper suppressionMapper;
     private final SavedViewPreferenceMapper savedViewPreferenceMapper;
@@ -254,7 +256,8 @@ public class UserOffboardingService {
      * (CASCADE — saved-view preferences, saved views, dashboards, assistant-chat grants,
      * notifications, collaborator seats)
      * and shared-history references are nulled (SET NULL — company, contact, deal, and
-     * campaign ownership, assistant-chat provenance, task assignment, uploader,
+     * campaign ownership, assistant-chat provenance, record-comment authorship,
+     * creation, redaction, and resolution provenance, task assignment, uploader,
      * notification actor, report and campaign actors, rule principals,
      * consent/suppression actors, share grantors).
      * Statements are grouped deletes-then-nulls
@@ -318,6 +321,11 @@ public class UserOffboardingService {
         aiChatMapper.clearMessageAuthorsAnywhere(userId);
         aiChatMapper.clearToolCallExecutorsAnywhere(userId);
         aiChatMapper.clearTurnRequestersAnywhere(userId);
+        recordCommentMapper.clearAuthorsAnywhere(userId);
+        recordCommentMapper.clearDeletersAnywhere(userId);
+        recordCommentMapper.clearThreadCreatorsAnywhere(userId);
+        recordCommentMapper.clearThreadResolversAnywhere(userId);
+        recordCommentMapper.deleteReactionsAnywhere(userId);
         taskMapper.unassignAnywhere(userId);
         attachmentMapper.clearUploaderAnywhere(userId);
         campaignMapper.clearCampaignUserReferencesAnywhere(userId);

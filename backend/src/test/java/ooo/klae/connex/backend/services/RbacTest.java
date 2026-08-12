@@ -50,6 +50,8 @@ class RbacTest extends AbstractServiceTest {
             Permission.REPORT_CREATE,
             Permission.REPORT_UPDATE,
             Permission.REPORT_DELETE,
+            Permission.COMMENT_CREATE,
+            Permission.COMMENT_MODERATE,
             Permission.CAMPAIGN_VIEW)));
         assertFalse(memberPerms.contains(Permission.CAMPAIGN_MANAGE));
         assertFalse(memberPerms.contains(Permission.CONSENT_MANAGE));

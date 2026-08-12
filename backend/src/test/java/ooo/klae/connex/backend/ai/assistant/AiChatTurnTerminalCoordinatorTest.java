@@ -53,13 +53,15 @@ class AiChatTurnTerminalCoordinatorTest {
                 TURN, "failed", "generation_capacity")).thenReturn(true);
         when(persistenceService.markTerminal(
                 TURN, "timed_out", "generation_timeout")).thenReturn(true);
+        when(persistenceService.markTerminal(
+                TURN, "timed_out", "turn_deadline_exceeded")).thenReturn(true);
     }
 
     @Test
     void capacityAndDeadlinePersistDistinctTerminalsBeforePublishing() {
         coordinator.generationCapacity(TURN);
         coordinator.listener(TURN).onTerminal(
-                AiGenerationTaskResult.Outcome.TIMED_OUT, "generation_timeout");
+                AiGenerationTaskResult.Outcome.TIMED_OUT, "turn_deadline_exceeded");
 
         InOrder order = inOrder(persistenceService, dispatcher);
         order.verify(persistenceService).markTerminal(
@@ -69,11 +71,11 @@ class AiChatTurnTerminalCoordinatorTest {
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
                 "terminal", null, "failed", "generation_capacity"));
         order.verify(persistenceService).markTerminal(
-                TURN, "timed_out", "generation_timeout");
+                TURN, "timed_out", "turn_deadline_exceeded");
         order.verify(dispatcher).sessionNow(
                 TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
-                "terminal", null, "timed_out", "generation_timeout"));
+                "terminal", null, "timed_out", "turn_deadline_exceeded"));
     }
 
     @Test

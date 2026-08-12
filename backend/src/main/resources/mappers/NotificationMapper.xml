@@ -159,7 +159,60 @@
         SELECT 1 FROM note source_note
         WHERE source_note.workspace_id = n.workspace_id
           AND source_note.id = n.source_id
-          AND (source_note.visibility = 'workspace' OR source_note.author_id = #{recipientId})
+          AND (source_note.visibility = 'workspace' OR source_note.author_id = n.recipient_id)
+      ))
+      OR (n.source_type = 'comment' AND EXISTS (
+        SELECT 1
+        FROM record_comment source_comment
+        JOIN record_comment_thread source_thread
+          ON source_thread.workspace_id = source_comment.workspace_id
+         AND source_thread.id = source_comment.thread_id
+        WHERE source_comment.workspace_id = n.workspace_id
+          AND source_comment.id = n.source_id
+          AND source_comment.deleted_at IS NULL
+          AND (
+            (source_thread.target_type = 'deal' AND EXISTS (
+              SELECT 1 FROM deal source_comment_deal
+              WHERE source_comment_deal.workspace_id = n.workspace_id
+                AND source_comment_deal.id = source_thread.target_id
+            ))
+            OR (source_thread.target_type = 'person' AND EXISTS (
+              SELECT 1 FROM person source_comment_person
+              WHERE source_comment_person.id = source_thread.target_id
+                AND source_comment_person.archived_at IS NULL
+                AND (
+                  source_comment_person.workspace_id = n.workspace_id
+                  OR EXISTS (
+                    SELECT 1 FROM person_share source_comment_person_share
+                    JOIN workspace source_comment_person_viewer
+                      ON source_comment_person_viewer.id = source_comment_person_share.workspace_id
+                    JOIN workspace source_comment_person_owner
+                      ON source_comment_person_owner.id = source_comment_person.workspace_id
+                     AND source_comment_person_owner.org_id = source_comment_person_viewer.org_id
+                    WHERE source_comment_person_share.person_id = source_comment_person.id
+                      AND source_comment_person_share.workspace_id = n.workspace_id
+                  )
+                )
+            ))
+            OR (source_thread.target_type = 'company' AND EXISTS (
+              SELECT 1 FROM company source_comment_company
+              WHERE source_comment_company.id = source_thread.target_id
+                AND source_comment_company.archived_at IS NULL
+                AND (
+                  source_comment_company.workspace_id = n.workspace_id
+                  OR EXISTS (
+                    SELECT 1 FROM company_share source_comment_company_share
+                    JOIN workspace source_comment_company_viewer
+                      ON source_comment_company_viewer.id = source_comment_company_share.workspace_id
+                    JOIN workspace source_comment_company_owner
+                      ON source_comment_company_owner.id = source_comment_company.workspace_id
+                     AND source_comment_company_owner.org_id = source_comment_company_viewer.org_id
+                    WHERE source_comment_company_share.company_id = source_comment_company.id
+                      AND source_comment_company_share.workspace_id = n.workspace_id
+                  )
+                )
+            ))
+          )
       ))
       OR (n.source_type = 'deal' AND EXISTS (
         SELECT 1 FROM deal source_deal
@@ -235,6 +288,23 @@
                AND context_person_owner.org_id = context_person_viewer.org_id
               WHERE context_person_share.person_id = context_person.id
                 AND context_person_share.workspace_id = n.workspace_id
+            )
+          )
+      ))
+      OR (n.context_type = 'company' AND EXISTS (
+        SELECT 1 FROM company context_company
+        WHERE context_company.id = n.context_id
+          AND (
+            context_company.workspace_id = n.workspace_id
+            OR EXISTS (
+              SELECT 1 FROM company_share context_company_share
+              JOIN workspace context_company_viewer
+                ON context_company_viewer.id = context_company_share.workspace_id
+              JOIN workspace context_company_owner
+                ON context_company_owner.id = context_company.workspace_id
+               AND context_company_owner.org_id = context_company_viewer.org_id
+              WHERE context_company_share.company_id = context_company.id
+                AND context_company_share.workspace_id = n.workspace_id
             )
           )
       ))
@@ -614,6 +684,31 @@
       AND n.type IN (<include refid="reminderTypes"/>)
     ORDER BY n.recipient_id, n.id
   </select>
+
+  <select id="findInaccessibleNotificationRecipientIds" resultType="int">
+    SELECT DISTINCT n.recipient_id
+    FROM notification n
+    WHERE n.workspace_id = #{workspaceId}
+      AND n.resolved_at IS NULL
+      AND (
+        NOT <include refid="contentAccessible"/>
+        OR NOT <include refid="contextAccessible"/>
+      )
+    ORDER BY n.recipient_id
+  </select>
+
+  <update id="resolveInaccessibleNotifications">
+    UPDATE notification n
+    SET resolved_at = #{resolvedAt},
+        snoozed_until = NULL,
+        snooze_timezone = NULL
+    WHERE n.workspace_id = #{workspaceId}
+      AND n.resolved_at IS NULL
+      AND (
+        NOT <include refid="contentAccessible"/>
+        OR NOT <include refid="contextAccessible"/>
+      )
+  </update>
 
   <select id="findHistoricalNotificationBaselines"
           resultType="ooo.klae.connex.backend.beans.HistoricalNotificationBaseline">

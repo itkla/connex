@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.ai.provider.openai;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -13,10 +15,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
+import java.net.InetAddress;
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +32,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -31,7 +42,10 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -43,12 +57,14 @@ class OpenAiCompatibleAdapterTest {
     @Mock private OpenAiCompatibleClient openAiCompatibleClient;
 
     private ObjectMapper objectMapper;
+    private AiProperties aiProperties;
     private OpenAiCompatibleAdapter adapter;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        adapter = new OpenAiCompatibleAdapter(openAiCompatibleClient, objectMapper);
+        aiProperties = new AiProperties();
+        adapter = new OpenAiCompatibleAdapter(openAiCompatibleClient, objectMapper, aiProperties);
     }
 
     @Test
@@ -58,7 +74,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_joinsBasePathsAndPreservesExplicitPort() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn(validResponse());
 
         for (String base : List.of(
@@ -71,7 +87,7 @@ class OpenAiCompatibleAdapterTest {
 
         ArgumentCaptor<URI> endpoints = ArgumentCaptor.forClass(URI.class);
         verify(openAiCompatibleClient, times(4)).complete(
-                endpoints.capture(), anyBoolean(), any(AiCredentials.class), anyString());
+                endpoints.capture(), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class));
         assertEquals(List.of(
                 URI.create("https://api.example.test/v1/chat/completions"),
                 URI.create("https://api.example.test/v1/chat/completions"),
@@ -82,7 +98,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_buildsChatCompletionBodyAndParsesResponse() throws Exception {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -98,7 +114,7 @@ class OpenAiCompatibleAdapterTest {
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(any(URI.class), anyBoolean(),
-                any(AiCredentials.class), bodyCaptor.capture());
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         assertEquals("llama3.3:70b", body.path("model").asString());
         assertEquals("system", body.path("messages").path(0).path("role").asString());
@@ -109,18 +125,96 @@ class OpenAiCompatibleAdapterTest {
         assertEquals("Hello.", body.path("messages").path(2).path("content").asString());
         assertEquals(64, body.path("max_tokens").asInt());
         assertFalse(body.has("max_completion_tokens"));
-        assertFalse(body.has("response_format"));
+        assertEquals("json_object", body.path("response_format").path("type").asString());
         assertEquals(0.25, body.path("temperature").asDouble());
         assertEquals("Hello world", result.text());
         assertEquals(12, result.inputTokens());
         assertEquals(3, result.outputTokens());
         assertEquals("stop", result.stopReason());
+        assertEquals(AiStructuredOutputEnforcement.JSON_OBJECT,
+                result.structuredOutputEnforcement());
         assertFalse(result.toString().contains("Hello world"));
     }
 
     @Test
+    void complete_sendsStrictJsonSchemaAndDegradesOnARejectedCapability() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+                .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 400))
+                .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 422))
+                .thenReturn(validResponse());
+
+        AiCompletionResult result = adapter.complete(schemaRequest());
+
+        ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiRequestDeadline> deadlines = ArgumentCaptor.forClass(AiRequestDeadline.class);
+        verify(openAiCompatibleClient, times(3)).complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture(), deadlines.capture());
+        JsonNode schemaBody = objectMapper.readTree(bodies.getAllValues().get(0));
+        assertEquals("json_schema", schemaBody.path("response_format").path("type").asString());
+        assertEquals("assistant_step",
+                schemaBody.path("response_format").path("json_schema").path("name").asString());
+        assertEquals(true,
+                schemaBody.path("response_format").path("json_schema").path("strict").asBoolean());
+        assertEquals("object", schemaBody.path("response_format").path("json_schema")
+                .path("schema").path("type").asString());
+        JsonNode fallbackBody = objectMapper.readTree(bodies.getAllValues().get(1));
+        assertEquals("json_object", fallbackBody.path("response_format").path("type").asString());
+        JsonNode promptOnlyBody = objectMapper.readTree(bodies.getAllValues().get(2));
+        assertFalse(promptOnlyBody.has("response_format"));
+        assertSame(deadlines.getAllValues().get(0), deadlines.getAllValues().get(1));
+        assertSame(deadlines.getAllValues().get(0), deadlines.getAllValues().get(2));
+        assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
+                result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void completeBoundsStructuredFallbackChainToOneWallClockBudget() throws Exception {
+        HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        ExecutorService serverExecutor = Executors.newSingleThreadExecutor(
+                Thread.ofPlatform().daemon().name("openai-fallback-budget-test-", 0).factory());
+        server.setExecutor(serverExecutor);
+        server.createContext("/v1/chat/completions", exchange -> {
+            try {
+                Thread.sleep(450);
+                exchange.sendResponseHeaders(422, -1);
+            } catch (IOException ignored) {
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        AiEndpointAddressValidator validator = org.mockito.Mockito.mock(AiEndpointAddressValidator.class);
+        when(validator.resolveFetchable("127.0.0.1", true))
+                .thenReturn(InetAddress.getByName("127.0.0.1"));
+        AiProperties properties = new AiProperties();
+        properties.setConnectTimeoutMs(500);
+        properties.setRequestTimeoutMs(500);
+        OpenAiCompatibleClient client = new OpenAiCompatibleClient(properties, validator);
+        OpenAiCompatibleAdapter boundedAdapter = new OpenAiCompatibleAdapter(
+                client, objectMapper, properties);
+        String endpoint = "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
+        long started = System.nanoTime();
+        try {
+            AiProviderException exception = assertThrows(
+                    AiProviderException.class,
+                    () -> boundedAdapter.complete(schemaRequest(endpoint, true)));
+
+            long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+            assertEquals("OpenAI-compatible invocation exceeded its deadline", exception.getMessage());
+            assertTrue(elapsedMillis < 1_000, () -> "elapsed milliseconds: " + elapsedMillis);
+        } finally {
+            client.shutdown();
+            server.stop(0);
+            serverExecutor.shutdownNow();
+        }
+    }
+
+    @Test
     void completeEmbedsImageBytesInTheFirstUserTurn() throws Exception {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn(validResponse());
         AiCompletionRequest request = new AiCompletionRequest(
                 target("https://api.example.test/v1", false, "openai/gpt-5.2"),
@@ -136,7 +230,7 @@ class OpenAiCompatibleAdapterTest {
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(any(URI.class), anyBoolean(),
-                any(AiCredentials.class), bodyCaptor.capture());
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
         JsonNode content = objectMapper.readTree(bodyCaptor.getValue())
                 .path("messages").path(1).path("content");
         assertEquals("text", content.path(0).path("type").asString());
@@ -153,7 +247,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_missingUsageReturnsZeroTokenCounts() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -179,13 +273,13 @@ class OpenAiCompatibleAdapterTest {
         assertThrows(AiProviderException.class, () -> adapter.complete(denied));
         verifyNoInteractions(openAiCompatibleClient);
 
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn(validResponse());
         adapter.complete(request("http://localhost:11434/v1", true, null, emptyCredentials()));
 
         verify(openAiCompatibleClient).complete(
                 eq(URI.create("http://localhost:11434/v1/chat/completions")), eq(true),
-                eq(emptyCredentials()), anyString());
+                eq(emptyCredentials()), anyString(), any(AiRequestDeadline.class));
     }
 
     @Test
@@ -210,7 +304,7 @@ class OpenAiCompatibleAdapterTest {
                 "{\"choices\":[{\"message\":{\"content\":3},\"finish_reason\":\"stop\"}]}",
                 "{\"choices\":[{\"message\":{\"content\":\"SENSITIVE_RESPONSE_BODY\"}}]}")) {
             when(openAiCompatibleClient.complete(
-                    any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+                    any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                     .thenReturn(responseBody);
 
             AiProviderException exception = assertThrows(AiProviderException.class,
@@ -225,7 +319,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_arbitraryFinishReasonIsNormalizedToOther() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("{\"choices\":[{\"message\":{\"content\":\"Local result\"},"
                         + "\"finish_reason\":\"sk-live-leaked-credential\"}],"
                         + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
@@ -239,7 +333,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_partialOrNegativeUsageDefaultsTokensToZero() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("{\"choices\":[{\"message\":{\"content\":\"Local result\"},"
                         + "\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":9,\"prompt_tokens\":-1}}");
 
@@ -253,7 +347,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_neverExposesApiKeyPromptOrResponseInExceptionsOrToString() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString()))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenThrow(new IllegalStateException(API_KEY + PROMPT + "SENSITIVE_RESPONSE_BODY"));
         AiCompletionRequest request = new AiCompletionRequest(
                 target("https://api.example.test/v1", false),
@@ -309,6 +403,24 @@ class OpenAiCompatibleAdapterTest {
         return new AiProviderTarget(
                 "openai_compatible", null, modelId, endpoint,
                 null, null, null, allowInternalEndpoint);
+    }
+
+    private AiCompletionRequest schemaRequest() throws Exception {
+        return schemaRequest("https://api.example.test/v1", false);
+    }
+
+    private AiCompletionRequest schemaRequest(String endpoint, boolean allowInternalEndpoint) throws Exception {
+        return new AiCompletionRequest(
+                target(endpoint, allowInternalEndpoint),
+                credentials(),
+                "Return one step",
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                64,
+                0.25);
     }
 
     private static AiCredentials credentials() {

@@ -52,6 +52,8 @@ import { updateContact, createContact, importBusinessCard, getContactsPage, getC
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
+import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
@@ -572,8 +574,22 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         [],
     );
 
+    const commentIndicatorIds = useMemo(() => contacts.map((contact) => contact.id), [contacts]);
+    const commentCounts = useCommentIndicators('person', commentIndicatorIds);
+
     const columns: ColumnDef<Contact>[] = useMemo(() => [
-        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
+        {
+            key: 'name',
+            label: t('columnName'),
+            getSortValue: (c) => c.name ?? null,
+            widthClass: 'min-w-48',
+            render: (c) => (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <span className="truncate">{c.name}</span>
+                    <CommentIndicatorChip count={commentCounts.get(c.id)} />
+                </span>
+            ),
+        },
         {
             key: 'warmth',
             label: t('columnWarmth'),
@@ -624,7 +640,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByContactId, memberById, inlineEdit, saveContact, showArchived]);
+    ], [t, tempByContactId, memberById, inlineEdit, saveContact, showArchived, commentCounts]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 

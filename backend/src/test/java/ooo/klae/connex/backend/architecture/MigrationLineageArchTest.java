@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -96,6 +97,29 @@ class MigrationLineageArchTest {
             "Flyway migrations must be regular files named V{integer}__{snake_case}.sql "
                 + "or R__{snake_case}.sql, apart from the two lineage .gitkeep files: "
                 + invalidNames);
+    }
+
+    /** Flyway versions form one global sequence across the tenant and control lineages. */
+    @Test
+    void versionedMigrationNumbersAreGloballyUnique() throws IOException {
+        Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
+        Set<BigInteger> versions = new HashSet<>();
+        List<String> duplicates = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(root)) {
+            for (Path file : files
+                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .toList()) {
+                Matcher matcher = VERSIONED_MIGRATION_FILE_NAME.matcher(
+                        file.getFileName().toString());
+                if (matcher.matches()
+                        && !versions.add(new BigInteger(matcher.group(1)))) {
+                    duplicates.add(file.getFileName().toString());
+                }
+            }
+        }
+        assertTrue(duplicates.isEmpty(),
+            "Flyway versions are globally monotonic across tenant and control lineages; "
+                + "renumber duplicate versions: " + duplicates);
     }
 
     /**

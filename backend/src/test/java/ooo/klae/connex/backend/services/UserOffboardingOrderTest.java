@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
+import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
@@ -77,6 +78,7 @@ class UserOffboardingOrderTest {
     @Mock private SavedViewPreferenceMapper savedViewPreferenceMapper;
     @Mock private SavedViewMapper savedViewMapper;
     @Mock private RelationshipSignalMapper relationshipSignalMapper;
+    @Mock private RecordCommentMapper recordCommentMapper;
     @Mock private UserDashboardMapper userDashboardMapper;
     @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
@@ -217,7 +219,7 @@ class UserOffboardingOrderTest {
             userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, aiChatMapper, stateVersionService, companyMapper,
             personMapper, dealMapper, workflowOffboardingService, suppressionMapper,
-            relationshipSignalMapper);
+            relationshipSignalMapper, recordCommentMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(workflowOffboardingService).discover(9);
@@ -247,6 +249,11 @@ class UserOffboardingOrderTest {
         order.verify(aiChatMapper).clearMessageAuthorsAnywhere(9);
         order.verify(aiChatMapper).clearToolCallExecutorsAnywhere(9);
         order.verify(aiChatMapper).clearTurnRequestersAnywhere(9);
+        order.verify(recordCommentMapper).clearAuthorsAnywhere(9);
+        order.verify(recordCommentMapper).clearDeletersAnywhere(9);
+        order.verify(recordCommentMapper).clearThreadCreatorsAnywhere(9);
+        order.verify(recordCommentMapper).clearThreadResolversAnywhere(9);
+        order.verify(recordCommentMapper).deleteReactionsAnywhere(9);
         order.verify(suppressionMapper).clearCreatorsAnywhere(9);
         order.verify(relationshipSignalMapper).deleteActorStateAnywhere(9);
     }

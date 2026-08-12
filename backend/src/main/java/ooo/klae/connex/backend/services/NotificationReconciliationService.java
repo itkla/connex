@@ -112,6 +112,7 @@ public class NotificationReconciliationService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
         duplicateDecisionLockService.lockBackgroundOrganization(workspaceId);
+        reconcileSourcePayloads(workspaceId);
         Instant evaluationInstant = clock.instant();
         String triggeredAt = utcTimestamp(evaluationInstant);
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
@@ -203,6 +204,19 @@ public class NotificationReconciliationService {
                     stateVersionService.markChanged(notification.getRecipientId());
                 }
             }
+        }
+    }
+
+    /** Resolves payloads whose source or context is no longer accessible to the recipient. */
+    public void reconcileSourcePayloads(int workspaceId) {
+        List<Integer> recipientIds = notificationMapper.findInaccessibleNotificationRecipientIds(workspaceId);
+        if (recipientIds.isEmpty()) {
+            return;
+        }
+        int rows = notificationMapper.resolveInaccessibleNotifications(
+            workspaceId, utcTimestamp(clock.instant()));
+        if (rows > 0) {
+            recipientIds.forEach(stateVersionService::markChanged);
         }
     }
 

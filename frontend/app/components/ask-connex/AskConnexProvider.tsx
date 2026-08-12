@@ -14,7 +14,6 @@ import {
 import { useTranslations } from 'next-intl';
 
 import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
-import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
 import { useActions } from '@/app/hooks/useActions';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
@@ -75,6 +74,7 @@ type OpenSource = 'standard' | 'keyboard';
 
 type AskConnexContextValue = {
     open: boolean;
+    instantOpen: boolean;
     working: boolean;
     openDrawer: (source?: OpenSource) => void;
     closeDrawer: () => void;
@@ -212,10 +212,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [composer]);
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
+        if (open) return;
         setInstantOpen(source === 'keyboard');
         setOpen(true);
-    }, []);
+    }, [open]);
     const closeDrawer = useCallback(() => setOpen(false), []);
+    const closeDrawerInstant = useCallback(() => {
+        setInstantOpen(true);
+        setOpen(false);
+    }, []);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -580,21 +585,26 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const shareSession = useCallback(async (shared: boolean): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || sharePermission !== 'granted') return false;
+        const sessionId = activeSession.id;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return false;
         try {
-            const updated = await setAiChatSessionShared(activeSession.id, shared);
+            const updated = await setAiChatSessionShared(sessionId, shared, { signal });
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
             setActiveSession(updated);
             activeSessionRef.current = updated;
             setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
             if (shared) {
-                const signal = identityControllerRef.current?.signal;
-                if (signal && !signal.aborted) await refreshCollaboration(updated.id, signal);
+                await refreshCollaboration(updated.id, signal);
             } else {
                 setParticipants([]);
                 setPresence(null);
             }
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
             toastSuccess(t(shared ? 'toast.shared' : 'toast.private'));
             return true;
         } catch (error) {
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
             return false;
         }
@@ -602,8 +612,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const inviteParticipant = useCallback(async (targetUserId: number): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || activeSession.visibility !== 'shared') return false;
+        const sessionId = activeSession.id;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return false;
         try {
-            const invited = await inviteAiChatParticipant(activeSession.id, targetUserId);
+            const invited = await inviteAiChatParticipant(sessionId, targetUserId, { signal });
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
             setParticipants((current) => [
                 ...current.filter((participant) => participant.userId !== invited.userId),
                 invited,
@@ -611,6 +625,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             toastSuccess(t('toast.invited'));
             return true;
         } catch (error) {
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
             return false;
         }
@@ -618,49 +633,72 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const joinInvitation = useCallback(async (invitation: AiChatSession) => {
         if (working) return;
+        const selectedSessionId = activeSessionRef.current?.id ?? null;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
         try {
-            const joined = await joinAiChatSession(invitation.id);
+            const joined = await joinAiChatSession(invitation.id, { signal });
+            if (signal.aborted
+                    || (activeSessionRef.current?.id ?? null) !== selectedSessionId) return;
             setInvitations((current) => current.filter((session) => session.id !== joined.id));
             setSessions((current) => [joined, ...current.filter((session) => session.id !== joined.id)]);
             await selectSession(joined);
+            if (signal.aborted || activeSessionRef.current?.id !== joined.id) return;
             toastSuccess(t('toast.joined'));
         } catch (error) {
+            if (signal.aborted
+                    || (activeSessionRef.current?.id ?? null) !== selectedSessionId) return;
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
         }
     }, [selectSession, t, working]);
 
     const leaveSession = useCallback(async () => {
         if (!activeSession || activeSession.ownedByCurrentUser || working) return;
+        const sessionId = activeSession.id;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
         try {
-            await leaveAiChatSession(activeSession.id);
-            setSessions((current) => current.filter((session) => session.id !== activeSession.id));
+            await leaveAiChatSession(sessionId, { signal });
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
+            setSessions((current) => current.filter((session) => session.id !== sessionId));
             newChat();
             toastSuccess(t('toast.left'));
         } catch (error) {
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
         }
     }, [activeSession, newChat, t, working]);
 
     const removeParticipant = useCallback(async (targetUserId: number) => {
         if (!activeSession?.ownedByCurrentUser) return;
+        const sessionId = activeSession.id;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
         try {
-            await removeAiChatParticipant(activeSession.id, targetUserId);
+            await removeAiChatParticipant(sessionId, targetUserId, { signal });
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
             setParticipants((current) => current.filter((participant) => participant.userId !== targetUserId));
             toastSuccess(t('toast.participantRemoved'));
         } catch (error) {
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
         }
     }, [activeSession, t]);
 
     const renameSession = useCallback(async (title: string): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser) return false;
+        const sessionId = activeSession.id;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return false;
         try {
-            const updated = await updateAiChatSession(activeSession.id, { title });
+            const updated = await updateAiChatSession(sessionId, { title }, { signal });
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
             setActiveSession(updated);
             setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
             toastSuccess(t('toast.renamed'));
             return true;
         } catch (error) {
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
             return false;
         }
@@ -668,12 +706,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const archiveSession = useCallback(async () => {
         if (!activeSession?.ownedByCurrentUser || working) return;
+        const sessionId = activeSession.id;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
         try {
-            await archiveAiChatSession(activeSession.id);
-            setSessions((current) => current.filter((session) => session.id !== activeSession.id));
+            await archiveAiChatSession(sessionId, { signal });
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
+            setSessions((current) => current.filter((session) => session.id !== sessionId));
             toastSuccess(t('toast.archived'));
             newChat();
         } catch (error) {
+            if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
             toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
         }
     }, [activeSession, newChat, t, working]);
@@ -815,7 +858,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         composerPlaceholder: t('composerPlaceholder'),
         context: t('context'),
         contextLimit: t('contextLimit'),
-        contextNone: t('contextNone'),
         emptyBody: t('emptyBody'),
         emptyTitle: t('emptyTitle'),
         formerMember: t('formerMember'),
@@ -828,6 +870,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         leave: t('leave'),
         manageSharing: t('manageSharing'),
         memberAuthor: (id: number) => t('memberAuthor', { id }),
+        jumpToLatest: t('jumpToLatest'),
+        loadError: t('loadError'),
+        messages: t('messages'),
         newChat: t('newChat'),
         noRecentSessions: t('noRecentSessions'),
         moreOptions: t('moreOptions'),
@@ -843,6 +888,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         renameSave: t('renameSave'),
         renameSaving: t('renameSaving'),
         renameTitle: t('renameTitle'),
+        retry: t('retry'),
         send: t('send'),
         shareCancel: t('shareCancel'),
         shareConfirm: t('shareConfirm'),
@@ -861,20 +907,18 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }), [t, tDisclosure]);
 
     const value = useMemo<AskConnexContextValue>(
-        () => ({ open, working, openDrawer, closeDrawer }),
-        [closeDrawer, open, openDrawer, working],
+        () => ({ open, instantOpen, working, openDrawer, closeDrawer }),
+        [closeDrawer, instantOpen, open, openDrawer, working],
     );
 
     return (
         <AskConnexContext.Provider value={value}>
             {children}
-            {scoped && !open ? (
-                <AskConnexTab label={t('title')} working={working} onOpen={() => openDrawer()} />
-            ) : null}
             <AskConnexDrawer
                 open={open}
                 instantOpen={instantOpen}
                 isMobile={isMobile}
+                showTab={scoped}
                 sessions={scoped ? sessions : []}
                 invitations={scoped ? invitations : []}
                 activeSession={scoped ? activeSession : null}
@@ -897,6 +941,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 labels={labels}
                 onOpenChange={setOpen}
                 onOpenChangeComplete={() => setInstantOpen(false)}
+                onKeyboardClose={closeDrawerInstant}
                 onSelectSession={(session) => void selectSession(session)}
                 onNewChat={newChat}
                 onRename={renameSession}

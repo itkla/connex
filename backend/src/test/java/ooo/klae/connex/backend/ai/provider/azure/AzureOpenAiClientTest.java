@@ -4,7 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -13,8 +20,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 
+import org.apache.hc.core5.http.ContentType;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.http.HttpMethod;
@@ -23,7 +33,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
+import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 
@@ -52,6 +65,36 @@ class AzureOpenAiClientTest {
             guard.verify(() -> AiEgressGuard.requireFetchableHost("connex.openai.azure.com", false));
             server.verify();
         }
+    }
+
+    @Test
+    void complete_usesPinnedTransportWithTheCallersAbsoluteDeadline() {
+        AiProperties properties = new AiProperties();
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        AiRequestDeadline deadline = AiRequestDeadline.afterMillis(5_000);
+        when(providerClient.post(
+                eq(ENDPOINT),
+                eq(Set.of("connex.openai.azure.com")),
+                argThat(headers -> API_KEY.equals(headers.get("api-key"))),
+                eq(ContentType.APPLICATION_JSON),
+                any(byte[].class),
+                same(deadline),
+                eq("Azure OpenAI invocation")))
+                .thenReturn(new FixedAiProviderClient.Response(
+                        200, "{\"choices\":[]}".getBytes(StandardCharsets.UTF_8)));
+        AzureOpenAiClient client = new AzureOpenAiClient(properties, providerClient);
+
+        String response = client.complete(ENDPOINT, credentials(), REQUEST_BODY, deadline);
+
+        assertEquals("{\"choices\":[]}", response);
+        verify(providerClient).post(
+                eq(ENDPOINT),
+                eq(Set.of("connex.openai.azure.com")),
+                argThat(headers -> API_KEY.equals(headers.get("api-key"))),
+                eq(ContentType.APPLICATION_JSON),
+                any(byte[].class),
+                same(deadline),
+                eq("Azure OpenAI invocation"));
     }
 
     @Test

@@ -6,13 +6,18 @@ import java.util.Base64;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -32,6 +37,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
 
     private final OpenAiCompatibleClient openAiCompatibleClient;
     private final ObjectMapper objectMapper;
+    private final AiProperties aiProperties;
 
     @Override
     public String providerId() {
@@ -39,20 +45,39 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     }
 
     @Override
+    public AiStructuredOutputEnforcement structuredOutputCapability(AiProviderTarget target) {
+        return AiStructuredOutputEnforcement.JSON_SCHEMA;
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
         }
+        AiRequestDeadline deadline = AiRequestDeadline.afterMillis(aiProperties.getRequestTimeoutMs());
         AiProviderTarget target = request.target();
         if (!PROVIDER_OPENAI_COMPATIBLE.equals(target.provider())) {
             throw new AiProviderException("Unsupported AI provider");
         }
         try {
             URI endpoint = buildCompletionEndpoint(target);
-            String requestBody = buildRequestBody(request);
-            String responseBody = openAiCompatibleClient.complete(endpoint, target.allowInternalEndpoint(),
-                    request.credentials(), requestBody);
-            return parseResponse(responseBody);
+            AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
+            while (true) {
+                try {
+                    String requestBody = buildRequestBody(request, enforcement);
+                    String responseBody = request.providerAttemptExecutor().execute(() ->
+                            openAiCompatibleClient.complete(
+                                    endpoint, target.allowInternalEndpoint(),
+                                    request.credentials(), requestBody, deadline));
+                    return parseResponse(responseBody, enforcement);
+                } catch (AiProviderRequestRejectedException exception) {
+                    if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
+                            || !exception.permitsStructuredOutputFallback()) {
+                        throw exception;
+                    }
+                    enforcement = enforcement.degrade();
+                }
+            }
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -90,7 +115,9 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         }
     }
 
-    private String buildRequestBody(AiCompletionRequest request) throws Exception {
+    private String buildRequestBody(
+            AiCompletionRequest request,
+            AiStructuredOutputEnforcement enforcement) throws Exception {
         String modelId = request.target().modelId();
         if (modelId == null || modelId.isBlank()) {
             throw new AiProviderException("OpenAI-compatible model id is required");
@@ -131,7 +158,41 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             root.put("max_tokens", request.maxTokens());
             root.put("temperature", request.temperature());
         }
+        addResponseFormat(root, request, enforcement);
         return objectMapper.writeValueAsString(root);
+    }
+
+    private static AiStructuredOutputEnforcement requestedEnforcement(
+            AiCompletionRequest request) {
+        if (request.outputMode() != AiOutputMode.JSON) {
+            return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
+        return request.responseSchema() == null
+                ? AiStructuredOutputEnforcement.JSON_OBJECT
+                : AiStructuredOutputEnforcement.JSON_SCHEMA;
+    }
+
+    private static void addResponseFormat(
+            ObjectNode root,
+            AiCompletionRequest request,
+            AiStructuredOutputEnforcement enforcement) {
+        switch (enforcement) {
+            case PROMPT_ONLY -> {
+                return;
+            }
+            case JSON_OBJECT -> root.putObject("response_format").put("type", "json_object");
+            case JSON_SCHEMA -> {
+                if (request.responseSchema() == null) {
+                    throw new AiProviderException("AI response schema is required");
+                }
+                ObjectNode responseFormat = root.putObject("response_format");
+                responseFormat.put("type", "json_schema");
+                ObjectNode jsonSchema = responseFormat.putObject("json_schema");
+                jsonSchema.put("name", request.responseSchema().name());
+                jsonSchema.put("strict", true);
+                jsonSchema.set("schema", request.responseSchema().schema());
+            }
+        }
     }
 
     private static String dataUrl(AiInputImage image) {
@@ -139,7 +200,9 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 + Base64.getEncoder().encodeToString(image.content());
     }
 
-    private AiCompletionResult parseResponse(String responseBody) {
+    private AiCompletionResult parseResponse(
+            String responseBody,
+            AiStructuredOutputEnforcement enforcement) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             if (root == null || !root.isObject()) {
@@ -166,7 +229,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 outputTokens = readOptionalTokenCount(usage.path("completion_tokens"));
             }
             String stopReason = readRequiredText(choice.path("finish_reason"));
-            return new AiCompletionResult(text, inputTokens, outputTokens, stopReason);
+            return new AiCompletionResult(
+                    text, inputTokens, outputTokens, stopReason, enforcement);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {

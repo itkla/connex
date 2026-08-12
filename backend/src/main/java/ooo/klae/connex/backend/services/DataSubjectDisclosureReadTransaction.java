@@ -2,10 +2,13 @@ package ooo.klae.connex.backend.services;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -15,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentDisclosureDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentThreadDisclosureDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -135,6 +140,8 @@ public class DataSubjectDisclosureReadTransaction {
             dataSubjectDisclosureMapper.findProviderCaptureEvidence(
                 workspaceId, personId, workspaceIds));
         disclosure.setNotes(dataSubjectDisclosureMapper.findNotes(workspaceId, personId, workspaceIds));
+        disclosure.setRecordCommentThreads(
+            recordCommentThreads(workspaceId, personId, workspaceIds));
         disclosure.setTasks(dataSubjectDisclosureMapper.findTasks(workspaceId, personId, workspaceIds));
         disclosure.setAttachments(
             dataSubjectDisclosureMapper.findAttachments(workspaceId, personId, workspaceIds));
@@ -147,5 +154,24 @@ public class DataSubjectDisclosureReadTransaction {
         disclosure.setThirdPartyProvisions(
             dataSubjectDisclosureMapper.findProvisions(workspaceId, personId, workspaceIds));
         return disclosure;
+    }
+
+    private List<RecordCommentThreadDisclosureDto> recordCommentThreads(
+            int workspaceId,
+            int personId,
+            List<Integer> workspaceIds) {
+        List<RecordCommentThreadDisclosureDto> threads =
+            dataSubjectDisclosureMapper.findRecordCommentThreads(
+                workspaceId, personId, workspaceIds);
+        List<RecordCommentDisclosureDto> comments = dataSubjectDisclosureMapper.findRecordComments(
+            workspaceId, personId, workspaceIds);
+        Map<Long, List<RecordCommentDisclosureDto>> commentsByThread = comments.stream().collect(
+            Collectors.groupingBy(
+                RecordCommentDisclosureDto::getThreadId,
+                LinkedHashMap::new,
+                Collectors.toList()));
+        threads.forEach(thread -> thread.setComments(
+            commentsByThread.getOrDefault(thread.getId(), List.of())));
+        return threads;
     }
 }

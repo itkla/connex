@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -128,6 +129,38 @@ public class AiInvocationAdmissionService {
         }
     }
 
+    /**
+     * Reserves one organization-quota attempt for an interactive, non-cacheable model call.
+     * Rejected reservations never invoke the provider, and an uncommitted close releases quota.
+     * @return active direct invocation admission
+     */
+    public DirectAdmission acquireDirect() {
+        int orgId = workspaceService.getCurrentOrgId();
+        if (orgId <= 0) {
+            throw new IllegalStateException("AI invocation organization is unavailable");
+        }
+        Instant now = clock.instant();
+        synchronized (stateLock) {
+            purgeStale(now);
+            if (!quotaWindows.containsKey(orgId)
+                    && quotaWindows.size() >= quotaMaxOrganizations) {
+                rejected(orgId, Rejection.CAPACITY);
+                throw new DirectAdmissionRejectedException(Rejection.CAPACITY);
+            }
+            QuotaState quota = quotaWindows.get(orgId);
+            if (quota != null && quota.size() >= quotaAttemptsPerOrg) {
+                rejected(orgId, Rejection.ORGANIZATION_QUOTA);
+                throw new DirectAdmissionRejectedException(Rejection.ORGANIZATION_QUOTA);
+            }
+            if (quota == null) {
+                quota = new QuotaState();
+                quotaWindows.put(orgId, quota);
+            }
+            quota.reserve();
+            return new DirectAdmission(this, orgId);
+        }
+    }
+
     private Admission rejected(int orgId, Rejection rejection) {
         log.warn("AI invocation rejected: organizationId={}, reason={}", orgId, rejection);
         return Admission.rejected(rejection);
@@ -185,6 +218,29 @@ public class AiInvocationAdmissionService {
             }
             quota.commit(clock.instant());
             flight.invocationCommitted = true;
+        }
+    }
+
+    private void commitDirect(int orgId) {
+        synchronized (stateLock) {
+            QuotaState quota = quotaWindows.get(orgId);
+            if (quota == null) {
+                throw new IllegalStateException("AI invocation quota reservation is unavailable");
+            }
+            quota.commit(clock.instant());
+        }
+    }
+
+    private void releaseDirect(int orgId) {
+        synchronized (stateLock) {
+            QuotaState quota = quotaWindows.get(orgId);
+            if (quota == null) {
+                return;
+            }
+            quota.release();
+            if (quota.isEmpty()) {
+                quotaWindows.remove(orgId);
+            }
         }
     }
 
@@ -458,6 +514,60 @@ public class AiInvocationAdmissionService {
                     owner.complete(identity, flight, LeaderOutcome.FAILED);
                 }
             }
+        }
+    }
+
+    /** Lifecycle handle for one non-cacheable organization-quota reservation. */
+    public static final class DirectAdmission implements AutoCloseable {
+        private final AiInvocationAdmissionService owner;
+        private final int orgId;
+        private final Object lifecycleLock = new Object();
+        private boolean committed;
+        private boolean closed;
+
+        private DirectAdmission(AiInvocationAdmissionService owner, int orgId) {
+            this.owner = Objects.requireNonNull(owner, "owner");
+            this.orgId = orgId;
+        }
+
+        void commitInvocation() {
+            synchronized (lifecycleLock) {
+                if (closed) {
+                    throw new IllegalStateException("AI direct invocation admission is closed");
+                }
+                if (!committed) {
+                    owner.commitDirect(orgId);
+                    committed = true;
+                }
+            }
+        }
+
+        @Override
+        public void close() {
+            synchronized (lifecycleLock) {
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                if (!committed) {
+                    owner.releaseDirect(orgId);
+                }
+            }
+        }
+    }
+
+    /** Distinguishes direct-attempt organization quota from bounded registry capacity. */
+    public static final class DirectAdmissionRejectedException extends TooManyRequestsException {
+        private final Rejection rejection;
+
+        public DirectAdmissionRejectedException(Rejection rejection) {
+            super("AI direct invocation admission was rejected");
+            this.rejection = Objects.requireNonNull(rejection, "rejection");
+        }
+
+        /** @return stable direct-admission rejection reason */
+        public Rejection rejection() {
+            return rejection;
         }
     }
 
