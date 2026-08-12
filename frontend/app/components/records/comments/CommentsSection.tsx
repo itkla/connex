@@ -12,12 +12,16 @@ import {
     ApiError,
     createCommentThread,
     deleteRecordComment,
+    editRecordComment,
+    getCommentThread,
     getCommentThreads,
     removeCommentReaction,
     reopenCommentThread,
     replyToCommentThread,
     resolveCommentThread,
 } from '@/app/lib/api';
+import type { DraftKeyParts } from '@/app/lib/formDrafts';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type {
     RecordComment,
     RecordCommentReactionKey,
@@ -65,6 +69,7 @@ export default function CommentsSection({
     const t = useTranslations('Comments');
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
+    const { activeWorkspaceId } = useWorkspace();
 
     const [threads, setThreads] = useState<RecordCommentThreadType[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -73,20 +78,20 @@ export default function CommentsSection({
     const [loadingMore, setLoadingMore] = useState(false);
     const [refreshNonce, setRefreshNonce] = useState(0);
     const [composerValue, setComposerValue] = useState('');
-    const [replyThreadId, setReplyThreadId] = useState<number | null>(null);
-    const [replyValue, setReplyValue] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [pendingDelete, setPendingDelete] = useState<RecordComment | null>(null);
     const [deleting, setDeleting] = useState(false);
 
     const composerToken = useRef<string | null>(null);
-    const replyToken = useRef<string | null>(null);
     const highlightRef = useRef<HTMLDivElement | null>(null);
     const highlightScrolled = useRef(false);
     const fetchGeneration = useRef(0);
     const reactionBusyIds = useRef<Set<number>>(new Set());
 
     const highlightedCommentId = searchParams.get('comment');
+    const linkedThreadParam = searchParams.get('thread');
+    const linkedThreadFetched = useRef(false);
+    const appendedThreadId = useRef<number | null>(null);
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
 
     useEffect(() => {
@@ -109,6 +114,23 @@ export default function CommentsSection({
             active = false;
         };
     }, [targetType, targetId, initialLimit, refreshNonce]);
+
+    useEffect(() => {
+        if (!loaded || loadError || linkedThreadFetched.current) return;
+        linkedThreadFetched.current = true;
+        const linkedThreadId = linkedThreadParam ? Number(linkedThreadParam) : null;
+        if (!linkedThreadId || Number.isNaN(linkedThreadId)) return;
+        if (threads.some((thread) => thread.id === linkedThreadId)) return;
+        getCommentThread(linkedThreadId)
+            .then((thread) => {
+                if (thread.targetType !== targetType || thread.targetId !== targetId) return;
+                appendedThreadId.current = thread.id;
+                setThreads((prev) =>
+                    prev.some((existing) => existing.id === thread.id) ? prev : [...prev, thread],
+                );
+            })
+            .catch(() => undefined);
+    }, [loaded, loadError, threads, linkedThreadParam, targetType, targetId]);
 
     useEffect(() => {
         if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
@@ -144,9 +166,12 @@ export default function CommentsSection({
         const generation = fetchGeneration.current;
         setLoadingMore(true);
         try {
+            const pagedCount = threads.filter(
+                (thread) => thread.id !== appendedThreadId.current,
+            ).length;
             const data = await getCommentThreads(targetType, targetId, {
                 limit: PAGE_SIZE,
-                offset: threads.length,
+                offset: pagedCount,
                 state: 'all',
             });
             if (generation !== fetchGeneration.current) return;
@@ -184,47 +209,97 @@ export default function CommentsSection({
         }
     }, [submitting, loaded, composerValue, targetType, targetId, t]);
 
-    const handleReply = useCallback(async () => {
-        if (submitting || replyThreadId == null || commentPlainText(replyValue).length === 0) return;
-        replyToken.current ??= crypto.randomUUID();
-        setSubmitting(true);
-        try {
-            const created = await replyToCommentThread(replyThreadId, {
-                content: replyValue,
-                clientToken: replyToken.current,
-            });
-            setThreads((prev) =>
-                prev.map((thread) =>
-                    thread.id === replyThreadId
-                        ? {
-                              ...thread,
-                              comments: [
-                                  ...thread.comments.filter((comment) => comment.id !== created.id),
-                                  created,
-                              ],
-                          }
-                        : thread,
-                ),
-            );
-            setReplyValue('');
-            setReplyThreadId(null);
-            replyToken.current = null;
-            toastSuccess(t('posted'));
-        } catch (error) {
-            if (error instanceof ApiError && error.status === 409) {
-                toastError(t('conflict'));
-                setReplyThreadId(null);
-                setReplyValue('');
-                replyToken.current = null;
-                setLoaded(false);
-                setRefreshNonce((nonce) => nonce + 1);
-            } else {
-                toastError(t('postFailed'));
+    const submitReply = useCallback(
+        async (
+            thread: RecordCommentThreadType,
+            content: string,
+            clientToken: string,
+        ): Promise<boolean> => {
+            try {
+                const created = await replyToCommentThread(thread.id, { content, clientToken });
+                setThreads((prev) =>
+                    prev.map((existing) =>
+                        existing.id === thread.id
+                            ? {
+                                  ...existing,
+                                  comments: [
+                                      ...existing.comments.filter(
+                                          (comment) => comment.id !== created.id,
+                                      ),
+                                      created,
+                                  ],
+                              }
+                            : existing,
+                    ),
+                );
+                toastSuccess(t('posted'));
+                return true;
+            } catch (error) {
+                if (error instanceof ApiError && error.status === 409) {
+                    toastError(t('conflict'));
+                    setLoaded(false);
+                    setRefreshNonce((nonce) => nonce + 1);
+                } else {
+                    toastError(t('postFailed'));
+                }
+                return false;
             }
-        } finally {
-            setSubmitting(false);
-        }
-    }, [submitting, replyThreadId, replyValue, t]);
+        },
+        [t],
+    );
+
+    const submitEdit = useCallback(
+        async (comment: RecordComment, content: string): Promise<boolean> => {
+            try {
+                const updated = await editRecordComment(comment.id, content);
+                setThreads((prev) =>
+                    prev.map((thread) =>
+                        thread.id === comment.threadId
+                            ? {
+                                  ...thread,
+                                  comments: thread.comments.map((existing) =>
+                                      existing.id === comment.id ? updated : existing,
+                                  ),
+                              }
+                            : thread,
+                    ),
+                );
+                toastSuccess(t('editSaved'));
+                return true;
+            } catch (error) {
+                if (error instanceof ApiError && error.status === 409) {
+                    toastError(t('conflict'));
+                    setLoaded(false);
+                    setRefreshNonce((nonce) => nonce + 1);
+                    return true;
+                }
+                toastError(t('editFailed'));
+                return false;
+            }
+        },
+        [t],
+    );
+
+    const copyCommentLink = useCallback(
+        (comment: RecordComment) => {
+            const collection =
+                targetType === 'person'
+                    ? 'contacts'
+                    : targetType === 'company'
+                      ? 'companies'
+                      : 'deals';
+            const url = `${window.location.origin}/records/${collection}/${targetId}?comment=${comment.id}&thread=${comment.threadId}`;
+            try {
+                navigator.clipboard
+                    .writeText(url)
+                    .then(() => toastSuccess(t('linkCopied')))
+                    .catch(() => toastError(t('copyFailed')));
+            } catch {
+                toastError(t('copyFailed'));
+            }
+        },
+        [targetType, targetId, t],
+    );
 
     const handleStateTransition = useCallback(
         async (thread: RecordCommentThreadType, action: 'resolve' | 'reopen') => {
@@ -326,6 +401,16 @@ export default function CommentsSection({
         }
     }, [pendingDelete, deleting, t]);
 
+    const composerDraftKeyParts = useMemo<DraftKeyParts>(
+        () => ({
+            userId: currentUser.id,
+            workspaceId: activeWorkspaceId,
+            formType: 'comment',
+            scope: `${targetType}:${targetId}`,
+        }),
+        [currentUser.id, activeWorkspaceId, targetType, targetId],
+    );
+
     const isEmpty = loaded && !loadError && threads.length === 0;
 
     return (
@@ -358,6 +443,7 @@ export default function CommentsSection({
                             submitting={submitting}
                             disabled={!loaded}
                             canSubmit={commentPlainText(composerValue).length > 0}
+                            draftKeyParts={composerDraftKeyParts}
                         />
                     </div>
                 )}
@@ -444,29 +530,16 @@ export default function CommentsSection({
                                 key={thread.id}
                                 thread={thread}
                                 currentUser={currentUser}
+                                activeWorkspaceId={activeWorkspaceId}
                                 canComment={canComment}
                                 canModerate={canModerate}
                                 highlightedCommentId={highlightedCommentId}
                                 highlightRef={highlightRef}
                                 forceExpanded={thread.id === highlightedThreadId}
-                                replyOpen={replyThreadId === thread.id}
-                                replyValue={replyValue}
-                                replyCanSubmit={commentPlainText(replyValue).length > 0}
-                                submitting={submitting}
-                                onOpenReply={() => {
-                                    setReplyThreadId(thread.id);
-                                    setReplyValue('');
-                                    replyToken.current = null;
-                                }}
-                                onCancelReply={() => {
-                                    setReplyThreadId(null);
-                                    setReplyValue('');
-                                }}
-                                onReplyChange={(value) => {
-                                    setReplyValue(value);
-                                    replyToken.current = null;
-                                }}
-                                onReplySubmit={handleReply}
+                                transitioning={submitting}
+                                onSubmitReply={submitReply}
+                                onSubmitEdit={submitEdit}
+                                onCopyLink={copyCommentLink}
                                 onDelete={setPendingDelete}
                                 onToggleReaction={handleToggleReaction}
                                 onResolve={() => handleStateTransition(thread, 'resolve')}

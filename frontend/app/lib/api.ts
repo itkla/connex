@@ -3675,6 +3675,14 @@ export function reopenCommentThread(threadId: number, expectedVersion: number, i
 }
 
 /**
+ * Fetches one comment thread by id for deep-link resolution when the thread
+ * sits beyond the loaded page window.
+ */
+export function getCommentThread(threadId: number, init: RequestInit = {}) {
+    return getJson<Types.RecordCommentThread>(`/api/comment-threads/${threadId}`, init);
+}
+
+/**
  * Ensures the caller's reaction is present on a comment; repeating the request
  * is a no-op. Returns the comment's updated per-reaction aggregate.
  */
@@ -3738,6 +3746,14 @@ export function replyToCommentThread(
     init: RequestInit = {},
 ) {
     return postJson<Types.RecordComment>(`/api/comment-threads/${threadId}/comments`, payload, init);
+}
+
+/**
+ * Edits the caller's own comment within the 15-minute edit window and returns
+ * the updated comment with re-synced references.
+ */
+export function editRecordComment(commentId: number, content: string, init: RequestInit = {}) {
+    return patchJson<Types.RecordComment>(`/api/comments/${commentId}`, { content }, init);
 }
 
 /**

@@ -9,7 +9,7 @@ import ooo.klae.connex.backend.beans.RecordCommentReactionSummary;
 import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.dto.RecordCommentIndicatorDto;
 
-/** Workspace-scoped persistence for record comment threads and immutable comments. */
+/** Workspace-scoped persistence for record comment threads and comments. */
 public interface RecordCommentMapper {
     List<RecordCommentThread> getThreadPage(
         @Param("workspaceId") int workspaceId,
@@ -79,6 +79,11 @@ public interface RecordCommentMapper {
     int insertThread(RecordCommentThread thread);
 
     int insertComment(RecordComment comment);
+
+    int updateCommentContent(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("content") String content);
 
     int countCommentsInThread(
         @Param("workspaceId") int workspaceId,

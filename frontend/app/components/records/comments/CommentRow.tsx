@@ -2,12 +2,20 @@
 
 import { useState, type Ref } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { CheckCircleIcon, FaceSmileIcon, TrashIcon } from '@heroicons/react/24/outline';
+import {
+    CheckCircleIcon,
+    FaceSmileIcon,
+    LinkIcon,
+    PencilIcon,
+    TrashIcon,
+} from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import type { RecordComment, RecordCommentReactionKey } from '@/app/lib/types';
-import { formatDateTime, formatRelativeTime } from '@/app/lib/utils';
+import { formatRelativeTime, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { useLiveNow } from '@/app/hooks/useNow';
+import { commentPlainText } from '@/app/components/records/comments/commentText';
+import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -31,6 +39,8 @@ const REACTION_EMOJI: Record<RecordCommentReactionKey, string> = {
     laugh: '😄',
 };
 
+const SERVER_EDIT_WINDOW_MS = 15 * 60 * 1000;
+
 type Props = {
     comment: RecordComment;
     isRoot: boolean;
@@ -39,18 +49,23 @@ type Props = {
     highlightRef?: Ref<HTMLDivElement>;
     canReact: boolean;
     canDelete: boolean;
+    canEdit: boolean;
     canResolve?: boolean;
     onDelete: (comment: RecordComment) => void;
     onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
+    onCopyLink: (comment: RecordComment) => void;
+    onSubmitEdit: (comment: RecordComment, content: string) => Promise<boolean>;
     onResolve?: () => void;
 };
 
 /**
  * One comment on the thread rail: the avatar cell (with the connecting rail
  * segment) and the content cell with an anchored author line, relative
- * timestamp, body or redaction tombstone, reaction chips, and a single quiet
- * action cluster that reveals on hover and stays visible on coarse pointers.
- * Rendered as two cells of the parent thread grid.
+ * timestamp with an edited marker, body or redaction tombstone, reaction
+ * chips, and a single quiet action cluster (react, copy link, edit within the
+ * window, resolve on the root, delete) that reveals on hover and stays visible
+ * on coarse pointers. The row owns its inline edit state; the parent owns the
+ * mutation. Rendered as two cells of the parent thread grid.
  */
 export default function CommentRow({
     comment,
@@ -60,19 +75,48 @@ export default function CommentRow({
     highlightRef,
     canReact,
     canDelete,
+    canEdit,
     canResolve = false,
     onDelete,
     onToggleReaction,
+    onCopyLink,
+    onSubmitEdit,
     onResolve,
 }: Props) {
     const t = useTranslations('Comments');
     const locale = useLocale();
     const now = useLiveNow();
     const [pickerOpen, setPickerOpen] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [editValue, setEditValue] = useState('');
+    const [savingEdit, setSavingEdit] = useState(false);
+
     const deleted = comment.deletedAt != null;
     const authorName = comment.author?.displayName ?? t('formerMember');
     const reactions = comment.reactions ?? [];
-    const showCluster = (!deleted && (canReact || canDelete)) || (canResolve && onResolve != null);
+    const withinEditWindow = now - parseMysqlDateTime(comment.createdAt) < SERVER_EDIT_WINDOW_MS;
+    const showEdit = canEdit && !deleted && withinEditWindow;
+    const showCluster =
+        !deleted || (canResolve && onResolve != null);
+
+    const startEdit = () => {
+        setEditValue(comment.content ?? '');
+        setEditing(true);
+    };
+
+    const submitEdit = async () => {
+        if (savingEdit || commentPlainText(editValue).length === 0) return;
+        setSavingEdit(true);
+        try {
+            const succeeded = await onSubmitEdit(comment, editValue);
+            if (succeeded) {
+                setEditing(false);
+                setEditValue('');
+            }
+        } finally {
+            setSavingEdit(false);
+        }
+    };
 
     return (
         <>
@@ -93,21 +137,46 @@ export default function CommentRow({
                     highlighted && 'bg-brand-light/40',
                 )}
             >
-                <p className="flex min-w-0 items-baseline gap-2 pr-20 text-sm leading-7">
+                <p className="flex min-w-0 items-baseline gap-2 pr-24 text-sm leading-7">
                     <span className="truncate font-medium text-foreground">{authorName}</span>
                     <time
                         dateTime={comment.createdAt}
-                        title={formatDateTime(comment.createdAt, locale)}
+                        title={formatUtcDateTime(comment.createdAt, locale)}
                         className="shrink-0 text-xs text-muted-foreground"
                     >
                         {formatRelativeTime(comment.createdAt, locale, now)}
                     </time>
+                    {comment.editedAt != null && !deleted && (
+                        <span
+                            title={formatUtcDateTime(comment.editedAt, locale)}
+                            className="shrink-0 text-xs text-muted-foreground/80"
+                        >
+                            {t('editedMarker')}
+                        </span>
+                    )}
                 </p>
 
                 {deleted ? (
                     <p className="text-sm italic leading-relaxed text-muted-foreground">
                         {t('deletedComment')}
                     </p>
+                ) : editing ? (
+                    <div className="mt-1">
+                        <CommentComposer
+                            value={editValue}
+                            onChange={setEditValue}
+                            onSubmit={submitEdit}
+                            onCancel={() => {
+                                setEditing(false);
+                                setEditValue('');
+                            }}
+                            placeholder={t('composerPlaceholder')}
+                            submitLabel={t('save')}
+                            submitting={savingEdit}
+                            canSubmit={commentPlainText(editValue).length > 0 && withinEditWindow}
+                            autoFocus
+                        />
+                    </div>
                 ) : (
                     <NoteContent
                         content={comment.content ?? ''}
@@ -117,7 +186,7 @@ export default function CommentRow({
                     />
                 )}
 
-                {reactions.length > 0 && (
+                {reactions.length > 0 && !editing && (
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         {reactions.map((summary) => (
                             <button
@@ -145,7 +214,7 @@ export default function CommentRow({
                     </div>
                 )}
 
-                {showCluster && (
+                {showCluster && !editing && (
                     <div
                         className={cn(
                             'absolute -top-1 right-0 flex items-center gap-0.5 rounded-lg bg-card p-0.5',
@@ -186,6 +255,36 @@ export default function CommentRow({
                                     ))}
                                 </PopoverContent>
                             </Popover>
+                        )}
+                        {!deleted && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        type="button"
+                                        aria-label={t('copyLink')}
+                                        onClick={() => onCopyLink(comment)}
+                                        className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                        <LinkIcon className="size-4" />
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t('copyLink')}</TooltipContent>
+                            </Tooltip>
+                        )}
+                        {showEdit && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        type="button"
+                                        aria-label={t('edit')}
+                                        onClick={startEdit}
+                                        className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                        <PencilIcon className="size-4" />
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t('edit')}</TooltipContent>
+                            </Tooltip>
                         )}
                         {canResolve && onResolve && (
                             <Tooltip>

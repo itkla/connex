@@ -2827,6 +2827,8 @@ export type RecordComment = {
     /** Null once the comment has been redacted; the row survives as a tombstone. */
     content: string | null;
     createdAt: string;
+    /** Set when the author edited the comment within the edit window. */
+    editedAt?: string | null;
     deletedAt: string | null;
     deletedByUserId?: number | null;
     /** Server-authorized @/# references resolved from the content tokens. */
