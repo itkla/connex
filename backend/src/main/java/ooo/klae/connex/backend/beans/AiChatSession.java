@@ -11,6 +11,7 @@ public class AiChatSession {
     private int workspaceId;
     private Integer createdByUserId;
     private String title;
+    private boolean titleUserSet = true;
     private String visibility;
     private String status;
     private boolean ownedByCurrentUser;

@@ -346,6 +346,7 @@
     "renameTitle": "Rename chat",
     "retry": "Try again",
     "send": "Send message",
+    "suggestedFollowUps": "Suggested follow-ups",
     "tooLong": "Messages can contain up to 16,000 characters.",
     "turnAccepted": "Request accepted",
     "turnWorking": "Working with your authorized workspace context…",

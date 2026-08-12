@@ -346,6 +346,7 @@
     "renameTitle": "チャット名を変更",
     "retry": "もう一度試す",
     "send": "メッセージを送信",
+    "suggestedFollowUps": "おすすめのフォローアップ",
     "tooLong": "メッセージは16,000文字以内で入力してください。",
     "turnAccepted": "リクエストを受け付けました",
     "turnWorking": "アクセス可能なワークスペース情報を確認中…",

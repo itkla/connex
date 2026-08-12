@@ -12,4 +12,5 @@ public class AiChatSessionCreateRequest {
     @NotBlank
     @Size(max = 200)
     private String title;
+    private boolean autoTitle;
 }

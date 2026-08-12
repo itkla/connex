@@ -62,6 +62,11 @@ public interface AiChatMapper {
         @Param("title") String title,
         @Param("status") String status);
 
+    int updateGeneratedTitle(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("title") String title);
+
     int insertParticipant(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
@@ -145,6 +150,11 @@ public interface AiChatMapper {
     List<AiChatTurn> listActiveTurnsBySessionForUpdate(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
+
+    List<AiChatTurn> listTurnsByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("ids") List<Integer> ids);
 
     int markTurnRunning(
         @Param("workspaceId") int workspaceId,

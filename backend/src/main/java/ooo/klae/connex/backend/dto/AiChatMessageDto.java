@@ -18,15 +18,24 @@ public class AiChatMessageDto {
     private String content;
     private String createdAt;
     private List<AiChatCitationDto> citations = List.of();
+    private List<String> suggestions = List.of();
 
     /** Maps a persisted message to its API representation. */
     public static AiChatMessageDto from(AiChatMessage message) {
-        return from(message, List.of());
+        return from(message, List.of(), List.of());
     }
 
     /** Maps a persisted message with citations authorized for the current viewer. */
     public static AiChatMessageDto from(
             AiChatMessage message, List<AiChatCitationDto> citations) {
+        return from(message, citations, List.of());
+    }
+
+    /** Maps a persisted message with caller-safe citations and follow-up suggestions. */
+    public static AiChatMessageDto from(
+            AiChatMessage message,
+            List<AiChatCitationDto> citations,
+            List<String> suggestions) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
@@ -36,6 +45,7 @@ public class AiChatMessageDto {
         dto.setContent(message.getContent());
         dto.setCreatedAt(message.getCreatedAt());
         dto.setCitations(List.copyOf(citations));
+        dto.setSuggestions(List.copyOf(suggestions));
         return dto;
     }
 }

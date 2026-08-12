@@ -4756,8 +4756,16 @@ export function getAiChatSessions(
     );
 }
 
-export function createAiChatSession(title: string, init: RequestInit = {}) {
-    return postJson<Types.AiChatSession>('/api/ai/assistant/sessions', { title }, init);
+export function createAiChatSession(
+    title: string,
+    autoTitle = false,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiChatSession>(
+        '/api/ai/assistant/sessions',
+        { title, autoTitle },
+        init,
+    );
 }
 
 export function getAiChatSession(
