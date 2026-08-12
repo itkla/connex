@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -35,6 +37,8 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
+import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.beans.AiChatMessage;
@@ -189,6 +193,78 @@ class AiChatAgentLoopServiceTest {
         verify(invocationService, times(2)).completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission));
+    }
+
+    @Test
+    void schemaRepairPreservesIssuedPlaceholderThroughDemaskingAndTranscriptPersistence() {
+        when(toolExecutor.pageContext(any(), any())).thenReturn(new AiAssistantToolResult(
+                Map.of("records", List.of(Map.of(
+                        "handle", "r1", "kind", "person", "name", "Mina Patel"))),
+                List.of(new Identifier("person", "Mina Patel"))));
+        AiStructuredRepair repair = AiStructuredRepair.from(
+                "exclusive_step",
+                "{\"tool\":null,\"final\":{\"text\":\"Follow up with {{P1}}.\"}}");
+        AiStructuredRepairAttempt<AiAssistantStep> malformed = new AiStructuredRepairAttempt<>(
+                new AiStructuredOutcome.Malformed<>("malformed_output", 2, 3, "stop"),
+                Optional.of(repair));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
+                .thenReturn(malformed)
+                .thenAnswer(invocation -> {
+                    AiInvocation repairedInvocation = invocation.getArgument(0);
+                    String repairPrompt = repairedInvocation.prompt().getMessages().getLast().getContent();
+                    assertTrue(repairPrompt.contains("{{P1}}"));
+                    assertFalse(repairPrompt.matches("(?s).*?(?<!\\{\\{)P1(?!}}).*"));
+                    Demasker.DemaskResult demasked = Demasker.demask(
+                            "Follow up with {{P1}}.", repairedInvocation.context());
+                    assertEquals(0, demasked.warnings());
+                    return parsed(new AiAssistantStep(
+                            null, new AiAssistantStep.FinalAnswer(demasked.text(), List.of())));
+                });
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Follow up with Mina Patel."), any(), eq(5), eq(8));
+    }
+
+    @Test
+    void schemaRepairRejectsBareIssuedPlaceholderBeforeTranscriptPersistence() throws Exception {
+        when(toolExecutor.pageContext(any(), any())).thenReturn(new AiAssistantToolResult(
+                Map.of("records", List.of(Map.of(
+                        "handle", "r1", "kind", "person", "name", "Mina Patel"))),
+                List.of(new Identifier("person", "Mina Patel"))));
+        AiStructuredRepair repair = AiStructuredRepair.from(
+                "exclusive_step",
+                "{\"tool\":null,\"final\":{\"text\":\"Follow up with {{P1}}.\"}}");
+        AiStructuredRepairAttempt<AiAssistantStep> malformed = new AiStructuredRepairAttempt<>(
+                new AiStructuredOutcome.Malformed<>("malformed_output", 2, 3, "stop"),
+                Optional.of(repair));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission)))
+                .thenReturn(malformed)
+                .thenAnswer(invocation -> {
+                    AiRawOutputGuard outputGuard = invocation.getArgument(2);
+                    assertEquals("bare_placeholder", outputGuard.rejectionReason(objectMapper.readTree(
+                            "{\"tool\":null,\"final\":{\"text\":\"Follow up with P1.\","
+                                    + "\"citations\":[]}}")));
+                    return new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Malformed<>(
+                                    "malformed_output", 3, 4, "stop"),
+                            Optional.empty());
+                });
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("schema_repair_failed", result.reason());
+        verify(persistenceService, never()).resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt());
     }
 
     @Test

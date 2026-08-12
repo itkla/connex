@@ -6,6 +6,8 @@ import java.util.Base64;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -35,6 +37,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
 
     private final OpenAiCompatibleClient openAiCompatibleClient;
     private final ObjectMapper objectMapper;
+    private final AiProperties aiProperties;
 
     @Override
     public String providerId() {
@@ -51,6 +54,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
         }
+        AiRequestDeadline deadline = AiRequestDeadline.afterMillis(aiProperties.getRequestTimeoutMs());
         AiProviderTarget target = request.target();
         if (!PROVIDER_OPENAI_COMPATIBLE.equals(target.provider())) {
             throw new AiProviderException("Unsupported AI provider");
@@ -64,7 +68,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             openAiCompatibleClient.complete(
                                     endpoint, target.allowInternalEndpoint(),
-                                    request.credentials(), requestBody));
+                                    request.credentials(), requestBody, deadline));
                     return parseResponse(responseBody, enforcement);
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY

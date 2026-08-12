@@ -43,6 +43,7 @@ import org.springframework.web.client.RestClientException;
 import jakarta.annotation.PreDestroy;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.PinnedHostDnsResolver;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -103,6 +104,18 @@ public class OpenAiCompatibleClient {
      */
     public String complete(URI endpoint, boolean allowInternalEndpoint, AiCredentials credentials,
             String requestBodyJson) {
+        AiRequestDeadline deadline = requestTimeout == null
+                ? null
+                : AiRequestDeadline.afterMillis(requestTimeout.toMillis());
+        return complete(endpoint, allowInternalEndpoint, credentials, requestBodyJson, deadline);
+    }
+
+    String complete(
+            URI endpoint,
+            boolean allowInternalEndpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline) {
         String host = requireEndpoint(endpoint, allowInternalEndpoint);
         if (credentials == null) {
             throw new AiProviderException("OpenAI-compatible credentials are required");
@@ -115,14 +128,14 @@ public class OpenAiCompatibleClient {
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         OpenAiCompatibleResponse response;
         try {
-            long deadlineNanos = requestTimeout == null ? 0 : deadlineNanos(requestTimeout);
-            InetAddress pinnedAddress = resolveFetchable(host, allowInternalEndpoint, deadlineNanos);
+            InetAddress pinnedAddress = resolveFetchable(host, allowInternalEndpoint, deadline);
             if (restClient != null) {
                 response = sendOnce(restClient, endpoint, apiKey, body);
             } else {
+                Objects.requireNonNull(deadline, "deadline");
                 try (PinnedRestClient pinned = pinnedRestClient(
-                        host, pinnedAddress, remainingDuration(deadlineNanos))) {
-                    response = sendOnce(pinned, endpoint, apiKey, body, deadlineNanos);
+                        host, pinnedAddress, remainingDuration(deadline))) {
+                    response = sendOnce(pinned, endpoint, apiKey, body, deadline);
                 }
             }
         } catch (AiProviderException exception) {
@@ -160,8 +173,12 @@ public class OpenAiCompatibleClient {
     }
 
     private OpenAiCompatibleResponse sendOnce(
-            PinnedRestClient pinned, URI endpoint, String apiKey, byte[] body, long deadlineNanos) {
-        Duration remaining = remainingDuration(deadlineNanos);
+            PinnedRestClient pinned,
+            URI endpoint,
+            String apiKey,
+            byte[] body,
+            AiRequestDeadline deadline) {
+        Duration remaining = remainingDuration(deadline);
         HttpPost request = new HttpPost(endpoint);
         request.setHeader(HttpHeaders.CONTENT_TYPE, ContentType.APPLICATION_JSON.getMimeType());
         request.setHeader(HttpHeaders.ACCEPT, ContentType.APPLICATION_JSON.getMimeType());
@@ -175,11 +192,11 @@ public class OpenAiCompatibleClient {
                 .setHardCancellationEnabled(true)
                 .build());
         AtomicBoolean deadlineTriggered = new AtomicBoolean();
-        ScheduledFuture<?> deadline = deadlineExecutor.schedule(() -> {
+        ScheduledFuture<?> deadlineTask = deadlineExecutor.schedule(() -> {
             deadlineTriggered.set(true);
             request.cancel();
             pinned.httpClient().close(CloseMode.IMMEDIATE);
-        }, remainingNanos(deadlineNanos), TimeUnit.NANOSECONDS);
+        }, remainingNanos(deadline), TimeUnit.NANOSECONDS);
         try {
             OpenAiCompatibleResponse response = pinned.httpClient().execute(request, providerResponse -> {
                 HttpEntity entity = providerResponse.getEntity();
@@ -188,29 +205,32 @@ public class OpenAiCompatibleClient {
                         : readBounded(entity.getContent());
                 return new OpenAiCompatibleResponse(providerResponse.getCode(), responseBody);
             });
-            if (deadlineExpired(deadlineNanos)) {
+            if (deadline.isExpired()) {
                 throw deadlineExceeded();
             }
             return response;
         } catch (IOException exception) {
             throw new AiProviderException(isDeadlineFailure(
-                    exception, deadlineTriggered.get(), request.isCancelled(), deadlineNanos)
+                    exception, deadlineTriggered.get(), request.isCancelled(), deadline)
                     ? "OpenAI-compatible invocation exceeded its deadline"
                     : "OpenAI-compatible invocation failed during transport");
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RuntimeException exception) {
-            if (deadlineTriggered.get() || request.isCancelled() || deadlineExpired(deadlineNanos)) {
+            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
                 throw deadlineExceeded();
             }
             throw exception;
         } finally {
-            deadline.cancel(false);
+            deadlineTask.cancel(false);
         }
     }
 
-    private InetAddress resolveFetchable(String host, boolean allowInternalEndpoint, long deadlineNanos) {
-        if (requestTimeout == null) {
+    private InetAddress resolveFetchable(
+            String host,
+            boolean allowInternalEndpoint,
+            AiRequestDeadline deadline) {
+        if (deadline == null) {
             return endpointAddressValidator.resolveFetchable(host, allowInternalEndpoint);
         }
         if (!resolverSlots.tryAcquire()) {
@@ -230,7 +250,7 @@ public class OpenAiCompatibleClient {
             throw new AiProviderException("OpenAI-compatible invocation failed during transport");
         }
         try {
-            return resolution.get(remainingNanos(deadlineNanos), TimeUnit.NANOSECONDS);
+            return resolution.get(remainingNanos(deadline), TimeUnit.NANOSECONDS);
         } catch (TimeoutException exception) {
             throw deadlineExceeded();
         } catch (InterruptedException exception) {
@@ -265,31 +285,26 @@ public class OpenAiCompatibleClient {
         return new PinnedRestClient(httpClient);
     }
 
-    private static long deadlineNanos(Duration timeout) {
-        return System.nanoTime() + timeout.toNanos();
+    private static Duration remainingDuration(AiRequestDeadline deadline) {
+        return Duration.ofNanos(remainingNanos(deadline));
     }
 
-    private static Duration remainingDuration(long deadlineNanos) {
-        return Duration.ofNanos(remainingNanos(deadlineNanos));
-    }
-
-    private static long remainingNanos(long deadlineNanos) {
-        long remaining = deadlineNanos - System.nanoTime();
+    private static long remainingNanos(AiRequestDeadline deadline) {
+        long remaining = deadline.remainingNanos();
         if (remaining <= 0) {
             throw deadlineExceeded();
         }
         return remaining;
     }
 
-    private static boolean deadlineExpired(long deadlineNanos) {
-        return deadlineNanos - System.nanoTime() <= 0;
-    }
-
     private static boolean isDeadlineFailure(
-            IOException exception, boolean deadlineTriggered, boolean requestCancelled, long deadlineNanos) {
+            IOException exception,
+            boolean deadlineTriggered,
+            boolean requestCancelled,
+            AiRequestDeadline deadline) {
         return deadlineTriggered
                 || requestCancelled
-                || deadlineExpired(deadlineNanos)
+                || deadline.isExpired()
                 || exception instanceof SocketTimeoutException
                         && !(exception instanceof ConnectTimeoutException);
     }

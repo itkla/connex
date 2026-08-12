@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.provider.azure;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -22,6 +23,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -48,7 +51,7 @@ class AzureOpenAiAdapterTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        adapter = new AzureOpenAiAdapter(azureOpenAiClient, objectMapper);
+        adapter = new AzureOpenAiAdapter(azureOpenAiClient, objectMapper, new AiProperties());
     }
 
     @Test
@@ -58,7 +61,7 @@ class AzureOpenAiAdapterTest {
 
     @Test
     void complete_buildsChatCompletionRequestAndParsesResponse() throws Exception {
-        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -76,7 +79,9 @@ class AzureOpenAiAdapterTest {
 
         ArgumentCaptor<URI> endpointCaptor = ArgumentCaptor.forClass(URI.class);
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(azureOpenAiClient).complete(endpointCaptor.capture(), any(AiCredentials.class), bodyCaptor.capture());
+        verify(azureOpenAiClient).complete(
+                endpointCaptor.capture(), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class));
         assertEquals("https://connex.openai.azure.com/openai/deployments/contacts-prod/chat/completions"
                 + "?api-version=2025-01-01-preview", endpointCaptor.getValue().toString());
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
@@ -99,7 +104,7 @@ class AzureOpenAiAdapterTest {
 
     @Test
     void complete_sendsStrictJsonSchemaResponseFormat() throws Exception {
-        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn(validResponse());
         AiCompletionRequest request = new AiCompletionRequest(
                 new AiProviderTarget("azure_openai", null, "gpt-5.2",
@@ -119,7 +124,8 @@ class AzureOpenAiAdapterTest {
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(azureOpenAiClient).complete(
-                any(URI.class), any(AiCredentials.class), bodyCaptor.capture());
+                any(URI.class), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class));
         JsonNode responseFormat = objectMapper.readTree(bodyCaptor.getValue()).path("response_format");
         assertEquals("json_schema", responseFormat.path("type").asString());
         assertEquals("assistant_step", responseFormat.path("json_schema").path("name").asString());
@@ -132,7 +138,7 @@ class AzureOpenAiAdapterTest {
 
     @Test
     void complete_degradesRejectedSchemaToJsonObjectThenPromptOnly() throws Exception {
-        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenThrow(new AiProviderRequestRejectedException("Azure OpenAI", 400))
                 .thenThrow(new AiProviderRequestRejectedException("Azure OpenAI", 422))
                 .thenReturn(validResponse());
@@ -153,20 +159,23 @@ class AzureOpenAiAdapterTest {
         AiCompletionResult result = adapter.complete(request);
 
         ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiRequestDeadline> deadlines = ArgumentCaptor.forClass(AiRequestDeadline.class);
         verify(azureOpenAiClient, times(3)).complete(
-                any(URI.class), any(AiCredentials.class), bodies.capture());
+                any(URI.class), any(AiCredentials.class), bodies.capture(), deadlines.capture());
         assertEquals("json_schema", objectMapper.readTree(bodies.getAllValues().get(0))
                 .path("response_format").path("type").asString());
         assertEquals("json_object", objectMapper.readTree(bodies.getAllValues().get(1))
                 .path("response_format").path("type").asString());
         assertFalse(objectMapper.readTree(bodies.getAllValues().get(2)).has("response_format"));
+        assertSame(deadlines.getAllValues().get(0), deadlines.getAllValues().get(1));
+        assertSame(deadlines.getAllValues().get(0), deadlines.getAllValues().get(2));
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
                 result.structuredOutputEnforcement());
     }
 
     @Test
     void completeEmbedsImageBytesInTheFirstUserTurn() throws Exception {
-        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn(validResponse());
         AiCompletionRequest request = new AiCompletionRequest(
                 new AiProviderTarget("azure_openai", null, "gpt-5.2",
@@ -183,7 +192,9 @@ class AzureOpenAiAdapterTest {
         adapter.complete(request);
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(azureOpenAiClient).complete(any(URI.class), any(AiCredentials.class), bodyCaptor.capture());
+        verify(azureOpenAiClient).complete(
+                any(URI.class), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class));
         JsonNode content = objectMapper.readTree(bodyCaptor.getValue())
                 .path("messages").path(1).path("content");
         assertEquals("text", content.path(0).path("type").asString());
@@ -199,13 +210,15 @@ class AzureOpenAiAdapterTest {
 
     @Test
     void complete_omitsBlankSystemPrompt() throws Exception {
-        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn(validResponse());
 
         adapter.complete(validRequest("https://connex.openai.azure.com", " "));
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(azureOpenAiClient).complete(any(URI.class), any(AiCredentials.class), bodyCaptor.capture());
+        verify(azureOpenAiClient).complete(
+                any(URI.class), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class));
         JsonNode messages = objectMapper.readTree(bodyCaptor.getValue()).path("messages");
         assertEquals(2, messages.size());
         assertEquals("user", messages.path(0).path("role").asString());
@@ -224,7 +237,7 @@ class AzureOpenAiAdapterTest {
                         + "\"completion_tokens\":1}}",
                 "{\"choices\":[{\"message\":{\"content\":\"SENSITIVE_RESPONSE_BODY\"}}],"
                         + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}")) {
-            when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+            when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                     .thenReturn(responseBody);
 
             AiProviderException exception = assertThrows(AiProviderException.class,
@@ -263,7 +276,7 @@ class AzureOpenAiAdapterTest {
 
     @Test
     void complete_neverExposesApiKeyInToStringOrException() {
-        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString()))
+        when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenThrow(new IllegalStateException("transport rejected " + API_KEY));
         AiCompletionRequest request = validRequest("https://connex.openai.azure.com", null);
 

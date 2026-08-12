@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
@@ -121,13 +123,17 @@ public class AiChatAgentLoopService {
                                 history, pageContext, toolTurns, maskingContext, resources, repair),
                         MAX_OUTPUT_TOKENS,
                         TEMPERATURE);
+                AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
+                        maskingContext.tokenBindings().stream()
+                                .map(Map.Entry::getKey)
+                                .collect(Collectors.toUnmodifiableSet()));
                 AiStructuredRepairAttempt<AiAssistantStep> attempt;
                 try (AiInvocationAdmissionService.DirectAdmission admission =
                         invocationAdmissionService.acquireDirect()) {
                     attempt = invocationService.completeStructuredRepairable(
                             invocation,
                             AiAssistantStep.class,
-                            stepGuard,
+                            outputGuard,
                             stepSchema.responseSchema(),
                             admission);
                 }

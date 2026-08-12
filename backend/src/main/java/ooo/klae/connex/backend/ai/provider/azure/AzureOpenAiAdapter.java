@@ -10,6 +10,8 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -40,6 +42,7 @@ public class AzureOpenAiAdapter implements AiProvider {
 
     private final AzureOpenAiClient azureOpenAiClient;
     private final ObjectMapper objectMapper;
+    private final AiProperties aiProperties;
 
     @Override
     public String providerId() {
@@ -56,6 +59,7 @@ public class AzureOpenAiAdapter implements AiProvider {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
         }
+        AiRequestDeadline deadline = AiRequestDeadline.afterMillis(aiProperties.getRequestTimeoutMs());
         AiProviderTarget target = request.target();
         if (!PROVIDER_AZURE_OPENAI.equals(target.provider())) {
             throw new AiProviderException("Unsupported AI provider");
@@ -68,7 +72,7 @@ public class AzureOpenAiAdapter implements AiProvider {
                     String requestBody = buildRequestBody(request, enforcement);
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             azureOpenAiClient.complete(
-                                    endpoint, request.credentials(), requestBody));
+                                    endpoint, request.credentials(), requestBody, deadline));
                     return parseResponse(responseBody, enforcement);
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY

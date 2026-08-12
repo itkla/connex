@@ -5,7 +5,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,6 +42,9 @@ public final class MaskingEngine {
                     + "(?:[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\\.[0-9]{1,9})?)?"
                     + "(?:Z|[+\\-][0-9]{2}:[0-9]{2})?)?(?![0-9])");
 
+    private static final Pattern PLACEHOLDER = Pattern.compile(
+            "\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
+
     /** Whitespace detector used to make multi-word identifier matching flexible. */
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
@@ -63,6 +68,67 @@ public final class MaskingEngine {
         if (verdict.excluded()) {
             return OMITTED_BY_POLICY;
         }
+        return maskSanitizedFreeText(sanitizedText, ctx);
+    }
+
+    /**
+     * Masks untrusted model output while retaining only placeholders already issued in the current
+     * request. This is used when masked output is returned to a provider for schema repair.
+     * @param text untrusted, already-masked model output
+     * @param ctx request-local masking context populated before the original provider call
+     * @return safely masked text with issued placeholders preserved in canonical form
+     */
+    public static String maskFreeTextPreservingIssuedPlaceholders(String text, MaskingContext ctx) {
+        Objects.requireNonNull(ctx, "ctx");
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String normalizedText = normalizeSeparators(Normalizer.normalize(text, Normalizer.Form.NFKC));
+        Matcher screeningMatcher = PLACEHOLDER.matcher(normalizedText);
+        StringBuilder screeningText = new StringBuilder(normalizedText.length());
+        List<Integer> issuedPlaceholderOffsets = new ArrayList<>();
+        int screeningEnd = 0;
+        while (screeningMatcher.find()) {
+            screeningText.append(stripInjectedTokenDelimiters(
+                    normalizedText.substring(screeningEnd, screeningMatcher.start())));
+            String token = canonicalToken(screeningMatcher.group(1));
+            if (ctx.originalValueForToken(token) == null) {
+                screeningText.append(stripInjectedTokenDelimiters(screeningMatcher.group()));
+            } else {
+                issuedPlaceholderOffsets.add(screeningText.length());
+            }
+            screeningEnd = screeningMatcher.end();
+        }
+        screeningText.append(stripInjectedTokenDelimiters(normalizedText.substring(screeningEnd)));
+        String screened = screeningText.toString();
+        String specialCareScreeningText = WHITESPACE.matcher(screened).replaceAll(" ");
+        if (SpecialCareTextScreen.screen(specialCareScreeningText).excluded()) {
+            return OMITTED_BY_POLICY;
+        }
+        if (sensitiveValueCrossesIssuedPlaceholder(screened, issuedPlaceholderOffsets, ctx)) {
+            return REDACTED;
+        }
+
+        Matcher placeholderMatcher = PLACEHOLDER.matcher(normalizedText);
+        StringBuilder masked = new StringBuilder(normalizedText.length());
+        int maskedEnd = 0;
+        while (placeholderMatcher.find()) {
+            String token = canonicalToken(placeholderMatcher.group(1));
+            if (ctx.originalValueForToken(token) == null) {
+                continue;
+            }
+            masked.append(maskSanitizedFreeText(
+                    stripInjectedTokenDelimiters(normalizedText.substring(maskedEnd, placeholderMatcher.start())),
+                    ctx));
+            masked.append(token);
+            maskedEnd = placeholderMatcher.end();
+        }
+        masked.append(maskSanitizedFreeText(
+                stripInjectedTokenDelimiters(normalizedText.substring(maskedEnd)), ctx));
+        return masked.toString();
+    }
+
+    private static String maskSanitizedFreeText(String sanitizedText, MaskingContext ctx) {
         String masked = sanitizedText;
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
             masked = identifierPattern(entry.rawValue()).matcher(masked)
@@ -73,6 +139,43 @@ public final class MaskingEngine {
         masked = PHONE_LIKE_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
         masked = LONG_DIGIT_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
         return masked;
+    }
+
+    private static String canonicalToken(String tokenBody) {
+        return "{{" + tokenBody + "}}";
+    }
+
+    private static boolean sensitiveValueCrossesIssuedPlaceholder(
+            String text,
+            List<Integer> issuedPlaceholderOffsets,
+            MaskingContext ctx) {
+        if (issuedPlaceholderOffsets.isEmpty()) {
+            return false;
+        }
+        for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
+            if (hasCrossingMatch(identifierPattern(entry.rawValue()), text, issuedPlaceholderOffsets)) {
+                return true;
+            }
+        }
+        return hasCrossingMatch(EMAIL_ADDRESS, text, issuedPlaceholderOffsets)
+                || hasCrossingMatch(URL, text, issuedPlaceholderOffsets)
+                || hasCrossingMatch(PHONE_LIKE_RUN, text, issuedPlaceholderOffsets)
+                || hasCrossingMatch(LONG_DIGIT_RUN, text, issuedPlaceholderOffsets);
+    }
+
+    private static boolean hasCrossingMatch(
+            Pattern pattern,
+            String text,
+            List<Integer> issuedPlaceholderOffsets) {
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            for (int offset : issuedPlaceholderOffsets) {
+                if (matcher.start() < offset && offset < matcher.end()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

@@ -196,7 +196,8 @@ public class AiAssistantPromptAssembler {
     private String repairRequest(AiStructuredRepair repair, MaskingContext context) {
         String serialized = serialize(Map.of(
                 "schemaRule", repair.schemaRule(),
-                "output", MaskingEngine.maskFreeText(repair.offendingOutput(), context),
+                "output", MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                        repair.offendingOutput(), context),
                 "truncated", repair.truncated()));
         return "Your previous output violated the named schema rule. Return one corrected JSON step only.\n"
                 + MODEL_OUTPUT_BEGIN + "\n" + serialized + "\n" + MODEL_OUTPUT_END;
