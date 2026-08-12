@@ -138,9 +138,12 @@ export default function CommentComposer({
             try {
                 const url = await onAttachImage(file);
                 if (url) {
-                    onChangeRef.current(
-                        appendCommentImage(valueRef.current, commentImageMarkdown(file.name, url)),
+                    const next = appendCommentImage(
+                        valueRef.current,
+                        commentImageMarkdown(file.name, url),
                     );
+                    valueRef.current = next;
+                    onChangeRef.current(next);
                 }
             } finally {
                 setUploadingCount((count) => count - 1);
