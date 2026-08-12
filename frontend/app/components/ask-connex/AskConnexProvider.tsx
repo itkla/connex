@@ -14,7 +14,6 @@ import {
 import { useTranslations } from 'next-intl';
 
 import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
-import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
 import { useActions } from '@/app/hooks/useActions';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
@@ -60,6 +59,7 @@ type OpenSource = 'standard' | 'keyboard';
 
 type AskConnexContextValue = {
     open: boolean;
+    instantOpen: boolean;
     working: boolean;
     openDrawer: (source?: OpenSource) => void;
     closeDrawer: () => void;
@@ -178,10 +178,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const scoped = stateIdentity === identity && !switching;
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
+        if (open) return;
         setInstantOpen(source === 'keyboard');
         setOpen(true);
-    }, []);
+    }, [open]);
     const closeDrawer = useCallback(() => setOpen(false), []);
+    const closeDrawerInstant = useCallback(() => {
+        setInstantOpen(true);
+        setOpen(false);
+    }, []);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -576,9 +581,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         composerPlaceholder: t('composerPlaceholder'),
         context: t('context'),
         contextLimit: t('contextLimit'),
-        contextNone: t('contextNone'),
         emptyBody: t('emptyBody'),
         emptyTitle: t('emptyTitle'),
+        jumpToLatest: t('jumpToLatest'),
+        loadError: t('loadError'),
+        messages: t('messages'),
         newChat: t('newChat'),
         noRecentSessions: t('noRecentSessions'),
         moreOptions: t('moreOptions'),
@@ -591,6 +598,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         renameSave: t('renameSave'),
         renameSaving: t('renameSaving'),
         renameTitle: t('renameTitle'),
+        retry: t('retry'),
         send: t('send'),
         title: t('title'),
         tooLong: t('tooLong'),
@@ -602,20 +610,18 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }), [t, tDisclosure]);
 
     const value = useMemo<AskConnexContextValue>(
-        () => ({ open, working, openDrawer, closeDrawer }),
-        [closeDrawer, open, openDrawer, working],
+        () => ({ open, instantOpen, working, openDrawer, closeDrawer }),
+        [closeDrawer, instantOpen, open, openDrawer, working],
     );
 
     return (
         <AskConnexContext.Provider value={value}>
             {children}
-            {scoped && !open ? (
-                <AskConnexTab label={t('title')} working={working} onOpen={() => openDrawer()} />
-            ) : null}
             <AskConnexDrawer
                 open={open}
                 instantOpen={instantOpen}
                 isMobile={isMobile}
+                showTab={scoped}
                 sessions={scoped ? sessions : []}
                 activeSession={scoped ? activeSession : null}
                 messages={scoped ? messages : []}
@@ -633,6 +639,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 labels={labels}
                 onOpenChange={setOpen}
                 onOpenChangeComplete={() => setInstantOpen(false)}
+                onKeyboardClose={closeDrawerInstant}
                 onSelectSession={(session) => void selectSession(session)}
                 onNewChat={newChat}
                 onRename={renameSession}
