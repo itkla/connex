@@ -19,7 +19,9 @@ import {
     reopenCommentThread,
     replyToCommentThread,
     resolveCommentThread,
+    uploadAttachment,
 } from '@/app/lib/api';
+import { normalizeNoteImageSource } from '@/app/components/activity/notes/editor/noteImageSource';
 import type { DraftKeyParts } from '@/app/lib/formDrafts';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type {
@@ -280,6 +282,24 @@ export default function CommentsSection({
         [t],
     );
 
+    const attachImage = useCallback(
+        async (file: File): Promise<string | null> => {
+            try {
+                const attachment = await uploadAttachment(targetType, targetId, file);
+                const source = normalizeNoteImageSource(attachment.url);
+                if (!source) {
+                    toastError(t('imageUploadFailed'));
+                    return null;
+                }
+                return source;
+            } catch {
+                toastError(t('imageUploadFailed'));
+                return null;
+            }
+        },
+        [targetType, targetId, t],
+    );
+
     const copyCommentLink = useCallback(
         (comment: RecordComment) => {
             const collection =
@@ -444,6 +464,7 @@ export default function CommentsSection({
                             disabled={!loaded}
                             canSubmit={commentPlainText(composerValue).length > 0}
                             draftKeyParts={composerDraftKeyParts}
+                            onAttachImage={attachImage}
                         />
                     </div>
                 )}
@@ -539,6 +560,7 @@ export default function CommentsSection({
                                 transitioning={submitting}
                                 onSubmitReply={submitReply}
                                 onSubmitEdit={submitEdit}
+                                onAttachImage={attachImage}
                                 onCopyLink={copyCommentLink}
                                 onDelete={setPendingDelete}
                                 onToggleReaction={handleToggleReaction}

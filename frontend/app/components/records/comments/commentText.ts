@@ -6,6 +6,7 @@
  */
 export function commentPlainText(value: string): string {
     return value
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
         .replace(/(\*\*|__)([^*_]+)\1/g, '$2')
         .replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$|[.,!?])/g, '$1$2')
@@ -13,6 +14,38 @@ export function commentPlainText(value: string): string {
         .replace(/^#{1,6}\s+/gm, '')
         .replace(/^>\s?/gm, '')
         .trim();
+}
+
+/**
+ * Derives readable alt text from an uploaded file name: the extension is
+ * dropped and separator runs collapse to spaces, falling back to the raw
+ * name when nothing remains.
+ */
+export function commentImageAlt(fileName: string): string {
+    const base = fileName
+        .replace(/\.[^.]+$/u, '')
+        .replace(/[_-]+/gu, ' ')
+        .trim();
+    return base || fileName;
+}
+
+/**
+ * Builds the Markdown image embed for an uploaded comment attachment. The
+ * alt text is stripped of characters that would terminate the alt segment or
+ * inject extra syntax, keeping the embed a single well-formed token.
+ */
+export function commentImageMarkdown(fileName: string, url: string): string {
+    const alt = commentImageAlt(fileName)
+        .replace(/[[\]()\\`!\r\n]/gu, ' ')
+        .replace(/\s+/gu, ' ')
+        .trim();
+    return `![${alt || 'image'}](${url})`;
+}
+
+/** Appends an image embed to a comment body on its own paragraph. */
+export function appendCommentImage(value: string, imageMarkdown: string): string {
+    const trimmed = value.replace(/\s+$/u, '');
+    return trimmed.length > 0 ? `${trimmed}\n\n${imageMarkdown}` : imageMarkdown;
 }
 
 /** Wire shape of a persisted comment composer draft. */
