@@ -5,14 +5,17 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.AiChatCitationDto;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -28,6 +31,7 @@ public class AiChatCitationProjector {
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
+    private final AiChatMapper chatMapper;
 
     /** Returns authorized citations keyed by their containing message id. */
     public Map<Integer, List<AiChatCitationDto>> project(
@@ -54,40 +58,65 @@ public class AiChatCitationProjector {
         return Map.copyOf(projected);
     }
 
-    /** Returns validated demasked follow-up suggestions stored with one assistant message. */
-    public List<String> suggestions(AiChatMessage message) {
+    /** Returns validated demasked follow-up suggestions only to each turn's original asker. */
+    public Map<Integer, List<String>> suggestions(
+            int workspaceId,
+            int sessionId,
+            int userId,
+            List<AiChatMessage> messages) {
+        Map<Integer, StoredSuggestions> storedByMessage = new LinkedHashMap<>();
+        Set<Integer> turnIds = new LinkedHashSet<>();
+        for (AiChatMessage message : messages) {
+            StoredSuggestions stored = storedSuggestions(message);
+            if (stored == null) {
+                continue;
+            }
+            storedByMessage.put(message.getId(), stored);
+            turnIds.add(stored.turnId());
+        }
+        if (turnIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
+        for (AiChatTurn turn : chatMapper.listTurnsByIds(
+                workspaceId, sessionId, List.copyOf(turnIds))) {
+            if (turn.getRequestedByUserId() != null) {
+                requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
+            }
+        }
+        Map<Integer, List<String>> projected = new LinkedHashMap<>();
+        storedByMessage.forEach((messageId, stored) -> projected.put(
+                messageId,
+                Objects.equals(requesterByTurn.get(stored.turnId()), userId)
+                        ? AiAssistantStepGuard.filterSuggestions(stored.values())
+                        : List.of()));
+        return Map.copyOf(projected);
+    }
+
+    private StoredSuggestions storedSuggestions(AiChatMessage message) {
         if (!"assistant".equals(message.getAuthorKind())
                 || message.getStructuredJson() == null) {
-            return List.of();
+            return null;
         }
         try {
-            JsonNode suggestions = objectMapper.readTree(message.getStructuredJson())
-                    .get("suggestions");
-            if (suggestions == null || !suggestions.isArray()) {
-                return List.of();
+            JsonNode metadata = objectMapper.readTree(message.getStructuredJson());
+            JsonNode turnId = metadata.get("turnId");
+            JsonNode suggestions = metadata.get("suggestions");
+            if (turnId == null || !turnId.isIntegralNumber()
+                    || !turnId.canConvertToInt() || turnId.asInt() <= 0
+                    || suggestions == null || !suggestions.isArray()) {
+                return null;
             }
-            Set<String> projected = new LinkedHashSet<>();
+            List<String> stored = new ArrayList<>();
             for (JsonNode suggestion : suggestions) {
                 if (!suggestion.isString()) {
                     continue;
                 }
-                String value = suggestion.asString().strip();
-                if (value.isBlank()
-                        || value.length() > AiAssistantStepGuard.MAX_SUGGESTION_CHARS
-                        || value.indexOf('\n') >= 0
-                        || value.indexOf('\r') >= 0
-                        || AiAssistantStepGuard.containsHandle(value)
-                        || AiAssistantStepGuard.containsControlInstruction(value)) {
-                    continue;
-                }
-                projected.add(value);
-                if (projected.size() == AiAssistantStepGuard.MAX_SUGGESTIONS) {
-                    break;
-                }
+                stored.add(suggestion.asString());
             }
-            return List.copyOf(projected);
+            return new StoredSuggestions(turnId.asInt(), List.copyOf(stored));
         } catch (JacksonException exception) {
-            return List.of();
+            return null;
         }
     }
 
@@ -161,6 +190,9 @@ public class AiChatCitationProjector {
     }
 
     private record StoredCitation(String handle, String kind, int id) {
+    }
+
+    private record StoredSuggestions(int turnId, List<String> values) {
     }
 
     private record RecordKey(String kind, int id) {

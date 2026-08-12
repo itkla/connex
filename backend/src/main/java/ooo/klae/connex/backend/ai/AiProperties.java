@@ -4,8 +4,11 @@ import java.time.Duration;
 import java.util.EnumMap;
 import java.util.Map;
 
+import jakarta.validation.constraints.Min;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.validation.annotation.Validated;
 
 import lombok.Data;
 
@@ -15,6 +18,7 @@ import lombok.Data;
  * enabled BYOP provider, so AI features fail closed.
  */
 @Data
+@Validated
 @Component
 @ConfigurationProperties(prefix = "connex.ai")
 public class AiProperties {
@@ -100,6 +104,7 @@ public class AiProperties {
     private int invocationMaxActiveFlights = 10000;
 
     /** Provider output-token cap for each Ask Connex model step. */
+    @Min(1)
     private int assistantMaxOutputTokens = 16384;
 
     /** Fixed worker count for request-detached AI generation. */

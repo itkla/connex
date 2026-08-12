@@ -151,6 +151,11 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
 
+    List<AiChatTurn> listTurnsByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("ids") List<Integer> ids);
+
     int markTurnRunning(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

@@ -126,7 +126,7 @@ class AiAssistantPromptAssemblerTest {
         resources.put("r1", new AiChatResourceRegistry.ResourceRef("person", 71));
         resources.put("r2", new AiChatResourceRegistry.ResourceRef("deal", 73));
         String metadata = assembler.finalMetadata(
-                List.of("r1"), List.of("Show the relationship history"), resources);
+                41, List.of("r1"), List.of("Show the relationship history"), resources);
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");
         priorAnswer.setContent("Ada Lovelace is advancing the Atlas renewal from r1.");
@@ -167,6 +167,7 @@ class AiAssistantPromptAssemblerTest {
     @Test
     void inaccessibleHistoricalResourcesOmitTheirAssistantAnswerFromReplay() {
         String metadata = assembler.finalMetadata(
+                41,
                 List.of("r1"),
                 List.of(),
                 Map.of("r1", new AiChatResourceRegistry.ResourceRef("person", 71)));

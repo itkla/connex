@@ -1,5 +1,5 @@
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
-import type { AiChatCitation, AiChatMessage, AiChatPageContext } from '@/app/lib/types';
+import type { AiChatCitation, AiChatMessage, AiChatPageContext, Page } from '@/app/lib/types';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -206,13 +206,61 @@ export function askConnexCitations(
     return unique;
 }
 
+/** Returns the ascending transcript pages required to assemble the newest full message window. */
+export function askConnexLatestMessagePages(total: number, pageSize: number): number[] {
+    const latestPage = Math.max(1, Math.ceil(total / pageSize));
+    if (latestPage === 1 || total % pageSize === 0) return [latestPage];
+    return [latestPage - 1, latestPage];
+}
+
+/** Orders the fetched tail pages and returns at most one full newest-message window. */
+export function askConnexLatestMessages(
+    pages: readonly (readonly AiChatMessage[])[],
+    pageSize: number,
+): AiChatMessage[] {
+    return pages
+        .flatMap((page) => page)
+        .toSorted((left, right) => left.seq - right.seq)
+        .slice(-pageSize);
+}
+
+/** Loads a stable newest-message window, retrying when concurrent writes move the page boundary. */
+export async function loadAskConnexLatestMessages(
+    initialPage: Page<AiChatMessage>,
+    pageSize: number,
+    loadPage: (page: number) => Promise<Page<AiChatMessage>>,
+): Promise<AiChatMessage[]> {
+    let expectedTotal = initialPage.total;
+    let reusableFirstPage: Page<AiChatMessage> | null = initialPage;
+    for (;;) {
+        const pageNumbers = askConnexLatestMessagePages(expectedTotal, pageSize);
+        const pages = await Promise.all(pageNumbers.map((page) => {
+            if (page === 1 && reusableFirstPage?.total === expectedTotal) {
+                return reusableFirstPage;
+            }
+            return loadPage(page);
+        }));
+        if (pages.every((page) => page.total === expectedTotal)) {
+            return askConnexLatestMessages(
+                pages.map((page) => page.items),
+                pageSize,
+            );
+        }
+        expectedTotal = Math.max(...pages.map((page) => page.total));
+        reusableFirstPage = null;
+    }
+}
+
 /** Returns safe follow-up actions from only the latest settled assistant answer. */
 export function latestAskConnexSuggestions(
     messages: readonly AiChatMessage[],
     working: boolean,
 ): string[] {
     if (working) return [];
-    const latest = messages.at(-1);
+    let latest: AiChatMessage | undefined;
+    for (const message of messages) {
+        if (latest === undefined || message.seq > latest.seq) latest = message;
+    }
     if (latest?.authorKind !== 'assistant' || !latest.suggestions?.length) return [];
     const unique = new Set<string>();
     for (const suggestion of latest.suggestions) {

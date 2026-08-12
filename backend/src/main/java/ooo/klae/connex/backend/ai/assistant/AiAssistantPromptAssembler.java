@@ -100,6 +100,7 @@ public class AiAssistantPromptAssembler {
 
     /** Serializes final citation metadata, including server-only resolution for later authorization. */
     public String finalMetadata(
+            int turnId,
             List<String> citations,
             List<String> suggestions,
             Map<String, AiChatResourceRegistry.ResourceRef> resources) {
@@ -122,6 +123,7 @@ public class AiAssistantPromptAssembler {
                 .toList();
         try {
             return objectMapper.writeValueAsString(Map.of(
+                    "turnId", turnId,
                     "citations", resolved,
                     "suggestions", suggestions,
                     "resources", replayResources));

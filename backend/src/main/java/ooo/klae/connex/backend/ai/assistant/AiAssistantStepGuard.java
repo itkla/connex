@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -131,14 +132,42 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
                 return "final_suggestions";
             }
             String value = suggestion.asString().strip();
-            if (value.isBlank() || value.length() > MAX_SUGGESTION_CHARS
-                    || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0
-                    || containsHandle(value) || containsControlInstruction(value)
+            if (!isSafeSuggestion(value)
                     || !uniqueSuggestions.add(value)) {
                 return "final_suggestions";
             }
         }
         return null;
+    }
+
+    static List<String> filterSuggestions(List<String> suggestions) {
+        if (suggestions == null || suggestions.isEmpty()) {
+            return List.of();
+        }
+        Set<String> filtered = new LinkedHashSet<>();
+        for (String suggestion : suggestions) {
+            if (suggestion == null) {
+                continue;
+            }
+            String value = suggestion.strip();
+            if (!isSafeSuggestion(value)) {
+                continue;
+            }
+            filtered.add(value);
+            if (filtered.size() == MAX_SUGGESTIONS) {
+                break;
+            }
+        }
+        return List.copyOf(filtered);
+    }
+
+    private static boolean isSafeSuggestion(String value) {
+        return !value.isBlank()
+                && value.length() <= MAX_SUGGESTION_CHARS
+                && value.indexOf('\n') < 0
+                && value.indexOf('\r') < 0
+                && !containsHandle(value)
+                && !containsControlInstruction(value);
     }
 
     static boolean containsHandle(String value) {

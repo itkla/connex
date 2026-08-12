@@ -36,6 +36,7 @@ import {
     askConnexMessageContent,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
+    loadAskConnexLatestMessages,
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
@@ -56,6 +57,8 @@ import type {
 } from '@/app/lib/types';
 
 type OpenSource = 'standard' | 'keyboard';
+
+const ASK_CONNEX_MESSAGE_PAGE_SIZE = 50;
 
 type AskConnexContextValue = {
     open: boolean;
@@ -213,12 +216,28 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         signal: AbortSignal,
         animateNew: boolean,
     ): Promise<AiChatSession | null> => {
-        const detail = await getAiChatSession(sessionId, { page: 1, size: 50 }, { signal });
+        const firstDetail = await getAiChatSession(
+            sessionId,
+            { page: 1, size: ASK_CONNEX_MESSAGE_PAGE_SIZE },
+            { signal },
+        );
+        if (signal.aborted) return null;
+        const nextMessages = await loadAskConnexLatestMessages(
+            firstDetail.messages,
+            ASK_CONNEX_MESSAGE_PAGE_SIZE,
+            async (page) => {
+                const detail = await getAiChatSession(
+                    sessionId,
+                    { page, size: ASK_CONNEX_MESSAGE_PAGE_SIZE },
+                    { signal },
+                );
+                return detail.messages;
+            },
+        );
         if (signal.aborted) return null;
         const known = new Set(messagesRef.current.map(
             (message) => `${message.seq}:${message.authorKind}:${message.content}`,
         ));
-        const nextMessages = detail.messages.items;
         messagesRef.current = nextMessages;
         setMessages(nextMessages);
         setFreshMessageIds(animateNew
@@ -226,10 +245,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
                 .map((message) => message.id))
             : new Set());
-        setActiveSession(detail.session);
+        setActiveSession(firstDetail.session);
         setLoadState('ready');
         setLoadError(null);
-        return detail.session;
+        return firstDetail.session;
     }, []);
 
     const pollDurableTurn = useCallback(async (

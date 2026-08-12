@@ -359,6 +359,18 @@
     FOR UPDATE
   </select>
 
+  <select id="listTurnsByIds" resultMap="turnResult">
+    SELECT id, workspace_id, session_id, requested_by_user_id, status,
+           terminal_reason, created_at, updated_at
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+  </select>
+
   <update id="markTurnRunning">
     UPDATE ai_chat_turn
     SET status = 'running', terminal_reason = NULL

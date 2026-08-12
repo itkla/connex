@@ -4,12 +4,15 @@ import {
     EMPTY_ASK_CONNEX_TURN,
     askConnexCitationHref,
     askConnexCitations,
+    askConnexLatestMessagePages,
+    askConnexLatestMessages,
     askConnexMessageContent,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
     extractAskConnexAttachments,
     groupAskConnexMessages,
     latestAskConnexSuggestions,
+    loadAskConnexLatestMessages,
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
@@ -165,6 +168,140 @@ describe('Ask Connex follow-up suggestions', () => {
     it('returns no actions when the assistant provides none', () => {
         expect(latestAskConnexSuggestions([{ ...assistant, suggestions: [] }], false)).toEqual([]);
         expect(latestAskConnexSuggestions([{ ...assistant, suggestions: null }], false)).toEqual([]);
+    });
+
+    it('uses the highest-sequence assistant answer beyond the first fifty messages', () => {
+        const firstPage = Array.from({ length: 50 }, (_, index) => ({
+            ...assistant,
+            id: index + 1,
+            seq: index + 1,
+            suggestions: index === 49 ? ['Stale follow-up'] : [],
+        }));
+        const latestUser = {
+            ...assistant,
+            id: 51,
+            seq: 51,
+            authorKind: 'user',
+            suggestions: null,
+        };
+        const latestAssistant = {
+            ...assistant,
+            id: 52,
+            seq: 52,
+            suggestions: ['Current follow-up'],
+        };
+        const transcript = askConnexLatestMessages(
+            [firstPage, [latestAssistant, latestUser]],
+            50,
+        );
+
+        expect(askConnexLatestMessagePages(52, 50)).toEqual([1, 2]);
+        expect(transcript.map((message) => message.seq)).toEqual(
+            Array.from({ length: 50 }, (_, index) => index + 3),
+        );
+        expect(latestAskConnexSuggestions(transcript, false)).toEqual(['Current follow-up']);
+    });
+
+    it('fetches only a full final page when the transcript ends on a boundary', () => {
+        expect(askConnexLatestMessagePages(100, 50)).toEqual([2]);
+    });
+
+    it('refetches the tail when a concurrent write moves a full page to a new page', async () => {
+        const calls: number[] = [];
+        let firstTailRead = true;
+        const messages = await loadAskConnexLatestMessages(
+            {
+                items: Array.from({ length: 50 }, (_, index) => ({
+                    ...assistant,
+                    id: index + 1,
+                    seq: index + 1,
+                })),
+                total: 100,
+            },
+            50,
+            async (page) => {
+                calls.push(page);
+                if (page === 2 && firstTailRead) {
+                    firstTailRead = false;
+                    return {
+                        items: Array.from({ length: 50 }, (_, index) => ({
+                            ...assistant,
+                            id: index + 51,
+                            seq: index + 51,
+                        })),
+                        total: 101,
+                    };
+                }
+                if (page === 2) {
+                    return {
+                        items: Array.from({ length: 50 }, (_, index) => ({
+                            ...assistant,
+                            id: index + 51,
+                            seq: index + 51,
+                        })),
+                        total: 101,
+                    };
+                }
+                return {
+                    items: [{ ...assistant, id: 101, seq: 101, suggestions: ['Current follow-up'] }],
+                    total: 101,
+                };
+            },
+        );
+
+        expect(calls).toEqual([2, 2, 3]);
+        expect(messages.map((message) => message.seq)).toEqual(
+            Array.from({ length: 50 }, (_, index) => index + 52),
+        );
+        expect(latestAskConnexSuggestions(messages, false)).toEqual(['Current follow-up']);
+    });
+
+    it('refetches both tail pages when concurrent writes cross from a partial page', async () => {
+        const calls: number[] = [];
+        let firstTailRead = true;
+        const messages = await loadAskConnexLatestMessages(
+            {
+                items: Array.from({ length: 50 }, (_, index) => ({
+                    ...assistant,
+                    id: index + 1,
+                    seq: index + 1,
+                })),
+                total: 99,
+            },
+            50,
+            async (page) => {
+                calls.push(page);
+                if (page === 2 && firstTailRead) {
+                    firstTailRead = false;
+                    return {
+                        items: Array.from({ length: 50 }, (_, index) => ({
+                            ...assistant,
+                            id: index + 51,
+                            seq: index + 51,
+                        })),
+                        total: 101,
+                    };
+                }
+                if (page === 2) {
+                    return {
+                        items: Array.from({ length: 50 }, (_, index) => ({
+                            ...assistant,
+                            id: index + 51,
+                            seq: index + 51,
+                        })),
+                        total: 101,
+                    };
+                }
+                return {
+                    items: [{ ...assistant, id: 101, seq: 101, suggestions: ['Current follow-up'] }],
+                    total: 101,
+                };
+            },
+        );
+
+        expect(calls).toEqual([2, 2, 3]);
+        expect(messages.at(-1)?.seq).toBe(101);
+        expect(latestAskConnexSuggestions(messages, false)).toEqual(['Current follow-up']);
     });
 });
 

@@ -295,8 +295,10 @@ public class AiChatAgentLoopService {
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
                 resources.requireKnownCitations(finalAnswer.citations());
+                List<String> suggestions = AiAssistantStepGuard.filterSuggestions(
+                        finalAnswer.suggestions());
                 String metadata = promptAssembler.finalMetadata(
-                        finalAnswer.citations(), finalAnswer.suggestions(), resources.snapshot());
+                        turn.turnId(), finalAnswer.citations(), suggestions, resources.snapshot());
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, finalAnswer.text(), metadata, inputTokens, outputTokens);

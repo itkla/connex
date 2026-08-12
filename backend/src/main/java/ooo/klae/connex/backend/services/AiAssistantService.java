@@ -113,7 +113,7 @@ public class AiAssistantService {
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
         auditAdministrativeReads(workspaceId, userId, List.of(session));
-        return detail(workspaceId, id, messageSize, offset, session);
+        return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
     /** Returns one retained session and records the metadata-only administrative read. */
@@ -131,7 +131,7 @@ public class AiAssistantService {
         }
         requireStillRetained(workspaceId, userId, session);
         auditRetainedRead(session);
-        return detail(workspaceId, id, messageSize, offset, session);
+        return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
     /**
@@ -151,6 +151,7 @@ public class AiAssistantService {
 
     private AiChatSessionDetailDto detail(
             int workspaceId,
+            int userId,
             int id,
             int messageSize,
             int offset,
@@ -158,11 +159,13 @@ public class AiAssistantService {
         List<AiChatMessage> storedMessages = chatMapper.listMessages(
             workspaceId, id, messageSize, offset);
         var citations = citationProjector.project(workspaceId, storedMessages);
+        var suggestions = citationProjector.suggestions(
+                workspaceId, id, userId, storedMessages);
         List<AiChatMessageDto> messages = storedMessages.stream()
             .map(message -> AiChatMessageDto.from(
                     message,
                     citations.getOrDefault(message.getId(), List.of()),
-                    citationProjector.suggestions(message)))
+                    suggestions.getOrDefault(message.getId(), List.of())))
             .toList();
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),

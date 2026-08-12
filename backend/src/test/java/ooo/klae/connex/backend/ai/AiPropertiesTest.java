@@ -2,21 +2,34 @@ package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.validation.autoconfigure.ValidationAutoConfiguration;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.mock.env.MockEnvironment;
 
 class AiPropertiesTest {
+
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(
+                    ConfigurationPropertiesAutoConfiguration.class,
+                    ValidationAutoConfiguration.class))
+            .withUserConfiguration(AiProperties.class);
 
     @Test
     void instanceAiRequiresExplicitOperatorOptIn() throws IOException {
@@ -98,5 +111,21 @@ class AiPropertiesTest {
         assertTrue(properties.isFeatureEnabled(AiFeature.REPORT_NARRATIVE));
         assertEquals(7777, properties.getAssistantMaxOutputTokens());
         assertEquals(Duration.ofMinutes(15), properties.getInvocationQuotaWindow());
+    }
+
+    @Test
+    void nonPositiveAssistantOutputTokenLimitsFailAtStartup() {
+        contextRunner.run(context -> assertNull(context.getStartupFailure()));
+        contextRunner
+                .withPropertyValues("connex.ai.assistant-max-output-tokens=1")
+                .run(context -> assertNull(context.getStartupFailure()));
+        for (String invalid : List.of("0", "-1")) {
+            contextRunner
+                    .withPropertyValues(
+                            "connex.ai.assistant-max-output-tokens=" + invalid)
+                    .run(context -> assertNotNull(
+                            context.getStartupFailure(),
+                            "Expected startup failure for output-token limit " + invalid));
+        }
     }
 }
