@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
@@ -9,10 +9,21 @@ import GlobalSearch from "@/app/components/GlobalSearch";
 import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import MobileBottomBar from "@/app/components/MobileBottomBar";
 import { useAskConnex } from "@/app/components/ask-connex/AskConnexProvider";
-import { useIsMobile } from "@/app/hooks/useIsMobile";
 import { useSidebarMode } from "@/app/hooks/useSidebarMode";
 import { instant, springSmooth } from "@/app/lib/motion";
 import { useTranslations } from "next-intl";
+
+const ASK_CONNEX_PUSH_QUERY = "(min-width: 1024px)";
+
+function subscribeAskConnexPush(onChange: () => void): () => void {
+    const mediaQuery = window.matchMedia(ASK_CONNEX_PUSH_QUERY);
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
+}
+
+function getAskConnexPushSnapshot(): boolean {
+    return window.matchMedia(ASK_CONNEX_PUSH_QUERY).matches;
+}
 
 export default function ContentShell({
     sidebar,
@@ -23,7 +34,11 @@ export default function ContentShell({
 }) {
     const { mode, toggle } = useSidebarMode();
     const askConnex = useAskConnex();
-    const isMobile = useIsMobile();
+    const pushesAskConnex = useSyncExternalStore(
+        subscribeAskConnexPush,
+        getAskConnexPushSnapshot,
+        () => false,
+    );
     const reduceMotion = useReducedMotion() ?? false;
     const [mobileOpen, setMobileOpen] = useState(false);
     const pathname = usePathname();
@@ -90,7 +105,7 @@ export default function ContentShell({
                 className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_0rem] grid-rows-[minmax(0,1fr)]"
                 initial={false}
                 animate={{
-                    gridTemplateColumns: askConnex.open && !isMobile
+                    gridTemplateColumns: askConnex.open && pushesAskConnex
                         ? "minmax(0, 1fr) 24rem"
                         : "minmax(0, 1fr) 0rem",
                 }}

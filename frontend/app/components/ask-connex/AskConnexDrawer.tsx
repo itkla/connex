@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ArchiveBoxIcon,
     ArrowDownIcon,
-    ArrowPathIcon,
     ArrowUpIcon,
     CheckIcon,
     ClockIcon,
@@ -23,6 +22,10 @@ import { useFormatter } from 'next-intl';
 import { createPortal } from 'react-dom';
 import { motion, useReducedMotion } from 'motion/react';
 
+import AccessDenied from '@/app/components/AccessDenied';
+import { EmptyState } from '@/app/components/EmptyState';
+import ErrorState from '@/app/components/ErrorState';
+import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
 import type { AskConnexAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
@@ -485,47 +488,49 @@ function ConversationSurface({
                             ) : null}
                             {loadState === 'error' && loadError ? (
                                 <MessageScrollerItem messageId="load-error">
-                                    <div role="alert" className="flex items-center gap-2 px-4 py-4 text-xs text-muted-foreground">
-                                        <ExclamationCircleIcon className="size-4 shrink-0 text-destructive" />
-                                        <span className="min-w-0 flex-1">{labels.loadError}</span>
-                                        <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
-                                            <ArrowPathIcon className="size-3.5" />
-                                            {labels.retry}
-                                        </Button>
-                                    </div>
+                                    <SectionBoundary resetKey={activeSession?.id ?? 'new'}>
+                                        <div className="[&>div]:min-h-0 [&>div]:px-4 [&>div]:py-12">
+                                            <ErrorState error={loadError} retry={onRetry} showBack={false} />
+                                        </div>
+                                    </SectionBoundary>
                                 </MessageScrollerItem>
                             ) : null}
-                            {loadState === 'forbidden' && unavailable ? (
-                                <MessageScrollerItem messageId="forbidden">
-                                    <div role="status" className="px-4 py-4 text-xs leading-relaxed text-muted-foreground">
-                                        <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
-                                        {unavailable.body}
-                                    </div>
+                            {loadState === 'forbidden' ? (
+                                <MessageScrollerItem messageId="forbidden" className="p-4">
+                                    <AccessDenied
+                                        variant="inline"
+                                        title={unavailable?.title}
+                                        body={unavailable?.body ?? ''}
+                                    />
                                 </MessageScrollerItem>
                             ) : null}
                             {loadState === 'ready' && messages.length === 0 ? (
                                 <MessageScrollerItem messageId="empty">
-                                    <div className="flex flex-col items-center px-5 py-12 text-center">
-                                        <SparklesIcon className="size-5 text-muted-foreground" />
-                                        <p className="mt-3 text-sm font-medium text-foreground">{labels.emptyTitle}</p>
-                                        <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">{labels.emptyBody}</p>
-                                        <div className="mt-5 flex w-full max-w-sm flex-col gap-1.5">
-                                            {starterPrompts.map((prompt) => (
-                                                <Button
-                                                    key={prompt}
-                                                    type="button"
-                                                    variant="ghost"
-                                                    className="h-auto justify-start whitespace-normal bg-muted/60 py-2 text-left"
-                                                    onClick={() => onComposerChange(prompt)}
-                                                >
-                                                    {prompt}
-                                                </Button>
-                                            ))}
-                                        </div>
-                                        <p className="mt-5 max-w-sm text-xs leading-relaxed text-muted-foreground">
-                                            {labels.disclosureCreation}
-                                        </p>
-                                    </div>
+                                    <EmptyState
+                                        icon={SparklesIcon}
+                                        title={labels.emptyTitle}
+                                        body={labels.emptyBody}
+                                        tone="brand"
+                                        className="border-0 bg-transparent px-4 py-12"
+                                        action={(
+                                            <div className="flex w-full max-w-sm flex-col gap-1.5">
+                                                {starterPrompts.map((prompt) => (
+                                                    <Button
+                                                        key={prompt}
+                                                        type="button"
+                                                        variant="ghost"
+                                                        className="h-auto justify-start whitespace-normal bg-muted/60 py-2 text-left"
+                                                        onClick={() => onComposerChange(prompt)}
+                                                    >
+                                                        {prompt}
+                                                    </Button>
+                                                ))}
+                                                <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
+                                                    {labels.disclosureCreation}
+                                                </p>
+                                            </div>
+                                        )}
+                                    />
                                 </MessageScrollerItem>
                             ) : null}
                             {loadState === 'ready' && messages.length > 0 ? (
@@ -638,6 +643,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onRename,
     } = props;
     const reduceMotion = useReducedMotion() ?? false;
+    const desktopTriggerRef = useRef<HTMLButtonElement>(null);
     const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
     const [renameOpen, setRenameOpen] = useState(false);
     const [renameValue, setRenameValue] = useState('');
@@ -658,10 +664,16 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
             if (activeElement instanceof HTMLElement
                 && activeElement.closest('[data-slot="dropdown-menu-content"], [data-slot="dialog-content"]')) return;
             onKeyboardClose();
+            desktopTriggerRef.current?.focus();
         };
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
     }, [isMobile, onKeyboardClose, open]);
+
+    const closeDesktopPanel = useCallback(() => {
+        onOpenChange(false);
+        desktopTriggerRef.current?.focus();
+    }, [onOpenChange]);
 
     const beginRename = () => {
         if (!activeSession) return;
@@ -709,12 +721,13 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         <>
             {showTab ? (
                 <AskConnexTab
+                    buttonRef={desktopTriggerRef}
                     label={labels.title}
                     closeLabel={labels.close}
                     open={open}
                     working={props.turn.phase === 'accepted' || props.turn.phase === 'running'}
                     onOpen={() => onOpenChange(true)}
-                    onClose={() => onOpenChange(false)}
+                    onClose={closeDesktopPanel}
                 />
             ) : null}
             <motion.aside
@@ -739,7 +752,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                             variant="ghost"
                             size="icon-sm"
                             aria-label={labels.close}
-                            onClick={() => onOpenChange(false)}
+                            onClick={closeDesktopPanel}
                         >
                             <XMarkIcon className="size-4" />
                         </Button>
