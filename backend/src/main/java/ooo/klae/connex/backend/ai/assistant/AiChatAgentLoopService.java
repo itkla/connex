@@ -100,7 +100,7 @@ public class AiChatAgentLoopService {
                     0, "state", null, "running", null));
             AiChatResourceRegistry resources = new AiChatResourceRegistry();
             MaskingContext maskingContext = new MaskingContext();
-            AiChatMemory memory = memoryService.prepare(turn, maskingContext);
+            AiChatMemory memory = memoryService.prepare(turn, maskingContext, deadline);
             AiChatAttachmentContext attachmentContext =
                     attachmentContextService.prepare(turn, deadline);
             List<AiChatMessage> history = memory.history();
@@ -118,6 +118,7 @@ public class AiChatAgentLoopService {
             Map<String, AiAssistantToolResult> toolResultCache = new HashMap<>();
             Set<String> seenToolResults = new HashSet<>();
             List<String> reasoningParts = new ArrayList<>();
+            boolean reasoningRejected = false;
             AiStructuredRepair repair = null;
             int noProgressSteps = 0;
             int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
@@ -164,9 +165,12 @@ public class AiChatAgentLoopService {
                             });
                 }
                 AiStructuredOutcome<AiAssistantStep> outcome = attempt.outcome();
-                if (aiProperties.isAssistantThinkingEnabled()) {
-                    attempt.reasoning().ifPresent(reasoning ->
-                            appendReasoning(reasoningParts, reasoning));
+                if (aiProperties.isAssistantThinkingEnabled() && !reasoningRejected
+                        && attempt.reasoning().isPresent()
+                        && !appendReasoning(
+                                reasoningParts, attempt.reasoning().orElseThrow())) {
+                    reasoningParts.clear();
+                    reasoningRejected = true;
                 }
                 requireWorkspaceEnabled(turn);
                 inputTokens = addTokens(inputTokens, inputTokens(outcome));
@@ -523,15 +527,17 @@ public class AiChatAgentLoopService {
                 : current + additional;
     }
 
-    private static void appendReasoning(List<String> reasoningParts, String reasoning) {
+    private static boolean appendReasoning(
+            List<String> reasoningParts, String reasoning) {
         int used = reasoningParts.stream().mapToInt(String::length).sum()
-                + Math.max(0, reasoningParts.size() - 1) * 2;
+                + reasoningParts.size() * 2;
         if (reasoning.isBlank()) {
-            return;
+            return true;
         }
         if (reasoning.length() > MAX_REASONING_CHARS - used) {
-            throw new AiAssistantLoopException("malformed_output", "reasoning_length");
+            return false;
         }
         reasoningParts.add(reasoning);
+        return true;
     }
 }

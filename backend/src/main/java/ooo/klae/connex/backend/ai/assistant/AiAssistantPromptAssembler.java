@@ -31,6 +31,8 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 @RequiredArgsConstructor
 public class AiAssistantPromptAssembler {
+    private static final int MAX_SUMMARY_IDENTIFIERS = 200;
+    private static final int MAX_SUMMARY_IDENTIFIER_CHARS = 1_000;
     private static final String CRM_DATA_BEGIN = "CRM_DATA_BEGIN";
     private static final String CRM_DATA_END = "CRM_DATA_END";
     private static final String USER_REQUEST_BEGIN = "USER_REQUEST_BEGIN";
@@ -290,12 +292,10 @@ public class AiAssistantPromptAssembler {
         }
         Map<String, Object> data = new LinkedHashMap<>();
         if (existingSummary != null) {
-            String content = reauthorizeSummary(existingSummary, resources);
-            if (content == null) {
-                throw new AiAssistantLoopException(
-                        "summary_compaction_failed", "summary_compaction_failed");
+            String content = reauthorizeSummary(existingSummary, resources, context);
+            if (content != null) {
+                data.put("priorSummary", MaskingEngine.maskFreeText(content, context));
             }
-            data.put("priorSummary", MaskingEngine.maskFreeText(content, context));
         }
         data.put("messages", transcript);
         prompt.userTurn(crmData("conversation_compaction", data, context));
@@ -359,7 +359,7 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiChatResourceRegistry resources) {
         if ("system".equals(message.getAuthorKind())) {
-            String summary = reauthorizeSummary(message, resources);
+            String summary = reauthorizeSummary(message, resources, context);
             if (summary == null) {
                 return;
             }
@@ -425,7 +425,9 @@ public class AiAssistantPromptAssembler {
     }
 
     private String reauthorizeSummary(
-            AiChatMessage message, AiChatResourceRegistry resources) {
+            AiChatMessage message,
+            AiChatResourceRegistry resources,
+            MaskingContext context) {
         if (message.getStructuredJson() == null) {
             return null;
         }
@@ -447,13 +449,22 @@ public class AiAssistantPromptAssembler {
                 return null;
             }
         }
+        JsonNode storedIdentifiers = metadata.get("identifiers");
+        if (storedIdentifiers == null || !storedIdentifiers.isArray()
+                || storedIdentifiers.size() > MAX_SUMMARY_IDENTIFIERS) {
+            return null;
+        }
+        for (JsonNode identifier : storedIdentifiers) {
+            StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+            MaskingEngine.maskField(stored.kind(), stored.value(), context);
+        }
         return message.getContent();
     }
 
     private String reauthorizeUser(
             AiChatMessage message, AiChatResourceRegistry resources) {
         if (message.getStructuredJson() == null) {
-            return null;
+            return message.getContent();
         }
         JsonNode metadata;
         try {
@@ -497,6 +508,26 @@ public class AiAssistantPromptAssembler {
             throw new IllegalStateException("Assistant resource metadata is invalid");
         }
         return new StoredResourceIdentity(kind.asString(), id.asInt());
+    }
+
+    private static StoredSummaryIdentifier storedSummaryIdentifier(JsonNode identifier) {
+        JsonNode kind = identifier.get("kind");
+        JsonNode value = identifier.get("value");
+        if (kind == null || !kind.isString()
+                || value == null || !value.isString() || value.asString().isBlank()
+                || value.asString().length() > MAX_SUMMARY_IDENTIFIER_CHARS) {
+            throw new IllegalStateException("Assistant summary identifier metadata is invalid");
+        }
+        EntityKind entityKind = switch (kind.asString()) {
+            case "person" -> EntityKind.PERSON;
+            case "company" -> EntityKind.COMPANY;
+            case "deal" -> EntityKind.DEAL;
+            case "email" -> EntityKind.EMAIL;
+            case "phone" -> EntityKind.PHONE;
+            default -> throw new IllegalStateException(
+                    "Assistant summary identifier metadata is invalid");
+        };
+        return new StoredSummaryIdentifier(entityKind, value.asString());
     }
 
     private static String remapHandles(String content, Map<String, String> handles) {
@@ -641,6 +672,9 @@ public class AiAssistantPromptAssembler {
     }
 
     private record StoredResourceIdentity(String kind, int id) {
+    }
+
+    private record StoredSummaryIdentifier(EntityKind kind, String value) {
     }
 
     private record ReplayAnswer(String content, List<String> citations) {

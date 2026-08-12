@@ -341,20 +341,16 @@ public class AiInvocationService {
             AiCompletionResult result = raw.result();
             CompletionNormalizer.CapturedCompletion captured =
                     CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
-            if (captured.ambiguous()
+            if ((captured.ambiguous() && captured.answer().isBlank())
                     || CompletionNormalizer.containsReasoningTag(captured.answer())) {
                 return malformed(
                         raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
                         "reasoning_boundary", "", false, false);
             }
             String stripped = captured.answer();
-            ReasoningNormalization reasoning = normalizeReasoning(
-                    captured.reasoning(), invocation);
-            if (reasoning.rejectionReason() != null) {
-                return malformed(
-                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
-                        reasoning.rejectionReason(), stripped, false, false);
-            }
+            ReasoningNormalization reasoning = captured.ambiguous()
+                    ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
+                    : normalizeReasoning(captured.reasoning(), invocation);
             ObjectNode object = AiJson.extractObject(stripped, objectMapper);
             if (object == null) {
                 return malformed(
@@ -387,7 +383,9 @@ public class AiInvocationService {
             return new AiStructuredRepairAttempt<>(
                     new AiStructuredOutcome.Parsed<>(value, warnings,
                             result.inputTokens(), result.outputTokens(), result.stopReason()),
-                    Optional.empty(), reasoning.content());
+                    Optional.empty(), reasoning.rejectionReason() == null
+                            ? reasoning.content()
+                            : Optional.empty());
         }
     }
 

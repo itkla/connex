@@ -67,7 +67,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 return 32_768;
             }
         }
-        return 4_096;
+        return 32_768;
     }
 
     private static boolean isLargeGemmaThree(String modelId) {

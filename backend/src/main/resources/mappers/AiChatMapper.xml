@@ -457,6 +457,7 @@
       WHERE workspace_id = #{workspaceId}
         AND session_id = #{sessionId}
         AND seq &lt;= #{maxSeq}
+        AND author_kind IN ('user', 'assistant')
       ORDER BY seq DESC
       LIMIT #{limit}
     ) recent

@@ -278,6 +278,76 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
+    void durableSummaryIdentifiersAreRemaskedWithTheFreshEgressContext() throws Exception {
+        AiChatMessage summary = new AiChatMessage();
+        summary.setAuthorKind("system");
+        summary.setContent(
+                "Former Contact owns the renewal; email former@example.com for details.");
+        summary.setStructuredJson("""
+                {"kind":"history_summary","sourceFromSeq":1,"throughSeq":4,
+                "resources":[],
+                "identifiers":[{"kind":"person","value":"Former Contact"}]}
+                """);
+        MaskingContext context = new MaskingContext();
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(summary),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                context,
+                new AiChatResourceRegistry());
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        assertFalse(serialized.contains("Former Contact"));
+        assertFalse(serialized.contains("former@example.com"));
+        assertTrue(serialized.contains("{{P1}}"));
+        assertTrue(serialized.contains("[redacted]"));
+    }
+
+    @Test
+    void durableSummarySpecialCareTextIsOmittedBeforeEgress() throws Exception {
+        AiChatMessage summary = new AiChatMessage();
+        summary.setAuthorKind("system");
+        summary.setContent("A contact discussed a diagnosis during the prior turn.");
+        summary.setStructuredJson("""
+                {"kind":"history_summary","sourceFromSeq":1,"throughSeq":4,
+                "resources":[],"identifiers":[]}
+                """);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(summary),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        assertFalse(serialized.contains("diagnosis"));
+        assertTrue(serialized.contains("[omitted by policy]"));
+    }
+
+    @Test
+    void legacySummaryWithoutIdentifierProvenanceIsNotSentToTheProvider() {
+        AiChatMessage summary = new AiChatMessage();
+        summary.setAuthorKind("system");
+        summary.setContent("Former Contact remains in an unproven legacy summary.");
+        summary.setStructuredJson("""
+                {"kind":"history_summary","sourceFromSeq":1,"throughSeq":4,
+                "resources":[]}
+                """);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(summary),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertTrue(prompt.getMessages().isEmpty());
+    }
+
+    @Test
     void compactionRejectsAssistantSourceWhoseResourcesAreNoLongerAuthorized() {
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");
@@ -329,6 +399,25 @@ class AiAssistantPromptAssemblerTest {
                         List.of(priorRequest),
                         new MaskingContext(),
                         new AiChatResourceRegistry()));
+    }
+
+    @Test
+    void compactionAcceptsLegacyUserSourceWithoutStructuredMetadata() throws Exception {
+        AiChatMessage legacyRequest = new AiChatMessage();
+        legacyRequest.setAuthorKind("user");
+        legacyRequest.setContent(
+                "Keep the quarterly planning preference; contact legacy@example.com later.");
+
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(legacyRequest),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        assertTrue(serialized.contains("quarterly planning preference"));
+        assertFalse(serialized.contains("legacy@example.com"));
+        assertTrue(serialized.contains("[redacted]"));
     }
 
     @Test

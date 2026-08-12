@@ -72,7 +72,7 @@ class OpenAiCompatibleAdapterTest {
     void providerId_registersOpenAiCompatibleAdapter() {
         assertEquals("openai_compatible", adapter.providerId());
         assertEquals(AiReasoningMode.TAGGED, adapter.reasoningCapability(null));
-        assertEquals(4_096, adapter.contextWindowTokens(null));
+        assertEquals(32_768, adapter.contextWindowTokens(null));
         assertEquals(128_000, adapter.contextWindowTokens(
                 target("https://api.example.test/v1", false, "gemma-4-31b-it")));
         assertEquals(128_000, adapter.contextWindowTokens(
@@ -85,6 +85,25 @@ class OpenAiCompatibleAdapterTest {
                 target("https://api.example.test/v1", false, "gemma-3-270m-it")));
         assertEquals(32_768, adapter.contextWindowTokens(
                 target("https://api.example.test/v1", false, "gemma-3n-e4b-it")));
+    }
+
+    @Test
+    void nonGemmaModelRetainsUsableCapabilitiesAndCompletesAStructuredTurn()
+            throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn(validResponse());
+        AiProviderTarget llama = target(
+                "https://api.example.test/v1", false, "llama3.3:70b");
+
+        AiCompletionResult result = adapter.complete(schemaRequest());
+
+        assertEquals(32_768, adapter.contextWindowTokens(llama));
+        assertEquals("Done", result.text());
+        assertEquals(
+                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                result.structuredOutputEnforcement());
     }
 
     @Test

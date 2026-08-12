@@ -219,20 +219,30 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void recentReplayStopsAtTheQueuedMessageSequence() {
+    void recentReplayStopsAtQueuedSequenceWithoutCountingTheSummaryRow() {
         User owner = newUser();
         AiChatSession session = session(workspace, owner, "Bounded replay", "shared");
         message(session, owner, 1, "before");
-        message(session, owner, 2, "queued request");
-        message(session, owner, 3, "later participant message");
+        AiChatMessage summary = new AiChatMessage();
+        summary.setWorkspaceId(workspace.getId());
+        summary.setSessionId(session.getId());
+        summary.setSeq(2);
+        summary.setAuthorKind("system");
+        summary.setContent("durable summary");
+        summary.setStructuredJson(
+                "{\"kind\":\"history_summary\",\"sourceFromSeq\":1,"
+                        + "\"throughSeq\":1,\"resources\":[]}");
+        chatMapper.insertMessage(summary);
+        message(session, owner, 3, "queued request");
+        message(session, owner, 4, "later participant message");
 
         List<AiChatMessage> replay = chatMapper.listRecentMessages(
-                workspace.getId(), session.getId(), 2, 50);
+                workspace.getId(), session.getId(), 3, 50);
         List<AiChatMessage> latestAtBoundary = chatMapper.listRecentMessages(
-                workspace.getId(), session.getId(), 2, 1);
+                workspace.getId(), session.getId(), 3, 1);
 
-        assertEquals(List.of(1, 2), replay.stream().map(AiChatMessage::getSeq).toList());
-        assertEquals(List.of(2), latestAtBoundary.stream().map(AiChatMessage::getSeq).toList());
+        assertEquals(List.of(1, 3), replay.stream().map(AiChatMessage::getSeq).toList());
+        assertEquals(List.of(3), latestAtBoundary.stream().map(AiChatMessage::getSeq).toList());
     }
 
     @Test

@@ -567,7 +567,8 @@ class AiInvocationServiceTest {
     }
 
     @Test
-    void completeStructuredRepairableFailsClosedOnAmbiguousReasoningBoundary() throws Exception {
+    void completeStructuredRepairableDropsAmbiguousReasoningAndKeepsTheValidAnswer()
+            throws Exception {
         AiInvocation invocation = reasoningInvocation("Summarize relationship state");
         providerReturns(new AiCompletionResult(
                 "<thinking>tagged plan</thinking>{\"rationale\":\"Ping {{P1}}.\"}",
@@ -586,7 +587,7 @@ class AiInvocationServiceTest {
                         AiRawOutputGuard.PERMIT_ALL,
                         schema);
 
-        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertEquals("Ping Mina Patel.", asParsed(attempt.outcome()).value().rationale());
         assertTrue(attempt.reasoning().isEmpty());
         assertTrue(attempt.repair().isEmpty());
     }
@@ -652,7 +653,8 @@ class AiInvocationServiceTest {
     }
 
     @Test
-    void completeStructuredRepairableRejectsReasoningWithDirectIdentifierLeak() throws Exception {
+    void completeStructuredRepairableDropsRejectedReasoningAndKeepsTheValidAnswer()
+            throws Exception {
         AiInvocation invocation = reasoningInvocation("Summarize relationship state");
         providerReturns(new AiCompletionResult(
                 "{\"rationale\":\"Ping {{P1}}.\"}",
@@ -671,7 +673,7 @@ class AiInvocationServiceTest {
                         AiRawOutputGuard.PERMIT_ALL,
                         schema);
 
-        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertEquals("Ping Mina Patel.", asParsed(attempt.outcome()).value().rationale());
         assertTrue(attempt.reasoning().isEmpty());
     }
 

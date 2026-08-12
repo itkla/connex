@@ -38,14 +38,14 @@ class CompletionNormalizerTest {
     }
 
     @Test
-    void failsClosedWhenNativeAndTaggedBoundariesConflict() {
+    void ambiguousNativeAndTaggedReasoningKeepsTheSeparatelyBoundedAnswer() {
         CompletionNormalizer.CapturedCompletion captured = CompletionNormalizer.captureReasoning(
                 "<thinking>tagged reasoning</thinking>{\"final\":\"answer\"}",
                 "native reasoning");
 
         assertTrue(captured.ambiguous());
         assertEquals("", captured.reasoning());
-        assertEquals("", captured.answer());
+        assertEquals("{\"final\":\"answer\"}", captured.answer());
     }
 
     @Test

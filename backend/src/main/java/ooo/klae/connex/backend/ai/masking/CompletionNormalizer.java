@@ -50,8 +50,9 @@ public final class CompletionNormalizer {
 
     /**
      * Captures either a native reasoning channel or consecutive leading tagged blocks. Native and
-     * tagged reasoning in the same response, or an unbalanced tagged boundary, is ambiguous and
-     * discards both regions.
+     * tagged reasoning in the same response is ambiguous, so it discards both reasoning regions
+     * while retaining the separately bounded answer. An unbalanced tagged boundary discards the
+     * whole output because no safe answer boundary exists.
      * @param modelOutput provider answer channel
      * @param nativeReasoning provider-native reasoning channel, or an empty string
      * @return separated answer and reasoning with an explicit ambiguity signal
@@ -93,7 +94,7 @@ public final class CompletionNormalizer {
             remaining = remaining.substring(afterClose);
         }
         if (!nativeText.isEmpty() && !taggedReasoning.isEmpty()) {
-            return new CapturedCompletion("", "", true);
+            return new CapturedCompletion(remaining.strip(), "", true);
         }
         String reasoning = nativeText.isEmpty() ? taggedReasoning.toString() : nativeText;
         return new CapturedCompletion(remaining.strip(), reasoning, false);
