@@ -91,6 +91,7 @@ export default function CommentsSection({
     const highlightedCommentId = searchParams.get('comment');
     const linkedThreadParam = searchParams.get('thread');
     const linkedThreadFetched = useRef(false);
+    const appendedThreadId = useRef<number | null>(null);
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
 
     useEffect(() => {
@@ -122,12 +123,14 @@ export default function CommentsSection({
         if (threads.some((thread) => thread.id === linkedThreadId)) return;
         getCommentThread(linkedThreadId)
             .then((thread) => {
+                if (thread.targetType !== targetType || thread.targetId !== targetId) return;
+                appendedThreadId.current = thread.id;
                 setThreads((prev) =>
                     prev.some((existing) => existing.id === thread.id) ? prev : [...prev, thread],
                 );
             })
             .catch(() => undefined);
-    }, [loaded, loadError, threads, linkedThreadParam]);
+    }, [loaded, loadError, threads, linkedThreadParam, targetType, targetId]);
 
     useEffect(() => {
         if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
@@ -163,9 +166,12 @@ export default function CommentsSection({
         const generation = fetchGeneration.current;
         setLoadingMore(true);
         try {
+            const pagedCount = threads.filter(
+                (thread) => thread.id !== appendedThreadId.current,
+            ).length;
             const data = await getCommentThreads(targetType, targetId, {
                 limit: PAGE_SIZE,
-                offset: threads.length,
+                offset: pagedCount,
                 state: 'all',
             });
             if (generation !== fetchGeneration.current) return;

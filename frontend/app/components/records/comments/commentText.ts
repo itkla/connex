@@ -14,3 +14,18 @@ export function commentPlainText(value: string): string {
         .replace(/^>\s?/gm, '')
         .trim();
 }
+
+/** Wire shape of a persisted comment composer draft. */
+export type CommentDraft = {
+    content: string;
+};
+
+/** Narrow an unknown draft payload restored from session storage. */
+export function isCommentDraft(value: unknown): value is CommentDraft {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'content' in value &&
+        typeof (value as { content: unknown }).content === 'string'
+    );
+}

@@ -7,15 +7,14 @@ import { LoaderCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
+import {
+    isCommentDraft,
+    type CommentDraft,
+} from '@/app/components/records/comments/commentText';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { Button } from '@/components/ui/button';
 
-type CommentDraft = {
-    content: string;
-};
-
-/** Defer draft restoration past the hydration tick, mirroring DraftResumeBridge. */
-const DRAFT_RESTORE_DELAY_MS = 250;
+const POST_HYDRATION_RESTORE_DELAY_MS = 250;
 
 const DISABLED_DRAFT_KEY: DraftKeyParts = {
     userId: null,
@@ -23,15 +22,6 @@ const DISABLED_DRAFT_KEY: DraftKeyParts = {
     formType: 'comment',
     scope: 'disabled',
 };
-
-function isCommentDraft(value: unknown): value is CommentDraft {
-    return (
-        typeof value === 'object' &&
-        value !== null &&
-        'content' in value &&
-        typeof (value as { content: unknown }).content === 'string'
-    );
-}
 
 type Props = {
     value: string;
@@ -106,7 +96,7 @@ export default function CommentComposer({
                 }
             }
             restoreSettled.current = true;
-        }, DRAFT_RESTORE_DELAY_MS);
+        }, POST_HYDRATION_RESTORE_DELAY_MS);
         return () => window.clearTimeout(timer);
     }, [draftOrigin]);
 

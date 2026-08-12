@@ -12,7 +12,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import type { RecordComment, RecordCommentReactionKey } from '@/app/lib/types';
-import { formatDateTime, formatRelativeTime } from '@/app/lib/utils';
+import { formatRelativeTime, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { commentPlainText } from '@/app/components/records/comments/commentText';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
@@ -39,8 +39,7 @@ const REACTION_EMOJI: Record<RecordCommentReactionKey, string> = {
     laugh: '😄',
 };
 
-/** Server-enforced author edit window; mirrored here so the affordance hides when it lapses. */
-const EDIT_WINDOW_MS = 15 * 60 * 1000;
+const SERVER_EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 type Props = {
     comment: RecordComment;
@@ -95,7 +94,7 @@ export default function CommentRow({
     const deleted = comment.deletedAt != null;
     const authorName = comment.author?.displayName ?? t('formerMember');
     const reactions = comment.reactions ?? [];
-    const withinEditWindow = now - new Date(comment.createdAt).getTime() < EDIT_WINDOW_MS;
+    const withinEditWindow = now - parseMysqlDateTime(comment.createdAt) < SERVER_EDIT_WINDOW_MS;
     const showEdit = canEdit && !deleted && withinEditWindow;
     const showCluster =
         !deleted || (canResolve && onResolve != null);
@@ -108,11 +107,14 @@ export default function CommentRow({
     const submitEdit = async () => {
         if (savingEdit || commentPlainText(editValue).length === 0) return;
         setSavingEdit(true);
-        const succeeded = await onSubmitEdit(comment, editValue);
-        setSavingEdit(false);
-        if (succeeded) {
-            setEditing(false);
-            setEditValue('');
+        try {
+            const succeeded = await onSubmitEdit(comment, editValue);
+            if (succeeded) {
+                setEditing(false);
+                setEditValue('');
+            }
+        } finally {
+            setSavingEdit(false);
         }
     };
 
@@ -139,14 +141,14 @@ export default function CommentRow({
                     <span className="truncate font-medium text-foreground">{authorName}</span>
                     <time
                         dateTime={comment.createdAt}
-                        title={formatDateTime(comment.createdAt, locale)}
+                        title={formatUtcDateTime(comment.createdAt, locale)}
                         className="shrink-0 text-xs text-muted-foreground"
                     >
                         {formatRelativeTime(comment.createdAt, locale, now)}
                     </time>
                     {comment.editedAt != null && !deleted && (
                         <span
-                            title={formatDateTime(comment.editedAt, locale)}
+                            title={formatUtcDateTime(comment.editedAt, locale)}
                             className="shrink-0 text-xs text-muted-foreground/80"
                         >
                             {t('editedMarker')}

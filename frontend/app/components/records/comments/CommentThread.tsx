@@ -9,9 +9,9 @@ import { cn } from '@/lib/utils';
 import type { RecordComment, RecordCommentReactionKey, RecordCommentThread } from '@/app/lib/types';
 import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
-import { formatDateTime, formatRelativeTime } from '@/app/lib/utils';
+import { formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import { useLiveNow } from '@/app/hooks/useNow';
-import { commentPlainText } from '@/app/components/records/comments/commentText';
+import { commentPlainText, isCommentDraft } from '@/app/components/records/comments/commentText';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import CommentRow from '@/app/components/records/comments/CommentRow';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -110,11 +110,8 @@ export default function CommentThread({
     useEffect(() => {
         const timer = window.setTimeout(() => {
             const stored = readDraft(replyDraftKeyParts, { version: DRAFT_VERSIONS.comment });
-            const content =
-                stored && typeof stored.data === 'object' && stored.data !== null
-                    ? (stored.data as { content?: unknown }).content
-                    : undefined;
-            if (typeof content === 'string' && content.length > 0) {
+            const content = stored && isCommentDraft(stored.data) ? stored.data.content : '';
+            if (content.length > 0) {
                 setReplyValue((current) => (current.length > 0 ? current : content));
                 setReplyOpen(true);
             }
@@ -132,13 +129,16 @@ export default function CommentThread({
         if (replySubmitting || commentPlainText(replyValue).length === 0) return;
         replyToken.current ??= crypto.randomUUID();
         setReplySubmitting(true);
-        const succeeded = await onSubmitReply(thread, replyValue, replyToken.current);
-        setReplySubmitting(false);
-        if (succeeded) {
-            setReplyValue('');
-            setReplyOpen(false);
-            replyToken.current = null;
-            replyDraft.clear();
+        try {
+            const succeeded = await onSubmitReply(thread, replyValue, replyToken.current);
+            if (succeeded) {
+                setReplyValue('');
+                setReplyOpen(false);
+                replyToken.current = null;
+                replyDraft.clear();
+            }
+        } finally {
+            setReplySubmitting(false);
         }
     };
 
@@ -275,7 +275,7 @@ export default function CommentThread({
                                 onClick={onReopen}
                                 title={
                                     thread.resolvedAt
-                                        ? formatDateTime(thread.resolvedAt, locale)
+                                        ? formatUtcDateTime(thread.resolvedAt, locale)
                                         : undefined
                                 }
                             >
