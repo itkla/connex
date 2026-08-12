@@ -239,7 +239,7 @@ type AskConnexDrawerProps = {
 
 type ConversationSurfaceProps = Omit<
     AskConnexDrawerProps,
-    'open' | 'instantOpen' | 'isMobile' | 'showTab' | 'onOpenChange' | 'onOpenChangeComplete' | 'onKeyboardClose' | 'onRename'
+    'instantOpen' | 'isMobile' | 'showTab' | 'onOpenChange' | 'onOpenChangeComplete' | 'onKeyboardClose' | 'onRename'
 > & {
     closeButton: ReactNode;
     onBeginRename: () => void;
@@ -714,6 +714,7 @@ function ConversationSurface({
     onAttachFiles,
     onRemoveFileAttachment,
     onSend,
+    open,
 }: ConversationSurfaceProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [recordPickerRequest, setRecordPickerRequest] = useState(0);
@@ -912,20 +913,22 @@ function ConversationSurface({
                             className="min-h-16 max-h-36 overflow-y-auto px-1 py-1 text-sm leading-5"
                         />
                         <div className="mt-2 flex items-end gap-2">
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                multiple
-                                accept=".txt,.md,.markdown,.csv,.json,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,text/csv,application/json,image/jpeg,image/png,image/webp"
-                                className="sr-only"
-                                tabIndex={-1}
-                                aria-label={labels.attachFile}
-                                onChange={(event) => {
-                                    const files = Array.from(event.target.files ?? []);
-                                    event.target.value = '';
-                                    if (files.length > 0) onAttachFiles(files);
-                                }}
-                            />
+                            {open ? (
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    multiple
+                                    accept=".txt,.md,.markdown,.csv,.json,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,text/csv,application/json,image/jpeg,image/png,image/webp"
+                                    className="sr-only"
+                                    tabIndex={-1}
+                                    aria-label={labels.attachFile}
+                                    onChange={(event) => {
+                                        const files = Array.from(event.target.files ?? []);
+                                        event.target.value = '';
+                                        if (files.length > 0) onAttachFiles(files);
+                                    }}
+                                />
+                            ) : null}
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <Button
@@ -1063,7 +1066,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         if (invited) setSelectedMemberId('');
     };
 
-    const surfaceProps: ConversationSurfaceProps = {
+    const surfaceProps: Omit<ConversationSurfaceProps, 'open'> = {
         sessions: props.sessions,
         invitations: props.invitations,
         activeSession: props.activeSession,
@@ -1136,6 +1139,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
             >
                 <ConversationSurface
                     {...surfaceProps}
+                    open={open}
                     closeButton={(
                         <Button
                             type="button"
@@ -1180,6 +1184,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                         <DrawerDescription className="sr-only">{labels.title}</DrawerDescription>
                         <ConversationSurface
                             {...surfaceProps}
+                            open
                             closeButton={(
                                 <DrawerClose render={<Button variant="ghost" size="icon-sm" aria-label={labels.close} />}>
                                     <XMarkIcon className="size-4" />
