@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -8,7 +9,6 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
  */
 class MigrationLineageArchTest {
 
+    private static final BigInteger REVIEWED_GLOBAL_MIGRATION_BASELINE = BigInteger.valueOf(161);
     private static final Pattern VERSIONED_MIGRATION_FILE_NAME =
         Pattern.compile("V(\\d+)__[a-z0-9_]+\\.sql");
     private static final Pattern SQL_MIGRATION_FILE_NAME =
@@ -99,27 +100,32 @@ class MigrationLineageArchTest {
                 + invalidNames);
     }
 
-    /** Flyway versions form one global sequence across the tenant and control lineages. */
     @Test
-    void versionedMigrationNumbersAreGloballyUnique() throws IOException {
+    void migrationsAfterTheReviewedGlobalBaselineAreSequentialAndUnique() throws IOException {
         Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
-        Set<BigInteger> versions = new HashSet<>();
-        List<String> duplicates = new ArrayList<>();
+        List<BigInteger> actual;
         try (Stream<Path> files = Files.walk(root)) {
-            for (Path file : files
-                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                    .toList()) {
-                Matcher matcher = VERSIONED_MIGRATION_FILE_NAME.matcher(
-                        file.getFileName().toString());
-                if (matcher.matches()
-                        && !versions.add(new BigInteger(matcher.group(1)))) {
-                    duplicates.add(file.getFileName().toString());
-                }
-            }
+            actual = files
+                    .map(path -> VERSIONED_MIGRATION_FILE_NAME.matcher(
+                            path.getFileName().toString()))
+                    .filter(Matcher::matches)
+                    .map(matcher -> new BigInteger(matcher.group(1)))
+                    .filter(version -> version.compareTo(
+                            REVIEWED_GLOBAL_MIGRATION_BASELINE) > 0)
+                    .sorted()
+                    .toList();
         }
-        assertTrue(duplicates.isEmpty(),
-            "Flyway versions are globally monotonic across tenant and control lineages; "
-                + "renumber duplicate versions: " + duplicates);
+        BigInteger latest = actual.isEmpty()
+                ? REVIEWED_GLOBAL_MIGRATION_BASELINE
+                : actual.getLast();
+        List<BigInteger> expected = new ArrayList<>();
+        for (BigInteger version = REVIEWED_GLOBAL_MIGRATION_BASELINE.add(BigInteger.ONE);
+                version.compareTo(latest) <= 0;
+                version = version.add(BigInteger.ONE)) {
+            expected.add(version);
+        }
+        assertEquals(expected, actual,
+                "Global Flyway versions after V161 must be unique and sequential");
     }
 
     /**

@@ -43,6 +43,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertNotNull(foundSession);
         assertEquals(owner.getId(), foundSession.getCreatedByUserId());
         assertEquals("Quarterly planning", foundSession.getTitle());
+        assertTrue(foundSession.isTitleUserSet());
         assertEquals("private", foundSession.getVisibility());
         assertEquals("active", foundSession.getStatus());
         assertTrue(foundSession.isOwnedByCurrentUser());
@@ -130,6 +131,36 @@ class AiChatMapperTest extends AbstractMapperTest {
                 workspace.getId(), session.getId(), null, null, "private");
         assertEquals(List.of(owner.getId()), chatMapper.listRealtimeRecipientUserIds(
                 workspace.getId(), session.getId()));
+    }
+
+    @Test
+    void generatedTitleCannotReplaceATitleAfterManualRename() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "New conversation", "private");
+        session.setTitleUserSet(false);
+        jdbcTemplate.update(
+                "UPDATE ai_chat_session SET title_user_set = FALSE WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), session.getId());
+        AiChatMessage answer = new AiChatMessage();
+        answer.setWorkspaceId(workspace.getId());
+        answer.setSessionId(session.getId());
+        answer.setSeq(1);
+        answer.setAuthorKind("assistant");
+        answer.setContent("Resolved answer");
+        chatMapper.insertMessage(answer);
+
+        assertEquals(1, chatMapper.updateGeneratedTitle(
+                workspace.getId(), session.getId(), "Pipeline review"));
+        assertEquals(1, chatMapper.updateSession(
+                workspace.getId(), session.getId(), "My renewal notes", null, null));
+        assertEquals(0, chatMapper.updateGeneratedTitle(
+                workspace.getId(), session.getId(), "Overwritten title"));
+
+        AiChatSession stored = chatMapper.getSessionById(
+                workspace.getId(), owner.getId(), session.getId());
+        assertNotNull(stored);
+        assertEquals("My renewal notes", stored.getTitle());
+        assertTrue(stored.isTitleUserSet());
     }
 
     @Test
@@ -227,14 +258,35 @@ class AiChatMapperTest extends AbstractMapperTest {
         toolCall.setArgumentsJson("{\"handle\":\"r1\"}");
         toolCall.setIdempotencyKey("turn-" + turn.getId() + "-step-1");
         chatMapper.insertToolCall(toolCall);
+        assertEquals(
+                toolCall.getId(),
+                chatMapper.getToolCallBySession(
+                        workspace.getId(), session.getId(), toolCall.getId()).getId());
+        assertEquals(
+                List.of(toolCall.getId()),
+                chatMapper.listPendingToolCallsBySession(
+                        workspace.getId(), session.getId()).stream()
+                        .map(AiChatToolCall::getId)
+                        .toList());
+        assertNull(chatMapper.getToolCallBySession(
+                workspace.getId() + 1, session.getId(), toolCall.getId()));
         assertEquals(1, chatMapper.updateToolCall(
                 workspace.getId(), userMessage.getId(), toolCall.getId(),
                 "executed", "{\"kind\":\"person\"}", owner.getId()));
         AiChatToolCall storedTool = chatMapper.getToolCallById(
                 workspace.getId(), userMessage.getId(), toolCall.getId());
+        AiChatToolCall replayedTool = chatMapper.getToolCallByIdempotencyKey(
+                workspace.getId(), toolCall.getIdempotencyKey());
+        AiChatToolCall lockedTool = chatMapper.getToolCallBySessionForUpdate(
+                workspace.getId(), session.getId(), toolCall.getId());
         assertEquals("executed", storedTool.getStatus());
         assertEquals(owner.getId(), storedTool.getExecutedByUserId());
         assertEquals("turn-" + turn.getId() + "-step-1", storedTool.getIdempotencyKey());
+        assertEquals(session.getId(), replayedTool.getSessionId());
+        assertEquals(owner.getId(), replayedTool.getRequestedByUserId());
+        assertEquals(toolCall.getId(), lockedTool.getId());
+        assertTrue(chatMapper.listPendingToolCallsBySession(
+                workspace.getId(), session.getId()).isEmpty());
 
         AiChatMessage answer = new AiChatMessage();
         answer.setWorkspaceId(workspace.getId());

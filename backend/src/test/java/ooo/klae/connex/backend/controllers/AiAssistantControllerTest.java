@@ -26,7 +26,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
+import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
+import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatParticipantDto;
 import ooo.klae.connex.backend.dto.AiChatPresenceDto;
@@ -46,19 +49,22 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class AiAssistantControllerTest {
 
     @Mock private AiAssistantService service;
     @Mock private AiAssistantTurnService turnService;
+    @Mock private AiAssistantWriteToolService writeToolService;
     @Mock private ErrorReporter errorReporter;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new AiAssistantController(service, turnService))
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                new AiAssistantController(service, turnService, writeToolService))
             .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
             .build();
     }
@@ -95,6 +101,69 @@ class AiAssistantControllerTest {
             .andExpect(jsonPath("$.terminalReason").value("generation_timeout"));
 
         verify(turnService).get(42, 19);
+    }
+
+    @Test
+    void approvalRejectionAndUndoUseSessionScopedToolCallEndpoints() throws Exception {
+        JsonMapper objectMapper = JsonMapper.builder().build();
+        when(writeToolService.approve(42, 29)).thenReturn(new AiAssistantToolCallDto(
+                29, "change_deal_stage", "confirm", "executed",
+                objectMapper.readTree("{\"stage\":\"Proposal\"}"), false, null));
+        when(writeToolService.reject(42, 30)).thenReturn(new AiAssistantToolCallDto(
+                30, "assign_owner", "confirm", "rejected",
+                objectMapper.createObjectNode(), false, null));
+        when(writeToolService.undo(42, 31)).thenReturn(new AiAssistantToolCallDto(
+                31, "create_note", "auto", "undone",
+                objectMapper.readTree("{\"recordType\":\"note\"}"), false,
+                "2026-08-10T12:10:00Z"));
+
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/tool-calls/29/approve"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("executed"))
+            .andExpect(jsonPath("$.result.stage").value("Proposal"));
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/tool-calls/30/reject"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("rejected"));
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/tool-calls/31/undo"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("undone"));
+
+        verify(writeToolService).approve(42, 29);
+        verify(writeToolService).reject(42, 30);
+        verify(writeToolService).undo(42, 31);
+    }
+
+    @Test
+    void proposalListAndDetailExposeOnlyResolvedHumanReviewArguments() throws Exception {
+        JsonMapper objectMapper = JsonMapper.builder().build();
+        AiAssistantToolProposalDto proposal = new AiAssistantToolProposalDto(
+                29,
+                "assign_owner",
+                "confirm",
+                "proposed",
+                new AiAssistantToolProposalDto.Target("person", 31, "Ada Lovelace"),
+                objectMapper.readTree("{\"owner\":\"Grace Hopper\"}"));
+        when(writeToolService.listPendingProposals(42)).thenReturn(List.of(proposal));
+        when(writeToolService.getPendingProposal(42, 29)).thenReturn(proposal);
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].tool").value("assign_owner"))
+            .andExpect(jsonPath("$[0].tier").value("confirm"))
+            .andExpect(jsonPath("$[0].status").value("proposed"))
+            .andExpect(jsonPath("$[0].target.kind").value("person"))
+            .andExpect(jsonPath("$[0].target.id").value(31))
+            .andExpect(jsonPath("$[0].target.name").value("Ada Lovelace"))
+            .andExpect(jsonPath("$[0].arguments.owner").value("Grace Hopper"))
+            .andExpect(jsonPath("$[0].arguments.handle").doesNotExist())
+            .andExpect(jsonPath("$[0].arguments.idempotency_key").doesNotExist());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls/29"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(29))
+            .andExpect(jsonPath("$.arguments.owner").value("Grace Hopper"));
+
+        verify(writeToolService).listPendingProposals(42);
+        verify(writeToolService).getPendingProposal(42, 29);
     }
 
     @Test

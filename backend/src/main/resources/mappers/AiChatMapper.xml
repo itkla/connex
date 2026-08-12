@@ -8,6 +8,7 @@
     <result property="workspaceId" column="workspace_id"/>
     <result property="createdByUserId" column="created_by_user_id"/>
     <result property="title" column="title"/>
+    <result property="titleUserSet" column="title_user_set"/>
     <result property="visibility" column="visibility"/>
     <result property="status" column="status"/>
     <result property="participationStatus" column="participation_status"/>
@@ -58,6 +59,8 @@
     <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
     <result property="messageId" column="message_id"/>
+    <result property="sessionId" column="session_id"/>
+    <result property="requestedByUserId" column="requested_by_user_id"/>
     <result property="toolName" column="tool_name"/>
     <result property="status" column="status"/>
     <result property="argumentsJson" column="arguments_json"/>
@@ -70,7 +73,8 @@
   </resultMap>
 
   <sql id="sessionColumns">
-    s.id, s.workspace_id, s.created_by_user_id, s.title, s.visibility, s.status,
+    s.id, s.workspace_id, s.created_by_user_id, s.title, s.title_user_set,
+    s.visibility, s.status,
     (SELECT p.status
        FROM ai_chat_session_participant p
       WHERE p.workspace_id = #{workspaceId}
@@ -193,15 +197,18 @@
 
   <insert id="insertSession" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_session
-      (workspace_id, created_by_user_id, title, visibility, status)
+      (workspace_id, created_by_user_id, title, title_user_set, visibility, status)
     VALUES
-      (#{workspaceId}, #{createdByUserId}, #{title}, #{visibility}, #{status})
+      (#{workspaceId}, #{createdByUserId}, #{title}, #{titleUserSet}, #{visibility}, #{status})
   </insert>
 
   <update id="updateSession">
     UPDATE ai_chat_session
     <set>
-      <if test="title != null">title = #{title},</if>
+      <if test="title != null">
+        title = #{title},
+        title_user_set = TRUE,
+      </if>
       <if test="status != null">
         status = #{status},
         archived_at = CASE WHEN #{status} = 'archived' THEN COALESCE(archived_at, CURRENT_TIMESTAMP(6)) ELSE NULL END,
@@ -210,6 +217,21 @@
     </set>
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
+  </update>
+
+  <update id="updateGeneratedTitle">
+    UPDATE ai_chat_session
+    SET title = #{title}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND title_user_set = FALSE
+      AND (
+        SELECT COUNT(*)
+        FROM ai_chat_message m
+        WHERE m.workspace_id = #{workspaceId}
+          AND m.session_id = #{id}
+          AND m.author_kind = 'assistant'
+      ) = 1
   </update>
 
   <insert id="insertParticipant">
@@ -470,6 +492,18 @@
     FOR UPDATE
   </select>
 
+  <select id="listTurnsByIds" resultMap="turnResult">
+    SELECT id, workspace_id, session_id, requested_by_user_id, status,
+           terminal_reason, created_at, updated_at
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+  </select>
+
   <update id="markTurnRunning">
     UPDATE ai_chat_turn
     SET status = 'running', terminal_reason = NULL
@@ -516,6 +550,59 @@
       AND id = #{id}
   </select>
 
+  <select id="getToolCallByIdempotencyKey" resultMap="toolCallResult">
+    SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
+           m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
+           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.idempotency_key, tc.created_at, tc.updated_at
+    FROM ai_chat_tool_call tc
+    JOIN ai_chat_message m
+      ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+    WHERE tc.workspace_id = #{workspaceId}
+      AND tc.idempotency_key = #{idempotencyKey}
+  </select>
+
+  <select id="getToolCallBySession" resultMap="toolCallResult">
+    SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
+           m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
+           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.idempotency_key, tc.created_at, tc.updated_at
+    FROM ai_chat_tool_call tc
+    JOIN ai_chat_message m
+      ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+    WHERE tc.workspace_id = #{workspaceId}
+      AND m.session_id = #{sessionId}
+      AND tc.id = #{id}
+  </select>
+
+  <select id="listPendingToolCallsBySession" resultMap="toolCallResult">
+    SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
+           m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
+           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.idempotency_key, tc.created_at, tc.updated_at
+    FROM ai_chat_tool_call tc
+    JOIN ai_chat_message m
+      ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+    WHERE tc.workspace_id = #{workspaceId}
+      AND m.session_id = #{sessionId}
+      AND tc.status = 'proposed'
+    ORDER BY tc.id ASC
+  </select>
+
+  <select id="getToolCallBySessionForUpdate" resultMap="toolCallResult">
+    SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
+           m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
+           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.idempotency_key, tc.created_at, tc.updated_at
+    FROM ai_chat_tool_call tc
+    JOIN ai_chat_message m
+      ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+    WHERE tc.workspace_id = #{workspaceId}
+      AND m.session_id = #{sessionId}
+      AND tc.id = #{id}
+    FOR UPDATE
+  </select>
+
   <update id="updateToolCall">
     UPDATE ai_chat_tool_call
     SET status = #{status},
@@ -526,6 +613,16 @@
       AND message_id = #{messageId}
       AND id = #{id}
       AND status = 'proposed'
+  </update>
+
+  <update id="updateExecutedToolResult">
+    UPDATE ai_chat_tool_call
+    SET result_json = #{resultJson,jdbcType=VARCHAR},
+        executed_by_user_id = #{executedByUserId},
+        executed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'executed'
   </update>
 
 </mapper>

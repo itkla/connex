@@ -18,7 +18,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.SearchResultsDto;
@@ -48,6 +53,7 @@ class AiAssistantToolExecutorTest {
     private PersonMapper personMapper;
     private CompanyMapper companyMapper;
     private DealMapper dealMapper;
+    private AiAssistantDateResolver dateResolver;
     private AiAssistantToolExecutor executor;
 
     @BeforeEach
@@ -63,10 +69,11 @@ class AiAssistantToolExecutorTest {
         personMapper = mock(PersonMapper.class);
         companyMapper = mock(CompanyMapper.class);
         dealMapper = mock(DealMapper.class);
+        dateResolver = mock(AiAssistantDateResolver.class);
         executor = new AiAssistantToolExecutor(
                 new AiAssistantToolCatalog(), searchService, personService, companyService,
                 dealService, activityService, taskService, scoringService, workspaceService,
-                personMapper, companyMapper, dealMapper);
+                personMapper, companyMapper, dealMapper, dateResolver);
     }
 
     @Test
@@ -85,26 +92,16 @@ class AiAssistantToolExecutorTest {
     }
 
     @Test
-    void reservedKeysFailClosedWithoutNestedOrInventedReads() throws Exception {
+    void reservedDealBriefFailsClosedWithoutNestedReads() throws Exception {
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 7);
         resources.register("deal", 8);
 
-        AiAssistantLoopException schedule = assertThrows(
-                AiAssistantLoopException.class,
-                () -> executor.execute(
-                        "find_schedule_conflicts",
-                        objectMapper.readTree(
-                                "{\"handle\":\"r1\",\"start\":\"2026-08-10T09:00:00Z\","
-                                        + "\"end\":\"2026-08-10T10:00:00Z\"}"),
-                        resources,
-                        true));
         AiAssistantLoopException brief = assertThrows(
                 AiAssistantLoopException.class,
                 () -> executor.execute(
                         "get_deal_brief", objectMapper.readTree("{\"handle\":\"r2\"}"), resources, true));
 
-        assertEquals("schedule_conflicts_unavailable", schedule.detailReason());
         assertEquals("deal_brief_nested_generation_unavailable", brief.detailReason());
         verifyNoInteractions(
                 searchService, personService, companyService, dealService,
@@ -196,5 +193,110 @@ class AiAssistantToolExecutorTest {
         assertEquals(List.of(), result.data().get("records"));
         verify(personMapper).getByIds(7, ids);
         verifyNoInteractions(personService, companyService, dealService);
+    }
+
+    @Test
+    void restrictedPersonsRecordsAreFilteredThroughCompanyAndDealReads() throws Exception {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        Person restricted = new Person();
+        restricted.setId(17);
+        restricted.setSuspendedAt(LocalDateTime.parse("2026-08-01T00:00:00"));
+        when(personMapper.getByIds(7, List.of(17))).thenReturn(List.of(restricted));
+        Activity activity = new Activity();
+        activity.setPerson(restricted);
+        EntityReference restrictedReference = new EntityReference();
+        restrictedReference.setRefType("person");
+        restrictedReference.setRefId(17);
+        Activity referencedActivity = new Activity();
+        referencedActivity.setReferences(List.of(restrictedReference));
+        Task task = new Task();
+        task.setPerson(restricted);
+        Note note = new Note();
+        note.setReferences(List.of(restrictedReference));
+        note.setVisibility("workspace");
+        note.setContent("Discuss [Restricted Person](person:17)");
+        Company company = new Company();
+        company.setId(5);
+        company.setName("Example Company");
+        Deal deal = new Deal();
+        deal.setId(8);
+        deal.setName("Example Deal");
+        when(companyService.getCompanyById(5)).thenReturn(company);
+        when(companyService.getCompanyTimeline(5, 5)).thenReturn(
+                new CompanyService.CompanyTimelineData(
+                        List.of(activity, referencedActivity), List.of(task), List.of(note)));
+        when(companyService.getCompanyTimeline(5, 10)).thenReturn(
+                new CompanyService.CompanyTimelineData(
+                        List.of(activity, referencedActivity), List.of(task), List.of(note)));
+        when(dealService.getDealById(8)).thenReturn(deal);
+        when(activityService.getActivitiesByDealId(8)).thenReturn(
+                List.of(activity, referencedActivity));
+        when(dealService.getNotesByDealId(8)).thenReturn(List.of(note));
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("company", 5);
+        resources.register("deal", 8);
+
+        assertEquals(List.of(), executor.execute(
+                "list_activities",
+                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"),
+                resources,
+                true).data().get("activities"));
+        assertEquals(List.of(), executor.execute(
+                "list_tasks",
+                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"),
+                resources,
+                true).data().get("tasks"));
+        assertEquals(List.of(), executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes"));
+        assertEquals(List.of(), executor.execute(
+                "list_activities",
+                objectMapper.readTree("{\"handle\":\"r2\",\"limit\":5}"),
+                resources,
+                true).data().get("activities"));
+        assertEquals(List.of(), executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r2\"}"),
+                resources,
+                true).data().get("notes"));
+    }
+
+    @Test
+    void oversizedNotesAreTruncatedWithinFieldAndAggregateBudgets() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        Note[] notes = IntStream.range(0, 10)
+                .mapToObj(index -> {
+                    Note note = new Note();
+                    note.setVisibility("workspace");
+                    note.setContent("x".repeat(50_000));
+                    return note;
+                })
+                .toArray(Note[]::new);
+        person.setNotes(notes);
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+
+        Object noteData = executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes");
+
+        List<?> retained = (List<?>) noteData;
+        assertEquals(4, retained.size());
+        int totalCharacters = 0;
+        for (Object value : retained) {
+            Map<?, ?> note = (Map<?, ?>) value;
+            String content = (String) note.get("content");
+            assertEquals(4_000, content.length());
+            assertEquals(true, note.get("contentTruncated"));
+            totalCharacters += content.length();
+        }
+        assertEquals(16_000, totalCharacters);
     }
 }

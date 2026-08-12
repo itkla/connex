@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import tools.jackson.databind.ObjectMapper;
@@ -29,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import lombok.RequiredArgsConstructor;
 
@@ -239,6 +241,26 @@ public class ActivityService {
             throw new ResourceNotFoundException("Activity not found with id: " + id);
         }
         requireEditable(before);
+        activityMapper.delete(workspaceId, id);
+        referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_ACTIVITY, id);
+        auditService.record("activity.delete", "activity", id, before.getSubject(),
+            "Deleted activity " + before.getSubject(),
+            auditService.diff(before, null, AUDIT_FIELDS));
+    }
+
+    /** Deletes an activity only when its locked current state satisfies the supplied guard. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.ACTIVITY_DELETE)
+    public void deleteIf(int id, Predicate<Activity> guard) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Activity before = activityMapper.getActivityByIdForUpdate(workspaceId, id);
+        if (before == null) {
+            throw new ResourceNotFoundException("Activity not found with id: " + id);
+        }
+        requireEditable(before);
+        if (guard == null || !guard.test(before)) {
+            throw new ConflictException("Activity changed and cannot be deleted");
+        }
         activityMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_ACTIVITY, id);
         auditService.record("activity.delete", "activity", id, before.getSubject(),

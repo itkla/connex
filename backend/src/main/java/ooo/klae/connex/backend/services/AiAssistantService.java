@@ -127,6 +127,7 @@ public class AiAssistantService {
         session.setWorkspaceId(workspaceId);
         session.setCreatedByUserId(userId);
         session.setTitle(requireTitle(request == null ? null : request.getTitle()));
+        session.setTitleUserSet(request == null || !request.isAutoTitle());
         session.setVisibility(PRIVATE);
         session.setStatus(ACTIVE);
         chatMapper.insertSession(session);
@@ -142,7 +143,7 @@ public class AiAssistantService {
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
         auditAdministrativeReads(workspaceId, userId, List.of(session));
-        return detail(workspaceId, id, messageSize, offset, session);
+        return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
     /** Returns one retained session and records the metadata-only administrative read. */
@@ -160,7 +161,7 @@ public class AiAssistantService {
         }
         requireStillRetained(workspaceId, userId, session);
         auditRetainedRead(session);
-        return detail(workspaceId, id, messageSize, offset, session);
+        return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
     /**
@@ -180,6 +181,7 @@ public class AiAssistantService {
 
     private AiChatSessionDetailDto detail(
             int workspaceId,
+            int userId,
             int id,
             int messageSize,
             int offset,
@@ -188,10 +190,13 @@ public class AiAssistantService {
             workspaceId, id, messageSize, offset);
         var citations = citationProjector.project(workspaceId, storedMessages);
         Map<Integer, String> authorNames = authorNames(storedMessages);
+        var suggestions = citationProjector.suggestions(
+                workspaceId, id, userId, storedMessages);
         List<AiChatMessageDto> messages = storedMessages.stream()
             .map(message -> AiChatMessageDto.from(
                     message,
                     citations.getOrDefault(message.getId(), List.of()),
+                    suggestions.getOrDefault(message.getId(), List.of()),
                     message.getAuthorUserId() == null
                             ? null
                             : authorNames.get(message.getAuthorUserId())))

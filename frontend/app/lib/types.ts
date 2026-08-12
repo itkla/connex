@@ -2357,6 +2357,7 @@ export type AiChatMessage = {
     content: string;
     createdAt: string;
     citations?: AiChatCitation[] | null;
+    suggestions?: string[] | null;
 };
 
 /** Viewer-safe membership state for one shared assistant session participant. */

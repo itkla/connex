@@ -365,6 +365,7 @@
     "shareDescription": "Sharing exposes the full transcript, which may contain data the invitee cannot otherwise access. Citations they cannot access are hidden, but the answer text is shared as written.",
     "shared": "Joined",
     "shareTitle": "Share this chat",
+    "suggestedFollowUps": "Suggested follow-ups",
     "tooLong": "Messages can contain up to 16,000 characters.",
     "typing": "{names} typing",
     "unshare": "Make private",

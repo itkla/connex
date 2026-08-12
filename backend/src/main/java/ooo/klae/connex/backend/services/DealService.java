@@ -22,6 +22,7 @@ import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import tools.jackson.databind.ObjectMapper;
@@ -71,6 +72,7 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -860,6 +862,53 @@ public class DealService {
         return hydrateReferences(workspaceId, deal);
     }
 
+    /** Locks one writable deal for a mutation that retains a later commit fence. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Deal lockDealForUpdate(int id) {
+        return requireDealForUpdate(workspaceService.getCurrentWorkspaceId(), id);
+    }
+
+    /** Transaction-bound board rows prepared for one stage change. */
+    public static final class LockedStageChange {
+        private final int workspaceId;
+        private final int dealId;
+        private final int stageId;
+        private final Stage stage;
+        private final List<Deal> lockedDeals;
+
+        private LockedStageChange(
+                int workspaceId,
+                int dealId,
+                int stageId,
+                Stage stage,
+                List<Deal> lockedDeals) {
+            this.workspaceId = workspaceId;
+            this.dealId = dealId;
+            this.stageId = stageId;
+            this.stage = stage;
+            this.lockedDeals = List.copyOf(lockedDeals);
+        }
+    }
+
+    /** Locks every board row implicated by a later stage change in ascending deal-id order. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LockedStageChange lockStageChangeRowsForUpdate(int dealId, int stageId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return lockStageChangeRows(workspaceId, dealId, stageId, true);
+    }
+
+    /** Applies a prepared stage change without performing another board-row lock pass. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal changeStage(LockedStageChange lockedStageChange) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (lockedStageChange == null
+                || lockedStageChange.workspaceId != workspaceId) {
+            throw new ConflictException("Prepared deal stage mutation is unavailable");
+        }
+        return moveLocked(lockedStageChange, Integer.MAX_VALUE, true);
+    }
+
     /**
      * When the deal reached each stage, earliest first. Readable by any member who can see the deal.
      * @param id the deal to read history for
@@ -1287,18 +1336,22 @@ public class DealService {
      * Adds a tag to a deal.
      * @param dealId
      * @param tagId
+     * @return whether this invocation created the tag association
      */
     @RequirePermission(Permission.DEAL_UPDATE)
-    public void addTag(int dealId, int tagId) {
+    public boolean addTag(int dealId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
-        dealMapper.addTag(workspaceId, dealId, tagId);
+        if (dealMapper.addTag(workspaceId, dealId, tagId) != 1) {
+            return false;
+        }
         auditService.record("deal.addTag", "deal", dealId, deal.getName(),
             "Tagged " + deal.getName() + " with " + tag.getName(),
             auditService.singleChange("tag", null, tag.getName()));
+        return true;
     }
 
     /**
@@ -1313,6 +1366,25 @@ public class DealService {
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         dealMapper.removeTag(workspaceId, dealId, tagId);
+        String tagName = tag != null ? tag.getName() : "#" + tagId;
+        auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
+            "Removed tag " + tagName + " from " + deal.getName(),
+            auditService.singleChange("tag", tagName, null));
+    }
+
+    /** Removes a tag only when the association still exists at the inverse write. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public void removeTagIfUnchanged(int dealId, int tagId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        if (dealMapper.removeTag(workspaceId, dealId, tagId) != 1) {
+            throw new ConflictException("Deal tag association changed and cannot be removed");
+        }
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
             "Removed tag " + tagName + " from " + deal.getName(),
@@ -1549,11 +1621,39 @@ public class DealService {
      */
     private Deal moveInternal(int dealId, int stageId, int position, boolean forceStageChanged) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        LockedStageChange lockedStageChange = lockStageChangeRows(
+            workspaceId, dealId, stageId, false);
+        return moveLocked(lockedStageChange, position, forceStageChanged);
+    }
+
+    private LockedStageChange lockStageChangeRows(
+            int workspaceId, int dealId, int stageId, boolean requireStableSourceStage) {
         Deal discovered = requireDeal(workspaceId, dealId);
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         List<Deal> lockedDeals = lockDealMoveRows(
             workspaceId, dealId, discovered.getStageId(), stageId);
+        Deal locked = lockedDeals.stream()
+            .filter(deal -> deal.getId() == dealId)
+            .findFirst()
+            .orElseThrow(() -> new ResourceNotFoundException("Deal not found with id: " + dealId));
+        if (requireStableSourceStage
+                && !Objects.equals(discovered.getStageId(), locked.getStageId())) {
+            throw new ConflictException("Deal stage changed while preparing the mutation");
+        }
+        return new LockedStageChange(
+            workspaceId, dealId, stageId, stage, lockedDeals);
+    }
+
+    private Deal moveLocked(
+            LockedStageChange lockedStageChange,
+            int position,
+            boolean forceStageChanged) {
+        int workspaceId = lockedStageChange.workspaceId;
+        int dealId = lockedStageChange.dealId;
+        int stageId = lockedStageChange.stageId;
+        Stage stage = lockedStageChange.stage;
+        List<Deal> lockedDeals = lockedStageChange.lockedDeals;
         Deal before = lockedDeals.stream()
             .filter(deal -> deal.getId() == dealId)
             .findFirst()

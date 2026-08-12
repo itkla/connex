@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -74,6 +75,18 @@ class CompanyServiceTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
+    }
+
+    @Test
+    void conditionalTagRemovalRefusesOnceTheAssociationChanged() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        companyService.addTag(company.getId(), tag.getId());
+
+        assertDoesNotThrow(() -> companyService.removeTagIfUnchanged(company.getId(), tag.getId()));
+        assertThrows(
+            ConflictException.class,
+            () -> companyService.removeTagIfUnchanged(company.getId(), tag.getId()));
     }
 
     @Test

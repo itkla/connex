@@ -32,7 +32,12 @@ import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
 import type { AskConnexAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
-import { askConnexCitationHref, askConnexCitations, groupAskConnexMessages } from '@/app/lib/askConnex';
+import {
+    askConnexCitationHref,
+    askConnexCitations,
+    groupAskConnexMessages,
+    latestAskConnexSuggestions,
+} from '@/app/lib/askConnex';
 import { easeOut, instant, springSmooth } from '@/app/lib/motion';
 import type {
     AiChatCitation,
@@ -158,6 +163,7 @@ type AskConnexDrawerLabels = {
     shareDescription: string;
     shared: string;
     shareTitle: string;
+    suggestedFollowUps: string;
     title: string;
     tooLong: string;
     typing: (names: string) => string;
@@ -190,6 +196,7 @@ type AskConnexDrawerProps = {
     attachments: AskConnexAttachment[];
     contextOverflow: boolean;
     contentTooLong: boolean;
+    working: boolean;
     turn: AskConnexTurnState;
     unavailable: UnavailableState;
     starterPrompts: string[];
@@ -209,7 +216,7 @@ type AskConnexDrawerProps = {
     onRetry: () => void;
     onComposerChange: (value: string) => void;
     onRemoveAttachment: (attachment: AskConnexAttachment) => void;
-    onSend: () => void;
+    onSend: (content?: string) => void;
 };
 
 type ConversationSurfaceProps = Omit<
@@ -264,6 +271,36 @@ function MessageCitations({
     );
 }
 
+function MessageSuggestions({
+    suggestions,
+    label,
+    onSend,
+}: {
+    suggestions: string[];
+    label: string;
+    onSend: (content?: string) => void;
+}) {
+    if (suggestions.length === 0) return null;
+
+    return (
+        <ul aria-label={label} className="flex flex-wrap gap-1.5">
+            {suggestions.map((suggestion) => (
+                <li key={suggestion}>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        className="h-auto max-w-72 justify-start whitespace-normal py-1.5 text-left leading-4"
+                        onClick={() => onSend(suggestion)}
+                    >
+                        {suggestion}
+                    </Button>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
 function SenderAvatar({ user, label }: { user: boolean; label: string }) {
     const initial = label.trim().slice(0, 1).toLocaleUpperCase();
     return (
@@ -284,13 +321,17 @@ function TranscriptMessage({
     fresh,
     firstInGroup,
     lastInGroup,
+    suggestions,
     labels,
+    onSend,
 }: {
     message: AiChatMessage;
     fresh: boolean;
     firstInGroup: boolean;
     lastInGroup: boolean;
+    suggestions: string[];
     labels: AskConnexDrawerLabels;
+    onSend: (content?: string) => void;
 }) {
     const format = useFormatter();
     const reduceMotion = useReducedMotion() ?? false;
@@ -330,6 +371,13 @@ function TranscriptMessage({
                     {message.content}
                 </motion.div>
                 {!user ? <MessageCitations citations={message.citations} labels={labels} /> : null}
+                {!user ? (
+                    <MessageSuggestions
+                        suggestions={suggestions}
+                        label={labels.suggestedFollowUps}
+                        onSend={onSend}
+                    />
+                ) : null}
                 {lastInGroup && timestamp ? (
                     <MessageFooter className="px-1 font-normal">
                         <time dateTime={message.createdAt}>{timestamp}</time>
@@ -569,6 +617,7 @@ function ConversationSurface({
     attachments,
     contextOverflow,
     contentTooLong,
+    working,
     turn,
     unavailable,
     starterPrompts,
@@ -587,7 +636,11 @@ function ConversationSurface({
     onSend,
 }: ConversationSurfaceProps) {
     const groups = useMemo(() => groupAskConnexMessages(messages), [messages]);
-    const working = turn.phase === 'accepted' || turn.phase === 'running';
+    const suggestions = useMemo(
+        () => latestAskConnexSuggestions(messages, working),
+        [messages, working],
+    );
+    const latestMessageId = messages.at(-1)?.id ?? null;
     const canSend = composer.trim().length > 0
         && loadState === 'ready'
         && !contextOverflow
@@ -705,7 +758,9 @@ function ConversationSurface({
                                                             fresh={freshMessageIds.has(message.id)}
                                                             firstInGroup={index === 0}
                                                             lastInGroup={index === group.messages.length - 1}
+                                                            suggestions={message.id === latestMessageId ? suggestions : []}
                                                             labels={labels}
+                                                            onSend={onSend}
                                                         />
                                                     ))}
                                                 </MessageGroup>
@@ -890,6 +945,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         attachments: props.attachments,
         contextOverflow: props.contextOverflow,
         contentTooLong: props.contentTooLong,
+        working: props.working,
         turn: props.turn,
         unavailable: props.unavailable,
         starterPrompts: props.starterPrompts,
@@ -919,7 +975,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                     label={labels.title}
                     closeLabel={labels.close}
                     open={open}
-                    working={props.turn.phase === 'accepted' || props.turn.phase === 'running'}
+                    working={props.working}
                     onOpen={() => onOpenChange(true)}
                     onClose={closeDesktopPanel}
                 />

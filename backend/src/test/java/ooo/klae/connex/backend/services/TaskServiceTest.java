@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -27,6 +28,22 @@ class TaskServiceTest extends AbstractServiceTest {
 
     @Autowired TaskService taskService;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void conditionalDeleteRefusesChangedStateAndDeletesMatchingState() {
+        Task task = newTask(currentUser, null, null);
+
+        assertThrows(
+            ConflictException.class,
+            () -> taskService.deleteIf(task.getId(), current -> false));
+        assertEquals(task.getId(), taskService.getTaskById(task.getId()).getId());
+
+        taskService.deleteIf(
+            task.getId(),
+            current -> task.getDescription().equals(current.getDescription()));
+
+        assertThrows(ResourceNotFoundException.class, () -> taskService.getTaskById(task.getId()));
+    }
 
     @Test
     void move_reordersWithinStatusContiguously() {
