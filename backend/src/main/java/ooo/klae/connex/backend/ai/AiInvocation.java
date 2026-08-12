@@ -65,7 +65,8 @@ public record AiInvocation(
         if (images.size() > 1) {
             throw new IllegalArgumentException("AI invocation accepts at most one image");
         }
-        if (feature.requiresImageInput() != !images.isEmpty()) {
+        if ((feature.requiresImageInput() && images.isEmpty())
+                || (!feature.acceptsImageInput() && !images.isEmpty())) {
             throw new IllegalArgumentException("AI invocation input does not match its feature");
         }
         if (maxTokens < 1) {

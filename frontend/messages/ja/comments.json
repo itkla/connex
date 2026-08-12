@@ -5,6 +5,10 @@
     "empty": "質問や気づき、引き継ぎ事項をチームに共有できます。",
     "composerPlaceholder": "コメントを追加…",
     "composerHint": "@でメンション · Shift+Enterで改行",
+    "attachImage": "画像を添付",
+    "imageUploading": "画像をアップロード中…",
+    "imageUploadFailed": "画像をアップロードできませんでした",
+    "imageUnsupportedType": "JPEG、PNG、WebP形式の画像のみ対応しています",
     "replyPlaceholder": "返信…",
     "post": "コメントする",
     "reply": "返信",
@@ -44,6 +48,14 @@
     "reaction_heart": "ハート",
     "reaction_celebrate": "お祝い",
     "reaction_eyes": "注目",
-    "reaction_laugh": "笑い"
+    "reaction_laugh": "笑い",
+    "edit": "コメントを編集",
+    "save": "保存",
+    "editedMarker": "（編集済み）",
+    "editSaved": "コメントを更新しました",
+    "editFailed": "コメントを更新できませんでした",
+    "copyLink": "リンクをコピー",
+    "linkCopied": "リンクをコピーしました",
+    "copyFailed": "リンクをコピーできませんでした"
   }
 }

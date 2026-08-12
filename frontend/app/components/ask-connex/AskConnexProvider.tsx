@@ -22,7 +22,9 @@ import {
     ApiError,
     archiveAiChatSession,
     createAiChatSession,
+    deleteAiChatAttachment,
     getActiveWorkspaceMembers,
+    getAiChatAttachments,
     getAiChatInvitations,
     getAiChatParticipants,
     getAiChatPresence,
@@ -39,22 +41,27 @@ import {
     setAiChatSessionShared,
     startAiChatTurn,
     touchAiChatPresence,
+    uploadAiChatAttachment,
     updateAiChatSession,
 } from '@/app/lib/api';
 import {
     EMPTY_ASK_CONNEX_TURN,
+    AskConnexFileRemovalError,
     activeRecordAskConnexContext,
     askConnexMessageContent,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
+    hasPendingAskConnexFileOperation,
     loadAskConnexLatestMessages,
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
     reduceAskConnexTurn,
+    removeReadyAskConnexFile,
     removeAskConnexAttachment,
     serializeStoredAskConnexTurn,
     type AskConnexAttachment,
+    type AskConnexFileAttachment,
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
@@ -62,6 +69,7 @@ import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     AiChatCitation,
+    AiChatAttachment,
     AiChatMessage,
     AiChatParticipant,
     AiChatPresence,
@@ -138,6 +146,20 @@ function starterPromptKeys(kind: AskConnexAttachment['kind'] | null): string[] {
     return ['starters.workspace.followUps', 'starters.workspace.risks', 'starters.workspace.activity'];
 }
 
+function readyFileAttachment(attachment: AiChatAttachment): AskConnexFileAttachment {
+    return {
+        clientId: `stored:${attachment.id}`,
+        id: attachment.id,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        kind: attachment.kind,
+        status: 'ready',
+        progress: 100,
+        error: null,
+    };
+}
+
 /** Reads the persistent Ask Connex drawer controller from the authenticated app shell. */
 export function useAskConnex(): AskConnexContextValue {
     const value = useContext(AskConnexContext);
@@ -152,6 +174,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const { context } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
+    const attachmentCreatePermission = usePermissionCheck('ATTACHMENT_CREATE');
+    const attachmentDeletePermission = usePermissionCheck('ATTACHMENT_DELETE');
     const sharePermission = usePermissionCheck('AI_SESSION_SHARE');
     const isMobile = useIsMobile();
     const userId = context.user?.id ?? null;
@@ -175,6 +199,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error' | 'forbidden'>('loading');
     const [loadError, setLoadError] = useState<Error | null>(null);
     const [composer, setComposer] = useState('');
+    const [fileAttachments, setFileAttachments] = useState<AskConnexFileAttachment[]>([]);
     const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -185,6 +210,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
     const tempMessageIdRef = useRef(-1);
+    const sessionCreationRef = useRef<Promise<AiChatSession> | null>(null);
+    const sessionEpochRef = useRef(0);
     const activeSessionRef = useRef<AiChatSession | null>(null);
     const typingRef = useRef(false);
     const sessionsRefreshVersionRef = useRef(0);
@@ -205,7 +232,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [contextResult.attachments, implicitContext],
     );
     const contentTooLong = askConnexMessageContent(composer).length > 16_000;
-    const working = submitting || turn.phase === 'accepted' || turn.phase === 'running';
+    const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
+    const fileContextCount = fileAttachments.filter(
+        (attachment) => attachment.status !== 'failed',
+    ).length;
+    const contextOverflow = contextResult.pageContext.length + fileContextCount > 10;
+    const working = submitting
+        || turn.phase === 'accepted'
+        || turn.phase === 'running'
+        || fileOperationPending;
     const scoped = stateIdentity === identity && !switching;
 
     useEffect(() => {
@@ -269,11 +304,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         animateNew: boolean,
     ): Promise<AiChatSession | null> => {
         const refreshVersion = ++transcriptRefreshVersionRef.current;
-        const firstDetail = await getAiChatSession(
-            sessionId,
-            { page: 1, size: ASK_CONNEX_MESSAGE_PAGE_SIZE },
-            { signal },
-        );
+        const [firstDetail, attachments] = await Promise.all([
+            getAiChatSession(
+                sessionId,
+                { page: 1, size: ASK_CONNEX_MESSAGE_PAGE_SIZE },
+                { signal },
+            ),
+            getAiChatAttachments(sessionId, { signal }),
+        ]);
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
         const nextMessages = await loadAskConnexLatestMessages(
             firstDetail.messages,
@@ -298,6 +336,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
                 .map((message) => message.id))
             : new Set());
+        setFileAttachments(attachments.map(readyFileAttachment));
         setActiveSession(firstDetail.session);
         activeSessionRef.current = firstDetail.session;
         if (firstDetail.session.visibility === 'shared') {
@@ -313,6 +352,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [refreshCollaboration]);
 
     const clearActiveSession = useCallback(() => {
+        sessionEpochRef.current++;
         sessionControllerRef.current?.abort();
         transcriptRefreshVersionRef.current += 1;
         safeStorageRemove(sessionKey);
@@ -325,6 +365,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setMessages([]);
         setFreshMessageIds(new Set());
         setComposer('');
+        setFileAttachments([]);
         setSubmissionBlocked(false);
         setUnavailableReason(null);
         submittingRef.current = false;
@@ -388,7 +429,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             setSubmissionBlocked(false);
             await refreshTranscript(stored.sessionId, signal, true);
             await refreshSessions(signal);
-            if (durable.status === 'failed') deferredErrorToast(t('toast.turnFailed'));
+            if (durable.status === 'failed') {
+                deferredErrorToast(
+                    durable.terminalReason === 'image_input_unsupported'
+                        ? t('turnImageUnsupported')
+                        : durable.terminalReason === 'budget_exhausted'
+                            ? t('budgetExhausted')
+                            : t('toast.turnFailed'),
+                );
+            }
             if (durable.status === 'timed_out') deferredErrorToast(t('toast.turnTimedOut'));
         } catch (error) {
             if (signal.aborted) return;
@@ -403,6 +452,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [clearActiveSession, pollDurableTurn, refreshSessions, refreshTranscript, t, turnKey]);
 
     useEffect(() => {
+        sessionEpochRef.current++;
         const controller = new AbortController();
         identityControllerRef.current?.abort();
         identityControllerRef.current = controller;
@@ -427,6 +477,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             setMessages([]);
             setFreshMessageIds(new Set());
             setComposer('');
+            setFileAttachments([]);
             setUnavailableReason(null);
             setSubmissionBlocked(false);
             submittingRef.current = false;
@@ -492,6 +543,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
+        sessionEpochRef.current++;
         sessionControllerRef.current?.abort();
         const controller = new AbortController();
         sessionControllerRef.current = controller;
@@ -507,6 +559,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setMessages([]);
         setFreshMessageIds(new Set());
         setComposer('');
+        setFileAttachments([]);
         setSubmissionBlocked(false);
         submittingRef.current = false;
         setSubmitting(false);
@@ -714,6 +767,129 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [activeSession, t]);
 
+    const ensureSession = useCallback(async (signal: AbortSignal): Promise<AiChatSession> => {
+        if (activeSession !== null) return activeSession;
+        if (sessionCreationRef.current !== null) return sessionCreationRef.current;
+        const creation = createAiChatSession(
+            t('newChatTitle'),
+            true,
+            { signal },
+        ).then((createdSession) => {
+            if (signal.aborted) throw signal.reason;
+            setActiveSession(createdSession);
+            activeSessionRef.current = createdSession;
+            setSessions((current) => [
+                createdSession,
+                ...current.filter((item) => item.id !== createdSession.id),
+            ]);
+            safeStorageSet(sessionKey, String(createdSession.id));
+            setLoadState('ready');
+            return createdSession;
+        }).finally(() => {
+            if (sessionCreationRef.current === creation) sessionCreationRef.current = null;
+        });
+        sessionCreationRef.current = creation;
+        return creation;
+    }, [activeSession, sessionKey, t]);
+
+    const uploadErrorMessage = useCallback((error: unknown): string => {
+        if (!(error instanceof ApiError)) return t('upload.failed');
+        if (error.status === 413) return t('upload.tooLarge');
+        if (error.status === 415) return t('upload.unsupported');
+        if (error.status === 409) return t('upload.limit');
+        return t('upload.failed');
+    }, [t]);
+
+    const attachFiles = useCallback(async (files: File[]) => {
+        const signal = identityControllerRef.current?.signal;
+        if (
+            !signal
+            || signal.aborted
+            || working
+            || permission !== 'granted'
+            || attachmentCreatePermission !== 'granted'
+        ) return;
+        for (const file of files) {
+            const operationEpoch = sessionEpochRef.current;
+            const clientId = crypto.randomUUID();
+            const pending: AskConnexFileAttachment = {
+                clientId,
+                id: null,
+                fileName: file.name,
+                contentType: file.type || 'application/octet-stream',
+                size: file.size,
+                kind: file.type.startsWith('image/') ? 'image' : 'text',
+                status: 'uploading',
+                progress: 0,
+                error: null,
+            };
+            setFileAttachments((current) => [...current, pending]);
+            try {
+                const session = await ensureSession(signal);
+                const uploaded = await uploadAiChatAttachment(
+                    session.id,
+                    file,
+                    (progress) => setFileAttachments((current) => current.map((attachment) =>
+                        attachment.clientId === clientId
+                            ? { ...attachment, progress }
+                            : attachment)),
+                    { signal },
+                );
+                if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
+                setFileAttachments((current) => current.map((attachment) =>
+                    attachment.clientId === clientId
+                        ? { ...readyFileAttachment(uploaded), clientId }
+                        : attachment));
+            } catch (error) {
+                if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
+                setFileAttachments((current) => current.map((attachment) =>
+                    attachment.clientId === clientId
+                        ? {
+                            ...attachment,
+                            status: 'failed',
+                            progress: 0,
+                            error: uploadErrorMessage(error),
+                        }
+                        : attachment));
+            }
+        }
+    }, [attachmentCreatePermission, ensureSession, permission, uploadErrorMessage, working]);
+
+    const removeFileAttachment = useCallback(async (attachment: AskConnexFileAttachment) => {
+        if (fileOperationPending) return;
+        if (attachment.status === 'uploading' || attachment.status === 'removing') return;
+        if (attachment.status === 'failed' || attachment.id === null || activeSession === null) {
+            setFileAttachments((current) => current.filter(
+                (item) => item.clientId !== attachment.clientId,
+            ));
+            return;
+        }
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
+        const operationEpoch = sessionEpochRef.current;
+        const sessionId = activeSession.id;
+        const attachmentId = attachment.id;
+        const removal = removeReadyAskConnexFile(
+                fileAttachments,
+                attachment,
+                operationEpoch,
+                () => sessionEpochRef.current,
+                signal,
+                () => deleteAiChatAttachment(sessionId, attachmentId, { signal }),
+            );
+        setFileAttachments(removal.pending);
+        try {
+            const updated = await removal.settled;
+            if (updated !== null) setFileAttachments(updated);
+        } catch (error) {
+            if (!(error instanceof AskConnexFileRemovalError)) return;
+            setFileAttachments(error.attachments);
+            toastError(error.cause instanceof ApiError
+                ? error.cause.message
+                : t('upload.removeFailed'));
+        }
+    }, [activeSession, fileAttachments, fileOperationPending, t]);
+
     const renameSession = useCallback(async (title: string): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser) return false;
         const sessionId = activeSession.id;
@@ -754,6 +930,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const requestContent = contentOverride ?? composer;
         const content = askConnexMessageContent(requestContent);
         const requestContext = mergeAskConnexContext(context.record, requestContent);
+        const requestContextOverflow = requestContext.pageContext.length + fileContextCount > 10;
         const activeSignal = identityControllerRef.current?.signal;
         if (
             !activeSignal
@@ -764,7 +941,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || submittingRef.current
             || turn.phase === 'accepted'
             || turn.phase === 'running'
-            || requestContext.overflow
+            || fileOperationPending
+            || requestContextOverflow
             || content.length === 0
             || content.length > 16_000
         ) return;
@@ -855,7 +1033,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, context.record, followTurn, permission, refreshTranscript, sessionKey, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userDisplayName, userId]);
+    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, sessionKey, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userDisplayName, userId]);
 
     const removeAttachment = useCallback((attachment: AskConnexAttachment) => {
         setComposer((current) => removeAskConnexAttachment(current, attachment));
@@ -891,6 +1069,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         citations: t('citations'),
         disclosureCreation: tDisclosure('sessionCreation'),
         disclosureList: tDisclosure('sessionList'),
+        imageDisclosure: tDisclosure('imageProvider'),
         citationKind: (kind: AiChatCitation['kind']) =>
             kind === 'person'
                 ? t('citationKindPerson')
@@ -903,6 +1082,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         composerPlaceholder: t('composerPlaceholder'),
         context: t('context'),
         contextLimit: t('contextLimit'),
+        addContext: t('addContext'),
+        addRecordContext: t('addRecordContext'),
+        attachFile: t('attachFile'),
+        removeFile: (label: string) => t('removeFile', { label }),
+        uploadProgress: (progress: number) => t('upload.progress', { progress }),
+        uploadRemoving: t('upload.removing'),
+        turnImageUnsupported: t('turnImageUnsupported'),
         emptyBody: t('emptyBody'),
         emptyTitle: t('emptyTitle'),
         formerMember: t('formerMember'),
@@ -981,7 +1167,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 composer={scoped ? composer : ''}
                 implicitContext={implicitContext}
                 attachments={scoped ? visibleAttachments : []}
-                contextOverflow={scoped && contextResult.overflow}
+                fileAttachments={scoped ? fileAttachments : []}
+                canAttachFiles={attachmentCreatePermission === 'granted'}
+                canRemoveFiles={attachmentDeletePermission === 'granted'}
+                contextOverflow={scoped && contextOverflow}
                 contentTooLong={scoped && contentTooLong}
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
@@ -1003,6 +1192,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onRetry={() => setReloadVersion((version) => version + 1)}
                 onComposerChange={setComposer}
                 onRemoveAttachment={removeAttachment}
+                onAttachFiles={(files) => void attachFiles(files)}
+                onRemoveFileAttachment={(attachment) => void removeFileAttachment(attachment)}
                 onSend={(content) => void send(content)}
             />
         </AskConnexContext.Provider>

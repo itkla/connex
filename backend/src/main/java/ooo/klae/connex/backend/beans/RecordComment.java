@@ -6,7 +6,7 @@ import java.util.List;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** Immutable comment content and redaction metadata within a record comment thread. */
+/** Comment content, edit state, and redaction metadata within a record comment thread. */
 @Data
 @NoArgsConstructor
 public class RecordComment {
@@ -17,6 +17,7 @@ public class RecordComment {
     private String content;
     private String clientToken;
     private LocalDateTime createdAt;
+    private LocalDateTime editedAt;
     private LocalDateTime deletedAt;
     private Integer deletedByUserId;
     private String authorDisplayName;

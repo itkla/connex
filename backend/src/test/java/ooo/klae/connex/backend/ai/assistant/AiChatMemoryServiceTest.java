@@ -69,7 +69,7 @@ class AiChatMemoryServiceTest {
                 mock(AiWorkspaceGovernanceService.class),
                 objectMapper);
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of());
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
         AiChatMessage early = message(
                 101, 1, "user",
                 "EARLY_FACT_BEGIN " + "quarterly planning preference ".repeat(200)

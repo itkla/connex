@@ -19,12 +19,15 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -53,6 +56,7 @@ public class AiChatTurnPersistenceService {
     private static final String INACCESSIBLE = "AI assistant session is not accessible";
 
     private final AiChatMapper chatMapper;
+    private final AttachmentMapper attachmentMapper;
     private final WorkspaceService workspaceService;
     private final AiProperties aiProperties;
     private final AiRestrictionEpoch restrictionEpoch;
@@ -88,6 +92,15 @@ public class AiChatTurnPersistenceService {
         if (chatMapper.countActiveTurns(workspaceId, sessionId) != 0) {
             throw new ConflictException("Assistant session already has an active turn");
         }
+        List<Integer> attachmentIds = attachmentMapper.getAssistantSessionAttachments(
+                workspaceId, sessionId).stream()
+                .map(Attachment::getId)
+                .toList();
+        if (request.pageContext().size() + attachmentIds.size()
+                > AiChatAttachmentPolicy.MAX_ATTACHMENTS) {
+            throw new BadRequestException(
+                    "Assistant turns accept at most ten record and file context items");
+        }
 
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspaceId);
@@ -122,7 +135,7 @@ public class AiChatTurnPersistenceService {
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
                 message.getSeq(), restrictionEpoch,
                 !SHARED.equals(session.getVisibility()),
-                request.pageContext());
+                request.pageContext(), attachmentIds);
     }
 
     /** Returns one authorized durable turn after applying its lazy generation deadline. */
@@ -285,6 +298,26 @@ public class AiChatTurnPersistenceService {
             throw new IllegalStateException(
                     "Assistant history summary metadata is invalid", exception);
         }
+    }
+
+    /** Loads current session-private attachment metadata after fresh actor authorization. */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public List<Attachment> loadAttachments(AiChatQueuedTurn turn) {
+        requireCurrentActorRead(turn);
+        AiChatSession session = chatMapper.getAccessibleSessionById(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null) {
+            throw inaccessible();
+        }
+        if (turn.attachmentIds().isEmpty()) {
+            return List.of();
+        }
+        List<Attachment> attachments = attachmentMapper.getAssistantSessionAttachmentsByIds(
+                turn.workspaceId(), turn.sessionId(), turn.attachmentIds());
+        if (attachments.size() != turn.attachmentIds().size()) {
+            throw inaccessible();
+        }
+        return attachments;
     }
 
     /** Persists a demasked read-tool proposal before execution. */

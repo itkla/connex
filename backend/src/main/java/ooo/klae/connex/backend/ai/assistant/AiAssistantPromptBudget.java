@@ -7,6 +7,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 public record AiAssistantPromptBudget(
         int maxOutputTokens,
         int historyBytes,
+        int attachmentContextBytes,
         int pageContextBytes,
         int toolResultBytes,
         int compactionSourceBytes) {
@@ -16,7 +17,8 @@ public record AiAssistantPromptBudget(
     private static final int MAX_MASKED_SERIALIZATION_EXPANSION = 12;
 
     public AiAssistantPromptBudget {
-        if (maxOutputTokens < 1 || historyBytes < 1 || pageContextBytes < 1
+        if (maxOutputTokens < 1 || historyBytes < 1 || attachmentContextBytes < 1
+                || pageContextBytes < 1
                 || toolResultBytes < 1 || compactionSourceBytes < 1) {
             throw new IllegalArgumentException("Assistant prompt budgets must be positive");
         }
@@ -26,7 +28,7 @@ public record AiAssistantPromptBudget(
      * Derives conservative input allocations from the configured adapter context window.
      * @param capabilities exact configured provider capabilities
      * @param configuredMaxOutputTokens operator-configured output ceiling
-     * @return separate history, page-context, tool-result, and compaction allocations
+     * @return separate history, attachment, page-context, tool-result, and compaction allocations
      */
     public static AiAssistantPromptBudget from(
             AiProviderCapabilities capabilities,
@@ -39,7 +41,7 @@ public record AiAssistantPromptBudget(
      * @param capabilities exact configured provider capabilities
      * @param configuredMaxOutputTokens operator-configured output ceiling
      * @param fixedEnvelopeBytes exact serialized system, schema, and reasoning envelope bytes
-     * @return separate history, page-context, tool-result, and compaction allocations
+     * @return separate history, attachment, page-context, tool-result, and compaction allocations
      */
     public static AiAssistantPromptBudget from(
             AiProviderCapabilities capabilities,
@@ -72,11 +74,15 @@ public record AiAssistantPromptBudget(
                 3,
                 variableEnvelopeBytes / MAX_MASKED_SERIALIZATION_EXPANSION);
         int historyBytes = Math.max(1, inputBytes / 2);
-        int pageContextBytes = Math.max(1, inputBytes / 5);
-        int toolResultBytes = Math.max(1, inputBytes - historyBytes - pageContextBytes);
+        int attachmentContextBytes = Math.max(1, inputBytes / 5);
+        int pageContextBytes = Math.max(1, inputBytes / 10);
+        int toolResultBytes = Math.max(
+                1,
+                inputBytes - historyBytes - attachmentContextBytes - pageContextBytes);
         return new AiAssistantPromptBudget(
                 maxOutputTokens,
                 historyBytes,
+                attachmentContextBytes,
                 pageContextBytes,
                 toolResultBytes,
                 inputBytes);

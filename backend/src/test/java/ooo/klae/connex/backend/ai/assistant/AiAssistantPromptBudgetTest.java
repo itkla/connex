@@ -24,11 +24,13 @@ class AiAssistantPromptBudgetTest {
 
         assertEquals(8_192, budget.maxOutputTokens());
         assertTrue(budget.historyBytes() > 0);
+        assertTrue(budget.attachmentContextBytes() > 0);
         assertTrue(budget.pageContextBytes() > 0);
         assertTrue(budget.toolResultBytes() > 0);
         assertEquals(
                 budget.compactionSourceBytes(),
-                budget.historyBytes() + budget.pageContextBytes() + budget.toolResultBytes());
+                budget.historyBytes() + budget.attachmentContextBytes()
+                        + budget.pageContextBytes() + budget.toolResultBytes());
         assertTrue(budget.compactionSourceBytes() * 12 + 8_192
                 <= 32_768 - budget.maxOutputTokens());
     }

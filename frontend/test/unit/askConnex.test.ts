@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     EMPTY_ASK_CONNEX_TURN,
+    AskConnexFileRemovalError,
     askConnexCitationHref,
     askConnexCitations,
     askConnexLatestMessagePages,
@@ -12,13 +13,16 @@ import {
     askConnexTurnStorageKey,
     extractAskConnexAttachments,
     groupAskConnexMessages,
+    hasPendingAskConnexFileOperation,
     latestAskConnexSuggestions,
     loadAskConnexLatestMessages,
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
     reduceAskConnexTurn,
+    removeReadyAskConnexFile,
     removeAskConnexAttachment,
+    restoreAskConnexFileAfterFailedRemoval,
     serializeStoredAskConnexTurn,
 } from '@/app/lib/askConnex';
 
@@ -87,6 +91,72 @@ describe('Ask Connex context merging', () => {
     it('submits readable prompt text while context travels separately', () => {
         expect(askConnexMessageContent('Summarize [Kenji](person:7) at [Acme](company:4)'))
             .toBe('Summarize Kenji at Acme');
+    });
+});
+
+describe('Ask Connex file lifecycle', () => {
+    const ready = {
+        clientId: 'stored:41',
+        id: 41,
+        fileName: 'brief.txt',
+        contentType: 'text/plain',
+        size: 128,
+        kind: 'text' as const,
+        status: 'ready' as const,
+        progress: 100,
+        error: null,
+    };
+
+    it('keeps uploads and removals pending until their requests settle', () => {
+        expect(hasPendingAskConnexFileOperation([
+            { ...ready, status: 'uploading', progress: 40 },
+        ])).toBe(true);
+        expect(hasPendingAskConnexFileOperation([
+            { ...ready, status: 'removing' },
+        ])).toBe(true);
+        expect(hasPendingAskConnexFileOperation([ready])).toBe(false);
+    });
+
+    it('does not restore a late failed deletion into a different session epoch', () => {
+        const removing = { ...ready, status: 'removing' as const };
+
+        expect(restoreAskConnexFileAfterFailedRemoval([removing], ready, 3, 4))
+            .toEqual([removing]);
+        expect(restoreAskConnexFileAfterFailedRemoval([removing], ready, 3, 3))
+            .toEqual([ready]);
+    });
+
+    it('keeps deletion pending until success removes the file', async () => {
+        let resolveRemoval: () => void = () => undefined;
+        const request = new Promise<void>((resolve) => {
+            resolveRemoval = resolve;
+        });
+        const controller = new AbortController();
+        const removal = removeReadyAskConnexFile(
+            [ready], ready, 3, () => 3, controller.signal, () => request,
+        );
+
+        expect(hasPendingAskConnexFileOperation(removal.pending)).toBe(true);
+        resolveRemoval();
+        await expect(removal.settled).resolves.toEqual([]);
+    });
+
+    it('restores only a current-session failed deletion', async () => {
+        const controller = new AbortController();
+        const failure = new Error('delete failed');
+
+        await expect(removeReadyAskConnexFile(
+            [ready], ready, 3, () => 3, controller.signal,
+            () => Promise.reject(failure),
+        ).settled).rejects.toMatchObject({
+            name: 'AskConnexFileRemovalError',
+            attachments: [ready],
+            cause: failure,
+        } satisfies Partial<AskConnexFileRemovalError>);
+        await expect(removeReadyAskConnexFile(
+            [ready], ready, 3, () => 4, controller.signal,
+            () => Promise.reject(failure),
+        ).settled).resolves.toBeNull();
     });
 });
 

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -41,5 +42,16 @@ class RecordCommentDtoTest {
         assertEquals("user", dto.references().getFirst().getType());
         assertEquals(42, dto.references().getFirst().getId());
         assertEquals("Mirei Takahara", dto.references().getFirst().getLabel());
+    }
+
+    @Test
+    void editedAtPassesThroughFromComment() {
+        LocalDateTime editedAt = LocalDateTime.of(2026, 8, 12, 10, 30, 15, 123_000_000);
+        RecordComment comment = new RecordComment();
+        comment.setEditedAt(editedAt);
+
+        RecordCommentDto dto = RecordCommentDto.from(comment);
+
+        assertEquals(editedAt, dto.editedAt());
     }
 }

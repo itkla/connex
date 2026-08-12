@@ -1,15 +1,17 @@
 'use client';
 
-import { useState, type Ref } from 'react';
+import { useEffect, useRef, useState, type Ref } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { CheckCircleIcon as CheckCircleSolidIcon } from '@heroicons/react/24/solid';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import type { RecordComment, RecordCommentReactionKey, RecordCommentThread } from '@/app/lib/types';
-import { formatDateTime, formatRelativeTime } from '@/app/lib/utils';
+import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
+import { useFormDraft } from '@/app/hooks/useFormDraft';
+import { formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import { useLiveNow } from '@/app/hooks/useNow';
-import { commentPlainText } from '@/app/components/records/comments/commentText';
+import { commentPlainText, isCommentDraft } from '@/app/components/records/comments/commentText';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import CommentRow from '@/app/components/records/comments/CommentRow';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -24,19 +26,21 @@ export type CommentAuthorIdentity = {
 type Props = {
     thread: RecordCommentThread;
     currentUser: CommentAuthorIdentity;
+    activeWorkspaceId: number | null;
     canComment: boolean;
     canModerate: boolean;
     highlightedCommentId: string | null;
     highlightRef: Ref<HTMLDivElement>;
     forceExpanded: boolean;
-    replyOpen: boolean;
-    replyValue: string;
-    replyCanSubmit: boolean;
-    submitting: boolean;
-    onOpenReply: () => void;
-    onCancelReply: () => void;
-    onReplyChange: (value: string) => void;
-    onReplySubmit: () => void;
+    transitioning: boolean;
+    onSubmitReply: (
+        thread: RecordCommentThread,
+        content: string,
+        clientToken: string,
+    ) => Promise<boolean>;
+    onSubmitEdit: (comment: RecordComment, content: string) => Promise<boolean>;
+    onAttachImage: (file: File) => Promise<string | null>;
+    onCopyLink: (comment: RecordComment) => void;
     onDelete: (comment: RecordComment) => void;
     onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
     onResolve: () => void;
@@ -53,26 +57,25 @@ function resolverName(thread: RecordCommentThread): string | null {
 
 /**
  * One discussion thread: the root comment and its replies connected by a
- * single avatar rail, a faux-input reply stub that expands into the composer,
- * and thread-level resolution. Resolved threads recede to a one-line summary
- * that expands inline, so finished discussions stop competing with open ones.
+ * single avatar rail, a faux-input reply stub that expands into a
+ * draft-persisted composer, and thread-level resolution. The thread owns its
+ * reply state and idempotency token; the parent owns every mutation. Resolved
+ * threads recede to a one-line summary that expands inline.
  */
 export default function CommentThread({
     thread,
     currentUser,
+    activeWorkspaceId,
     canComment,
     canModerate,
     highlightedCommentId,
     highlightRef,
     forceExpanded,
-    replyOpen,
-    replyValue,
-    replyCanSubmit,
-    submitting,
-    onOpenReply,
-    onCancelReply,
-    onReplyChange,
-    onReplySubmit,
+    transitioning,
+    onSubmitReply,
+    onSubmitEdit,
+    onAttachImage,
+    onCopyLink,
     onDelete,
     onToggleReaction,
     onResolve,
@@ -89,6 +92,63 @@ export default function CommentThread({
         if (forceExpanded) setExpandedOverride(null);
     }
     const expanded = expandedOverride ?? forceExpanded;
+
+    const [replyOpen, setReplyOpen] = useState(false);
+    const [replyValue, setReplyValue] = useState('');
+    const [replySubmitting, setReplySubmitting] = useState(false);
+    const replyToken = useRef<string | null>(null);
+
+    const [replyDraftKeyParts] = useState<DraftKeyParts>(() => ({
+        userId: currentUser.id,
+        workspaceId: activeWorkspaceId,
+        formType: 'comment',
+        scope: `reply:${thread.id}`,
+    }));
+    const replyDraft = useFormDraft<{ content: string }>({
+        keyParts: replyDraftKeyParts,
+        version: DRAFT_VERSIONS.comment,
+    });
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            const stored = readDraft(replyDraftKeyParts, { version: DRAFT_VERSIONS.comment });
+            const content = stored && isCommentDraft(stored.data) ? stored.data.content : '';
+            if (content.length > 0) {
+                setReplyValue((current) => (current.length > 0 ? current : content));
+                setReplyOpen(true);
+            }
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [replyDraftKeyParts]);
+
+    const prevReplyValue = useRef('');
+    useEffect(() => {
+        if (replyOpen) {
+            if (replyValue.length > 0) {
+                replyDraft.persist({ content: replyValue });
+            } else if (prevReplyValue.current.length > 0) {
+                replyDraft.clear();
+            }
+        }
+        prevReplyValue.current = replyValue;
+    }, [replyOpen, replyValue, replyDraft]);
+
+    const submitReply = async () => {
+        if (replySubmitting || commentPlainText(replyValue).length === 0) return;
+        replyToken.current ??= crypto.randomUUID();
+        setReplySubmitting(true);
+        try {
+            const succeeded = await onSubmitReply(thread, replyValue, replyToken.current);
+            if (succeeded) {
+                setReplyValue('');
+                setReplyOpen(false);
+                replyToken.current = null;
+                replyDraft.clear();
+            }
+        } finally {
+            setReplySubmitting(false);
+        }
+    };
 
     const root = thread.comments[0];
     const rootAuthor = root?.author?.displayName ?? t('formerMember');
@@ -115,9 +175,13 @@ export default function CommentThread({
                         canDelete={
                             !deleted && (comment.author?.id === currentUser.id || canModerate)
                         }
+                        canEdit={canComment && !resolved && comment.author?.id === currentUser.id}
                         canResolve={index === 0 && !resolved && canComment}
                         onDelete={onDelete}
                         onToggleReaction={onToggleReaction}
+                        onCopyLink={onCopyLink}
+                        onSubmitEdit={onSubmitEdit}
+                        onAttachImage={onAttachImage}
                         onResolve={onResolve}
                     />
                 );
@@ -137,19 +201,27 @@ export default function CommentThread({
                         {replyOpen ? (
                             <CommentComposer
                                 value={replyValue}
-                                onChange={onReplyChange}
-                                onSubmit={onReplySubmit}
-                                onCancel={onCancelReply}
+                                onChange={(value) => {
+                                    setReplyValue(value);
+                                    replyToken.current = null;
+                                }}
+                                onSubmit={submitReply}
+                                onCancel={() => {
+                                    setReplyOpen(false);
+                                    setReplyValue('');
+                                    replyDraft.clear();
+                                }}
                                 placeholder={t('replyPlaceholder')}
                                 submitLabel={t('reply')}
-                                submitting={submitting}
-                                canSubmit={replyCanSubmit}
+                                submitting={replySubmitting}
+                                canSubmit={commentPlainText(replyValue).length > 0}
                                 autoFocus
+                                onAttachImage={onAttachImage}
                             />
                         ) : (
                             <button
                                 type="button"
-                                onClick={onOpenReply}
+                                onClick={() => setReplyOpen(true)}
                                 className="block w-full cursor-text rounded-full border border-border/70 bg-muted/40 px-3.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:border-border hover:bg-muted/60"
                             >
                                 {t('replyPlaceholder')}
@@ -177,7 +249,7 @@ export default function CommentThread({
                 <CheckCircleSolidIcon className="size-5 shrink-0 text-brand" aria-hidden />
                 <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
                     <span className="font-medium text-foreground/80">{rootAuthor}</span>
-                    {rootSnippet ? <span aria-hidden>{' '}</span> : null}
+                    {rootSnippet ? <span aria-hidden>{' '}</span> : null}
                     {rootSnippet}
                 </span>
                 <span className="shrink-0 text-xs text-muted-foreground">
@@ -209,11 +281,11 @@ export default function CommentThread({
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                disabled={submitting}
+                                disabled={transitioning}
                                 onClick={onReopen}
                                 title={
                                     thread.resolvedAt
-                                        ? formatDateTime(thread.resolvedAt, locale)
+                                        ? formatUtcDateTime(thread.resolvedAt, locale)
                                         : undefined
                                 }
                             >

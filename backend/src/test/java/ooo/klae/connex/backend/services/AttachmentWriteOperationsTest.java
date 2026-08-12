@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -34,6 +35,7 @@ import ooo.klae.connex.backend.storage.UploadSource;
 @ExtendWith(MockitoExtension.class)
 class AttachmentWriteOperationsTest {
     @Mock private AttachmentMapper attachmentMapper;
+    @Mock private AiChatMapper aiChatMapper;
     @Mock private CompanyMapper companyMapper;
     @Mock private PersonMapper personMapper;
     @Mock private DealMapper dealMapper;
@@ -47,6 +49,7 @@ class AttachmentWriteOperationsTest {
     void setUp() {
         operations = new AttachmentWriteOperations(
             attachmentMapper,
+            aiChatMapper,
             companyMapper,
             personMapper,
             dealMapper,

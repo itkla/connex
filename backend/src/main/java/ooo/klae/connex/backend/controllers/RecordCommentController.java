@@ -6,6 +6,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,6 +25,7 @@ import ooo.klae.connex.backend.dto.RecordCommentCountDto;
 import ooo.klae.connex.backend.dto.RecordCommentCreateRequest;
 import ooo.klae.connex.backend.dto.RecordCommentCreateThreadRequest;
 import ooo.klae.connex.backend.dto.RecordCommentDto;
+import ooo.klae.connex.backend.dto.RecordCommentEditRequest;
 import ooo.klae.connex.backend.dto.RecordCommentIndicatorDto;
 import ooo.klae.connex.backend.dto.RecordCommentReactionDto;
 import ooo.klae.connex.backend.dto.RecordCommentThreadDto;
@@ -121,6 +123,15 @@ public class RecordCommentController {
     @DeleteMapping("/comments/{commentId}")
     public void deleteComment(@Positive @PathVariable long commentId) {
         recordCommentService.deleteComment(commentId);
+    }
+
+    @PatchMapping("/comments/{commentId}")
+    @RequirePermission(Permission.COMMENT_CREATE)
+    public RecordCommentDto editComment(
+            @Positive @PathVariable long commentId,
+            @Valid @RequestBody RecordCommentEditRequest request) {
+        return RecordCommentDto.from(
+            recordCommentService.editComment(commentId, request.content()));
     }
 
     @PutMapping("/comments/{commentId}/reactions/{reaction}")

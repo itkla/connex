@@ -55,6 +55,35 @@ class AttachmentMapperXmlTest {
         }
     }
 
+    @Test
+    void assistantAttachmentReadsAreSessionScopedAndGenericReadsExcludeThem() throws IOException {
+        String xml = mapperXml();
+
+        for (String statement : List.of(
+                "getAssistantSessionAttachments",
+                "getAssistantSessionAttachmentsByIds",
+                "getAssistantSessionAttachment",
+                "countAssistantSessionAttachments")) {
+            String sql = block(xml, statement);
+            assertTrue(sql.contains("a.workspace_id = #{workspaceId}"), statement);
+            assertTrue(sql.contains("a.entity_type = 'ai_chat_session'"), statement);
+            assertTrue(sql.contains("a.entity_id = #{sessionId}"), statement);
+        }
+        for (String statement : List.of(
+                "getAll", "search",
+                "countsBySource", "countsByKind", "countsByTag",
+                "countOrphaned", "totalCount", "totalSize")) {
+            assertTrue(block(xml, statement)
+                    .contains("a.entity_type != 'ai_chat_session'"), statement);
+        }
+        assertTrue(block(xml, "attachPageWhere")
+                .contains("a.entity_type != 'ai_chat_session'"));
+        assertTrue(block(xml, "getPage").contains("attachPageWhere"));
+        assertTrue(block(xml, "countPage").contains("attachPageWhere"));
+        assertTrue(block(xml, "exists")
+                .contains("entity_type != 'ai_chat_session'"));
+    }
+
     private static String block(String xml, String id) {
         Matcher matcher = BLOCK.matcher(xml);
         while (matcher.find()) {

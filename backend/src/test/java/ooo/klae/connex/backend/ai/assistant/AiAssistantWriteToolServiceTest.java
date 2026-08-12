@@ -70,7 +70,7 @@ class AiAssistantWriteToolServiceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-03-06T15:00:00Z"), ZoneOffset.UTC);
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiChatMapper chatMapper;
@@ -536,7 +536,7 @@ class AiAssistantWriteToolServiceTest {
 
         AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
-                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of());
+                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of());
         AiChatTurn secondStoredTurn = new AiChatTurn();
         secondStoredTurn.setId(secondTurn.turnId());
         secondStoredTurn.setRequestedByUserId(secondTurn.userId());

@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,15 +15,19 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
+import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
+import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatParticipantDto;
@@ -40,6 +45,7 @@ import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.AiAssistantService;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 /** Authenticated active-workspace endpoints for durable assistant chat sessions. */
 @RestController
@@ -51,6 +57,7 @@ public class AiAssistantController {
     private final AiAssistantService assistantService;
     private final AiAssistantTurnService turnService;
     private final AiAssistantWriteToolService writeToolService;
+    private final AiChatAttachmentService attachmentService;
 
     /** Returns a bounded page of caller-owned and shared-participant sessions. */
     @GetMapping
@@ -179,6 +186,32 @@ public class AiAssistantController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void archive(@PathVariable int id) {
         assistantService.archive(id);
+    }
+
+    /** Returns private context files attached to one accessible active session. */
+    @GetMapping("/{id:\\d+}/attachments")
+    public List<AiChatAttachmentDto> listAttachments(@PathVariable int id) {
+        return attachmentService.list(id);
+    }
+
+    /** Uploads one bounded text or image context file to an accessible active session. */
+    @PostMapping(
+        value = "/{id:\\d+}/attachments",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<AiChatAttachmentDto> uploadAttachment(
+            @PathVariable int id,
+            @RequestPart("file") MultipartFile file) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                attachmentService.upload(id, UploadSource.from(file)));
+    }
+
+    /** Deletes one private context file from an accessible active session. */
+    @DeleteMapping("/{sessionId:\\d+}/attachments/{attachmentId:\\d+}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteAttachment(
+            @PathVariable int sessionId,
+            @PathVariable int attachmentId) {
+        attachmentService.delete(sessionId, attachmentId);
     }
 
     /** Appends a caller-authored message to an active accessible session. */

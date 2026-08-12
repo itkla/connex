@@ -2316,6 +2316,16 @@ export type AiChatPageContext = {
     id: number;
 };
 
+/** Private file context attached to one assistant session. */
+export type AiChatAttachment = {
+    id: number;
+    fileName: string;
+    contentType: string;
+    size: number;
+    kind: 'text' | 'image';
+    createdAt: string;
+};
+
 /** API representation of one durable assistant chat session. */
 export type AiChatSession = {
     id: number;
@@ -2830,6 +2840,8 @@ export type RecordComment = {
     /** Null once the comment has been redacted; the row survives as a tombstone. */
     content: string | null;
     createdAt: string;
+    /** Set when the author edited the comment within the edit window. */
+    editedAt?: string | null;
     deletedAt: string | null;
     deletedByUserId?: number | null;
     /** Server-authorized @/# references resolved from the content tokens. */

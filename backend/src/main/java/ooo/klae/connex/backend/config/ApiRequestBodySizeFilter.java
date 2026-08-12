@@ -122,6 +122,7 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
 
     private static boolean isUploadPath(String path) {
         return path.equals("/api/attachments/upload")
+            || path.matches("^/api/ai/assistant/sessions/\\d+/attachments$")
             || path.equals("/api/users/me/profile-picture")
             || path.matches("^/api/persons/\\d+/profile-picture$")
             || path.matches("^/api/companies/\\d+/logo$");

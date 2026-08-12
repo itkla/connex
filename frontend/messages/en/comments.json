@@ -5,6 +5,10 @@
     "empty": "Ask a question, flag a concern, or hand off next steps to your team.",
     "composerPlaceholder": "Add a comment…",
     "composerHint": "@ to mention · Shift+Enter for a new line",
+    "attachImage": "Attach an image",
+    "imageUploading": "Uploading image…",
+    "imageUploadFailed": "The image could not be uploaded",
+    "imageUnsupportedType": "Only JPEG, PNG, and WebP images are supported",
     "replyPlaceholder": "Reply…",
     "post": "Comment",
     "reply": "Reply",
@@ -44,6 +48,14 @@
     "reaction_heart": "Heart",
     "reaction_celebrate": "Celebrate",
     "reaction_eyes": "Eyes",
-    "reaction_laugh": "Laugh"
+    "reaction_laugh": "Laugh",
+    "edit": "Edit comment",
+    "save": "Save",
+    "editedMarker": "(edited)",
+    "editSaved": "Comment updated",
+    "editFailed": "Couldn't update the comment",
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied",
+    "copyFailed": "Couldn't copy the link"
   }
 }

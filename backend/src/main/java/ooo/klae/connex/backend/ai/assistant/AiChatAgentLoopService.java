@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
@@ -71,6 +72,7 @@ public class AiChatAgentLoopService {
     private final AiAssistantWriteToolService writeToolService;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiChatMemoryService memoryService;
+    private final AiChatAttachmentContextService attachmentContextService;
     private final AiChatTurnPersistenceService persistenceService;
     private final AiRestrictionEpoch restrictionEpoch;
     private final WorkspaceService workspaceService;
@@ -99,6 +101,8 @@ public class AiChatAgentLoopService {
             AiChatResourceRegistry resources = new AiChatResourceRegistry();
             MaskingContext maskingContext = new MaskingContext();
             AiChatMemory memory = memoryService.prepare(turn, maskingContext);
+            AiChatAttachmentContext attachmentContext =
+                    attachmentContextService.prepare(turn, deadline);
             List<AiChatMessage> history = memory.history();
             AiChatMessage initiatingMessage = history.stream()
                     .filter(message -> message.getId() == turn.userMessageId())
@@ -116,8 +120,8 @@ public class AiChatAgentLoopService {
             List<String> reasoningParts = new ArrayList<>();
             AiStructuredRepair repair = null;
             int noProgressSteps = 0;
-            int inputTokens = memory.inputTokens();
-            int outputTokens = memory.outputTokens();
+            int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
+            int outputTokens = addTokens(memory.outputTokens(), attachmentContext.outputTokens());
             int maxSteps = Math.min(
                     governanceService.assistantMaxSteps(turn.workspaceId()), HARD_MAX_STEPS);
 
@@ -130,8 +134,14 @@ public class AiChatAgentLoopService {
                         AiFeature.ASSISTANT_CHAT,
                         maskingContext,
                         promptAssembler.assemble(
-                                history, pageContext, toolTurns, maskingContext, resources,
-                                memory.budget(), repair),
+                                history,
+                                pageContext,
+                                toolTurns,
+                                maskingContext,
+                                resources,
+                                attachmentContext.data(),
+                                memory.budget(),
+                                repair),
                         memory.budget().maxOutputTokens(),
                         TEMPERATURE,
                         aiProperties.isAssistantThinkingEnabled());
@@ -203,6 +213,10 @@ public class AiChatAgentLoopService {
                         AiAssistantPreparedWrite write = writeToolService.prepare(
                                 step.tool().name(), step.tool().args(), resources,
                                 turn.restrictionEpoch());
+                        if (!attachmentContext.data().isEmpty()
+                                && write.tier() == AiAssistantToolCatalog.ToolTier.AUTO) {
+                            return AiGenerationTaskResult.failed("attachment_auto_write_blocked");
+                        }
                         AiAssistantToolProposal proposal =
                                 persistenceService.proposeWriteTool(turn, stepNumber, write);
                         int toolCallId = proposal.id();
@@ -331,6 +345,9 @@ public class AiChatAgentLoopService {
                             ? "agent_backstop_exceeded"
                             : "step_cap_exceeded");
         } catch (AiAssistantLoopException exception) {
+            if ("turn_deadline_exceeded".equals(exception.terminalReason())) {
+                return AiGenerationTaskResult.timedOut(exception.terminalReason());
+            }
             return AiGenerationTaskResult.failed(exception.terminalReason());
         } catch (AiBudgetExhaustedException exception) {
             return AiGenerationTaskResult.failed("budget_exhausted");
@@ -341,6 +358,8 @@ public class AiChatAgentLoopService {
                             : "invocation_capacity_exhausted");
         } catch (TooManyRequestsException exception) {
             return AiGenerationTaskResult.failed("quota_exhausted");
+        } catch (AiImageInputUnsupportedException exception) {
+            return AiGenerationTaskResult.failed("image_input_unsupported");
         } catch (AiProviderException exception) {
             return AiGenerationTaskResult.failed("provider_error");
         } catch (ResourceNotFoundException exception) {

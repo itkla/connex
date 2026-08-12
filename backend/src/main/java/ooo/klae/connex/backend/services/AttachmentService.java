@@ -34,6 +34,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AttachmentService {
     private static final String MANAGED_URL_PREFIX = "/api/attachments/content/";
+    private static final String ASSISTANT_SESSION = "ai_chat_session";
 
     private final AttachmentMapper attachmentMapper;
     private final AttachmentReadService attachmentReadService;
@@ -58,6 +59,7 @@ public class AttachmentService {
     public List<Attachment> getByEntity(String entityType, int entityId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String normalizedType = normalizeType(entityType);
+        requireGenericAttachmentType(normalizedType);
         requireVisibleNoteTarget(workspaceId, normalizedType, entityId);
         return attachmentReadService.getByEntity(
             workspaceId, normalizedType, entityId);
@@ -148,6 +150,7 @@ public class AttachmentService {
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found with id: " + attachmentId);
         }
+        requireGenericAttachmentType(attachment.getEntityType());
         requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         List<String> before = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId).stream().map(Tag::getName).toList();
         attachmentMapper.clearTags(workspaceId, attachmentId);
@@ -168,6 +171,7 @@ public class AttachmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment attachment = attachmentReadService.getById(workspaceId, id);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        requireGenericAttachmentType(attachment.getEntityType());
         requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return attachment;
     }
@@ -179,6 +183,7 @@ public class AttachmentService {
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found for managed content");
         }
+        requireGenericAttachmentType(attachment.getEntityType());
         requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return managedObjectService.openAttachment(workspaceId, attachment);
     }
@@ -197,6 +202,7 @@ public class AttachmentService {
         Attachment attachment = attachmentReadService.getByUrl(
             workspaceService.getCurrentWorkspaceId(), url);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found for url");
+        requireGenericAttachmentType(attachment.getEntityType());
         return attachment;
     }
 
@@ -239,6 +245,7 @@ public class AttachmentService {
     public Attachment upload(String entityType, int entityId, UploadSource source, User uploader) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String normalizedType = normalizeType(entityType);
+        requireGenericAttachmentType(normalizedType);
         UserDisplayNameDto targetLabel = requireVisibleUserTarget(
             workspaceId, normalizedType, entityId);
         Attachment attachment = attachmentWriteOperations.upload(
@@ -250,6 +257,7 @@ public class AttachmentService {
     private UserDisplayNameDto prepareTarget(int workspaceId, Attachment attachment) {
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
+        requireGenericAttachmentType(attachment.getEntityType());
         return requireVisibleUserTarget(
             workspaceId, attachment.getEntityType(), attachment.getEntityId());
     }
@@ -286,6 +294,7 @@ public class AttachmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getMetadataById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        requireGenericAttachmentType(before.getEntityType());
         requireVisibleNoteTarget(workspaceId, before.getEntityType(), before.getEntityId());
         List<Integer> referenceIds = attachmentMapper.lockIdsByUrl(workspaceId, before.getUrl());
         if (!referenceIds.contains(id)) {
@@ -299,5 +308,11 @@ public class AttachmentService {
         auditService.record("attachment.delete", "attachment", id, before.getFileName(),
             "Deleted attachment " + before.getFileName(),
             auditService.diff(before, null, AUDIT_FIELDS));
+    }
+
+    private static void requireGenericAttachmentType(String entityType) {
+        if (ASSISTANT_SESSION.equals(entityType)) {
+            throw new ResourceNotFoundException("Attachment not found");
+        }
     }
 }

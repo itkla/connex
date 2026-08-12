@@ -67,6 +67,8 @@ class AttachmentReadBoundaryArchTest {
         }
         callers.sort(String::compareTo);
 
-        assertEquals(List.of("AttachmentService.java"), callers);
+        assertEquals(
+                List.of("AiChatAttachmentService.java", "AttachmentService.java"),
+                callers);
     }
 }

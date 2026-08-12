@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
+import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedAiImage;
 
 class ImageUploadValidatorTest {
     private static final byte[] VALID_WEBP = Base64.getDecoder().decode(
@@ -69,6 +70,22 @@ class ImageUploadValidatorTest {
         assertEquals(10, ImageIO.read(new ByteArrayInputStream(png.content())).getWidth());
         assertEquals(10, ImageIO.read(new ByteArrayInputStream(jpeg.content())).getWidth());
         assertEquals(1, ImageIO.read(new ByteArrayInputStream(webp.content())).getWidth());
+    }
+
+    @Test
+    void aiValidationFlattensAlphaAndEmitsBoundedCanonicalJpeg() throws IOException {
+        byte[] pngBytes = image("png", BufferedImage.TYPE_INT_ARGB, 10, 20);
+
+        ValidatedAiImage image = validator.validateForAi(
+                source("diagram.png", "image/png", pngBytes));
+        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(image.content()));
+
+        assertEquals(10, image.width());
+        assertEquals(20, image.height());
+        assertEquals(10, decoded.getWidth());
+        assertFalse(decoded.getColorModel().hasAlpha());
+        assertTrue(image.content().length <= 3_500_000);
+        assertEquals("image/jpeg", image.toInputImage().contentType());
     }
 
     @Test
