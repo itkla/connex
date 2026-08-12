@@ -54,6 +54,10 @@ public interface AiChatMapper {
         @Param("userId") int userId,
         @Param("id") int id);
 
+    boolean sessionExists(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
+
     int insertSession(AiChatSession session);
 
     int updateSession(

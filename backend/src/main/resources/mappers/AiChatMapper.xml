@@ -147,6 +147,15 @@
     FOR UPDATE
   </select>
 
+  <select id="sessionExists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM ai_chat_session
+      WHERE workspace_id = #{workspaceId}
+        AND id = #{id}
+    )
+  </select>
+
   <insert id="insertSession" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_session
       (workspace_id, created_by_user_id, title, visibility, status)

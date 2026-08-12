@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.argThat;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -24,27 +25,37 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiChatTurnPersistenceServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, false, List.of());
+            7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of());
 
     private AiChatMapper chatMapper;
+    private AttachmentMapper attachmentMapper;
     private WorkspaceService workspaceService;
     private AiChatTurnPersistenceService service;
 
     @BeforeEach
     void setUp() {
         chatMapper = mock(AiChatMapper.class);
+        attachmentMapper = mock(AttachmentMapper.class);
         workspaceService = mock(WorkspaceService.class);
+        AiProperties aiProperties = mock(AiProperties.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
+                attachmentMapper,
                 workspaceService,
-                mock(AiProperties.class),
+                aiProperties,
                 mock(AiRestrictionEpoch.class),
                 Clock.systemUTC(),
                 JsonMapper.builder().build());
@@ -63,6 +74,10 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(storedTurn);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
         when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
+        User actor = new User();
+        actor.setId(TURN.userId());
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(actor));
+        when(aiProperties.getGenerationMaxLifetime()).thenReturn(Duration.ofMinutes(5));
     }
 
     @Test
@@ -131,7 +146,7 @@ class AiChatTurnPersistenceServiceTest {
 
         AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
-                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of());
+                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of());
         AiChatTurn secondStoredTurn = new AiChatTurn();
         secondStoredTurn.setId(secondTurn.turnId());
         secondStoredTurn.setRequestedByUserId(secondTurn.userId());
@@ -145,5 +160,35 @@ class AiChatTurnPersistenceServiceTest {
         assertTrue(second.created());
         verify(chatMapper).insertToolCall(argThat(toolCall ->
                 "turn-18-step-1".equals(toolCall.getIdempotencyKey())));
+    }
+
+    @Test
+    void queuedTurnSnapshotsSessionAttachmentsAndEnforcesCombinedContextCap() {
+        Attachment first = attachment(31);
+        Attachment second = attachment(37);
+        when(attachmentMapper.getAssistantSessionAttachments(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of(first, second));
+        AiChatTurnCreateRequest accepted = new AiChatTurnCreateRequest(
+                "Summarize", List.of(new AiChatPageContextDto("person", 41)));
+
+        AiChatQueuedTurn queued = service.queue(
+                TURN.sessionId(), accepted, TURN.restrictionEpoch());
+
+        assertEquals(List.of(31, 37), queued.attachmentIds());
+        assertEquals(accepted.pageContext(), queued.pageContext());
+
+        List<AiChatPageContextDto> tenRecords = java.util.stream.IntStream.rangeClosed(1, 10)
+                .mapToObj(id -> new AiChatPageContextDto("person", id))
+                .toList();
+        assertThrows(BadRequestException.class, () -> service.queue(
+                TURN.sessionId(),
+                new AiChatTurnCreateRequest("Summarize", tenRecords),
+                TURN.restrictionEpoch()));
+    }
+
+    private static Attachment attachment(int id) {
+        Attachment attachment = new Attachment();
+        attachment.setId(id);
+        return attachment;
     }
 }

@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
+import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptBlockedException;
@@ -77,6 +78,30 @@ public class AiInvocationService {
     public AiCompletionOutcome complete(AiInvocation invocation) {
         try (RawInvocation raw = invokeRaw(
                 invocation, AiOutputMode.TEXT, null, NO_INVOCATION_COMMITMENT)) {
+            AiCompletionResult result = raw.result();
+            Demasker.DemaskResult demasked = Demasker.demask(
+                    CompletionNormalizer.stripReasoning(result.text()), invocation.context());
+            raw.close();
+            emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
+                    result.stopReason(), demasked.warnings(), null, false, null);
+            return new AiCompletionOutcome(demasked.text(), demasked.warnings(),
+                    result.inputTokens(), result.outputTokens(), result.stopReason());
+        }
+    }
+
+    /**
+     * Completes a masked direct invocation and commits its organization quota immediately before
+     * provider egress.
+     * @param invocation masked invocation request
+     * @param admission active direct invocation admission
+     * @return demasked completion outcome
+     */
+    public AiCompletionOutcome complete(
+            AiInvocation invocation,
+            AiInvocationAdmissionService.DirectAdmission admission) {
+        Objects.requireNonNull(admission, "admission");
+        try (RawInvocation raw = invokeRaw(
+                invocation, AiOutputMode.TEXT, null, admission::commitInvocation)) {
             AiCompletionResult result = raw.result();
             Demasker.DemaskResult demasked = Demasker.demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
@@ -339,7 +364,7 @@ public class AiInvocationService {
         if (!invocation.images().isEmpty() && !resolved.imageInputSupported()) {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "provider_capability", structured, null);
-            throw new AiProviderException("Configured AI model does not support image input");
+            throw new AiImageInputUnsupportedException();
         }
 
         String serializedPrompt;

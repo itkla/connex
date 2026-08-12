@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -28,6 +29,7 @@ public class AttachmentWriteOperations {
         Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
 
     private final AttachmentMapper attachmentMapper;
+    private final AiChatMapper aiChatMapper;
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
@@ -54,6 +56,22 @@ public class AttachmentWriteOperations {
     public Attachment upload(
             int workspaceId, String entityType, int entityId, UploadSource source, User uploader) {
         requireTenantTarget(workspaceId, entityType, entityId);
+        return storeAndPersist(workspaceId, entityType, entityId, source, uploader);
+    }
+
+    /** Stores a managed assistant attachment after the caller has locked and authorized its session. */
+    @Transactional
+    public Attachment uploadAssistantSession(
+            int workspaceId, int sessionId, UploadSource source, User uploader) {
+        if (!aiChatMapper.sessionExists(workspaceId, sessionId)) {
+            throw new ResourceNotFoundException("Attachment target was not found");
+        }
+        return storeAndPersist(
+                workspaceId, "ai_chat_session", sessionId, source, uploader);
+    }
+
+    private Attachment storeAndPersist(
+            int workspaceId, String entityType, int entityId, UploadSource source, User uploader) {
         StoredBinary stored = managedObjectService.storeAttachment(workspaceId, source);
         Attachment attachment = new Attachment();
         attachment.setWorkspaceId(workspaceId);

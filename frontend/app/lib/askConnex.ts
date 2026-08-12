@@ -12,6 +12,90 @@ export type AskConnexAttachment = AiChatPageContext & {
     label: string;
 };
 
+/** Client upload lifecycle for one assistant-session file chip. */
+export type AskConnexFileAttachment = {
+    clientId: string;
+    id: number | null;
+    fileName: string;
+    contentType: string;
+    size: number;
+    kind: 'text' | 'image';
+    status: 'uploading' | 'ready' | 'failed' | 'removing';
+    progress: number;
+    error: string | null;
+};
+
+/** Returns whether an upload or removal must settle before the conversation can advance. */
+export function hasPendingAskConnexFileOperation(
+    attachments: readonly AskConnexFileAttachment[],
+): boolean {
+    return attachments.some(
+        (attachment) => attachment.status === 'uploading' || attachment.status === 'removing',
+    );
+}
+
+/** Restores a failed removal only while its originating session epoch is still active. */
+export function restoreAskConnexFileAfterFailedRemoval(
+    attachments: readonly AskConnexFileAttachment[],
+    fallback: AskConnexFileAttachment,
+    operationEpoch: number,
+    currentEpoch: number,
+): AskConnexFileAttachment[] {
+    if (operationEpoch !== currentEpoch) return [...attachments];
+    return attachments.map((attachment) => attachment.clientId === fallback.clientId
+        ? fallback
+        : attachment);
+}
+
+/** Runs one ready-file deletion while preserving pending and stale-session semantics. */
+export function removeReadyAskConnexFile(
+    attachments: readonly AskConnexFileAttachment[],
+    attachment: AskConnexFileAttachment,
+    operationEpoch: number,
+    currentEpoch: () => number,
+    signal: AbortSignal,
+    request: () => Promise<void>,
+): {
+    pending: AskConnexFileAttachment[];
+    settled: Promise<AskConnexFileAttachment[] | null>;
+} {
+    const removing = attachments.map((item) => item.clientId === attachment.clientId
+        ? { ...item, status: 'removing' as const }
+        : item);
+    const settled = (async () => {
+        try {
+            await request();
+            if (signal.aborted || operationEpoch !== currentEpoch()) return null;
+            return removing.filter((item) => item.clientId !== attachment.clientId);
+        } catch (error) {
+            if (signal.aborted || operationEpoch !== currentEpoch()) return null;
+            throw new AskConnexFileRemovalError(
+                restoreAskConnexFileAfterFailedRemoval(
+                    removing,
+                    attachment,
+                    operationEpoch,
+                    currentEpoch(),
+                ),
+                error,
+            );
+        }
+    })();
+    return { pending: removing, settled };
+}
+
+/** Carries the restored attachment state alongside one current-session removal failure. */
+export class AskConnexFileRemovalError extends Error {
+    readonly attachments: AskConnexFileAttachment[];
+    readonly cause: unknown;
+
+    constructor(attachments: AskConnexFileAttachment[], cause: unknown) {
+        super('Ask Connex file removal failed');
+        this.name = 'AskConnexFileRemovalError';
+        this.attachments = attachments;
+        this.cause = cause;
+    }
+}
+
 /** Consecutive transcript messages authored by the same sender. */
 export type AskConnexMessageGroup = {
     authorKind: string;

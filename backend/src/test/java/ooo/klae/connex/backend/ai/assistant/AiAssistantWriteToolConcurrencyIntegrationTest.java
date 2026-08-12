@@ -338,7 +338,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         AiChatToolCall toolCall = toolCall(message, write);
         AiChatQueuedTurn queued = new AiChatQueuedTurn(
                 workspace.getId(), actor.getId(), session.getId(), turn.getId(),
-                message.getId(), message.getSeq(), expectedEpoch, true, List.of());
+                message.getId(), message.getSeq(), expectedEpoch, true, List.of(), List.of());
         return new ToolFixture(session.getId(), toolCall.getId(), queued);
     }
 

@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
+import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -165,6 +166,20 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void completeWithDirectAdmissionCommitsImmediatelyBeforeProviderEgress() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+
+        AiCompletionOutcome outcome = service.complete(invocation, directAdmission);
+
+        assertEquals("Mina Patel is ready for follow-up.", outcome.text());
+        InOrder order = inOrder(directAdmission, providerTransport);
+        order.verify(directAdmission).commitInvocation();
+        order.verify(providerTransport).run();
+    }
+
+    @Test
     void completeStructured_staleAsyncRestrictionEpochSkipsQuotaAndProvider() {
         AiInvocation invocation = invocation("Summarize relationship state");
         long expectedEpoch = restrictionEpoch.current(WORKSPACE_ID);
@@ -273,7 +288,8 @@ class AiInvocationServiceTest {
                 AiCredentials.of(Map.of()));
         when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(resolved);
 
-        AiProviderException exception = assertThrows(AiProviderException.class,
+        AiImageInputUnsupportedException exception = assertThrows(
+                AiImageInputUnsupportedException.class,
                 () -> service.complete(invocation));
 
         assertEquals("Configured AI model does not support image input", exception.getMessage());

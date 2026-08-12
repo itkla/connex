@@ -2316,6 +2316,16 @@ export type AiChatPageContext = {
     id: number;
 };
 
+/** Private file context attached to one assistant session. */
+export type AiChatAttachment = {
+    id: number;
+    fileName: string;
+    contentType: string;
+    size: number;
+    kind: 'text' | 'image';
+    createdAt: string;
+};
+
 /** API representation of one durable assistant chat session. */
 export type AiChatSession = {
     id: number;

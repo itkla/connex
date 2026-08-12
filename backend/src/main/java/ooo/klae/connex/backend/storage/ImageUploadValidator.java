@@ -28,6 +28,7 @@ import org.springframework.stereotype.Component;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 
+import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
@@ -60,13 +61,32 @@ public class ImageUploadValidator {
     }
 
     public ValidatedImage validate(UploadSource source) {
+        DecodedImage image = validate(source, true, properties.getMaxUploadBytes());
+        return new ValidatedImage(image.content(), image.contentType(), image.extension());
+    }
+
+    /**
+     * Fully validates and canonicalizes one image for bounded AI provider input.
+     * @param source repeatable upload source
+     * @return metadata-free JPEG bytes and decoded dimensions
+     */
+    public ValidatedAiImage validateForAi(UploadSource source) {
+        DecodedImage image = validate(source, false, AiInputImage.MAX_BYTES);
+        if (image.width() > AiInputImage.MAX_DIMENSION
+                || image.height() > AiInputImage.MAX_DIMENSION) {
+            throw new BadRequestException("Uploaded image dimensions exceed the AI input limit");
+        }
+        return new ValidatedAiImage(image.content(), image.width(), image.height());
+    }
+
+    private DecodedImage validate(UploadSource source, boolean preserveAlpha, long maxOutputBytes) {
         uploadPolicy.validateLength(source.contentLength());
         try (Lease lease = decodeAdmission.tryAcquire().orElseThrow(
                 () -> new ServiceUnavailableException("Image validation is busy; retry shortly"))) {
             byte[] bytes = read(source);
             ImageFormat format = detect(bytes);
             validateDeclaredContentType(source.contentType(), format.contentType());
-            return decode(bytes, format, lease);
+            return decode(bytes, format, lease, preserveAlpha, maxOutputBytes);
         }
     }
 
@@ -115,7 +135,12 @@ public class ImageUploadValidator {
         }
     }
 
-    private ValidatedImage decode(byte[] bytes, ImageFormat format, Lease lease) {
+    private DecodedImage decode(
+            byte[] bytes,
+            ImageFormat format,
+            Lease lease,
+            boolean preserveAlpha,
+            long maxOutputBytes) {
         try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
             if (input == null) {
                 throw malformed();
@@ -153,10 +178,12 @@ public class ImageUploadValidator {
                 if (decoded == null || decoded.getWidth() != width || decoded.getHeight() != height) {
                     throw malformed();
                 }
-                BufferedImage normalized = normalize(decoded, orientation, alpha);
-                EncodedImage encoded = encode(normalized, alpha);
-                return new ValidatedImage(
-                    encoded.content(), encoded.contentType(), encoded.extension());
+                boolean canonicalAlpha = preserveAlpha && alpha;
+                BufferedImage normalized = normalize(decoded, orientation, canonicalAlpha);
+                EncodedImage encoded = encode(normalized, canonicalAlpha, maxOutputBytes);
+                return new DecodedImage(
+                    encoded.content(), encoded.contentType(), encoded.extension(),
+                    normalized.getWidth(), normalized.getHeight());
             } finally {
                 reader.dispose();
             }
@@ -237,7 +264,10 @@ public class ImageUploadValidator {
         return normalized;
     }
 
-    private EncodedImage encode(BufferedImage image, boolean alpha) throws IOException {
+    private EncodedImage encode(
+            BufferedImage image,
+            boolean alpha,
+            long maxOutputBytes) throws IOException {
         String format = alpha ? "png" : "jpeg";
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName(format);
         if (!writers.hasNext()) {
@@ -245,7 +275,7 @@ public class ImageUploadValidator {
         }
         ImageWriter writer = writers.next();
         try (CappedImageOutputStream output =
-                new CappedImageOutputStream(properties.getMaxUploadBytes())) {
+                new CappedImageOutputStream(maxOutputBytes)) {
             writer.setOutput(output);
             ImageWriteParam parameters = writer.getDefaultWriteParam();
             if (!alpha && parameters.canWriteCompressed()) {
@@ -257,7 +287,7 @@ public class ImageUploadValidator {
             return new EncodedImage(
                 output.toByteArray(), alpha ? "image/png" : "image/jpeg", alpha ? "png" : "jpg");
         } catch (CappedImageOutputStream.LimitExceededException exception) {
-            throw new RequestBodyTooLargeException(properties.getMaxUploadBytes());
+            throw new RequestBodyTooLargeException(maxOutputBytes);
         } finally {
             writer.dispose();
         }
@@ -379,6 +409,36 @@ public class ImageUploadValidator {
     }
 
     private record EncodedImage(byte[] content, String contentType, String extension) {
+    }
+
+    private record DecodedImage(
+            byte[] content,
+            String contentType,
+            String extension,
+            int width,
+            int height) {
+    }
+
+    /**
+     * Canonical metadata-free JPEG bytes and decoded dimensions for provider input.
+     * @param content canonical JPEG bytes
+     * @param width decoded width
+     * @param height decoded height
+     */
+    public record ValidatedAiImage(byte[] content, int width, int height) {
+        public ValidatedAiImage {
+            content = content.clone();
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+
+        /** @return validated provider image value */
+        public AiInputImage toInputImage() {
+            return new AiInputImage("image/jpeg", content, width, height);
+        }
     }
 
     /**

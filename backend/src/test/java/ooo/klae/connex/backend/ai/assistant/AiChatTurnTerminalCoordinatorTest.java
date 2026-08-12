@@ -28,7 +28,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class AiChatTurnTerminalCoordinatorTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
 
     private AiChatTurnPersistenceService persistenceService;
     private AiChatRealtimePublisher publisher;
@@ -91,6 +91,8 @@ class AiChatTurnTerminalCoordinatorTest {
                 "invocation_capacity_exhausted",
                 "malformed_output",
                 "schema_repair_failed",
+                "image_input_unsupported",
+                "attachment_auto_write_blocked",
                 "no_progress",
                 "agent_backstop_exceeded",
                 "step_cap_exceeded",
