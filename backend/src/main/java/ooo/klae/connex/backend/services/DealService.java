@@ -892,7 +892,7 @@ public class DealService {
     @Transactional(propagation = Propagation.MANDATORY)
     public LockedStageChange lockStageChangeRowsForUpdate(int dealId, int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return lockStageChangeRows(workspaceId, dealId, stageId);
+        return lockStageChangeRows(workspaceId, dealId, stageId, true);
     }
 
     /** Applies a prepared stage change without performing another board-row lock pass. */
@@ -1613,12 +1613,12 @@ public class DealService {
     private Deal moveInternal(int dealId, int stageId, int position, boolean forceStageChanged) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         LockedStageChange lockedStageChange = lockStageChangeRows(
-            workspaceId, dealId, stageId);
+            workspaceId, dealId, stageId, false);
         return moveLocked(lockedStageChange, position, forceStageChanged);
     }
 
     private LockedStageChange lockStageChangeRows(
-            int workspaceId, int dealId, int stageId) {
+            int workspaceId, int dealId, int stageId, boolean requireStableSourceStage) {
         Deal discovered = requireDeal(workspaceId, dealId);
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
@@ -1628,7 +1628,8 @@ public class DealService {
             .filter(deal -> deal.getId() == dealId)
             .findFirst()
             .orElseThrow(() -> new ResourceNotFoundException("Deal not found with id: " + dealId));
-        if (!Objects.equals(discovered.getStageId(), locked.getStageId())) {
+        if (requireStableSourceStage
+                && !Objects.equals(discovered.getStageId(), locked.getStageId())) {
             throw new ConflictException("Deal stage changed while preparing the mutation");
         }
         return new LockedStageChange(
