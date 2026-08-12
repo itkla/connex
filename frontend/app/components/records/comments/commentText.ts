@@ -1,3 +1,5 @@
+import { defaultAltFromFileName } from '@/app/lib/managed-image';
+
 /**
  * Flattens a comment body to plain text for canSubmit checks and collapsed
  * thread summaries: reference tokens and Markdown links reduce to their
@@ -17,25 +19,13 @@ export function commentPlainText(value: string): string {
 }
 
 /**
- * Derives readable alt text from an uploaded file name: the extension is
- * dropped and separator runs collapse to spaces, falling back to the raw
- * name when nothing remains.
- */
-export function commentImageAlt(fileName: string): string {
-    const base = fileName
-        .replace(/\.[^.]+$/u, '')
-        .replace(/[_-]+/gu, ' ')
-        .trim();
-    return base || fileName;
-}
-
-/**
  * Builds the Markdown image embed for an uploaded comment attachment. The
- * alt text is stripped of characters that would terminate the alt segment or
- * inject extra syntax, keeping the embed a single well-formed token.
+ * alt text derives from the file name and is stripped of characters that
+ * would terminate the alt segment or inject extra syntax, keeping the embed
+ * a single well-formed token.
  */
 export function commentImageMarkdown(fileName: string, url: string): string {
-    const alt = commentImageAlt(fileName)
+    const alt = defaultAltFromFileName(fileName)
         .replace(/[[\]()\\`!\r\n]/gu, ' ')
         .replace(/\s+/gu, ' ')
         .trim();

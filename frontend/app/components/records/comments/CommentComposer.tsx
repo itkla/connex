@@ -15,7 +15,9 @@ import {
     isCommentDraft,
     type CommentDraft,
 } from '@/app/components/records/comments/commentText';
-import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import MentionEditor, {
+    type MentionEditorHandle,
+} from '@/app/components/activity/notes/MentionEditor';
 import { Button } from '@/components/ui/button';
 
 const POST_HYDRATION_RESTORE_DELAY_MS = 250;
@@ -81,6 +83,7 @@ export default function CommentComposer({
     const [focused, setFocused] = useState(autoFocus ?? false);
     const [uploadingCount, setUploadingCount] = useState(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const editorHandle = useRef<MentionEditorHandle>(null);
     const uploading = uploadingCount > 0;
     const engaged = focused || value.length > 0 || submitting || uploading;
     const submitReady = canSubmit && !submitting && !disabled && !uploading;
@@ -138,12 +141,15 @@ export default function CommentComposer({
             try {
                 const url = await onAttachImage(file);
                 if (url) {
-                    const next = appendCommentImage(
-                        valueRef.current,
-                        commentImageMarkdown(file.name, url),
-                    );
-                    valueRef.current = next;
-                    onChangeRef.current(next);
+                    const markdown = commentImageMarkdown(file.name, url);
+                    const editor = editorHandle.current;
+                    if (editor) {
+                        editor.appendParagraph(markdown);
+                    } else {
+                        const next = appendCommentImage(valueRef.current, markdown);
+                        valueRef.current = next;
+                        onChangeRef.current(next);
+                    }
                 }
             } finally {
                 setUploadingCount((count) => count - 1);
@@ -152,7 +158,7 @@ export default function CommentComposer({
     };
 
     const onPaste = (event: ClipboardEvent<HTMLDivElement>) => {
-        if (!onAttachImage) return;
+        if (!onAttachImage || submitting || disabled) return;
         const files = Array.from(event.clipboardData?.files ?? []);
         if (files.length === 0) return;
         event.preventDefault();
@@ -160,7 +166,7 @@ export default function CommentComposer({
     };
 
     const onDrop = (event: DragEvent<HTMLDivElement>) => {
-        if (!onAttachImage) return;
+        if (!onAttachImage || submitting || disabled) return;
         const files = Array.from(event.dataTransfer?.files ?? []);
         if (files.length === 0) return;
         event.preventDefault();
@@ -191,6 +197,7 @@ export default function CommentComposer({
                 autoFocus={autoFocus}
                 onSubmit={submitReady ? onSubmit : undefined}
                 className="min-h-9 px-3.5 py-2 text-sm outline-none"
+                handleRef={editorHandle}
             />
             <div
                 className="grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
@@ -206,8 +213,7 @@ export default function CommentComposer({
                                         type="file"
                                         accept={MANAGED_IMAGE_ACCEPT}
                                         multiple
-                                        className="sr-only"
-                                        tabIndex={-1}
+                                        className="hidden"
                                         onChange={(event) => {
                                             const files = Array.from(event.target.files ?? []);
                                             event.target.value = '';
@@ -217,9 +223,10 @@ export default function CommentComposer({
                                     <button
                                         type="button"
                                         className={cn(
-                                            'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors',
+                                            'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors',
                                             'hover:bg-accent/60 hover:text-foreground active:scale-[0.97]',
                                             'focus-visible:outline-2 focus-visible:outline-ring',
+                                            'disabled:pointer-events-none disabled:opacity-60',
                                         )}
                                         aria-label={t('attachImage')}
                                         title={t('attachImage')}
@@ -234,7 +241,7 @@ export default function CommentComposer({
                                     </button>
                                 </>
                             )}
-                            <p className="truncate text-xs text-muted-foreground/80">
+                            <p aria-live="polite" className="truncate text-xs text-muted-foreground/80">
                                 {uploading ? t('imageUploading') : t('composerHint')}
                             </p>
                         </div>

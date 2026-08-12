@@ -2,26 +2,21 @@ import { describe, expect, it } from 'vitest';
 
 import {
     appendCommentImage,
-    commentImageAlt,
     commentImageMarkdown,
     commentPlainText,
 } from '@/app/components/records/comments/commentText';
-
-describe('commentImageAlt', () => {
-    it('drops the extension and collapses separators', () => {
-        expect(commentImageAlt('quarterly_report-chart.png')).toBe('quarterly report chart');
-    });
-
-    it('falls back to the raw name when nothing remains', () => {
-        expect(commentImageAlt('.png')).toBe('.png');
-    });
-});
 
 describe('commentImageMarkdown', () => {
     it('builds a well-formed image embed', () => {
         expect(commentImageMarkdown('chart.png', '/api/attachments/content/abc')).toBe(
             '![chart](/api/attachments/content/abc)',
         );
+    });
+
+    it('drops the extension and collapses separators in the alt text', () => {
+        expect(
+            commentImageMarkdown('quarterly_report-chart.png', '/api/attachments/content/abc'),
+        ).toBe('![quarterly report chart](/api/attachments/content/abc)');
     });
 
     it('strips markdown-breaking characters from the alt text', () => {
