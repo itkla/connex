@@ -5,5 +5,6 @@ package ooo.klae.connex.backend.ai.provider;
  */
 public interface AiProvider {
     String providerId();
+    AiStructuredOutputEnforcement structuredOutputCapability(AiProviderTarget target);
     AiCompletionResult complete(AiCompletionRequest request);
 }

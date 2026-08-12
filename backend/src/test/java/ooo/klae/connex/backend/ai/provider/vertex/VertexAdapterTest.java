@@ -32,6 +32,8 @@ import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -119,6 +121,37 @@ class VertexAdapterTest {
                 any(URI.class), eq(ACCESS_TOKEN), body.capture(), any(AiRequestDeadline.class));
         JsonNode generationConfig = objectMapper.readTree(body.getValue()).path("generationConfig");
         assertEquals("application/json", generationConfig.path("responseMimeType").asString());
+    }
+
+    @Test
+    void complete_geminiSchemaRequestsControlledGeneration() throws Exception {
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.complete(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn(geminiResponse());
+        AiCompletionRequest request = new AiCompletionRequest(
+                target("gemini-2.5-flash"),
+                credentials(),
+                null,
+                List.of(new AiMessage("user", "Hello?")),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step",
+                        objectMapper.readTree("{\"type\":\"object\"}")),
+                64,
+                0.25);
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(vertexClient).complete(
+                any(URI.class), eq(ACCESS_TOKEN), body.capture(), any(AiRequestDeadline.class));
+        JsonNode generationConfig = objectMapper.readTree(body.getValue()).path("generationConfig");
+        assertEquals("application/json", generationConfig.path("responseMimeType").asString());
+        assertEquals("object", generationConfig.path("responseJsonSchema").path("type").asString());
+        assertEquals(AiStructuredOutputEnforcement.JSON_SCHEMA,
+                result.structuredOutputEnforcement());
     }
 
     @Test

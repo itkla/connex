@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.provider.bedrock;
 
 import java.util.Base64;
+import java.util.Locale;
 
 import org.springframework.stereotype.Service;
 
@@ -9,9 +10,11 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -36,6 +39,13 @@ public class BedrockAnthropicAdapter implements AiProvider {
     }
 
     @Override
+    public AiStructuredOutputEnforcement structuredOutputCapability(AiProviderTarget target) {
+        return target != null && supportsStructuredOutput(target.modelId())
+                ? AiStructuredOutputEnforcement.JSON_SCHEMA
+                : AiStructuredOutputEnforcement.PROMPT_ONLY;
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
@@ -46,9 +56,12 @@ public class BedrockAnthropicAdapter implements AiProvider {
         }
         BedrockRegion region = BedrockRegion.fromCode(target.region());
         try {
-            String requestBody = buildRequestBody(request);
-            String responseBody = bedrockClient.invokeModel(region, target.modelId(), request.credentials(), requestBody);
-            return parseResponse(responseBody);
+            AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
+            String requestBody = buildRequestBody(request, enforcement);
+            String responseBody = request.providerAttemptExecutor().execute(() ->
+                    bedrockClient.invokeModel(
+                            region, target.modelId(), request.credentials(), requestBody));
+            return parseResponse(responseBody, enforcement);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -56,7 +69,9 @@ public class BedrockAnthropicAdapter implements AiProvider {
         }
     }
 
-    private String buildRequestBody(AiCompletionRequest request) throws Exception {
+    private String buildRequestBody(
+            AiCompletionRequest request,
+            AiStructuredOutputEnforcement enforcement) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("anthropic_version", ANTHROPIC_VERSION);
         root.put("max_tokens", request.maxTokens());
@@ -88,16 +103,46 @@ public class BedrockAnthropicAdapter implements AiProvider {
         if (imagesPending) {
             throw new AiProviderException("AI images require a user message");
         }
+        if (enforcement == AiStructuredOutputEnforcement.JSON_SCHEMA) {
+            if (request.responseSchema() == null) {
+                throw new AiProviderException("AI response schema is required");
+            }
+            ObjectNode format = root.putObject("output_config").putObject("format");
+            format.put("type", "json_schema");
+            format.set("schema", request.responseSchema().schema());
+        }
         return objectMapper.writeValueAsString(root);
     }
 
-    private AiCompletionResult parseResponse(String responseBody) throws Exception {
+    private AiCompletionResult parseResponse(
+            String responseBody,
+            AiStructuredOutputEnforcement enforcement) throws Exception {
         JsonNode root = objectMapper.readTree(responseBody);
         String text = readText(root);
         int inputTokens = readRequiredInt(root.path("usage").path("input_tokens"), "input token count");
         int outputTokens = readRequiredInt(root.path("usage").path("output_tokens"), "output token count");
         String stopReason = root.path("stop_reason").asString(null);
-        return new AiCompletionResult(text, inputTokens, outputTokens, stopReason);
+        return new AiCompletionResult(
+                text, inputTokens, outputTokens, stopReason, enforcement);
+    }
+
+    private AiStructuredOutputEnforcement requestedEnforcement(
+            AiCompletionRequest request) {
+        return request.outputMode() == AiOutputMode.JSON
+                && request.responseSchema() != null
+                ? structuredOutputCapability(request.target())
+                : AiStructuredOutputEnforcement.PROMPT_ONLY;
+    }
+
+    private static boolean supportsStructuredOutput(String modelId) {
+        if (modelId == null) {
+            return false;
+        }
+        String normalized = modelId.toLowerCase(Locale.ROOT);
+        return normalized.contains("claude-sonnet-4-5")
+                || normalized.contains("claude-haiku-4-5")
+                || normalized.contains("claude-opus-4-5")
+                || normalized.contains("claude-opus-4-6");
     }
 
     private static String readText(JsonNode root) {

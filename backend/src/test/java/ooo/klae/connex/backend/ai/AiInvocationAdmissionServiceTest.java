@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.mockito.Mockito.lenient;
@@ -31,6 +32,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmission;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -151,6 +154,28 @@ class AiInvocationAdmissionServiceTest {
             assertEquals(Decision.RATE_LIMITED, rejected.decision());
             assertEquals(Rejection.ORGANIZATION_QUOTA, rejected.rejection());
         }
+    }
+
+    @Test
+    void directInteractiveAdmissionsCommitAndReleaseOrganizationQuota() {
+        properties.setInvocationQuotaAttemptsPerOrg(1);
+        AiInvocationAdmissionService service = service();
+
+        try (DirectAdmission admitted = service.acquireDirect()) {
+            admitted.commitInvocation();
+        }
+        DirectAdmissionRejectedException exhausted = assertThrows(
+                DirectAdmissionRejectedException.class, service::acquireDirect);
+        assertEquals(Rejection.ORGANIZATION_QUOTA, exhausted.rejection());
+
+        clock.advance(Duration.ofMinutes(11));
+        try (DirectAdmission released = service.acquireDirect()) {
+            assertEquals(1, service.quotaStateSize());
+        }
+        try (DirectAdmission admitted = service.acquireDirect()) {
+            admitted.commitInvocation();
+        }
+        assertThrows(DirectAdmissionRejectedException.class, service::acquireDirect);
     }
 
     @Test
