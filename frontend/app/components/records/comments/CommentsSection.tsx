@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
-import { LoaderCircle } from 'lucide-react';
+import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import {
@@ -22,19 +22,23 @@ import type {
     RecordComment,
     RecordCommentReactionKey,
     RecordCommentTargetType,
-    RecordCommentThread,
+    RecordCommentThread as RecordCommentThreadType,
 } from '@/app/lib/types';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import { commentPlainText } from '@/app/components/records/comments/commentText';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
 import CommentDeleteDialog from '@/app/components/records/comments/CommentDeleteDialog';
-import CommentThreadCard from '@/app/components/records/comments/CommentThreadCard';
+import CommentThread, {
+    type CommentAuthorIdentity,
+} from '@/app/components/records/comments/CommentThread';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 
 type Props = {
     targetType: RecordCommentTargetType;
     targetId: number;
-    currentUserId: number;
+    currentUser: CommentAuthorIdentity;
     canComment: boolean;
     canModerate: boolean;
     className?: string;
@@ -43,21 +47,17 @@ type Props = {
 const PAGE_SIZE = 10;
 const DEEP_LINK_LIMIT = 50;
 
-function tokenText(value: string): string {
-    return value.replace(/\[([^\]]*)\]\((?:user|person|deal|company|note|file|task|activity):\d+\)/g, '$1').trim();
-}
-
 /**
- * Workspace-local discussion feed for one record (#906 slice 0): open threads with
- * replies, a MentionEditor composer, and redaction tombstones. Comments are
- * immutable — the only mutation besides posting is a soft redact. The section is
- * deliberately calm: shape-matched skeletons while loading, no entry animations,
- * comments oldest-first inside a thread and newest thread first.
+ * Workspace-local discussion feed for one record (#906): the composer leads the
+ * card, open threads follow newest-first on their avatar rails, and resolved
+ * threads recede to collapsed summaries. Comments are immutable; the only
+ * mutation besides posting is a soft redact. Deliberately calm: shape-matched
+ * skeletons, state-driven motion only, one action cluster per comment.
  */
 export default function CommentsSection({
     targetType,
     targetId,
-    currentUserId,
+    currentUser,
     canComment,
     canModerate,
     className,
@@ -66,7 +66,7 @@ export default function CommentsSection({
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
 
-    const [threads, setThreads] = useState<RecordCommentThread[]>([]);
+    const [threads, setThreads] = useState<RecordCommentThreadType[]>([]);
     const [loaded, setLoaded] = useState(false);
     const [loadError, setLoadError] = useState(false);
     const [hasMore, setHasMore] = useState(false);
@@ -81,24 +81,18 @@ export default function CommentsSection({
 
     const composerToken = useRef<string | null>(null);
     const replyToken = useRef<string | null>(null);
-    const highlightRef = useRef<HTMLLIElement | null>(null);
+    const highlightRef = useRef<HTMLDivElement | null>(null);
     const highlightScrolled = useRef(false);
     const fetchGeneration = useRef(0);
-    const stateFilterRef = useRef<'open' | 'all'>('open');
+    const reactionBusyIds = useRef<Set<number>>(new Set());
 
     const highlightedCommentId = searchParams.get('comment');
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
-    const [showResolved, setShowResolved] = useState(false);
-    const stateFilter = highlightedCommentId || showResolved ? 'all' : 'open';
-
-    useEffect(() => {
-        stateFilterRef.current = stateFilter;
-    }, [stateFilter]);
 
     useEffect(() => {
         let active = true;
         fetchGeneration.current += 1;
-        getCommentThreads(targetType, targetId, { limit: initialLimit, state: stateFilter })
+        getCommentThreads(targetType, targetId, { limit: initialLimit, state: 'all' })
             .then((data) => {
                 if (!active) return;
                 setThreads(data);
@@ -114,7 +108,7 @@ export default function CommentsSection({
         return () => {
             active = false;
         };
-    }, [targetType, targetId, initialLimit, stateFilter, refreshNonce]);
+    }, [targetType, targetId, initialLimit, refreshNonce]);
 
     useEffect(() => {
         if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
@@ -136,6 +130,15 @@ export default function CommentsSection({
         [threads],
     );
 
+    const highlightedThreadId = useMemo(() => {
+        if (!highlightedCommentId) return null;
+        return (
+            threads.find((thread) =>
+                thread.comments.some((comment) => String(comment.id) === highlightedCommentId),
+            )?.id ?? null
+        );
+    }, [threads, highlightedCommentId]);
+
     const handleLoadMore = useCallback(async () => {
         if (loadingMore) return;
         const generation = fetchGeneration.current;
@@ -144,7 +147,7 @@ export default function CommentsSection({
             const data = await getCommentThreads(targetType, targetId, {
                 limit: PAGE_SIZE,
                 offset: threads.length,
-                state: stateFilter,
+                state: 'all',
             });
             if (generation !== fetchGeneration.current) return;
             setThreads((prev) => [
@@ -157,49 +160,10 @@ export default function CommentsSection({
         } finally {
             setLoadingMore(false);
         }
-    }, [loadingMore, targetType, targetId, threads.length, stateFilter, t]);
-
-    const handleStateTransition = useCallback(
-        async (thread: RecordCommentThread, action: 'resolve' | 'reopen') => {
-            if (submitting) return;
-            setSubmitting(true);
-            try {
-                const updated =
-                    action === 'resolve'
-                        ? await resolveCommentThread(thread.id, thread.version)
-                        : await reopenCommentThread(thread.id, thread.version);
-                setThreads((prev) =>
-                    action === 'resolve' && stateFilterRef.current === 'open'
-                        ? prev.filter((existing) => existing.id !== thread.id)
-                        : prev.map((existing) =>
-                              existing.id === thread.id
-                                  ? {
-                                        ...updated,
-                                        comments: updated.comments.length > 0
-                                            ? updated.comments
-                                            : existing.comments,
-                                    }
-                                  : existing,
-                          ),
-                );
-                toastSuccess(t(action === 'resolve' ? 'resolvedToast' : 'reopenedToast'));
-            } catch (error) {
-                if (error instanceof ApiError && error.status === 409) {
-                    toastError(t('conflict'));
-                    setLoaded(false);
-                    setRefreshNonce((nonce) => nonce + 1);
-                } else {
-                    toastError(t('actionFailed'));
-                }
-            } finally {
-                setSubmitting(false);
-            }
-        },
-        [submitting, t],
-    );
+    }, [loadingMore, targetType, targetId, threads.length, t]);
 
     const handlePost = useCallback(async () => {
-        if (submitting || !loaded || tokenText(composerValue).length === 0) return;
+        if (submitting || !loaded || commentPlainText(composerValue).length === 0) return;
         composerToken.current ??= crypto.randomUUID();
         setSubmitting(true);
         try {
@@ -221,7 +185,7 @@ export default function CommentsSection({
     }, [submitting, loaded, composerValue, targetType, targetId, t]);
 
     const handleReply = useCallback(async () => {
-        if (submitting || replyThreadId == null || tokenText(replyValue).length === 0) return;
+        if (submitting || replyThreadId == null || commentPlainText(replyValue).length === 0) return;
         replyToken.current ??= crypto.randomUUID();
         setSubmitting(true);
         try {
@@ -262,7 +226,43 @@ export default function CommentsSection({
         }
     }, [submitting, replyThreadId, replyValue, t]);
 
-    const reactionBusyIds = useRef<Set<number>>(new Set());
+    const handleStateTransition = useCallback(
+        async (thread: RecordCommentThreadType, action: 'resolve' | 'reopen') => {
+            if (submitting) return;
+            setSubmitting(true);
+            try {
+                const updated =
+                    action === 'resolve'
+                        ? await resolveCommentThread(thread.id, thread.version)
+                        : await reopenCommentThread(thread.id, thread.version);
+                setThreads((prev) =>
+                    prev.map((existing) =>
+                        existing.id === thread.id
+                            ? {
+                                  ...updated,
+                                  comments:
+                                      updated.comments.length > 0
+                                          ? updated.comments
+                                          : existing.comments,
+                              }
+                            : existing,
+                    ),
+                );
+                toastSuccess(t(action === 'resolve' ? 'resolvedToast' : 'reopenedToast'));
+            } catch (error) {
+                if (error instanceof ApiError && error.status === 409) {
+                    toastError(t('conflict'));
+                    setLoaded(false);
+                    setRefreshNonce((nonce) => nonce + 1);
+                } else {
+                    toastError(t('actionFailed'));
+                }
+            } finally {
+                setSubmitting(false);
+            }
+        },
+        [submitting, t],
+    );
 
     const handleToggleReaction = useCallback(
         async (comment: RecordComment, reaction: RecordCommentReactionKey) => {
@@ -330,32 +330,49 @@ export default function CommentsSection({
 
     return (
         <div className={cn(className)}>
-            <div className="mb-3 flex h-8 items-center justify-between">
+            <div className="mb-3 flex h-8 items-center">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('title')}
                     {loaded && !loadError ? ` · ${commentCount}` : ''}
                 </h2>
-                {!highlightedCommentId && (
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setShowResolved((value) => !value);
-                            setLoaded(false);
-                        }}
-                        className="cursor-pointer rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                        {showResolved ? t('hideResolved') : t('showResolved')}
-                    </button>
-                )}
             </div>
 
             <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                {canComment && (
+                    <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-4 pb-4 pt-4 sm:px-5">
+                        <Avatar className="mt-0.5 size-8 shrink-0">
+                            <AvatarImage src={currentUser.profilePictureUrl ?? undefined} alt="" />
+                            <AvatarFallback className="text-xs">
+                                {currentUser.displayName.slice(0, 1).toUpperCase()}
+                            </AvatarFallback>
+                        </Avatar>
+                        <CommentComposer
+                            value={composerValue}
+                            onChange={(value) => {
+                                setComposerValue(value);
+                                composerToken.current = null;
+                            }}
+                            onSubmit={handlePost}
+                            placeholder={t('composerPlaceholder')}
+                            submitLabel={t('post')}
+                            submitting={submitting}
+                            disabled={!loaded}
+                            canSubmit={commentPlainText(composerValue).length > 0}
+                        />
+                    </div>
+                )}
+
                 {!loaded && (
-                    <ul className="flex flex-col gap-4 px-6 py-5">
+                    <ul
+                        className={cn(
+                            'flex flex-col gap-5 px-4 pb-5 sm:px-5',
+                            canComment && 'border-t border-border pt-5',
+                        )}
+                    >
                         {[0, 1].map((row) => (
-                            <li key={row} className="flex items-start gap-3">
-                                <Skeleton className="size-7 shrink-0 rounded-full" />
-                                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                            <li key={row} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3">
+                                <Skeleton className="size-8 rounded-full" />
+                                <div className="flex min-w-0 flex-col gap-2 pt-1">
                                     <Skeleton className="h-3.5 w-40" />
                                     <Skeleton className="h-4 w-3/4" />
                                 </div>
@@ -365,7 +382,12 @@ export default function CommentsSection({
                 )}
 
                 {loaded && loadError && (
-                    <div className="flex items-center justify-between gap-3 px-6 py-5">
+                    <div
+                        className={cn(
+                            'flex items-center justify-between gap-3 px-5 py-5',
+                            canComment && 'border-t border-border',
+                        )}
+                    >
                         <p className="text-sm text-muted-foreground">{t('loadFailed')}</p>
                         <Button
                             type="button"
@@ -382,36 +404,54 @@ export default function CommentsSection({
                 )}
 
                 {isEmpty && (
-                    <p className="px-6 py-6 text-sm text-muted-foreground">{t('empty')}</p>
+                    <div
+                        className={cn(
+                            'flex flex-col items-center gap-2 px-6 pb-8 text-center',
+                            canComment ? 'border-t border-border pt-6' : 'pt-8',
+                        )}
+                    >
+                        <span className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">
+                            <ChatBubbleLeftRightIcon className="size-5" aria-hidden />
+                        </span>
+                        <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
+                        <p className="max-w-sm text-sm text-muted-foreground">{t('empty')}</p>
+                    </div>
                 )}
 
                 {loaded &&
                     !loadError &&
                     highlightedCommentId != null &&
-                    !threads.some((thread) =>
-                        thread.comments.some(
-                            (comment) => String(comment.id) === highlightedCommentId,
-                        ),
-                    ) && (
-                        <p className="border-b border-border px-6 py-3 text-xs text-muted-foreground">
+                    highlightedThreadId == null && (
+                        <p
+                            className={cn(
+                                'px-5 py-3 text-xs text-muted-foreground',
+                                canComment && 'border-t border-border',
+                            )}
+                        >
                             {t('deepLinkGone')}
                         </p>
                     )}
 
                 {loaded && !loadError && threads.length > 0 && (
-                    <ul className="divide-y divide-border">
+                    <ul
+                        className={cn(
+                            'divide-y divide-border',
+                            canComment && 'border-t border-border',
+                        )}
+                    >
                         {threads.map((thread) => (
-                            <CommentThreadCard
+                            <CommentThread
                                 key={thread.id}
                                 thread={thread}
-                                currentUserId={currentUserId}
+                                currentUser={currentUser}
                                 canComment={canComment}
                                 canModerate={canModerate}
                                 highlightedCommentId={highlightedCommentId}
                                 highlightRef={highlightRef}
+                                forceExpanded={thread.id === highlightedThreadId}
                                 replyOpen={replyThreadId === thread.id}
                                 replyValue={replyValue}
-                                replyCanSubmit={tokenText(replyValue).length > 0}
+                                replyCanSubmit={commentPlainText(replyValue).length > 0}
                                 submitting={submitting}
                                 onOpenReply={() => {
                                     setReplyThreadId(thread.id);
@@ -437,39 +477,17 @@ export default function CommentsSection({
                 )}
 
                 {loaded && !loadError && hasMore && (
-                    <div className="border-t border-border px-4 py-2">
+                    <div className="flex justify-center border-t border-border py-1.5">
                         <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="w-full text-muted-foreground"
+                            className="text-muted-foreground"
                             disabled={loadingMore}
                             onClick={handleLoadMore}
                         >
-                            {loadingMore ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                            ) : (
-                                t('loadMore')
-                            )}
+                            {loadingMore ? t('loadingMore') : t('loadMore')}
                         </Button>
-                    </div>
-                )}
-
-                {canComment && (
-                    <div className={cn('p-3', !isEmpty && 'border-t border-border')}>
-                        <CommentComposer
-                            value={composerValue}
-                            onChange={(value) => {
-                                setComposerValue(value);
-                                composerToken.current = null;
-                            }}
-                            onSubmit={handlePost}
-                            placeholder={t('composerPlaceholder')}
-                            submitLabel={t('post')}
-                            submitting={submitting}
-                            disabled={!loaded}
-                            canSubmit={tokenText(composerValue).length > 0}
-                        />
                     </div>
                 )}
             </div>

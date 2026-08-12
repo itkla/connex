@@ -111,13 +111,12 @@ function MessageScrollerProvider({
     visibilityListenersRef.current.forEach((listener) => listener())
   }, [orderedItems])
 
-  const updateScrollState = React.useCallback(() => {
+  const updateScrollAffordances = React.useCallback(() => {
     const viewport = viewportRef.current
     const button = buttonRef.current
     const root = rootRef.current
     if (!viewport) return
     const canScrollToEnd = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 2
-    followOutputRef.current = !canScrollToEnd
     if (root) {
       root.dataset.scrollable = canScrollToEnd ? "end" : ""
     }
@@ -128,6 +127,13 @@ function MessageScrollerProvider({
     }
     updateVisibility()
   }, [updateVisibility])
+
+  const updateScrollState = React.useCallback(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    followOutputRef.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2
+    updateScrollAffordances()
+  }, [updateScrollAffordances])
 
   const clearAnchorSpace = React.useCallback(() => {
     activeAnchorKeyRef.current = null
@@ -153,8 +159,8 @@ function MessageScrollerProvider({
     clearAnchorSpace()
     viewport.scrollTo({ top: 0 })
     followOutputRef.current = false
-    updateScrollState()
-  }, [clearAnchorSpace, updateScrollState])
+    updateScrollAffordances()
+  }, [clearAnchorSpace, updateScrollAffordances])
 
   const scrollToEnd = React.useCallback(() => {
     const viewport = viewportRef.current
@@ -162,16 +168,16 @@ function MessageScrollerProvider({
     clearAnchorSpace()
     viewport.scrollTo({ top: viewport.scrollHeight })
     followOutputRef.current = true
-    updateScrollState()
-  }, [clearAnchorSpace, updateScrollState])
+    updateScrollAffordances()
+  }, [clearAnchorSpace, updateScrollAffordances])
 
   const scrollToItem = React.useCallback((item: MessageItem, peek = 0) => {
     const viewport = viewportRef.current
     if (!viewport) return
     viewport.scrollTo({ top: Math.max(0, item.node.offsetTop - peek) })
     followOutputRef.current = false
-    updateScrollState()
-  }, [updateScrollState])
+    updateScrollAffordances()
+  }, [updateScrollAffordances])
 
   const scrollToMessage = React.useCallback((messageId: MessageId) => {
     const item = [...itemsRef.current.values()].find((candidate) => candidate.id === messageId)
@@ -212,8 +218,12 @@ function MessageScrollerProvider({
       scrollToEnd()
       return
     }
-    updateScrollState()
-  }, [autoScroll, defaultScrollPosition, orderedItems, scrollPreviousItemPeek, scrollToEnd, scrollToItem, scrollToStart, updateAnchorSpace, updateScrollState])
+    if (activeAnchor) {
+      updateScrollAffordances()
+    } else {
+      updateScrollState()
+    }
+  }, [autoScroll, defaultScrollPosition, orderedItems, scrollPreviousItemPeek, scrollToEnd, scrollToItem, scrollToStart, updateAnchorSpace, updateScrollAffordances, updateScrollState])
 
   const registerRoot = React.useCallback((node: HTMLDivElement | null) => {
     rootRef.current = node
@@ -281,6 +291,7 @@ function MessageScrollerProvider({
 
 function MessageScroller({
   className,
+  children,
   ref,
   ...props
 }: React.ComponentProps<typeof ScrollArea.Root>) {
@@ -296,7 +307,18 @@ function MessageScroller({
       data-slot="message-scroller"
       className={cn("relative flex min-h-0 flex-col", className)}
       {...props}
-    />
+    >
+      {children}
+      <ScrollArea.Scrollbar
+        data-slot="message-scroller-scrollbar"
+        className="absolute inset-y-0 right-0 z-20 flex w-2.5 touch-none p-px select-none"
+      >
+        <ScrollArea.Thumb
+          data-slot="message-scroller-thumb"
+          className="w-full rounded-full bg-border"
+        />
+      </ScrollArea.Scrollbar>
+    </ScrollArea.Root>
   )
 }
 

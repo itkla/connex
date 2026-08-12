@@ -11,13 +11,16 @@ import org.springframework.stereotype.Component;
 
 import tools.jackson.databind.JsonNode;
 
-/** Additive source of truth for the assistant's read-only tool vocabulary and argument schemas. */
+/** Additive source of truth for the assistant's tiered tool vocabulary and argument schemas. */
 @Component
 public class AiAssistantToolCatalog {
     private static final Pattern HANDLE = Pattern.compile("r[1-9][0-9]*");
 
     /** Supported JSON argument kinds. */
     public enum ArgumentKind { STRING, INTEGER, STRING_LIST }
+
+    /** Safety tier controlling whether a declared tool may execute without human approval. */
+    public enum ToolTier { READ, AUTO, CONFIRM }
 
     /** One closed tool argument definition. */
     public record ArgumentSpec(
@@ -36,6 +39,7 @@ public class AiAssistantToolCatalog {
     /** One stable tool key and its execution availability. */
     public record ToolSpec(
             String name,
+            ToolTier tier,
             boolean executable,
             String unavailableReason,
             List<ArgumentSpec> arguments) {
@@ -61,6 +65,18 @@ public class AiAssistantToolCatalog {
     public boolean isExecutable(String name) {
         ToolSpec spec = TOOLS.get(name);
         return spec != null && spec.executable();
+    }
+
+    /** @return whether the declared key performs a mutation */
+    public boolean isWrite(String name) {
+        ToolSpec spec = TOOLS.get(name);
+        return spec != null && spec.tier() != ToolTier.READ;
+    }
+
+    /** @return the safety tier for a declared key, or {@code null} when unknown */
+    public ToolTier tier(String name) {
+        ToolSpec spec = TOOLS.get(name);
+        return spec == null ? null : spec.tier();
     }
 
     /** @return the stable reserved-tool reason, or {@code null} for executable or unknown keys */
@@ -152,20 +168,37 @@ public class AiAssistantToolCatalog {
                 string("currency", false, 1, 8, Set.of()),
                 integer("days", false, 30, 365, Set.of("30", "90", "365")),
                 string("scope", false, 0, 10, Set.of("", "me", "unassigned"))));
-        add(tools, reservedScheduleConflicts());
-        add(tools, reservedDealBrief());
-        return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
-    }
-
-    /**
-     * Reserved until #939 provides a visibility-scoped date-window activity read; bucketed volume
-     * analytics cannot safely answer record-level schedule conflicts.
-     */
-    private static ToolSpec reservedScheduleConflicts() {
-        return reserved("find_schedule_conflicts", "schedule_conflicts_unavailable",
+        add(tools, executable("find_schedule_conflicts",
                 handle(),
-                string("start", true, 1, 40, Set.of()),
-                string("end", true, 1, 40, Set.of()));
+                string("start", true, 1, 80, Set.of()),
+                string("end", true, 1, 80, Set.of())));
+        add(tools, reservedDealBrief());
+        add(tools, auto("create_activity",
+                handle(),
+                string("type", true, 1, 32, Set.of()),
+                string("subject", true, 1, 255, Set.of()),
+                string("notes", false, 0, 50_000, Set.of()),
+                string("start", true, 1, 80, Set.of()),
+                integer("duration_minutes", false, 1, 1_440)));
+        add(tools, auto("create_task",
+                handle(),
+                string("description", true, 1, 1_000, Set.of()),
+                string("due_date", false, 0, 32, Set.of())));
+        add(tools, auto("create_note",
+                handle(),
+                string("content", true, 1, 50_000, Set.of()),
+                string("title", false, 0, 255, Set.of()),
+                string("visibility", false, 1, 9, Set.of("private", "workspace"))));
+        add(tools, auto("add_tag",
+                handle(),
+                string("tag", true, 1, 64, Set.of())));
+        add(tools, confirm("change_deal_stage",
+                handle(),
+                string("stage", true, 1, 128, Set.of())));
+        add(tools, confirm("assign_owner",
+                handle(),
+                string("owner", true, 1, 255, Set.of())));
+        return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
     }
 
     /**
@@ -181,11 +214,19 @@ public class AiAssistantToolCatalog {
     }
 
     private static ToolSpec executable(String name, ArgumentSpec... arguments) {
-        return new ToolSpec(name, true, null, List.of(arguments));
+        return new ToolSpec(name, ToolTier.READ, true, null, List.of(arguments));
+    }
+
+    private static ToolSpec auto(String name, ArgumentSpec... arguments) {
+        return new ToolSpec(name, ToolTier.AUTO, true, null, List.of(arguments));
+    }
+
+    private static ToolSpec confirm(String name, ArgumentSpec... arguments) {
+        return new ToolSpec(name, ToolTier.CONFIRM, true, null, List.of(arguments));
     }
 
     private static ToolSpec reserved(String name, String reason, ArgumentSpec... arguments) {
-        return new ToolSpec(name, false, reason, List.of(arguments));
+        return new ToolSpec(name, ToolTier.READ, false, reason, List.of(arguments));
     }
 
     private static ArgumentSpec handle() {

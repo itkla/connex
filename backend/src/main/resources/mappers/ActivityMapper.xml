@@ -271,6 +271,12 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getActivityByIdForUpdate" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="search" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND (subject LIKE #{query} OR notes LIKE #{query})

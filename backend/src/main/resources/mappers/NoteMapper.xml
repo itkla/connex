@@ -271,6 +271,13 @@
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
   </select>
 
+  <select id="getVisibleNoteByIdForUpdate" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+    FOR UPDATE
+  </select>
+
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM note WHERE workspace_id = #{workspaceId} AND id = #{id}

@@ -186,6 +186,8 @@ public class AiAssistantPromptAssembler {
 
                 Use only catalog tools. Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
 
+                AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
+
                 Make the final answer useful, specific, and complete. Ground every factual claim in CRM data actually retrieved during this turn. Quantify counts, dates, amounts, changes, and relationship signals when the data supports them. For a longer answer, use short paragraphs or plain-text bullets. State plainly when requested data is missing, unavailable, or too sparse for a conclusion. Do not pad an answer, invent facts, or present unsupported inference as fact.
 
                 Record references must use handles such as r1; never invent or infer a handle. Final citations must contain only handles present in CRM data. Never put handles in suggestion text or title text. Never reveal email addresses, phone numbers, or raw record ids.
