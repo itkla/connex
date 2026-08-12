@@ -2,14 +2,16 @@
 
 import { useState, type Ref } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { FaceSmileIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, FaceSmileIcon, TrashIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import type { RecordComment, RecordCommentReactionKey } from '@/app/lib/types';
-import { formatDateTime } from '@/app/lib/utils';
+import { formatDateTime, formatRelativeTime } from '@/app/lib/utils';
+import { useLiveNow } from '@/app/hooks/useNow';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const REACTION_KEYS = [
     'thumbs_up',
@@ -31,70 +33,91 @@ const REACTION_EMOJI: Record<RecordCommentReactionKey, string> = {
 
 type Props = {
     comment: RecordComment;
-    indented: boolean;
+    isRoot: boolean;
+    showRail: boolean;
     highlighted: boolean;
-    highlightRef?: Ref<HTMLLIElement>;
-    canDelete: boolean;
+    highlightRef?: Ref<HTMLDivElement>;
     canReact: boolean;
+    canDelete: boolean;
+    canResolve?: boolean;
     onDelete: (comment: RecordComment) => void;
     onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
+    onResolve?: () => void;
 };
 
 /**
- * One comment row: author identity (with an erased-account fallback), timestamp,
- * content or redaction tombstone, and a delete affordance that stays visible on
- * coarse pointers and reveals on hover for fine ones.
+ * One comment on the thread rail: the avatar cell (with the connecting rail
+ * segment) and the content cell with an anchored author line, relative
+ * timestamp, body or redaction tombstone, reaction chips, and a single quiet
+ * action cluster that reveals on hover and stays visible on coarse pointers.
+ * Rendered as two cells of the parent thread grid.
  */
 export default function CommentRow({
     comment,
-    indented,
+    isRoot,
+    showRail,
     highlighted,
     highlightRef,
-    canDelete,
     canReact,
+    canDelete,
+    canResolve = false,
     onDelete,
     onToggleReaction,
+    onResolve,
 }: Props) {
     const t = useTranslations('Comments');
     const locale = useLocale();
+    const now = useLiveNow();
     const [pickerOpen, setPickerOpen] = useState(false);
     const deleted = comment.deletedAt != null;
     const authorName = comment.author?.displayName ?? t('formerMember');
     const reactions = comment.reactions ?? [];
+    const showCluster = (!deleted && (canReact || canDelete)) || (canResolve && onResolve != null);
 
     return (
-        <li
-            ref={highlightRef}
-            className={cn(
-                'group flex scroll-mt-24 items-start gap-3 rounded-lg px-2 py-1.5 transition-colors duration-700',
-                indented && 'ml-9',
-                highlighted && 'bg-brand-light/40',
-            )}
-        >
-            <Avatar className="mt-0.5 size-7 shrink-0">
-                <AvatarImage src={comment.author?.profilePictureUrl ?? undefined} alt="" />
-                <AvatarFallback className="text-[0.65rem]">
-                    {authorName.slice(0, 1).toUpperCase()}
-                </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-                <p className="flex items-baseline gap-2 text-sm">
-                    <span className="font-medium text-foreground">{authorName}</span>
-                    <span className="text-xs text-muted-foreground">
-                        {formatDateTime(comment.createdAt, locale)}
-                    </span>
+        <>
+            <div className="flex flex-col items-center">
+                <Avatar className={cn('shrink-0', isRoot ? 'size-8' : 'mt-0.5 size-7')}>
+                    <AvatarImage src={comment.author?.profilePictureUrl ?? undefined} alt="" />
+                    <AvatarFallback className={cn(isRoot ? 'text-xs' : 'text-[0.65rem]')}>
+                        {authorName.slice(0, 1).toUpperCase()}
+                    </AvatarFallback>
+                </Avatar>
+                {showRail && <div className="mt-1.5 w-px flex-1 rounded-full bg-border" aria-hidden />}
+            </div>
+
+            <div
+                ref={highlightRef}
+                className={cn(
+                    'group relative -mx-2 mb-3 min-w-0 scroll-mt-24 rounded-lg px-2 pb-0.5 transition-colors duration-500 motion-reduce:transition-none',
+                    highlighted && 'bg-brand-light/40',
+                )}
+            >
+                <p className="flex min-w-0 items-baseline gap-2 pr-20 text-sm leading-7">
+                    <span className="truncate font-medium text-foreground">{authorName}</span>
+                    <time
+                        dateTime={comment.createdAt}
+                        title={formatDateTime(comment.createdAt, locale)}
+                        className="shrink-0 text-xs text-muted-foreground"
+                    >
+                        {formatRelativeTime(comment.createdAt, locale, now)}
+                    </time>
                 </p>
+
                 {deleted ? (
-                    <p className="text-sm italic text-muted-foreground">{t('deletedComment')}</p>
+                    <p className="text-sm italic leading-relaxed text-muted-foreground">
+                        {t('deletedComment')}
+                    </p>
                 ) : (
                     <NoteContent
                         content={comment.content ?? ''}
                         references={comment.references}
-                        className="text-sm text-foreground"
+                        className="text-sm leading-relaxed text-foreground"
                         block
                     />
                 )}
-                {(reactions.length > 0 || (canReact && !deleted)) && (
+
+                {reactions.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         {reactions.map((summary) => (
                             <button
@@ -108,17 +131,29 @@ export default function CommentRow({
                                 })}
                                 aria-pressed={summary.reactedByMe}
                                 className={cn(
-                                    'inline-flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 text-xs ring-1 ring-inset transition-colors',
+                                    'inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset transition-colors',
                                     summary.reactedByMe
-                                        ? 'bg-brand/10 ring-brand/40 text-foreground'
-                                        : 'bg-muted ring-border text-muted-foreground hover:bg-muted/70',
-                                    !canReact && 'pointer-events-none',
+                                        ? 'bg-brand/10 text-foreground ring-brand/40'
+                                        : 'bg-muted text-muted-foreground ring-transparent hover:ring-border',
+                                    'disabled:pointer-events-none disabled:opacity-60',
                                 )}
                             >
                                 <span aria-hidden>{REACTION_EMOJI[summary.reaction]}</span>
                                 {summary.count}
                             </button>
                         ))}
+                    </div>
+                )}
+
+                {showCluster && (
+                    <div
+                        className={cn(
+                            'absolute -top-1 right-0 flex items-center gap-0.5 rounded-lg bg-card p-0.5',
+                            'opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100',
+                            'pointer-coarse:opacity-100 motion-reduce:transition-none',
+                            pickerOpen && 'opacity-100',
+                        )}
+                    >
                         {canReact && !deleted && (
                             <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
                                 <PopoverTrigger
@@ -127,7 +162,7 @@ export default function CommentRow({
                                             type="button"
                                             aria-label={t('addReaction')}
                                             title={t('addReaction')}
-                                            className="inline-flex cursor-pointer items-center rounded-full p-2 text-muted-foreground transition-[color,background-color,opacity] hover:bg-muted hover:text-foreground focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100"
+                                            className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                         >
                                             <FaceSmileIcon className="size-4" />
                                         </button>
@@ -152,20 +187,39 @@ export default function CommentRow({
                                 </PopoverContent>
                             </Popover>
                         )}
+                        {canResolve && onResolve && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        type="button"
+                                        aria-label={t('resolve')}
+                                        onClick={onResolve}
+                                        className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                        <CheckCircleIcon className="size-4" />
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t('resolve')}</TooltipContent>
+                            </Tooltip>
+                        )}
+                        {canDelete && !deleted && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        type="button"
+                                        aria-label={t('delete')}
+                                        onClick={() => onDelete(comment)}
+                                        className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                    >
+                                        <TrashIcon className="size-4" />
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t('delete')}</TooltipContent>
+                            </Tooltip>
+                        )}
                     </div>
                 )}
             </div>
-            {canDelete && (
-                <button
-                    type="button"
-                    onClick={() => onDelete(comment)}
-                    className="shrink-0 cursor-pointer rounded-md p-2 text-muted-foreground transition-[color,background-color,opacity] hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100"
-                    title={t('delete')}
-                    aria-label={t('delete')}
-                >
-                    <TrashIcon className="size-4" />
-                </button>
-            )}
-        </li>
+        </>
     );
 }
