@@ -119,10 +119,16 @@ export default function CommentThread({
         return () => window.clearTimeout(timer);
     }, [replyDraftKeyParts]);
 
+    const prevReplyValue = useRef('');
     useEffect(() => {
-        if (replyOpen && replyValue.length > 0) {
-            replyDraft.persist({ content: replyValue });
+        if (replyOpen) {
+            if (replyValue.length > 0) {
+                replyDraft.persist({ content: replyValue });
+            } else if (prevReplyValue.current.length > 0) {
+                replyDraft.clear();
+            }
         }
+        prevReplyValue.current = replyValue;
     }, [replyOpen, replyValue, replyDraft]);
 
     const submitReply = async () => {
