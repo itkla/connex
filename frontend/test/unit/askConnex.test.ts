@@ -8,6 +8,7 @@ import {
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
     extractAskConnexAttachments,
+    groupAskConnexMessages,
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
@@ -127,5 +128,27 @@ describe('Ask Connex citations', () => {
         expect(askConnexCitations(many)).toHaveLength(8);
         expect(askConnexCitations(null)).toEqual([]);
         expect(askConnexCitations(undefined)).toEqual([]);
+    });
+});
+
+describe('Ask Connex transcript grouping', () => {
+    it('groups only consecutive messages from the same sender', () => {
+        const messages = [
+            { id: 1, sessionId: 4, seq: 1, authorKind: 'user', authorUserId: 7, content: 'First', createdAt: '2026-08-11T10:00:00Z' },
+            { id: 2, sessionId: 4, seq: 2, authorKind: 'user', authorUserId: 7, content: 'Second', createdAt: '2026-08-11T10:01:00Z' },
+            { id: 3, sessionId: 4, seq: 3, authorKind: 'user', authorUserId: 8, content: 'Another person', createdAt: '2026-08-11T10:02:00Z' },
+            { id: 4, sessionId: 4, seq: 4, authorKind: 'assistant', authorUserId: null, content: 'Reply', createdAt: '2026-08-11T10:03:00Z' },
+            { id: 5, sessionId: 4, seq: 5, authorKind: 'user', authorUserId: 7, content: 'Follow-up', createdAt: '2026-08-11T10:04:00Z' },
+        ];
+
+        expect(groupAskConnexMessages(messages).map((group) => ({
+            authorKind: group.authorKind,
+            ids: group.messages.map((message) => message.id),
+        }))).toEqual([
+            { authorKind: 'user', ids: [1, 2] },
+            { authorKind: 'user', ids: [3] },
+            { authorKind: 'assistant', ids: [4] },
+            { authorKind: 'user', ids: [5] },
+        ]);
     });
 });

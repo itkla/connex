@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiMediaAdmissionService;
@@ -32,6 +33,8 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
+import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiChatMessage;
@@ -121,6 +124,7 @@ class AiAssistantPromptInjectionGoldenTest {
         when(providerConfigService.resolveForOrg(9, 11)).thenReturn(resolved);
         var invocationService = new AiInvocationService(
                 featureGate,
+                mock(AiInvocationAdmissionService.class),
                 mock(AiMediaAdmissionService.class),
                 providerConfigService,
                 new AiProviderRouter(List.of(provider)),
@@ -276,9 +280,15 @@ class AiAssistantPromptInjectionGoldenTest {
         }
 
         @Override
+        public AiStructuredOutputEnforcement structuredOutputCapability(AiProviderTarget target) {
+            return AiStructuredOutputEnforcement.PROMPT_ONLY;
+        }
+
+        @Override
         public AiCompletionResult complete(AiCompletionRequest request) {
             requests.add(request);
-            return new AiCompletionResult(outputs.removeFirst(), 1, 1, "stop");
+            String output = request.providerAttemptExecutor().execute(outputs::removeFirst);
+            return new AiCompletionResult(output, 1, 1, "stop");
         }
 
         private List<AiCompletionRequest> requests() {

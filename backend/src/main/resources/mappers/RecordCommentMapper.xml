@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.RecordCommentMapper">
+
+  <resultMap id="ThreadResult" type="RecordCommentThread">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="targetType" column="target_type"/>
+    <result property="targetId" column="target_id"/>
+    <result property="createdByUserId" column="created_by_user_id"/>
+    <result property="state" column="state"/>
+    <result property="resolvedByUserId" column="resolved_by_user_id"/>
+    <result property="resolvedAt" column="resolved_at"/>
+    <result property="version" column="version"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="CommentResult" type="RecordComment">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="threadId" column="thread_id"/>
+    <result property="authorUserId" column="author_user_id"/>
+    <result property="content" column="content"/>
+    <result property="clientToken" column="client_token"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="deletedAt" column="deleted_at"/>
+    <result property="deletedByUserId" column="deleted_by_user_id"/>
+  </resultMap>
+
+  <resultMap id="ReactionSummaryResult" type="RecordCommentReactionSummary">
+    <id property="commentId" column="comment_id"/>
+    <id property="reaction" column="reaction"/>
+    <result property="count" column="reaction_count"/>
+    <result property="reactedByMe" column="reacted_by_me"/>
+  </resultMap>
+
+  <sql id="threadColumns">
+    id, workspace_id, target_type, target_id, created_by_user_id, state,
+    resolved_by_user_id, resolved_at, version, created_at, updated_at
+  </sql>
+
+  <sql id="commentColumns">
+    id, workspace_id, thread_id, author_user_id, content, client_token,
+    created_at, deleted_at, deleted_by_user_id
+  </sql>
+
+  <select id="getThreadPage" resultMap="ThreadResult">
+    SELECT <include refid="threadColumns"/>
+    FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId}
+      AND target_type = #{targetType}
+      AND target_id = #{targetId}
+    <if test="state != 'all'">
+      AND state = #{state}
+    </if>
+    ORDER BY created_at DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countThreads" resultType="long">
+    SELECT COUNT(*)
+    FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId}
+      AND target_type = #{targetType}
+      AND target_id = #{targetId}
+    <if test="state != 'all'">
+      AND state = #{state}
+    </if>
+  </select>
+
+  <select id="getThreadById" resultMap="ThreadResult">
+    SELECT <include refid="threadColumns"/>
+    FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getThreadByIdForUpdate" resultMap="ThreadResult">
+    SELECT <include refid="threadColumns"/>
+    FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getCommentsByThread" resultMap="CommentResult">
+    SELECT <include refid="commentColumns"/>
+    FROM record_comment
+    WHERE workspace_id = #{workspaceId} AND thread_id = #{threadId}
+    ORDER BY id ASC
+  </select>
+
+  <select id="getCommentsByThreadIds" resultMap="CommentResult">
+    SELECT <include refid="commentColumns"/>
+    FROM record_comment
+    WHERE workspace_id = #{workspaceId}
+      AND thread_id IN
+      <foreach item="threadId" collection="threadIds" open="(" separator="," close=")">#{threadId}</foreach>
+    ORDER BY thread_id ASC, id ASC
+  </select>
+
+  <select id="getCommentById" resultMap="CommentResult">
+    SELECT <include refid="commentColumns"/>
+    FROM record_comment
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getCommentByIdForUpdate" resultMap="CommentResult">
+    SELECT <include refid="commentColumns"/>
+    FROM record_comment
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getCommentByClientToken" resultMap="CommentResult">
+    SELECT <include refid="commentColumns"/>
+    FROM record_comment
+    WHERE workspace_id = #{workspaceId} AND client_token = #{clientToken}
+  </select>
+
+  <select id="getReactionSummaries" resultMap="ReactionSummaryResult">
+    SELECT comment_id,
+           reaction,
+           COUNT(*) AS reaction_count,
+           MAX(user_id = #{userId}) AS reacted_by_me
+    FROM record_comment_reaction
+    WHERE workspace_id = #{workspaceId}
+      AND comment_id IN
+      <foreach item="commentId" collection="commentIds" open="(" separator="," close=")">#{commentId}</foreach>
+    GROUP BY comment_id, reaction
+    ORDER BY comment_id,
+      FIELD(reaction, 'thumbs_up', 'thumbs_down', 'heart', 'celebrate', 'eyes', 'laugh')
+  </select>
+
+  <insert id="insertReaction">
+    INSERT INTO record_comment_reaction (
+      workspace_id, comment_id, user_id, reaction
+    )
+    SELECT #{workspaceId}, c.id, #{userId}, #{reaction}
+    FROM record_comment c
+    WHERE c.workspace_id = #{workspaceId}
+      AND c.id = #{commentId}
+      AND c.deleted_at IS NULL
+  </insert>
+
+  <delete id="deleteReaction">
+    DELETE FROM record_comment_reaction
+    WHERE workspace_id = #{workspaceId}
+      AND comment_id = #{commentId}
+      AND user_id = #{userId}
+      AND reaction = #{reaction}
+  </delete>
+
+  <select id="getOpenThreadIndicators"
+      resultType="ooo.klae.connex.backend.dto.RecordCommentIndicatorDto">
+    SELECT target_id, COUNT(*) AS open_threads
+    FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId}
+      AND target_type = #{targetType}
+      AND state = 'open'
+      AND target_id IN
+      <foreach item="targetId" collection="targetIds" open="(" separator="," close=")">#{targetId}</foreach>
+    GROUP BY target_id
+    ORDER BY target_id
+  </select>
+
+  <insert id="insertThread" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO record_comment_thread (
+      workspace_id, target_type, target_id, created_by_user_id, state
+    ) VALUES (
+      #{workspaceId}, #{targetType}, #{targetId}, #{createdByUserId}, #{state}
+    )
+  </insert>
+
+  <insert id="insertComment" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO record_comment (
+      workspace_id, thread_id, author_user_id, content, client_token
+    ) VALUES (
+      #{workspaceId}, #{threadId}, #{authorUserId}, #{content}, #{clientToken}
+    )
+  </insert>
+
+  <select id="countCommentsInThread" resultType="int">
+    SELECT COUNT(*)
+    FROM record_comment
+    WHERE workspace_id = #{workspaceId} AND thread_id = #{threadId}
+  </select>
+
+  <update id="softDeleteComment">
+    UPDATE record_comment
+    SET content = NULL,
+        deleted_at = UTC_TIMESTAMP(6),
+        deleted_by_user_id = #{deletedByUserId}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND deleted_at IS NULL
+  </update>
+
+  <update id="resolveThread">
+    UPDATE record_comment_thread
+    SET state = 'resolved',
+        resolved_by_user_id = #{resolvedByUserId},
+        resolved_at = UTC_TIMESTAMP(6),
+        version = version + 1,
+        updated_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND state = 'open'
+  </update>
+
+  <update id="reopenThread">
+    UPDATE record_comment_thread
+    SET state = 'open',
+        resolved_by_user_id = NULL,
+        resolved_at = NULL,
+        version = version + 1,
+        updated_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND state = 'resolved'
+  </update>
+
+  <delete id="deleteEmptyThread">
+    DELETE FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM record_comment
+        WHERE workspace_id = #{workspaceId} AND thread_id = #{id}
+      )
+  </delete>
+
+  <delete id="deleteThreadsForTarget">
+    DELETE FROM record_comment_thread
+    WHERE workspace_id = #{workspaceId}
+      AND target_type = #{targetType}
+      AND target_id = #{targetId}
+  </delete>
+
+  <update id="clearAuthorsAnywhere">
+    UPDATE record_comment
+    SET author_user_id = NULL
+    WHERE author_user_id = #{userId}
+  </update>
+
+  <update id="clearDeletersAnywhere">
+    UPDATE record_comment
+    SET deleted_by_user_id = NULL
+    WHERE deleted_by_user_id = #{userId}
+  </update>
+
+  <update id="clearThreadCreatorsAnywhere">
+    UPDATE record_comment_thread
+    SET created_by_user_id = NULL
+    WHERE created_by_user_id = #{userId}
+  </update>
+
+  <update id="clearThreadResolversAnywhere">
+    UPDATE record_comment_thread
+    SET resolved_by_user_id = NULL
+    WHERE resolved_by_user_id = #{userId}
+  </update>
+
+  <delete id="deleteReactionsAnywhere">
+    DELETE FROM record_comment_reaction
+    WHERE user_id = #{userId}
+  </delete>
+
+  <select id="getCommentIdsForTarget" resultType="long">
+    SELECT c.id
+    FROM record_comment c
+    JOIN record_comment_thread t
+      ON t.workspace_id = c.workspace_id AND t.id = c.thread_id
+    WHERE c.workspace_id = #{workspaceId}
+      AND t.target_type = #{targetType}
+      AND t.target_id = #{targetId}
+  </select>
+</mapper>

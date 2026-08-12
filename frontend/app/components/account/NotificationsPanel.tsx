@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowTrendingDownIcon, AtSymbolIcon, BriefcaseIcon, CheckCircleIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
+import { ArrowTrendingDownIcon, AtSymbolIcon, BriefcaseIcon, ChatBubbleLeftRightIcon, CheckCircleIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 
 import type { NotificationPreference } from "@/app/lib/types";
 import { getNotificationPreferences, updateNotificationPreferences } from "@/app/lib/api";
@@ -26,6 +26,8 @@ const TYPES = [
         descriptionKey: "relationshipDescription",
     },
     { type: "note.mention", icon: AtSymbolIcon, titleKey: "mentionTitle", descriptionKey: "mentionDescription" },
+    { type: "comment.mention", icon: AtSymbolIcon, titleKey: "commentMentionTitle", descriptionKey: "commentMentionDescription" },
+    { type: "comment.reply", icon: ChatBubbleLeftRightIcon, titleKey: "commentReplyTitle", descriptionKey: "commentReplyDescription" },
     { type: "task.mention", icon: AtSymbolIcon, titleKey: "taskMentionTitle", descriptionKey: "taskMentionDescription" },
     { type: "activity.mention", icon: AtSymbolIcon, titleKey: "activityMentionTitle", descriptionKey: "activityMentionDescription" },
     { type: "introduction.mention", icon: AtSymbolIcon, titleKey: "introductionMentionTitle", descriptionKey: "introductionMentionDescription" },

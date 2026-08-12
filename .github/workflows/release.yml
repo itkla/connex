@@ -3,12 +3,22 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to validate (for example, v0.9.0-tc.1)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+# Dry runs build three images and can occupy the group for the best part of an hour. They must
+# never queue ahead of a real publication, so they get their own group; the publication group name
+# is left exactly as it was. The mode is derived from the event here because job outputs are not
+# available at workflow level — it must stay consistent with the metadata job's derivation.
 concurrency:
-  group: release-${{ github.repository }}
+  group: release-${{ github.repository }}${{ github.event_name == 'workflow_dispatch' && '-dry-run' || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -20,6 +30,7 @@ jobs:
       contents: read
       actions: read
     outputs:
+      release_mode: ${{ github.event_name == 'push' && 'publish' || 'dry-run' }}
       version: ${{ steps.metadata.outputs.version }}
       build_epoch: ${{ steps.metadata.outputs.build_epoch }}
       build_time: ${{ steps.metadata.outputs.build_time }}
@@ -32,21 +43,42 @@ jobs:
 
       - name: Resolve release event metadata
         id: metadata
+        env:
+          DERIVED_RELEASE_MODE: ${{ github.event_name == 'push' && 'publish' || 'dry-run' }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$ ]]; then
+          case "$GITHUB_EVENT_NAME" in
+            push)
+              RELEASE_MODE=publish
+              TAG_NAME="$GITHUB_REF_NAME"
+              ;;
+            workflow_dispatch)
+              RELEASE_MODE=dry-run
+              TAG_NAME="$REQUESTED_VERSION"
+              ;;
+            *)
+              echo "::error::Unsupported release event: ${GITHUB_EVENT_NAME}"
+              exit 1
+              ;;
+          esac
+          test "$RELEASE_MODE" = "$DERIVED_RELEASE_MODE"
+          if [[ ! "$TAG_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$ ]]; then
             echo "::error::Release tags must use vMAJOR.MINOR.PATCH with optional strict SemVer prerelease identifiers."
             exit 1
           fi
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG_NAME#v}"
           if (( ${#VERSION} > 128 )); then
             echo "::error::Release version must be 128 characters or fewer to form a valid container tag (received ${#VERSION})."
             exit 1
           fi
-          test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
+          if [ "$RELEASE_MODE" = publish ]; then
+            test "$(git rev-parse "${TAG_NAME}^{commit}")" = "$GITHUB_SHA"
+          fi
           BUILD_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
           BUILD_TIME="$(git show -s --format=%cI "$GITHUB_SHA")"
           {
+            echo "tag_name=$TAG_NAME"
             echo "version=$VERSION"
             echo "build_epoch=$BUILD_EPOCH"
             echo "build_time=$BUILD_TIME"
@@ -82,11 +114,13 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Revalidate release tag and immutable publication policy
+      - name: Verify release preconditions and immutable publication policy
         env:
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+          RELEASE_MODE: ${{ github.event_name == 'push' && 'publish' || 'dry-run' }}
+          TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$TAG_NAME" "$RELEASE_MODE"
 
       - name: Require release commit to remain the main head
         if: steps.transaction.outputs.exists != 'true'
@@ -136,7 +170,7 @@ jobs:
   candidate-images:
     name: Build and verify ${{ matrix.component }} candidate
     needs: metadata
-    if: needs.metadata.outputs.transaction_exists != 'true'
+    if: ${{ needs.metadata.outputs.release_mode == 'publish' && needs.metadata.outputs.transaction_exists != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -285,10 +319,141 @@ jobs:
             release-${{ matrix.component }}.json
             sbom-${{ matrix.component }}.spdx.json
 
+  candidate-images-dry-run:
+    name: Build and verify ${{ matrix.component }} dry-run candidate
+    needs: metadata
+    if: needs.metadata.outputs.release_mode == 'dry-run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        component: [backend, frontend, ocr]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+        with:
+          version: v0.35.0
+          driver-opts: image=moby/buildkit:v0.31.1@sha256:6b59b7df63a8cb9902736f9ddf7fcff8261613d3e7449b8ea8b7537fc399c03a
+
+      - name: Verify pinned build toolchain
+        run: |
+          docker buildx version | grep -F 'v0.35.0'
+          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
+
+      - name: Build dry-run candidate
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.build_epoch }}
+        with:
+          context: ./${{ matrix.component }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          build-args: |
+            VERSION=${{ needs.metadata.outputs.version }}
+            BUILD_TIME=${{ needs.metadata.outputs.build_time }}
+            SOURCE_DATE_EPOCH=${{ needs.metadata.outputs.build_epoch }}
+          tags: |
+            connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.metadata.outputs.version }}
+
+      - name: Smoke dry-run OCR candidate
+        if: matrix.component == 'ocr'
+        env:
+          IMAGE_REF: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash ocr/ci/smoke_image.sh "$IMAGE_REF"
+
+      - name: Smoke dry-run frontend candidate
+        if: matrix.component == 'frontend'
+        env:
+          IMAGE_REF: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash frontend/ci/smoke_image.sh "$IMAGE_REF"
+
+      - name: Scan dry-run candidate for high-severity vulnerabilities
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
+        with:
+          image: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+
+      - name: Generate dry-run SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.component }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+  dry-run-summary:
+    name: Summarize release dry run
+    needs: [metadata, candidate-images-dry-run]
+    if: ${{ always() && needs.metadata.outputs.release_mode == 'dry-run' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Record dry-run coverage
+        env:
+          CANDIDATE_RESULT: ${{ needs.candidate-images-dry-run.result }}
+          METADATA_RESULT: ${{ needs.metadata.result }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          {
+            echo "## Release dry run: ${VERSION}"
+            echo
+            echo "**This run did not publish a release or modify release state.**"
+            echo
+            if [ "$METADATA_RESULT" = success ] && [ "$CANDIDATE_RESULT" = success ]; then
+              echo "### Exercised"
+              echo
+              echo "- Strict release-version validation"
+              echo "- Release preconditions applicable to a dry run, including the immutable"
+              echo "  publication policy and the requested version being unpublished"
+              echo "- Current main-head requirement"
+              echo "- Required ci.yml, security.yml, and deploy-smoke.yml results"
+              echo "- Backend, frontend, and OCR image builds with release build arguments"
+              echo "- Frontend and OCR image smoke tests"
+              echo "- High-severity Anchore scans with build failure enabled"
+              echo "- SPDX JSON SBOM generation for all three images"
+            else
+              echo "### Attempted but incomplete"
+              echo
+              echo "- Metadata/preconditions job: ${METADATA_RESULT}"
+              echo "- Candidate build and verification jobs: ${CANDIDATE_RESULT}"
+              echo "- See failed jobs for the guarantees that did not complete"
+            fi
+            echo
+            echo "### Not exercised"
+            echo
+            echo "- Release-tag existence and its binding to this commit"
+            echo "- Candidate image descriptors and the workflow-artifact handoff"
+            echo "- GHCR push and registry round-trip"
+            echo "- BuildKit max-mode provenance export"
+            echo "- GitHub artifact attestation (actions/attest)"
+            echo "- Keyless image signing with cosign, SBOM attestation, and release-manifest signing"
+            echo "- Exact-digest release-set boot and benchmark qualification"
+            echo "- Immutable release-tag promotion"
+            echo "- GitHub Release creation or publication"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$METADATA_RESULT" != success ] || [ "$CANDIDATE_RESULT" != success ]; then
+            exit 1
+          fi
+
   release-set-smoke:
     name: Smoke exact release set
     needs: [metadata, candidate-images]
-    if: needs.metadata.outputs.transaction_exists != 'true'
+    if: ${{ needs.metadata.outputs.release_mode == 'publish' && needs.metadata.outputs.transaction_exists != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -627,7 +792,7 @@ jobs:
   promote:
     name: Promote immutable release tags
     needs: [metadata, candidate-images, release-set-smoke]
-    if: ${{ always() && needs.metadata.result == 'success' && (needs.metadata.outputs.transaction_exists == 'true' || needs['release-set-smoke'].result == 'success') }}
+    if: ${{ always() && needs.metadata.outputs.release_mode == 'publish' && needs.metadata.result == 'success' && (needs.metadata.outputs.transaction_exists == 'true' || needs['release-set-smoke'].result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -790,7 +955,8 @@ jobs:
         env:
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+          RELEASE_MODE: ${{ needs.metadata.outputs.release_mode }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME" "$RELEASE_MODE"
 
       - name: Promote and verify final tags
         env:
@@ -816,6 +982,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [metadata, promote]
+    if: ${{ needs.metadata.outputs.release_mode == 'publish' }}
     permissions:
       contents: write
     steps:
@@ -831,13 +998,15 @@ jobs:
         env:
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+          RELEASE_MODE: ${{ needs.metadata.outputs.release_mode }}
+        run: bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME" "$RELEASE_MODE"
 
       - name: Publish the complete verified release atomically
         env:
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_MODE: ${{ needs.metadata.outputs.release_mode }}
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
@@ -898,6 +1067,6 @@ jobs:
             test "$(sha256sum "$asset" | cut -d ' ' -f1)" = \
               "$(sha256sum "/tmp/draft-release/$asset" | cut -d ' ' -f1)"
           done
-          bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME"
+          bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME" "$RELEASE_MODE"
           gh release edit "$GITHUB_REF_NAME" --draft=false "${prerelease_flags[@]}"
           gh release verify "$GITHUB_REF_NAME"

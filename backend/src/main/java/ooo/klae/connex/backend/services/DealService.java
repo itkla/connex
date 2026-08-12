@@ -84,6 +84,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -111,6 +112,7 @@ public class DealService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final RecordCommentMapper recordCommentMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
@@ -1306,6 +1308,13 @@ public class DealService {
         customFieldValueService.deleteByEntity("deal", id);
         dealMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_DEAL, id);
+        referenceService.deleteReferencesForSources(
+            workspaceId,
+            ReferenceService.SOURCE_COMMENT,
+            recordCommentMapper.getCommentIdsForTarget(workspaceId, "deal", id).stream()
+                .map(Math::toIntExact)
+                .toList());
+        recordCommentMapper.deleteThreadsForTarget(workspaceId, "deal", id);
         auditService.record("deal.delete", "deal", id, before.getName(),
             "Deleted deal " + before.getName(),
             auditService.diff(before, null, AUDIT_FIELDS));

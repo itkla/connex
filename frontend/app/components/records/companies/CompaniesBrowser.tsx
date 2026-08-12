@@ -61,6 +61,8 @@ import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialo
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
+import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
+import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
@@ -662,8 +664,22 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         [],
     );
 
+    const commentIndicatorIds = useMemo(() => companies.map((company) => company.id), [companies]);
+    const commentCounts = useCommentIndicators('company', commentIndicatorIds);
+
     const columns: ColumnDef<Company>[] = useMemo(() => [
-        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
+        {
+            key: 'name',
+            label: t('columnName'),
+            getSortValue: (c) => c.name ?? null,
+            widthClass: 'min-w-48',
+            render: (c) => (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <span className="truncate">{c.name}</span>
+                    <CommentIndicatorChip count={commentCounts.get(c.id)} />
+                </span>
+            ),
+        },
         {
             key: 'warmth',
             label: t('columnWarmth'),
@@ -713,7 +729,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, commentCounts]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 

@@ -20,12 +20,20 @@ public class AiChatTurnTerminalCoordinator {
     private static final Set<String> FAILED_REASONS = Set.of(
             "provider_error",
             "quota_exhausted",
+            "org_invocation_quota_exhausted",
+            "invocation_capacity_exhausted",
             "malformed_output",
+            "schema_repair_failed",
+            "no_progress",
+            "agent_backstop_exceeded",
             "step_cap_exceeded",
             "generation_capacity",
             "restrictions_changed",
             "access_revoked",
             INTERNAL_ERROR);
+    private static final Set<String> TIMED_OUT_REASONS = Set.of(
+            "generation_timeout",
+            "turn_deadline_exceeded");
 
     private final TenantWorkScope tenantWorkScope;
     private final AiChatTurnPersistenceService persistenceService;
@@ -74,7 +82,9 @@ public class AiChatTurnTerminalCoordinator {
     private static String stableReason(
             AiGenerationTaskResult.Outcome outcome, String reason) {
         if (outcome == AiGenerationTaskResult.Outcome.TIMED_OUT) {
-            return "generation_timeout";
+            return reason != null && TIMED_OUT_REASONS.contains(reason)
+                    ? reason
+                    : "generation_timeout";
         }
         if ("generation_failed".equals(reason)) {
             return INTERNAL_ERROR;

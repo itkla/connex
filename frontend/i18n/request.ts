@@ -35,6 +35,7 @@ const namespaces = [
     "introductions",
     "calendar",
     "attachments",
+    "comments",
     "admin",
     "notifications",
     "importExport",

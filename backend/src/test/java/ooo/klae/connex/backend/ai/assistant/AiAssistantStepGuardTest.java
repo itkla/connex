@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,5 +33,22 @@ class AiAssistantStepGuardTest {
                         + "\"final\":null}")));
         assertFalse(guard.permits(objectMapper.readTree(
                 "{\"tool\":null,\"final\":{\"text\":\"Ready\",\"citations\":[],\"extra\":1}}")));
+        assertEquals("exclusive_step", guard.rejectionReason(objectMapper.readTree(
+                "{\"tool\":null,\"final\":null}")));
+        assertEquals("tool_arguments", guard.rejectionReason(objectMapper.readTree(
+                "{\"tool\":{\"name\":\"get_record\",\"args\":{\"handle\":\"raw-id\"}},"
+                        + "\"final\":null}")));
+    }
+
+    @Test
+    void issuedPlaceholderGuardRejectsBareBodiesButAcceptsBracedTokens() throws Exception {
+        var issuedGuard = guard.forIssuedPlaceholders(Set.of("{{P1}}"));
+
+        assertEquals("bare_placeholder", issuedGuard.rejectionReason(objectMapper.readTree(
+                "{\"tool\":null,\"final\":{\"text\":\"Ask P1\",\"citations\":[]}}")));
+        assertTrue(issuedGuard.permits(objectMapper.readTree(
+                "{\"tool\":null,\"final\":{\"text\":\"Ask {{ P1 }}\",\"citations\":[]}}")));
+        assertTrue(issuedGuard.permits(objectMapper.readTree(
+                "{\"tool\":null,\"final\":{\"text\":\"Ask P10\",\"citations\":[]}}")));
     }
 }

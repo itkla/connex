@@ -1,9 +1,11 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,6 +26,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentDisclosureDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentThreadDisclosureDto;
 import ooo.klae.connex.backend.mappers.DataSubjectDisclosureMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,9 +46,9 @@ class DataSubjectDisclosureReadTransactionTest {
         readTransaction = new DataSubjectDisclosureReadTransaction(
             dataSubjectDisclosureMapper,
             sqlSessionFactory);
-        when(sqlSessionFactory.openSession(false)).thenReturn(sqlSession);
-        when(sqlSession.getConnection()).thenReturn(connection);
-        when(sqlSession.getMapper(DataSubjectDisclosureMapper.class))
+        lenient().when(sqlSessionFactory.openSession(false)).thenReturn(sqlSession);
+        lenient().when(sqlSession.getConnection()).thenReturn(connection);
+        lenient().when(sqlSession.getMapper(DataSubjectDisclosureMapper.class))
             .thenReturn(lockedMapper);
     }
 
@@ -153,5 +158,39 @@ class DataSubjectDisclosureReadTransactionTest {
         assertEquals(primary, thrown);
         assertEquals(List.of(rollbackFailure), List.of(thrown.getSuppressed()));
         verify(sqlSession).close();
+    }
+
+    @Test
+    void disclosureAssemblyNestsActiveAndRedactedCommentsUnderTheirThread() {
+        PersonDto person = new PersonDto();
+        person.setId(5);
+        RecordCommentThreadDisclosureDto thread = new RecordCommentThreadDisclosureDto();
+        thread.setId(11L);
+        RecordCommentDisclosureDto active = new RecordCommentDisclosureDto();
+        active.setId(21L);
+        active.setThreadId(11L);
+        active.setContent("Subject comment");
+        RecordCommentDisclosureDto redacted = new RecordCommentDisclosureDto();
+        redacted.setId(22L);
+        redacted.setThreadId(11L);
+        redacted.setContent(null);
+        redacted.setDeletedAt(java.time.LocalDateTime.of(2026, 1, 2, 3, 4));
+        when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4, 6))).thenReturn(person);
+        when(dataSubjectDisclosureMapper.findRecordCommentThreads(4, 5, List.of(4, 6)))
+            .thenReturn(List.of(thread));
+        when(dataSubjectDisclosureMapper.findRecordComments(4, 5, List.of(4, 6)))
+            .thenReturn(List.of(active, redacted));
+
+        var disclosure = readTransaction.assemble(4, 5, List.of(4, 6));
+
+        assertEquals(1, disclosure.getRecordCommentThreads().size());
+        assertEquals(List.of(21L, 22L), disclosure.getRecordCommentThreads().getFirst()
+            .getComments().stream().map(RecordCommentDisclosureDto::getId).toList());
+        assertEquals("Subject comment", disclosure.getRecordCommentThreads().getFirst()
+            .getComments().getFirst().getContent());
+        assertNull(disclosure.getRecordCommentThreads().getFirst()
+            .getComments().getLast().getContent());
+        assertEquals(redacted.getDeletedAt(), disclosure.getRecordCommentThreads().getFirst()
+            .getComments().getLast().getDeletedAt());
     }
 }

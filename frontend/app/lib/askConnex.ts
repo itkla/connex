@@ -1,5 +1,5 @@
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
-import type { AiChatCitation, AiChatPageContext } from '@/app/lib/types';
+import type { AiChatCitation, AiChatMessage, AiChatPageContext } from '@/app/lib/types';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -10,6 +10,13 @@ export const ASK_CONNEX_CONTEXT_LIMIT = 10;
 /** A supported attached record parsed from the mention editor's serialized value. */
 export type AskConnexAttachment = AiChatPageContext & {
     label: string;
+};
+
+/** Consecutive transcript messages authored by the same sender. */
+export type AskConnexMessageGroup = {
+    authorKind: string;
+    authorUserId: number | null;
+    messages: AiChatMessage[];
 };
 
 /** Persisted descriptor needed to reconcile one accepted assistant turn after refresh. */
@@ -193,4 +200,22 @@ export function askConnexCitations(
         if (unique.length === limit) break;
     }
     return unique;
+}
+
+/** Groups consecutive messages by sender without changing transcript order. */
+export function groupAskConnexMessages(messages: readonly AiChatMessage[]): AskConnexMessageGroup[] {
+    const groups: AskConnexMessageGroup[] = [];
+    for (const message of messages) {
+        const current = groups.at(-1);
+        if (current?.authorKind === message.authorKind && current.authorUserId === message.authorUserId) {
+            current.messages.push(message);
+        } else {
+            groups.push({
+                authorKind: message.authorKind,
+                authorUserId: message.authorUserId,
+                messages: [message],
+            });
+        }
+    }
+    return groups;
 }

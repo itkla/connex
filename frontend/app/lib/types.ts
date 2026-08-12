@@ -2730,6 +2730,77 @@ export type CreateAttachmentPayload = {
     size?: number;
 };
 
+export type RecordCommentTargetType = 'person' | 'company' | 'deal';
+
+export type RecordCommentStateFilter = 'open' | 'resolved' | 'all';
+
+export type RecordCommentReactionKey =
+    | 'thumbs_up'
+    | 'thumbs_down'
+    | 'heart'
+    | 'celebrate'
+    | 'eyes'
+    | 'laugh';
+
+export type RecordCommentReactionSummary = {
+    reaction: RecordCommentReactionKey;
+    count: number;
+    reactedByMe: boolean;
+};
+
+export type RecordCommentIndicator = {
+    targetId: number;
+    openThreads: number;
+};
+
+export type RecordCommentAuthor = {
+    id: number;
+    displayName: string;
+    profilePictureUrl?: string | null;
+};
+
+export type RecordComment = {
+    id: number;
+    threadId: number;
+    /** Null when the author's account has been permanently erased. */
+    author: RecordCommentAuthor | null;
+    /** Null once the comment has been redacted; the row survives as a tombstone. */
+    content: string | null;
+    createdAt: string;
+    deletedAt: string | null;
+    deletedByUserId?: number | null;
+    /** Server-authorized @/# references resolved from the content tokens. */
+    references?: NoteReference[];
+    /** Per-reaction aggregate for this comment, including the caller's own state. */
+    reactions?: RecordCommentReactionSummary[];
+};
+
+export type RecordCommentThread = {
+    id: number;
+    targetType: RecordCommentTargetType;
+    targetId: number;
+    createdByUserId: number;
+    state: 'open' | 'resolved';
+    resolvedByUserId?: number | null;
+    resolvedAt?: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    comments: RecordComment[];
+};
+
+export type CreateCommentThreadPayload = {
+    targetType: RecordCommentTargetType;
+    targetId: number;
+    content: string;
+    clientToken: string;
+};
+
+export type CreateCommentReplyPayload = {
+    content: string;
+    clientToken: string;
+};
+
 export type FacetCount = {
     key: string;
     count: number;

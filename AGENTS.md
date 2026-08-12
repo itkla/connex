@@ -27,6 +27,8 @@ The verify loops require a running stack. **Prerequisites:** Node `^22.13.0 || >
 
 Auth is cookie/session based; workspace selection drives tenant context. See `frontend/proxy.ts` for the route-protection rules.
 
+**Deploy bundle: digests are blank on purpose.** `deploy/docker-compose.yml` pins every image by digest, and `silo.env.example` / `onprem.env.example` ship those digest variables **empty** so a published-image install refuses to start rather than silently running an unverified image. Compose interpolates the base file before `docker-compose.build.yml` is merged, so a from-source install must also pass `deploy/source-build.env`, which supplies placeholder digests that the build overlay then replaces. Never "fix" a Compose parse error by putting digests into a profile template — that removes the guarantee. The full command is in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md); `deploy-smoke.yml`'s `source-install` job runs it end to end.
+
 ## Golden Rules (non-negotiable)
 
 1. **Explore → Plan → Question → Argue → Act.** Never write code for anything bigger than a one-liner before you've read the surrounding code, formed a short plan, and surfaced assumptions. If the request is ambiguous or looks wrong, push back *before* coding — don't guess.

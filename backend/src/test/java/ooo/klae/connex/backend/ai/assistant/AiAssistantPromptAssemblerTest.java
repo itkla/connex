@@ -10,6 +10,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -23,6 +24,33 @@ class AiAssistantPromptAssemblerTest {
     private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(
             objectMapper, new AiAssistantToolCatalog());
+
+    @Test
+    void promptIncludesWorkedStepsCostDisciplineAndBoundedRepairData() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Check the pipeline");
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                AiStructuredRepair.from(
+                        "exclusive_step", "{\"tool\":null,\"final\":null,"
+                                + "\"contact\":\"ada@example.com +1 (415) 555-0100\"}"));
+
+        assertTrue(prompt.getSystemPrompt().contains("Valid tool step example"));
+        assertTrue(prompt.getSystemPrompt().contains("Valid final step example"));
+        assertTrue(prompt.getSystemPrompt().contains("fewest tool steps"));
+        assertTrue(prompt.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
+        assertTrue(prompt.getMessages().getLast().getContent().contains("exclusive_step"));
+        assertTrue(prompt.getMessages().getLast().getContent().contains("\\\"tool\\\""));
+        assertFalse(prompt.getMessages().getLast().getContent().contains("ada@example.com"));
+        assertFalse(prompt.getMessages().getLast().getContent().contains("415"));
+        assertTrue(prompt.getMessages().getLast().getContent().contains("[redacted]"));
+    }
 
     @Test
     void replayAndInjectedCrmStringsStayMaskedEscapedAndOutsideSystemPolicy() throws Exception {

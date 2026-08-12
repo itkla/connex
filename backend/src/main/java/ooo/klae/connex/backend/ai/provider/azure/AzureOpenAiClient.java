@@ -4,28 +4,31 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
+import org.apache.hc.core5.http.ContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
+import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 
 /**
- * Minimal Azure OpenAI transport. The client uses a single Spring {@link RestClient} backed by the
- * JDK {@link HttpClient}, never follows redirects, re-vets the Azure hostname immediately before
- * every send, and bounds response bytes.
+ * Minimal Azure OpenAI transport. Production requests use the shared pinned fixed-provider client
+ * so DNS validation and the HTTP exchange consume one absolute deadline. The package-local
+ * {@link RestClient} path keeps isolated request-shape tests lightweight.
  */
 @Component
 public class AzureOpenAiClient {
@@ -33,26 +36,24 @@ public class AzureOpenAiClient {
     private static final int BUFFER_BYTES = 8192;
 
     private final RestClient restClient;
+    private final FixedAiProviderClient providerClient;
     private final int maxResponseBytes;
+    private final long requestTimeoutMillis;
 
     @Autowired
-    public AzureOpenAiClient(AiProperties aiProperties) {
+    public AzureOpenAiClient(AiProperties aiProperties, FixedAiProviderClient providerClient) {
         Objects.requireNonNull(aiProperties, "aiProperties");
-        HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(duration(aiProperties.getConnectTimeoutMs(), "connect timeout"))
-                .build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(duration(aiProperties.getRequestTimeoutMs(), "request timeout"));
-        this.restClient = RestClient.builder()
-                .requestFactory(requestFactory)
-                .build();
+        this.restClient = null;
+        this.providerClient = Objects.requireNonNull(providerClient, "providerClient");
         this.maxResponseBytes = positiveInt(aiProperties.getMaxResponseBytes(), "max response bytes");
+        this.requestTimeoutMillis = positiveLong(aiProperties.getRequestTimeoutMs(), "request timeout");
     }
 
     AzureOpenAiClient(RestClient restClient, int maxResponseBytes) {
         this.restClient = Objects.requireNonNull(restClient, "restClient");
+        this.providerClient = null;
         this.maxResponseBytes = positiveInt(maxResponseBytes, "max response bytes");
+        this.requestTimeoutMillis = 60_000;
     }
 
     /**
@@ -63,16 +64,26 @@ public class AzureOpenAiClient {
      * @return provider response body JSON
      */
     public String complete(URI endpoint, AiCredentials credentials, String requestBodyJson) {
+        return complete(endpoint, credentials, requestBodyJson,
+                AiRequestDeadline.afterMillis(requestTimeoutMillis));
+    }
+
+    String complete(
+            URI endpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline) {
         String host = requireAzureEndpoint(endpoint);
         if (credentials == null) {
             throw new AiProviderException("Azure OpenAI credentials are required");
         }
         requireText(requestBodyJson, "request body");
+        Objects.requireNonNull(deadline, "deadline");
         String apiKey = credentials.require("apiKey");
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         AzureOpenAiResponse response;
         try {
-            response = sendOnce(endpoint, host, apiKey, body);
+            response = sendOnce(endpoint, host, apiKey, body, deadline);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RestClientException exception) {
@@ -81,21 +92,44 @@ public class AzureOpenAiClient {
             throw new AiProviderException("Azure OpenAI invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
-            throw new AiProviderException("Azure OpenAI invocation failed with status " + response.statusCode());
+            throw new AiProviderRequestRejectedException("Azure OpenAI", response.statusCode());
         }
         return new String(response.body(), StandardCharsets.UTF_8);
     }
 
-    private AzureOpenAiResponse sendOnce(URI endpoint, String host, String apiKey, byte[] body) {
+    private AzureOpenAiResponse sendOnce(
+            URI endpoint,
+            String host,
+            String apiKey,
+            byte[] body,
+            AiRequestDeadline deadline) {
+        if (providerClient != null) {
+            FixedAiProviderClient.Response response = providerClient.post(
+                    endpoint,
+                    Set.of(host),
+                    Map.of(
+                            "Content-Type", ContentType.APPLICATION_JSON.getMimeType(),
+                            "Accept", ContentType.APPLICATION_JSON.getMimeType(),
+                            "api-key", apiKey),
+                    ContentType.APPLICATION_JSON,
+                    body,
+                    deadline,
+                    "Azure OpenAI invocation");
+            return new AzureOpenAiResponse(response.statusCode(), response.body());
+        }
+        requireRemainingDeadline(deadline);
         RestClient.RequestBodySpec spec = restClient.post()
                 .uri(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
                 .header("api-key", apiKey);
         AiEgressGuard.requireFetchableHost(host, false);
-        return spec.body(body)
-                .exchange((request, response) -> new AzureOpenAiResponse(response.getStatusCode().value(),
-                        readBounded(response.getBody())));
+        AzureOpenAiResponse response = spec.body(body)
+                .exchange((request, providerResponse) -> new AzureOpenAiResponse(
+                        providerResponse.getStatusCode().value(),
+                        readBounded(providerResponse.getBody())));
+        requireRemainingDeadline(deadline);
+        return response;
     }
 
     private byte[] readBounded(InputStream input) throws IOException {
@@ -129,11 +163,17 @@ public class AzureOpenAiClient {
         return normalizedHost;
     }
 
-    private static Duration duration(long millis, String name) {
-        if (millis <= 0) {
+    private static long positiveLong(long value, String name) {
+        if (value <= 0) {
             throw new IllegalStateException("AI " + name + " must be positive");
         }
-        return Duration.ofMillis(millis);
+        return value;
+    }
+
+    private static void requireRemainingDeadline(AiRequestDeadline deadline) {
+        if (deadline.isExpired()) {
+            throw new AiProviderException("Azure OpenAI invocation exceeded its deadline");
+        }
     }
 
     private static int positiveInt(int value, String name) {

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,8 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.RelationshipSignal;
+import ooo.klae.connex.backend.beans.RecordComment;
+import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.beans.Stage;
@@ -36,6 +39,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.UserDashboard;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
+import ooo.klae.connex.backend.dto.RecordCommentDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
@@ -43,6 +47,7 @@ import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
+import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
@@ -68,6 +73,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private UserDashboardMapper userDashboardMapper;
     @Autowired private ReportMapper reportMapper;
     @Autowired private RelationshipSignalMapper relationshipSignalMapper;
+    @Autowired private RecordCommentMapper recordCommentMapper;
+    @Autowired private RecordCommentService recordCommentService;
     @Autowired private RuleMapper ruleMapper;
     @Autowired private CampaignMapper campaignMapper;
     @Autowired private ConsentMapper consentMapper;
@@ -141,6 +148,33 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             workspace.getId(), erasedChatSession.getId(), retainedChatOwner.getId());
         aiChatMapper.insertParticipant(
             workspace.getId(), retainedChatSession.getId(), target.getId());
+        RecordCommentThread commentThread = new RecordCommentThread();
+        commentThread.setWorkspaceId(workspace.getId());
+        commentThread.setTargetType("person");
+        commentThread.setTargetId(person.getId());
+        commentThread.setCreatedByUserId(target.getId());
+        commentThread.setState("open");
+        recordCommentMapper.insertThread(commentThread);
+        RecordComment retainedComment = new RecordComment();
+        retainedComment.setWorkspaceId(workspace.getId());
+        retainedComment.setThreadId(commentThread.getId());
+        retainedComment.setAuthorUserId(target.getId());
+        retainedComment.setContent("Retained account comment");
+        retainedComment.setClientToken(UUID.randomUUID().toString());
+        recordCommentMapper.insertComment(retainedComment);
+        RecordComment redactedComment = new RecordComment();
+        redactedComment.setWorkspaceId(workspace.getId());
+        redactedComment.setThreadId(commentThread.getId());
+        redactedComment.setAuthorUserId(currentUser.getId());
+        redactedComment.setContent("Redacted account comment");
+        redactedComment.setClientToken(UUID.randomUUID().toString());
+        recordCommentMapper.insertComment(redactedComment);
+        recordCommentMapper.softDeleteComment(
+            workspace.getId(), redactedComment.getId(), target.getId());
+        jdbcTemplate.update(
+            "UPDATE record_comment_thread SET state = 'resolved', resolved_by_user_id = ?, "
+                + "resolved_at = UTC_TIMESTAMP(6) WHERE workspace_id = ? AND id = ?",
+            target.getId(), workspace.getId(), commentThread.getId());
 
         offboardingService.eraseOrgDataReferences(target.getId());
 
@@ -198,6 +232,18 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(jdbcTemplate.queryForObject(
             "SELECT requested_by_user_id FROM ai_chat_turn WHERE workspace_id = ? AND session_id = ?",
             Integer.class, workspace.getId(), erasedChatSession.getId()));
+        RecordCommentThread retainedThread = recordCommentService.getThread(commentThread.getId());
+        assertNull(retainedThread.getCreatedByUserId());
+        assertNull(retainedThread.getResolvedByUserId());
+        assertEquals(2, retainedThread.getComments().size());
+        RecordComment retainedCommentAfter = retainedThread.getComments().getFirst();
+        assertEquals("Retained account comment", retainedCommentAfter.getContent());
+        assertNull(retainedCommentAfter.getAuthorUserId());
+        assertNull(RecordCommentDto.from(retainedCommentAfter).author());
+        RecordComment redactedCommentAfter = retainedThread.getComments().getLast();
+        assertNull(redactedCommentAfter.getContent());
+        assertNotNull(redactedCommentAfter.getDeletedAt());
+        assertNull(redactedCommentAfter.getDeletedByUserId());
         assertFalse(aiChatMapper.isParticipant(
             workspace.getId(), retainedChatSession.getId(), target.getId()));
         assertTrue(aiChatMapper.isParticipant(

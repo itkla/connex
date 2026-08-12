@@ -241,6 +241,15 @@ public interface NotificationMapper {
 
     List<Notification> findWorkspaceReminderNotifications(@Param("workspaceId") int workspaceId);
 
+    List<Integer> findInaccessibleNotificationRecipientIds(
+        @Param("workspaceId") int workspaceId
+    );
+
+    int resolveInaccessibleNotifications(
+        @Param("workspaceId") int workspaceId,
+        @Param("resolvedAt") String resolvedAt
+    );
+
     List<HistoricalNotificationBaseline> findHistoricalNotificationBaselines(
         @Param("workspaceId") int workspaceId
     );
