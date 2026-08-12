@@ -83,6 +83,11 @@ export default function CommentThread({
     const now = useLiveNow();
     const resolved = thread.state === 'resolved';
     const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
+    const [lastForceExpanded, setLastForceExpanded] = useState(forceExpanded);
+    if (forceExpanded !== lastForceExpanded) {
+        setLastForceExpanded(forceExpanded);
+        if (forceExpanded) setExpandedOverride(null);
+    }
     const expanded = expandedOverride ?? forceExpanded;
 
     const root = thread.comments[0];
@@ -166,7 +171,7 @@ export default function CommentThread({
                 type="button"
                 onClick={() => setExpandedOverride((value) => !(value ?? forceExpanded))}
                 aria-expanded={expanded}
-                aria-label={expanded ? t('collapseResolved') : t('expandResolved')}
+                title={expanded ? t('collapseResolved') : t('expandResolved')}
                 className="-mx-2 flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/50"
             >
                 <CheckCircleSolidIcon className="size-5 shrink-0 text-brand" aria-hidden />

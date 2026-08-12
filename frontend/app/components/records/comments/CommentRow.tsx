@@ -72,7 +72,7 @@ export default function CommentRow({
     const deleted = comment.deletedAt != null;
     const authorName = comment.author?.displayName ?? t('formerMember');
     const reactions = comment.reactions ?? [];
-    const showCluster = !deleted && (canReact || canDelete || canResolve);
+    const showCluster = (!deleted && (canReact || canDelete)) || (canResolve && onResolve != null);
 
     return (
         <>
@@ -154,7 +154,7 @@ export default function CommentRow({
                             pickerOpen && 'opacity-100',
                         )}
                     >
-                        {canReact && (
+                        {canReact && !deleted && (
                             <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
                                 <PopoverTrigger
                                     render={
@@ -202,7 +202,7 @@ export default function CommentRow({
                                 <TooltipContent>{t('resolve')}</TooltipContent>
                             </Tooltip>
                         )}
-                        {canDelete && (
+                        {canDelete && !deleted && (
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <button
