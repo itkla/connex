@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
@@ -75,6 +76,9 @@ class AiInvocationServiceTest {
     @Mock private Runnable providerTransport;
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
+    @Mock private AiOrganizationBudgetCoordinator budgetCoordinator;
+    @Mock private AiOrganizationBudgetCoordinator.Lease budgetLease;
+    @Mock private AiOrganizationBudgetCoordinator.Lease fallbackBudgetLease;
 
     private AiInvocationService service;
     private AiRestrictionEpoch restrictionEpoch;
@@ -86,7 +90,7 @@ class AiInvocationServiceTest {
         service = new AiInvocationService(
                 aiFeatureGate, aiInvocationAdmissionService, aiMediaAdmissionService,
                 aiProviderConfigService, aiProviderRouter, restrictionEpoch,
-                workspaceService, auditService, new ObjectMapper());
+                workspaceService, auditService, new ObjectMapper(), budgetCoordinator);
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
                 null, null, null, null, false, true,
                 AiCredentials.of(Map.of(
@@ -98,6 +102,8 @@ class AiInvocationServiceTest {
         lenient().when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(resolved);
         lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
+        lenient().when(budgetCoordinator.reserve(eq(ORG_ID), any(AiInvocation.class)))
+                .thenReturn(budgetLease, fallbackBudgetLease);
     }
 
     @Test
@@ -162,6 +168,26 @@ class AiInvocationServiceTest {
         assertEquals(0, audits.get(1).get("demaskWarnings"));
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
+        verify(budgetLease).settle(12, 7);
+    }
+
+    @Test
+    void complete_exhaustedOrganizationBudgetIsAnExplicitBlockedState() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(budgetCoordinator.reserve(ORG_ID, invocation))
+                .thenThrow(new AiBudgetExhaustedException());
+
+        AiBudgetExhaustedException exhausted = assertThrows(
+                AiBudgetExhaustedException.class,
+                () -> service.complete(invocation));
+
+        assertEquals(
+                "The organization daily AI token budget is exhausted",
+                exhausted.getMessage());
+        Map<?, ?> metadata = singleAuditMetadata();
+        assertEquals("blocked", metadata.get("outcome"));
+        assertEquals("budget_exhausted", metadata.get("reason"));
+        verify(aiProvider, never()).complete(any());
     }
 
     @Test
@@ -185,6 +211,7 @@ class AiInvocationServiceTest {
         assertNoContent(audits.get(1));
         verify(invocationAdmission, never()).commitLeaderInvocation();
         verify(providerTransport, never()).run();
+        verify(budgetLease).close();
     }
 
     @Test
@@ -211,6 +238,7 @@ class AiInvocationServiceTest {
         verify(aiProvider, never()).complete(any());
         verify(auditService, never()).recordIndependentScoped(
             any(), any(), any(), any(), any(), any(), any(), any());
+        verify(budgetLease).close();
     }
 
     @Test
@@ -225,7 +253,7 @@ class AiInvocationServiceTest {
 
         service.complete(invocation);
 
-        verify(aiFeatureGate).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
+        verify(aiFeatureGate, times(2)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
         ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
         verify(aiProvider).complete(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().images().size());
@@ -259,6 +287,7 @@ class AiInvocationServiceTest {
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
         verify(aiProvider, never()).complete(any());
+        verify(budgetLease).close();
     }
 
     @Test
@@ -330,6 +359,7 @@ class AiInvocationServiceTest {
         assertEquals("failure", audits.get(1).get("outcome"));
         assertEquals("provider_exception", audits.get(1).get("reason"));
         assertNoContent(audits.get(1));
+        verify(budgetLease).close();
     }
 
     @Test
@@ -510,6 +540,9 @@ class AiInvocationServiceTest {
         verify(fallbackAdmission).commitInvocation();
         verify(fallbackAdmission).close();
         verify(providerTransport, times(2)).run();
+        verify(budgetCoordinator, times(2)).reserve(ORG_ID, invocation);
+        verify(budgetLease).close();
+        verify(fallbackBudgetLease).settle(20, 8);
         verify(auditService, times(2)).recordStrictIndependentScoped(
                 eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
                 any(), any(), any());
@@ -552,6 +585,44 @@ class AiInvocationServiceTest {
         verify(fallbackAdmission, never()).commitInvocation();
         verify(fallbackAdmission).close();
         verify(providerTransport).run();
+    }
+
+    @Test
+    void featureGateIsRecheckedBeforeFallbackProviderEgress() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        ForbiddenException disabled = new ForbiddenException("AI features are not available");
+        doNothing().doNothing().doThrow(disabled)
+                .when(aiFeatureGate).requireAiUsable(FEATURE);
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    providerTransport.run();
+                    throw new AiProviderRequestRejectedException("provider", 400);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                assertEquals("provider invocation failed with status 400", exception.getMessage());
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                providerTransport.run();
+                return "forbidden fallback";
+            });
+            throw new IllegalStateException("Feature gate did not reject fallback egress");
+        });
+
+        ForbiddenException thrown = assertThrows(
+                ForbiddenException.class,
+                () -> service.completeStructured(
+                        invocation, IntroRationaleContent.class, invocationAdmission));
+
+        assertEquals(disabled, thrown);
+        verify(invocationAdmission).commitLeaderInvocation();
+        verify(fallbackAdmission, never()).commitInvocation();
+        verify(fallbackAdmission).close();
+        verify(providerTransport).run();
+        verify(budgetLease).close();
+        verify(fallbackBudgetLease).close();
     }
 
     @Test

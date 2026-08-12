@@ -2,14 +2,13 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.Set;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiGenerationTerminalListener;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
-import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Routes generation terminal callbacks to the owning tenant catalog and initiating user's queue. */
@@ -20,6 +19,7 @@ public class AiChatTurnTerminalCoordinator {
     private static final Set<String> FAILED_REASONS = Set.of(
             "provider_error",
             "quota_exhausted",
+            "budget_exhausted",
             "org_invocation_quota_exhausted",
             "invocation_capacity_exhausted",
             "malformed_output",
@@ -27,6 +27,7 @@ public class AiChatTurnTerminalCoordinator {
             "no_progress",
             "agent_backstop_exceeded",
             "step_cap_exceeded",
+            "workspace_disabled",
             "generation_capacity",
             "restrictions_changed",
             "access_revoked",
@@ -37,7 +38,7 @@ public class AiChatTurnTerminalCoordinator {
 
     private final TenantWorkScope tenantWorkScope;
     private final AiChatTurnPersistenceService persistenceService;
-    private final ObjectProvider<AiChatRealtimePublisher> realtimePublisher;
+    private final AiChatRealtimeDispatcher realtimeDispatcher;
 
     /** Creates the durable terminal listener for one committed turn. */
     public AiGenerationTerminalListener listener(AiChatQueuedTurn turn) {
@@ -59,7 +60,7 @@ public class AiChatTurnTerminalCoordinator {
             AiGenerationTaskResult.Outcome outcome,
             String reason) {
         if (outcome == AiGenerationTaskResult.Outcome.RESOLVED) {
-            publish(turn.userId(), new AiChatStepFrameDto(
+            publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "terminal", null, "resolved", null));
             return true;
@@ -72,7 +73,7 @@ public class AiChatTurnTerminalCoordinator {
                 turn.workspaceId(),
                 () -> persistenceService.markTerminal(turn, status, stableReason));
         if (changed) {
-            publish(turn.userId(), new AiChatStepFrameDto(
+            publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "terminal", null, status, stableReason));
         }
@@ -94,14 +95,7 @@ public class AiChatTurnTerminalCoordinator {
                 : INTERNAL_ERROR;
     }
 
-    private void publish(int userId, AiChatStepFrameDto frame) {
-        try {
-            AiChatRealtimePublisher publisher = realtimePublisher.getIfAvailable();
-            if (publisher != null) {
-                publisher.send(userId, frame);
-            }
-        } catch (RuntimeException exception) {
-            return;
-        }
+    private void publish(AiChatQueuedTurn turn, AiChatStepFrameDto frame) {
+        realtimeDispatcher.sessionNow(turn.workspaceId(), turn.sessionId(), frame);
     }
 }

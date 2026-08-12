@@ -173,6 +173,22 @@ class AuditServiceTest {
     }
 
     @Test
+    void strictScopedRecordUsesExactScopeAndCallerTransactionAppend() {
+        service.recordStrictScoped(
+            "org.ai_budget.save", "organization", 23, 17, 23,
+            "Organization 23", "Updated organization AI daily token budget",
+            Map.of("dailyUsageLimit", 1_000L));
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(17, entry.getWorkspaceId());
+        assertEquals(23, entry.getOrgId());
+        assertEquals("org.ai_budget.save", entry.getAction());
+        assertTrue(entry.getChanges().contains("1000"));
+    }
+
+    @Test
     void strictIndependentScopedRecordPropagatesPersistenceFailure() {
         IllegalStateException failure = new IllegalStateException("audit unavailable");
         doThrow(failure).when(auditIntegrityService).appendIndependent(any(AuditLog.class));

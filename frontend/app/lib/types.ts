@@ -2326,6 +2326,7 @@ export type AiChatSession = {
     status: string;
     archived: boolean;
     ownedByCurrentUser: boolean;
+    participationStatus: 'invited' | 'joined' | null;
     lastMessageAt: string | null;
     archivedAt: string | null;
     createdAt: string;
@@ -2352,10 +2353,68 @@ export type AiChatMessage = {
     seq: number;
     authorKind: string;
     authorUserId: number | null;
+    authorDisplayName: string | null;
     content: string;
     createdAt: string;
     citations?: AiChatCitation[] | null;
     suggestions?: string[] | null;
+};
+
+/** Viewer-safe membership state for one shared assistant session participant. */
+export type AiChatParticipant = {
+    userId: number;
+    displayName: string;
+    profilePictureUrl: string | null;
+    role: 'owner' | 'participant';
+    status: 'joined' | 'invited';
+    currentUser: boolean;
+};
+
+/** Current ephemeral presence and typing state for one shared assistant session. */
+export type AiChatPresence = {
+    sessionId: number;
+    present: AiChatParticipant[];
+    typingUserIds: number[];
+};
+
+/** Metadata-only realtime invalidation or turn-progress frame for an assistant session. */
+export type AiChatRealtimeFrame = {
+    workspaceId: number;
+    sessionId: number;
+    turnId: number;
+    seq: number;
+    kind: 'session' | 'message' | 'state' | 'step' | 'terminal';
+    tool: string | null;
+    status: string;
+    reason: string | null;
+};
+
+/** Active workspace AI kill switch and assistant turn limit. */
+export type AiWorkspaceGovernance = {
+    workspaceId: number;
+    enabled: boolean;
+    assistantMaxSteps: number;
+};
+
+/** One UTC-day AI usage aggregate by feature and requesting member. */
+export type AiUsageBreakdown = {
+    userId: number | null;
+    displayName: string;
+    feature: string;
+    inputUsage: number;
+    outputUsage: number;
+};
+
+/** Organization daily token budget and explicit exhaustion state. */
+export type AiOrganizationBudget = {
+    orgId: number;
+    usageDay: string;
+    dailyUsageLimit: number;
+    consumedUsage: number;
+    reservedUsage: number;
+    remainingUsage: number;
+    exhausted: boolean;
+    usage: AiUsageBreakdown[];
 };
 
 /** One accessible assistant session and its ordered message page. */

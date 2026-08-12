@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -35,9 +34,11 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
-import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.core.JacksonException;
@@ -50,7 +51,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Service
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
-    static final int MAX_STEPS = 64;
+    static final int HARD_MAX_STEPS = 64;
     private static final Duration TURN_DEADLINE = Duration.ofSeconds(70);
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     private static final String INTERNAL_ERROR = "internal_error";
@@ -74,12 +75,14 @@ public class AiChatAgentLoopService {
     private final AiRestrictionEpoch restrictionEpoch;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
+    private final AiChatRealtimeDispatcher realtimeDispatcher;
+    private final AiWorkspaceGovernanceService governanceService;
     private final Clock clock;
-    private final ObjectProvider<AiChatRealtimePublisher> realtimePublisher;
 
     /** Runs one committed turn under the shared generation context. */
     public AiGenerationTaskResult<AiChatTurnGenerationResult> run(AiChatQueuedTurn turn) {
         try {
+            requireWorkspaceEnabled(turn);
             boolean running;
             try {
                 running = persistenceService.markRunning(turn);
@@ -90,7 +93,7 @@ public class AiChatAgentLoopService {
                 return AiGenerationTaskResult.failed(INTERNAL_ERROR);
             }
             Instant deadline = clock.instant().plus(TURN_DEADLINE);
-            publish(turn.userId(), new AiChatStepFrameDto(
+            publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "state", null, "running", null));
             List<AiChatMessage> history = boundedHistory(
@@ -115,8 +118,11 @@ public class AiChatAgentLoopService {
             int noProgressSteps = 0;
             int inputTokens = 0;
             int outputTokens = 0;
+            int maxSteps = Math.min(
+                    governanceService.assistantMaxSteps(turn.workspaceId()), HARD_MAX_STEPS);
 
-            for (int stepNumber = 1; stepNumber <= MAX_STEPS; stepNumber++) {
+            for (int stepNumber = 1; stepNumber <= maxSteps; stepNumber++) {
+                requireWorkspaceEnabled(turn);
                 if (deadlineReached(deadline)) {
                     return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                 }
@@ -142,6 +148,7 @@ public class AiChatAgentLoopService {
                             admission);
                 }
                 AiStructuredOutcome<AiAssistantStep> outcome = attempt.outcome();
+                requireWorkspaceEnabled(turn);
                 inputTokens = addTokens(inputTokens, inputTokens(outcome));
                 outputTokens = addTokens(outputTokens, outputTokens(outcome));
                 if (deadlineReached(deadline)) {
@@ -240,7 +247,7 @@ public class AiChatAgentLoopService {
                     }
                     int toolCallId = persistenceService.proposeTool(
                             turn, stepNumber, step.tool().name(), argumentsJson);
-                    publish(turn.userId(), new AiChatStepFrameDto(
+                    publish(turn, new AiChatStepFrameDto(
                             turn.workspaceId(), turn.sessionId(), turn.turnId(),
                             stepNumber, "step", step.tool().name(),
                             "proposed", null));
@@ -255,7 +262,7 @@ public class AiChatAgentLoopService {
                             failTool(turn, toolCallId, "turn_not_active");
                             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
                         }
-                        publish(turn.userId(), new AiChatStepFrameDto(
+                        publish(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "executed", null));
@@ -271,7 +278,7 @@ public class AiChatAgentLoopService {
                         }
                     } catch (AiAssistantLoopException exception) {
                         failTool(turn, toolCallId, exception.detailReason());
-                        publish(turn.userId(), new AiChatStepFrameDto(
+                        publish(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
@@ -279,7 +286,7 @@ public class AiChatAgentLoopService {
                     } catch (RuntimeException exception) {
                         String reason = toolFailureReason(exception);
                         failTool(turn, toolCallId, reason);
-                        publish(turn.userId(), new AiChatStepFrameDto(
+                        publish(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", reason));
@@ -306,9 +313,14 @@ public class AiChatAgentLoopService {
                 return AiGenerationTaskResult.resolved(
                         new AiChatTurnGenerationResult(turn.turnId(), "resolved"));
             }
-            return AiGenerationTaskResult.failed("agent_backstop_exceeded");
+            return AiGenerationTaskResult.failed(
+                    maxSteps == HARD_MAX_STEPS
+                            ? "agent_backstop_exceeded"
+                            : "step_cap_exceeded");
         } catch (AiAssistantLoopException exception) {
             return AiGenerationTaskResult.failed(exception.terminalReason());
+        } catch (AiBudgetExhaustedException exception) {
+            return AiGenerationTaskResult.failed("budget_exhausted");
         } catch (DirectAdmissionRejectedException exception) {
             return AiGenerationTaskResult.failed(
                     exception.rejection() == Rejection.ORGANIZATION_QUOTA
@@ -321,6 +333,9 @@ public class AiChatAgentLoopService {
         } catch (ResourceNotFoundException exception) {
             return AiGenerationTaskResult.failed("access_revoked");
         } catch (ForbiddenException exception) {
+            if (!governanceService.isEnabled(turn.workspaceId())) {
+                return AiGenerationTaskResult.failed("workspace_disabled");
+            }
             if (restrictionsChanged(turn)) {
                 return AiGenerationTaskResult.failed("restrictions_changed");
             }
@@ -370,6 +385,7 @@ public class AiChatAgentLoopService {
     }
 
     private void requireCurrentAccess(AiChatQueuedTurn turn) {
+        requireWorkspaceEnabled(turn);
         if (restrictionsChanged(turn)) {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
@@ -378,6 +394,12 @@ public class AiChatAgentLoopService {
                     turn.workspaceId(), turn.userId(), Permission.AI_USE);
         } catch (ForbiddenException exception) {
             throw new AiAssistantLoopException("access_revoked", "access_revoked");
+        }
+    }
+
+    private void requireWorkspaceEnabled(AiChatQueuedTurn turn) {
+        if (!governanceService.isEnabled(turn.workspaceId())) {
+            throw new AiAssistantLoopException("workspace_disabled", "workspace_disabled");
         }
     }
 
@@ -417,15 +439,12 @@ public class AiChatAgentLoopService {
         return !clock.instant().isBefore(deadline);
     }
 
+    private void publish(AiChatQueuedTurn turn, AiChatStepFrameDto frame) {
+        realtimeDispatcher.sessionNow(turn.workspaceId(), turn.sessionId(), frame);
+    }
+
     private void publish(int userId, AiChatStepFrameDto frame) {
-        try {
-            AiChatRealtimePublisher publisher = realtimePublisher.getIfAvailable();
-            if (publisher != null) {
-                publisher.send(userId, frame);
-            }
-        } catch (RuntimeException exception) {
-            return;
-        }
+        realtimeDispatcher.userAfterCommit(userId, frame);
     }
 
     private void failTool(AiChatQueuedTurn turn, int toolCallId, String reason) {
@@ -434,6 +453,9 @@ public class AiChatAgentLoopService {
     }
 
     private static String toolFailureReason(RuntimeException exception) {
+        if (exception instanceof AiBudgetExhaustedException) {
+            return "budget_exhausted";
+        }
         if (exception instanceof TooManyRequestsException) {
             return "quota_exhausted";
         }

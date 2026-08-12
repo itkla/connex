@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,9 +25,14 @@ import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
+import ooo.klae.connex.backend.dto.AiChatParticipantDto;
+import ooo.klae.connex.backend.dto.AiChatParticipantInviteRequest;
+import ooo.klae.connex.backend.dto.AiChatPresenceDto;
+import ooo.klae.connex.backend.dto.AiChatPresenceRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
+import ooo.klae.connex.backend.dto.AiChatSessionShareRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
 import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
@@ -61,6 +67,14 @@ public class AiAssistantController {
         throw unsupportedScope();
     }
 
+    /** Returns pending shared-session invitations addressed to the caller. */
+    @GetMapping("/invitations")
+    public PageResponse<AiChatSessionDto> invitations(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        return assistantService.pageInvitations(page, size);
+    }
+
     /** Creates a private active session owned by the caller. */
     @PostMapping
     public ResponseEntity<AiChatSessionDto> create(
@@ -92,6 +106,72 @@ public class AiAssistantController {
             @PathVariable int id,
             @Valid @RequestBody AiChatSessionUpdateRequest request) {
         return assistantService.update(id, request);
+    }
+
+    /** Toggles an owned session between shared and private visibility. */
+    @PatchMapping("/{id:\\d+}/sharing")
+    public AiChatSessionDto setShared(
+            @PathVariable int id,
+            @Valid @RequestBody AiChatSessionShareRequest request) {
+        return assistantService.setShared(id, request.shared());
+    }
+
+    /** Invites one active member of the current workspace. */
+    @PostMapping("/{id:\\d+}/invitations")
+    public ResponseEntity<AiChatParticipantDto> invite(
+            @PathVariable int id,
+            @Valid @RequestBody AiChatParticipantInviteRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(assistantService.invite(id, request.userId()));
+    }
+
+    /** Joins a shared session after accepting the caller's pending invitation. */
+    @PostMapping("/{id:\\d+}/join")
+    public AiChatSessionDto join(@PathVariable int id) {
+        return assistantService.join(id);
+    }
+
+    /** Leaves or declines a shared session. */
+    @DeleteMapping("/{id:\\d+}/leave")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void leave(@PathVariable int id) {
+        assistantService.leave(id);
+    }
+
+    /** Lists the owner and participant states visible to the caller. */
+    @GetMapping("/{id:\\d+}/participants")
+    public List<AiChatParticipantDto> participants(@PathVariable int id) {
+        return assistantService.participants(id);
+    }
+
+    /** Removes one participant from an owned session. */
+    @DeleteMapping("/{id:\\d+}/participants/{userId:\\d+}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeParticipant(
+            @PathVariable int id,
+            @PathVariable int userId) {
+        assistantService.removeParticipant(id, userId);
+    }
+
+    /** Returns the caller-authorized live presence snapshot. */
+    @GetMapping("/{id:\\d+}/presence")
+    public AiChatPresenceDto presence(@PathVariable int id) {
+        return assistantService.presence(id);
+    }
+
+    /** Records a live presence and typing heartbeat. */
+    @PutMapping("/{id:\\d+}/presence")
+    public AiChatPresenceDto touchPresence(
+            @PathVariable int id,
+            @Valid @RequestBody AiChatPresenceRequest request) {
+        return assistantService.touchPresence(id, request.typing());
+    }
+
+    /** Removes only the caller's ephemeral presence state. */
+    @DeleteMapping("/{id:\\d+}/presence")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void leavePresence(@PathVariable int id) {
+        assistantService.leavePresence(id);
     }
 
     /** Idempotently soft-archives an owned session. */

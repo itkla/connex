@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ArchiveBoxIcon,
+    ArrowRightStartOnRectangleIcon,
     ArrowDownIcon,
     ArrowUpIcon,
     CheckIcon,
@@ -14,6 +15,8 @@ import {
     PencilSquareIcon,
     PlusIcon,
     SparklesIcon,
+    UserGroupIcon,
+    UserPlusIcon,
     UserIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline';
@@ -36,8 +39,15 @@ import {
     latestAskConnexSuggestions,
 } from '@/app/lib/askConnex';
 import { easeOut, instant, springSmooth } from '@/app/lib/motion';
-import type { AiChatCitation, AiChatMessage, AiChatSession } from '@/app/lib/types';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import type {
+    AiChatCitation,
+    AiChatMessage,
+    AiChatParticipant,
+    AiChatPresence,
+    AiChatSession,
+    WorkspaceMember,
+} from '@/app/lib/types';
+import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -70,6 +80,7 @@ import {
     MessageContent,
     MessageFooter,
     MessageGroup,
+    MessageHeader,
 } from '@/components/ui/message';
 import {
     MessageScroller,
@@ -79,6 +90,13 @@ import {
     MessageScrollerProvider,
     MessageScrollerViewport,
 } from '@/components/ui/message-scroller';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -95,7 +113,9 @@ type UnavailableState = {
 } | null;
 
 type AskConnexDrawerLabels = {
+    assistantAuthor: string;
     archive: string;
+    budgetExhausted: string;
     citations: string;
     disclosureCreation: string;
     disclosureList: string;
@@ -108,14 +128,27 @@ type AskConnexDrawerLabels = {
     contextLimit: string;
     emptyBody: string;
     emptyTitle: string;
+    formerMember: string;
+    invitation: string;
+    invitations: string;
+    invite: string;
+    inviteMember: string;
+    invitePending: string;
+    join: string;
+    leave: string;
+    manageSharing: string;
+    memberAuthor: (id: number) => string;
     jumpToLatest: string;
     loadError: string;
     messages: string;
     newChat: string;
     noRecentSessions: string;
     moreOptions: string;
+    participants: string;
+    presence: string;
     recentSessions: string;
     removeContext: (label: string) => string;
+    removeParticipant: (name: string) => string;
     rename: string;
     renameCancel: string;
     renameDescription: string;
@@ -125,9 +158,16 @@ type AskConnexDrawerLabels = {
     renameTitle: string;
     retry: string;
     send: string;
+    shareCancel: string;
+    shareConfirm: string;
+    shareDescription: string;
+    shared: string;
+    shareTitle: string;
     suggestedFollowUps: string;
     title: string;
     tooLong: string;
+    typing: (names: string) => string;
+    unshare: string;
     turnAccepted: string;
     turnFailed: string;
     turnResolved: string;
@@ -141,7 +181,12 @@ type AskConnexDrawerProps = {
     isMobile: boolean;
     showTab: boolean;
     sessions: AiChatSession[];
+    invitations: AiChatSession[];
     activeSession: AiChatSession | null;
+    participants: AiChatParticipant[];
+    presence: AiChatPresence | null;
+    members: WorkspaceMember[];
+    canShare: boolean;
     messages: AiChatMessage[];
     freshMessageIds: ReadonlySet<number>;
     loadState: DrawerLoadState;
@@ -163,6 +208,11 @@ type AskConnexDrawerProps = {
     onNewChat: () => void;
     onRename: (title: string) => Promise<boolean>;
     onArchive: () => void;
+    onJoinInvitation: (session: AiChatSession) => void;
+    onShare: (shared: boolean) => Promise<boolean>;
+    onInvite: (userId: number) => Promise<boolean>;
+    onLeave: () => void;
+    onRemoveParticipant: (userId: number) => void;
     onRetry: () => void;
     onComposerChange: (value: string) => void;
     onRemoveAttachment: (attachment: AskConnexAttachment) => void;
@@ -175,6 +225,7 @@ type ConversationSurfaceProps = Omit<
 > & {
     closeButton: ReactNode;
     onBeginRename: () => void;
+    onManageSharing: () => void;
 };
 
 function TranscriptSkeleton() {
@@ -250,12 +301,15 @@ function MessageSuggestions({
     );
 }
 
-function SenderAvatar({ user }: { user: boolean }) {
+function SenderAvatar({ user, label }: { user: boolean; label: string }) {
+    const initial = label.trim().slice(0, 1).toLocaleUpperCase();
     return (
         <MessageAvatar aria-hidden>
             <Avatar size="sm">
                 <AvatarFallback className={user ? 'bg-primary text-primary-foreground' : undefined}>
-                    {user ? <UserIcon className="size-3.5" /> : <SparklesIcon className="size-3.5" />}
+                    {user
+                        ? initial || <UserIcon className="size-3.5" />
+                        : <SparklesIcon className="size-3.5" />}
                 </AvatarFallback>
             </Avatar>
         </MessageAvatar>
@@ -265,6 +319,7 @@ function SenderAvatar({ user }: { user: boolean }) {
 function TranscriptMessage({
     message,
     fresh,
+    firstInGroup,
     lastInGroup,
     suggestions,
     labels,
@@ -272,6 +327,7 @@ function TranscriptMessage({
 }: {
     message: AiChatMessage;
     fresh: boolean;
+    firstInGroup: boolean;
     lastInGroup: boolean;
     suggestions: string[];
     labels: AskConnexDrawerLabels;
@@ -280,6 +336,10 @@ function TranscriptMessage({
     const format = useFormatter();
     const reduceMotion = useReducedMotion() ?? false;
     const user = message.authorKind === 'user';
+    const author = user
+        ? message.authorDisplayName
+            ?? (message.authorUserId === null ? labels.formerMember : labels.memberAuthor(message.authorUserId))
+        : labels.assistantAuthor;
     const animateEntrance = fresh && !user;
     const createdAt = new Date(message.createdAt);
     const timestamp = Number.isNaN(createdAt.getTime())
@@ -288,8 +348,15 @@ function TranscriptMessage({
 
     return (
         <Message align={user ? 'end' : 'start'}>
-            {lastInGroup ? <SenderAvatar user={user} /> : <MessageAvatar aria-hidden className="bg-transparent" />}
+            {lastInGroup
+                ? <SenderAvatar user={user} label={author} />
+                : <MessageAvatar aria-hidden className="bg-transparent" />}
             <MessageContent className="w-auto max-w-[85%] gap-1.5">
+                {firstInGroup ? (
+                    <MessageHeader className={user ? 'justify-end' : undefined}>
+                        {author}
+                    </MessageHeader>
+                ) : null}
                 <motion.div
                     initial={animateEntrance ? (reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.375rem)' }) : false}
                     animate={{ opacity: 1, transform: 'translateY(0rem)' }}
@@ -321,11 +388,40 @@ function TranscriptMessage({
     );
 }
 
+function PresenceStrip({ presence, labels }: { presence: AiChatPresence; labels: AskConnexDrawerLabels }) {
+    const typingUserIds = new Set(presence.typingUserIds);
+    const typingNames: string[] = [];
+    for (const participant of presence.present) {
+        if (!participant.currentUser && typingUserIds.has(participant.userId)) {
+            typingNames.push(participant.displayName);
+        }
+    }
+
+    return (
+        <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+            <span className="text-xs font-medium text-muted-foreground">{labels.presence}</span>
+            <AvatarGroup aria-label={labels.presence}>
+                {presence.present.map((participant) => (
+                    <Avatar key={participant.userId} size="sm" title={participant.displayName}>
+                        <AvatarImage src={participant.profilePictureUrl ?? undefined} alt="" />
+                        <AvatarFallback>{participant.displayName.slice(0, 1).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                ))}
+            </AvatarGroup>
+            {typingNames.length > 0 ? (
+                <span role="status" className="min-w-0 truncate text-xs text-muted-foreground">
+                    {labels.typing(typingNames.join(', '))}
+                </span>
+            ) : null}
+        </div>
+    );
+}
+
 function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskConnexDrawerLabels }) {
     if (turn.phase === 'idle') return null;
     if (turn.phase === 'resolved') {
         return (
-            <div className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
+            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
                 <CheckIcon className="size-3.5 text-primary" />
                 <span>{labels.turnResolved}</span>
             </div>
@@ -335,7 +431,7 @@ function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskC
         return (
             <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-destructive">
                 <ExclamationCircleIcon className="size-3.5" />
-                <span>{labels.turnFailed}</span>
+                <span>{turn.reason === 'budget_exhausted' ? labels.budgetExhausted : labels.turnFailed}</span>
             </div>
         );
     }
@@ -400,22 +496,32 @@ function ContextChips({
 
 function SessionMenu({
     sessions,
+    invitations,
     activeSession,
+    canShare,
     working,
     labels,
     onSelectSession,
     onNewChat,
     onBeginRename,
     onArchive,
+    onJoinInvitation,
+    onManageSharing,
+    onLeave,
 }: {
     sessions: AiChatSession[];
+    invitations: AiChatSession[];
     activeSession: AiChatSession | null;
+    canShare: boolean;
     working: boolean;
     labels: AskConnexDrawerLabels;
     onSelectSession: (session: AiChatSession) => void;
     onNewChat: () => void;
     onBeginRename: () => void;
     onArchive: () => void;
+    onJoinInvitation: (session: AiChatSession) => void;
+    onManageSharing: () => void;
+    onLeave: () => void;
 }) {
     return (
         <DropdownMenu>
@@ -429,12 +535,30 @@ function SessionMenu({
                 <p className="px-2 pb-1.5 text-xs leading-relaxed text-muted-foreground">
                     {labels.disclosureList}
                 </p>
+                {invitations.length > 0 ? (
+                    <>
+                        <DropdownMenuLabel>{labels.invitations}</DropdownMenuLabel>
+                        {invitations.map((invitation) => (
+                            <DropdownMenuItem
+                                key={`invitation:${invitation.id}`}
+                                disabled={working}
+                                onSelect={() => onJoinInvitation(invitation)}
+                            >
+                                <UserPlusIcon />
+                                <span className="min-w-0 flex-1 truncate">{invitation.title}</span>
+                                <span className="text-xs text-muted-foreground">{labels.join}</span>
+                            </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                    </>
+                ) : null}
                 {sessions.length === 0 ? (
                     <DropdownMenuItem disabled>{labels.noRecentSessions}</DropdownMenuItem>
                 ) : sessions.map((session) => (
                     <DropdownMenuItem
                         key={session.id}
                         disabled={working}
+                        aria-current={activeSession?.id === session.id ? 'true' : undefined}
                         onSelect={() => onSelectSession(session)}
                     >
                         <span className="min-w-0 flex-1 truncate">{session.title}</span>
@@ -453,6 +577,18 @@ function SessionMenu({
                     <PencilSquareIcon />
                     {labels.rename}
                 </DropdownMenuItem>
+                {activeSession?.ownedByCurrentUser && canShare ? (
+                    <DropdownMenuItem onSelect={onManageSharing}>
+                        <UserGroupIcon />
+                        {labels.manageSharing}
+                    </DropdownMenuItem>
+                ) : null}
+                {activeSession && !activeSession.ownedByCurrentUser ? (
+                    <DropdownMenuItem disabled={working} onSelect={onLeave}>
+                        <ArrowRightStartOnRectangleIcon />
+                        {labels.leave}
+                    </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                     variant="destructive"
                     disabled={!activeSession?.ownedByCurrentUser || working}
@@ -468,7 +604,10 @@ function SessionMenu({
 
 function ConversationSurface({
     sessions,
+    invitations,
     activeSession,
+    presence,
+    canShare,
     messages,
     freshMessageIds,
     loadState,
@@ -487,7 +626,10 @@ function ConversationSurface({
     onSelectSession,
     onNewChat,
     onBeginRename,
+    onManageSharing,
     onArchive,
+    onJoinInvitation,
+    onLeave,
     onRetry,
     onComposerChange,
     onRemoveAttachment,
@@ -514,16 +656,25 @@ function ConversationSurface({
                 </p>
                 <SessionMenu
                     sessions={sessions}
+                    invitations={invitations}
                     activeSession={activeSession}
+                    canShare={canShare}
                     working={working}
                     labels={labels}
                     onSelectSession={onSelectSession}
                     onNewChat={onNewChat}
                     onBeginRename={onBeginRename}
                     onArchive={onArchive}
+                    onJoinInvitation={onJoinInvitation}
+                    onManageSharing={onManageSharing}
+                    onLeave={onLeave}
                 />
                 {closeButton}
             </header>
+
+            {activeSession?.visibility === 'shared' && presence ? (
+                <PresenceStrip presence={presence} labels={labels} />
+            ) : null}
 
             <MessageScrollerProvider
                 key={activeSession?.id ?? 'new'}
@@ -605,6 +756,7 @@ function ConversationSurface({
                                                             key={message.id}
                                                             message={message}
                                                             fresh={freshMessageIds.has(message.id)}
+                                                            firstInGroup={index === 0}
                                                             lastInGroup={index === group.messages.length - 1}
                                                             suggestions={message.id === latestMessageId ? suggestions : []}
                                                             labels={labels}
@@ -703,6 +855,13 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     const [renameOpen, setRenameOpen] = useState(false);
     const [renameValue, setRenameValue] = useState('');
     const [renaming, setRenaming] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const [sharing, setSharing] = useState(false);
+    const [selectedMemberId, setSelectedMemberId] = useState('');
+    const participantIds = new Set(props.participants.map((participant) => participant.userId));
+    const availableMembers = props.members.filter((member) => (
+        member.id !== activeSession?.createdByUserId && !participantIds.has(member.id)
+    ));
 
     useEffect(() => {
         const frame = requestAnimationFrame(() => {
@@ -745,9 +904,38 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         if (saved) setRenameOpen(false);
     };
 
+    const enableSharing = async () => {
+        if (sharing) return;
+        setSharing(true);
+        await props.onShare(true);
+        setSharing(false);
+    };
+
+    const disableSharing = async () => {
+        if (sharing) return;
+        setSharing(true);
+        const saved = await props.onShare(false);
+        setSharing(false);
+        if (saved) setShareOpen(false);
+    };
+
+    const inviteSelectedMember = async () => {
+        const memberId = Number(selectedMemberId);
+        if (!Number.isSafeInteger(memberId) || memberId <= 0 || sharing) return;
+        setSharing(true);
+        const invited = await props.onInvite(memberId);
+        setSharing(false);
+        if (invited) setSelectedMemberId('');
+    };
+
     const surfaceProps: ConversationSurfaceProps = {
         sessions: props.sessions,
+        invitations: props.invitations,
         activeSession: props.activeSession,
+        participants: props.participants,
+        presence: props.presence,
+        members: props.members,
+        canShare: props.canShare,
         messages: props.messages,
         freshMessageIds: props.freshMessageIds,
         loadState: props.loadState,
@@ -766,7 +954,13 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onSelectSession: props.onSelectSession,
         onNewChat: props.onNewChat,
         onBeginRename: beginRename,
+        onManageSharing: () => setShareOpen(true),
         onArchive: props.onArchive,
+        onJoinInvitation: props.onJoinInvitation,
+        onShare: props.onShare,
+        onInvite: props.onInvite,
+        onLeave: props.onLeave,
+        onRemoveParticipant: props.onRemoveParticipant,
         onRetry: props.onRetry,
         onComposerChange: props.onComposerChange,
         onRemoveAttachment: props.onRemoveAttachment,
@@ -888,6 +1082,95 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={shareOpen} onOpenChange={(next) => !sharing && setShareOpen(next)}>
+                <DialogContent size="sm">
+                    <DialogHeader>
+                        <DialogTitle>{labels.shareTitle}</DialogTitle>
+                        <DialogDescription>{labels.shareDescription}</DialogDescription>
+                    </DialogHeader>
+                    {activeSession?.visibility !== 'shared' ? (
+                        <DialogFooter>
+                            <Button type="button" variant="ghost" onClick={() => setShareOpen(false)} disabled={sharing}>
+                                {labels.shareCancel}
+                            </Button>
+                            <Button type="button" onClick={() => void enableSharing()} disabled={sharing}>
+                                {labels.shareConfirm}
+                            </Button>
+                        </DialogFooter>
+                    ) : (
+                        <div className="space-y-5">
+                            <section className="space-y-2" aria-labelledby="ask-connex-participants-title">
+                                <h3 id="ask-connex-participants-title" className="text-sm font-medium text-foreground">
+                                    {labels.participants}
+                                </h3>
+                                <ul className="divide-y divide-border rounded-lg border border-border px-3">
+                                    {props.participants.map((participant) => (
+                                        <li key={participant.userId} className="flex min-w-0 items-center gap-3 py-2.5">
+                                            <Avatar size="sm">
+                                                <AvatarImage src={participant.profilePictureUrl ?? undefined} alt="" />
+                                                <AvatarFallback>{participant.displayName.slice(0, 1).toUpperCase()}</AvatarFallback>
+                                            </Avatar>
+                                            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                                                {participant.displayName}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {participant.status === 'invited' ? labels.invitePending : labels.shared}
+                                            </span>
+                                            {participant.role === 'participant' ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    aria-label={labels.removeParticipant(participant.displayName)}
+                                                    onClick={() => props.onRemoveParticipant(participant.userId)}
+                                                    disabled={sharing}
+                                                >
+                                                    <XMarkIcon className="size-4" />
+                                                </Button>
+                                            ) : null}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </section>
+                            <div className="space-y-2">
+                                <label htmlFor="ask-connex-invite-member" className="text-sm font-medium text-foreground">
+                                    {labels.inviteMember}
+                                </label>
+                                <div className="flex gap-2">
+                                    <Select value={selectedMemberId} onValueChange={setSelectedMemberId} disabled={sharing || availableMembers.length === 0}>
+                                        <SelectTrigger id="ask-connex-invite-member" className="min-w-0 flex-1">
+                                            <SelectValue placeholder={labels.inviteMember} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableMembers.map((member) => (
+                                                <SelectItem key={member.id} value={String(member.id)}>
+                                                    {member.displayName}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Button
+                                        type="button"
+                                        onClick={() => void inviteSelectedMember()}
+                                        disabled={!selectedMemberId || sharing}
+                                    >
+                                        {labels.invite}
+                                    </Button>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button type="button" variant="ghost" onClick={() => setShareOpen(false)} disabled={sharing}>
+                                    {labels.shareCancel}
+                                </Button>
+                                <Button type="button" variant="destructive" onClick={() => void disableSharing()} disabled={sharing}>
+                                    {labels.unshare}
+                                </Button>
+                            </DialogFooter>
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
         </>

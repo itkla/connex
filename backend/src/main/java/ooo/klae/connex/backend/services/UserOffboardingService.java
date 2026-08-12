@@ -304,6 +304,7 @@ public class UserOffboardingService {
         dealDuplicateReviewProofMapper.deleteForActorAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
         aiChatMapper.deleteParticipantsForUserAnywhere(userId);
+        aiChatMapper.clearParticipantInvitersAnywhere(userId);
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);
         dealMapper.removeCollaboratorAnywhere(userId);

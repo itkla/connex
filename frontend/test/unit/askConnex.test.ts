@@ -105,6 +105,8 @@ describe('Ask Connex turn state reduction', () => {
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'resolved' }).phase).toBe('resolved');
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'failed', reason: 'provider_error' }))
             .toMatchObject({ phase: 'failed', reason: 'provider_error' });
+        expect(reduceAskConnexTurn(running, { type: 'status', status: 'failed', reason: 'budget_exhausted' }))
+            .toMatchObject({ phase: 'failed', reason: 'budget_exhausted' });
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'timed_out', reason: 'generation_timeout' }))
             .toMatchObject({ phase: 'timed_out', reason: 'generation_timeout' });
     });
@@ -142,6 +144,7 @@ describe('Ask Connex follow-up suggestions', () => {
         seq: 2,
         authorKind: 'assistant',
         authorUserId: null,
+        authorDisplayName: null,
         content: 'Reply',
         createdAt: '2026-08-11T10:01:00Z',
         suggestions: [
@@ -308,11 +311,11 @@ describe('Ask Connex follow-up suggestions', () => {
 describe('Ask Connex transcript grouping', () => {
     it('groups only consecutive messages from the same sender', () => {
         const messages = [
-            { id: 1, sessionId: 4, seq: 1, authorKind: 'user', authorUserId: 7, content: 'First', createdAt: '2026-08-11T10:00:00Z' },
-            { id: 2, sessionId: 4, seq: 2, authorKind: 'user', authorUserId: 7, content: 'Second', createdAt: '2026-08-11T10:01:00Z' },
-            { id: 3, sessionId: 4, seq: 3, authorKind: 'user', authorUserId: 8, content: 'Another person', createdAt: '2026-08-11T10:02:00Z' },
-            { id: 4, sessionId: 4, seq: 4, authorKind: 'assistant', authorUserId: null, content: 'Reply', createdAt: '2026-08-11T10:03:00Z' },
-            { id: 5, sessionId: 4, seq: 5, authorKind: 'user', authorUserId: 7, content: 'Follow-up', createdAt: '2026-08-11T10:04:00Z' },
+            { id: 1, sessionId: 4, seq: 1, authorKind: 'user', authorUserId: 7, authorDisplayName: 'Mina', content: 'First', createdAt: '2026-08-11T10:00:00Z' },
+            { id: 2, sessionId: 4, seq: 2, authorKind: 'user', authorUserId: 7, authorDisplayName: 'Mina', content: 'Second', createdAt: '2026-08-11T10:01:00Z' },
+            { id: 3, sessionId: 4, seq: 3, authorKind: 'user', authorUserId: 8, authorDisplayName: 'Kenji', content: 'Another person', createdAt: '2026-08-11T10:02:00Z' },
+            { id: 4, sessionId: 4, seq: 4, authorKind: 'assistant', authorUserId: null, authorDisplayName: null, content: 'Reply', createdAt: '2026-08-11T10:03:00Z' },
+            { id: 5, sessionId: 4, seq: 5, authorKind: 'user', authorUserId: 7, authorDisplayName: 'Mina', content: 'Follow-up', createdAt: '2026-08-11T10:04:00Z' },
         ];
 
         expect(groupAskConnexMessages(messages).map((group) => ({

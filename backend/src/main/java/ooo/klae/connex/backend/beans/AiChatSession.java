@@ -14,6 +14,7 @@ public class AiChatSession {
     private boolean titleUserSet = true;
     private String visibility;
     private String status;
+    private String participationStatus;
     private boolean ownedByCurrentUser;
     private String lastMessageAt;
     private String archivedAt;

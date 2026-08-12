@@ -68,6 +68,11 @@ public enum Permission {
      */
     AI_USE,
     /**
+     * Permission to make an owned assistant session shared and invite workspace members into it.
+     * Participants still need {@link #AI_USE} to join, read, or contribute to the session.
+     */
+    AI_SESSION_SHARE,
+    /**
      * Permission to read assistant sessions retained after their creator is no longer an active
      * workspace member. This permission never authorizes session mutation or turn execution.
      */

@@ -19,11 +19,10 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
-import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
-import ooo.klae.connex.backend.notifications.AiChatRealtimePublisher;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class AiChatTurnTerminalCoordinatorTest {
@@ -31,20 +30,18 @@ class AiChatTurnTerminalCoordinatorTest {
             7, 11, 13, 17, 19, 1, 23L, true, List.of());
 
     private AiChatTurnPersistenceService persistenceService;
-    private AiChatRealtimePublisher publisher;
+    private AiChatRealtimeDispatcher dispatcher;
     private AiChatTurnTerminalCoordinator coordinator;
 
     @BeforeEach
     void setUp() {
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
-        publisher = mock(AiChatRealtimePublisher.class);
-        var beans = new StaticListableBeanFactory();
-        beans.addBean("publisher", publisher);
+        dispatcher = mock(AiChatRealtimeDispatcher.class);
         coordinator = new AiChatTurnTerminalCoordinator(
                 tenantWorkScope,
                 persistenceService,
-                beans.getBeanProvider(AiChatRealtimePublisher.class));
+                dispatcher);
         when(tenantWorkScope.inWorkspace(
                 eq(TURN.workspaceId()),
                 org.mockito.ArgumentMatchers.<Supplier<Boolean>>any()))
@@ -66,15 +63,17 @@ class AiChatTurnTerminalCoordinatorTest {
         coordinator.listener(TURN).onTerminal(
                 AiGenerationTaskResult.Outcome.TIMED_OUT, "turn_deadline_exceeded");
 
-        InOrder order = inOrder(persistenceService, publisher);
+        InOrder order = inOrder(persistenceService, dispatcher);
         order.verify(persistenceService).markTerminal(
                 TURN, "failed", "generation_capacity");
-        order.verify(publisher).send(TURN.userId(), new AiChatStepFrameDto(
+        order.verify(dispatcher).sessionNow(
+                TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
                 "terminal", null, "failed", "generation_capacity"));
         order.verify(persistenceService).markTerminal(
                 TURN, "timed_out", "turn_deadline_exceeded");
-        order.verify(publisher).send(TURN.userId(), new AiChatStepFrameDto(
+        order.verify(dispatcher).sessionNow(
+                TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
                 "terminal", null, "timed_out", "turn_deadline_exceeded"));
     }
@@ -87,6 +86,7 @@ class AiChatTurnTerminalCoordinatorTest {
         for (String reason : List.of(
                 "provider_error",
                 "quota_exhausted",
+                "budget_exhausted",
                 "org_invocation_quota_exhausted",
                 "invocation_capacity_exhausted",
                 "malformed_output",
@@ -94,6 +94,7 @@ class AiChatTurnTerminalCoordinatorTest {
                 "no_progress",
                 "agent_backstop_exceeded",
                 "step_cap_exceeded",
+                "workspace_disabled",
                 "internal_error")) {
             coordinator.listener(TURN).onTerminal(
                     AiGenerationTaskResult.Outcome.FAILED, reason);
@@ -119,7 +120,7 @@ class AiChatTurnTerminalCoordinatorTest {
                 AiGenerationTaskResult.Outcome.TIMED_OUT, "generation_timeout");
 
         assertFalse(claimed);
-        verify(publisher, never()).send(eq(TURN.userId()), any());
+        verify(dispatcher, never()).sessionNow(eq(TURN.workspaceId()), eq(TURN.sessionId()), any());
     }
 
     @Test
@@ -129,7 +130,8 @@ class AiChatTurnTerminalCoordinatorTest {
 
         assertTrue(claimed);
         verifyNoInteractions(persistenceService);
-        verify(publisher).send(TURN.userId(), new AiChatStepFrameDto(
+        verify(dispatcher).sessionNow(
+                TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
                 0, "terminal", null, "resolved", null));
     }

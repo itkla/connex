@@ -25,8 +25,11 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -50,6 +53,7 @@ class AiChatTurnPersistenceServiceTest {
                 mock(AiProperties.class),
                 restrictionEpoch,
                 Clock.systemUTC(),
+                mock(AiChatRealtimeDispatcher.class),
                 JsonMapper.builder().build());
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
@@ -102,6 +106,42 @@ class AiChatTurnPersistenceServiceTest {
         toolOrder.verify(chatMapper).updateToolCall(
                 TURN.workspaceId(), TURN.userMessageId(), 29,
                 "failed", "{\"reason\":\"internal_error\"}", TURN.userId());
+    }
+
+    @Test
+    void sharedSessionWithoutParticipantsNeverEnablesPrivateNotes() {
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        AiChatRealtimeDispatcher dispatcher = mock(AiChatRealtimeDispatcher.class);
+        AiChatTurnPersistenceService queueService = new AiChatTurnPersistenceService(
+                chatMapper,
+                workspaceService,
+                new AiProperties(),
+                mock(AiRestrictionEpoch.class),
+                Clock.systemUTC(),
+                dispatcher,
+                JsonMapper.builder().build());
+        User owner = new User();
+        owner.setId(TURN.userId());
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setVisibility("shared");
+        session.setStatus("active");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
+        when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        when(chatMapper.listActiveTurnsBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
+        when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(1);
+
+        AiChatQueuedTurn queued = queueService.queue(
+                TURN.sessionId(), new AiChatTurnCreateRequest("Question", List.of()),
+                TURN.restrictionEpoch());
+
+        assertFalse(queued.includePrivateNotes());
     }
 
     @Test

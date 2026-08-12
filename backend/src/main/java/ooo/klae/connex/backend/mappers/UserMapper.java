@@ -1,12 +1,13 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
-
-import java.util.List;
 
 /**
  * Mpper interface for {@code User} persistence.
@@ -18,6 +19,10 @@ public interface UserMapper {
     List<User> getAllUsers();
     /** Current display labels for the requested control-plane user ids. */
     List<UserDisplayNameDto> getDisplayNamesByIds(@Param("ids") List<Integer> ids);
+    /** Authenticated destination identities for a bounded assistant fanout recipient set. */
+    List<AiChatRealtimeRecipientDto> getActiveAiChatRealtimeRecipientsByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
     /** Current display labels for requested active members of one workspace. */
     List<UserDisplayNameDto> getActiveWorkspaceMemberDisplayNamesByIds(
         @Param("workspaceId") int workspaceId,

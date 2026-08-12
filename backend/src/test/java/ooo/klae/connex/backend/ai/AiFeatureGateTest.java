@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
 
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -29,6 +30,7 @@ class AiFeatureGateTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private ObjectProvider<AiProviderReadiness> providerReadiness;
     @Mock private AiProviderReadiness readiness;
+    @Mock private AiWorkspaceGovernanceService governanceService;
 
     private AiProperties properties;
     private AiFeatureGate gate;
@@ -36,10 +38,12 @@ class AiFeatureGateTest {
     @BeforeEach
     void setUp() {
         properties = new AiProperties();
-        gate = new AiFeatureGate(properties, workspaceService, providerReadiness);
+        gate = new AiFeatureGate(
+                properties, workspaceService, providerReadiness, governanceService);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentOrgId()).thenReturn(3);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(42);
+        lenient().when(governanceService.isEnabled(7)).thenReturn(true);
     }
 
     @Test
@@ -87,6 +91,15 @@ class AiFeatureGateTest {
     }
 
     @Test
+    void disabledWorkspaceDeniesIndependentlyOfAiUse() {
+        properties.setEnabled(true);
+        when(governanceService.isEnabled(7)).thenReturn(false);
+
+        assertFalse(gate.isAiUsable(AiFeature.DEAL_BRIEF));
+        verify(workspaceService, never()).permissionsFor(7, 42);
+    }
+
+    @Test
     void generationProfileUsesOneProviderReadinessSnapshot() {
         AiGenerationProfile profile = new AiGenerationProfile(
                 "bedrock", "us-east-1", "model", null, null, null, null, 2048, 0.2);
@@ -122,7 +135,8 @@ class AiFeatureGateTest {
         assertThrows(
                 ForbiddenException.class,
                 () -> gate.requireAiUsable(AiFeature.ASSISTANT_CHAT));
-        org.mockito.Mockito.verifyNoInteractions(workspaceService, providerReadiness, readiness);
+        org.mockito.Mockito.verifyNoInteractions(
+                workspaceService, providerReadiness, readiness, governanceService);
     }
 
     @Test

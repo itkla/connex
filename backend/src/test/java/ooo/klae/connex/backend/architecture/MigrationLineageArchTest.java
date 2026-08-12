@@ -40,7 +40,7 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
  */
 class MigrationLineageArchTest {
 
-    private static final BigInteger REVIEWED_GLOBAL_MIGRATION_BASELINE = BigInteger.valueOf(160);
+    private static final BigInteger REVIEWED_GLOBAL_MIGRATION_BASELINE = BigInteger.valueOf(161);
     private static final Pattern VERSIONED_MIGRATION_FILE_NAME =
         Pattern.compile("V(\\d+)__[a-z0-9_]+\\.sql");
     private static final Pattern SQL_MIGRATION_FILE_NAME =
@@ -125,7 +125,7 @@ class MigrationLineageArchTest {
             expected.add(version);
         }
         assertEquals(expected, actual,
-                "Global Flyway versions after V160 must be unique and sequential");
+                "Global Flyway versions after V161 must be unique and sequential");
     }
 
     /**

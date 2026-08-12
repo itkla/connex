@@ -299,6 +299,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("company", 450));
         raw.add(direct("attachment", 460));
         raw.add(direct("ai_chat_session", 465));
+        raw.add(direct("ai_workspace_governance", 466));
         raw.add(direct("ai_output_cache", 470));
         raw.add(direct("approval_policy", 480));
         raw.add(direct("business_card_import_request", 490));

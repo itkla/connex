@@ -10,6 +10,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -248,6 +250,35 @@ class WorkspaceIdentityLockOrderTest {
         verify(workspaceMapper, never()).updateIdentity(any(Integer.class), any(), any());
     }
 
+    @Test
+    void sharedSessionAuthorityLocksUsersWorkspaceMembershipsAndCustomRoles() {
+        int targetUserId = 17;
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(userMapper.lockByIdForShare(targetUserId)).thenReturn(targetUserId);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
+            .thenReturn(membership(ACTOR_ID, "admin", null, "active"));
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, targetUserId))
+            .thenReturn(membership(targetUserId, "member", 5, "active"));
+        when(roleMapper.lockRole(WORKSPACE_ID, 5)).thenReturn(5);
+        when(roleMapper.lockPermissions(WORKSPACE_ID, 5)).thenReturn(List.of());
+
+        assertThrows(ForbiddenException.class, () -> service.lockAndRequirePermissions(
+            WORKSPACE_ID,
+            Map.of(
+                ACTOR_ID, Set.of(Permission.AI_USE, Permission.AI_SESSION_SHARE),
+                targetUserId, Set.of(Permission.AI_USE))));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, roleMapper);
+        order.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        order.verify(userMapper).lockByIdForShare(targetUserId);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(WORKSPACE_ID);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, targetUserId);
+        order.verify(roleMapper).lockRole(WORKSPACE_ID, 5);
+        order.verify(roleMapper).lockPermissions(WORKSPACE_ID, 5);
+    }
+
     private static Workspace workspace(String name, String timezone) {
         Workspace workspace = new Workspace();
         workspace.setId(WORKSPACE_ID);
@@ -260,9 +291,14 @@ class WorkspaceIdentityLockOrderTest {
     }
 
     private static WorkspaceMember membership(String role, Integer roleId, String status) {
+        return membership(ACTOR_ID, role, roleId, status);
+    }
+
+    private static WorkspaceMember membership(
+            int userId, String role, Integer roleId, String status) {
         WorkspaceMember membership = new WorkspaceMember();
         membership.setWorkspaceId(WORKSPACE_ID);
-        membership.setUserId(ACTOR_ID);
+        membership.setUserId(userId);
         membership.setRole(role);
         membership.setRoleId(roleId);
         membership.setStatus(status);
