@@ -20,12 +20,14 @@ import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
-import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -56,6 +58,7 @@ public class AiChatTurnPersistenceService {
     private final AiProperties aiProperties;
     private final AiRestrictionEpoch restrictionEpoch;
     private final Clock clock;
+    private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final ObjectMapper objectMapper;
 
     /** Commits the user message and queued turn under the session sequence mutex. */
@@ -108,10 +111,16 @@ public class AiChatTurnPersistenceService {
         turn.setStatus(QUEUED);
         chatMapper.insertTurn(turn);
         chatMapper.updateLastMessageAt(workspaceId, sessionId);
+        realtimeDispatcher.sessionAfterCommit(
+                workspaceId,
+                sessionId,
+                new AiChatStepFrameDto(
+                        workspaceId, sessionId, turn.getId(), message.getSeq(),
+                        "message", null, "created", null));
         return new AiChatQueuedTurn(
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
                 message.getSeq(), restrictionEpoch,
-                chatMapper.countParticipants(workspaceId, sessionId) == 0,
+                !SHARED.equals(session.getVisibility()),
                 request.pageContext(), attachmentIds);
     }
 
@@ -228,7 +237,9 @@ public class AiChatTurnPersistenceService {
     }
 
     private static String turnStepKey(int turnId, int stepNumber) {
-        if (turnId <= 0 || stepNumber <= 0 || stepNumber > AiChatAgentLoopService.MAX_STEPS) {
+        if (turnId <= 0
+                || stepNumber <= 0
+                || stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS) {
             throw new IllegalArgumentException("Assistant tool turn and step must be positive");
         }
         return "turn-" + turnId + "-step-" + stepNumber;
@@ -317,6 +328,28 @@ public class AiChatTurnPersistenceService {
         }
         chatMapper.updateLastMessageAt(turn.workspaceId(), turn.sessionId());
         return true;
+    }
+
+    /** Applies a first-exchange title only while the session remains auto-title eligible. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public boolean applyGeneratedTitle(AiChatQueuedTurn turn, String title) {
+        if (title == null || title.isBlank()) {
+            return false;
+        }
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            return false;
+        }
+        requireCurrentActor(turn);
+        AiChatSession session = chatMapper.getSessionByIdForUpdate(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null
+                || !Objects.equals(session.getCreatedByUserId(), turn.userId())
+                || session.isTitleUserSet()) {
+            return false;
+        }
+        return chatMapper.updateGeneratedTitle(
+                turn.workspaceId(), turn.sessionId(), title) == 1;
     }
 
     /** Applies a generation-owned terminal transition without requiring request-thread state. */

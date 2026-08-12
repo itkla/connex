@@ -173,6 +173,22 @@ class AuditServiceTest {
     }
 
     @Test
+    void strictScopedRecordUsesExactScopeAndCallerTransactionAppend() {
+        service.recordStrictScoped(
+            "org.ai_budget.save", "organization", 23, 17, 23,
+            "Organization 23", "Updated organization AI daily token budget",
+            Map.of("dailyUsageLimit", 1_000L));
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(17, entry.getWorkspaceId());
+        assertEquals(23, entry.getOrgId());
+        assertEquals("org.ai_budget.save", entry.getAction());
+        assertTrue(entry.getChanges().contains("1000"));
+    }
+
+    @Test
     void strictIndependentScopedRecordPropagatesPersistenceFailure() {
         IllegalStateException failure = new IllegalStateException("audit unavailable");
         doThrow(failure).when(auditIntegrityService).appendIndependent(any(AuditLog.class));
@@ -254,7 +270,7 @@ class AuditServiceTest {
                 {"provider":"vertex","region":"secret region value","model":"claude-sonnet-4@20250514",
                 "feature":"assistant.chat","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
                 "structured":true,"structuredEnforcement":"json_schema","inputTokens":80,
-                "schemaRule":"exclusive_step","outputLength":317,"objectExtracted":true,
+                "schemaRule":"final_suggestions","outputLength":317,"objectExtracted":true,
                 "prompt":"private CRM content","response":"private model output"}
                 """);
         entry.setContext("{\"error\":\"ProviderException\",\"detail\":\"secret token value\"}");
@@ -268,7 +284,7 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains("claude-sonnet-4@20250514"));
         assertTrue(result.getChanges().contains(AiFeature.ASSISTANT_CHAT.wireKey()));
         assertTrue(result.getChanges().contains("json_schema"));
-        assertTrue(result.getChanges().contains("exclusive_step"));
+        assertTrue(result.getChanges().contains("final_suggestions"));
         assertTrue(result.getChanges().contains("317"));
         assertTrue(result.getChanges().contains("objectExtracted"));
         assertFalse(result.getChanges().contains("prompt"));

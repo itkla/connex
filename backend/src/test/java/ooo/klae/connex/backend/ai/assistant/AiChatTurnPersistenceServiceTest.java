@@ -1,13 +1,14 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -43,6 +45,7 @@ class AiChatTurnPersistenceServiceTest {
     private AiChatMapper chatMapper;
     private AttachmentMapper attachmentMapper;
     private WorkspaceService workspaceService;
+    private AiRestrictionEpoch restrictionEpoch;
     private AiChatTurnPersistenceService service;
 
     @BeforeEach
@@ -51,13 +54,15 @@ class AiChatTurnPersistenceServiceTest {
         attachmentMapper = mock(AttachmentMapper.class);
         workspaceService = mock(WorkspaceService.class);
         AiProperties aiProperties = mock(AiProperties.class);
+        restrictionEpoch = mock(AiRestrictionEpoch.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
                 workspaceService,
                 aiProperties,
-                mock(AiRestrictionEpoch.class),
+                restrictionEpoch,
                 Clock.systemUTC(),
+                mock(AiChatRealtimeDispatcher.class),
                 JsonMapper.builder().build());
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
@@ -78,6 +83,8 @@ class AiChatTurnPersistenceServiceTest {
         actor.setId(TURN.userId());
         when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(actor));
         when(aiProperties.getGenerationMaxLifetime()).thenReturn(Duration.ofMinutes(5));
+        when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
     }
 
     @Test
@@ -112,6 +119,78 @@ class AiChatTurnPersistenceServiceTest {
         toolOrder.verify(chatMapper).updateToolCall(
                 TURN.workspaceId(), TURN.userMessageId(), 29,
                 "failed", "{\"reason\":\"internal_error\"}", TURN.userId());
+    }
+
+    @Test
+    void sharedSessionWithoutParticipantsNeverEnablesPrivateNotes() {
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        AiChatRealtimeDispatcher dispatcher = mock(AiChatRealtimeDispatcher.class);
+        AiChatTurnPersistenceService queueService = new AiChatTurnPersistenceService(
+                chatMapper,
+                attachmentMapper,
+                workspaceService,
+                new AiProperties(),
+                mock(AiRestrictionEpoch.class),
+                Clock.systemUTC(),
+                dispatcher,
+                JsonMapper.builder().build());
+        User owner = new User();
+        owner.setId(TURN.userId());
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setVisibility("shared");
+        session.setStatus("active");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
+        when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        when(chatMapper.listActiveTurnsBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
+        when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(1);
+        when(attachmentMapper.getAssistantSessionAttachments(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
+
+        AiChatQueuedTurn queued = queueService.queue(
+                TURN.sessionId(), new AiChatTurnCreateRequest("Question", List.of()),
+                TURN.restrictionEpoch());
+
+        assertFalse(queued.includePrivateNotes());
+    }
+
+    @Test
+    void firstResolvedAssistantTitleRequiresOwnershipAndAutoTitleProvenance() {
+        AiChatQueuedTurn retryTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), 3, TURN.restrictionEpoch(), false, List.of(), List.of());
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setTitleUserSet(false);
+        when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        when(chatMapper.updateGeneratedTitle(
+                TURN.workspaceId(), TURN.sessionId(), "Pipeline review")).thenReturn(1);
+
+        assertTrue(service.applyGeneratedTitle(retryTurn, "Pipeline review"));
+
+        session.setTitleUserSet(true);
+        assertFalse(service.applyGeneratedTitle(retryTurn, "Replacement"));
+        verify(chatMapper, times(1)).updateGeneratedTitle(
+                TURN.workspaceId(), TURN.sessionId(), "Pipeline review");
+    }
+
+    @Test
+    void restrictionEpochChangePreventsGeneratedTitlePersistence() {
+        when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(false);
+
+        assertFalse(service.applyGeneratedTitle(TURN, "Stale model title"));
+
+        verify(chatMapper, never()).updateGeneratedTitle(
+                TURN.workspaceId(), TURN.sessionId(), "Stale model title");
     }
 
     @Test

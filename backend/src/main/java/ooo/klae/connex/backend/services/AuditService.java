@@ -94,7 +94,8 @@ public class AuditService {
     private static final Set<String> AI_SCHEMA_RULES = Set.of(
             "json_object_missing", "raw_guard_rejected", "binding_failed",
             "top_level_fields", "exclusive_step", "tool_fields", "tool_name",
-            "tool_arguments", "final_fields", "final_shape", "final_citations");
+            "tool_arguments", "final_fields", "final_shape", "final_citations",
+            "final_suggestions");
     private static final Set<String> AI_STOP_REASONS = Set.of(
             "stop", "length", "content_filter", "tool_calls", "function_call", "end_turn",
             "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal", "safety",
@@ -157,6 +158,24 @@ public class AuditService {
             String targetLabel, String summary, Object changes) {
         writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes,
                 null, false, false, null, null);
+    }
+
+    /**
+     * Records a successful audit event with explicit scope in the caller's transaction and
+     * propagates persistence failures.
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param changes sanitized metadata
+     */
+    public void recordStrictScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, Object changes) {
+        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes,
+                null, false, true, workspaceId, orgId);
     }
 
     /**

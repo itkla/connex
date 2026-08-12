@@ -20,6 +20,21 @@
     ORDER BY id
   </select>
 
+  <select id="getActiveAiChatRealtimeRecipientsByIds"
+          resultType="ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto">
+    SELECT u.id, u.username
+    FROM app_user u
+    JOIN workspace_member wm
+      ON wm.user_id = u.id
+     AND wm.workspace_id = #{workspaceId}
+     AND wm.status = 'active'
+    WHERE u.id IN
+    <foreach collection="ids" item="id" open="(" separator="," close=")">
+      #{id}
+    </foreach>
+    ORDER BY u.id
+  </select>
+
   <select id="getActiveWorkspaceMemberReferencesByIds"
       resultType="ooo.klae.connex.backend.dto.UserReferenceDto">
     SELECT u.id, u.display_name, u.profile_picture_url

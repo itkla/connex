@@ -29,6 +29,12 @@ class AiAssistantStepSchemaTest {
         assertTrue(toolAlternatives.toString().contains("aggregate_metric"));
         JsonNode finalAlternatives = root.path("properties").path("final").path("anyOf");
         assertEquals("null", finalAlternatives.path(0).path("type").asString());
-        assertFalse(finalAlternatives.path(1).path("additionalProperties").asBoolean());
+        JsonNode finalShape = finalAlternatives.path(1);
+        assertFalse(finalShape.path("additionalProperties").asBoolean());
+        assertEquals(4, finalShape.path("required").size());
+        assertEquals(3, finalShape.path("properties").path("suggestions").path("maxItems").asInt());
+        assertEquals(160, finalShape.path("properties").path("suggestions")
+                .path("items").path("maxLength").asInt());
+        assertEquals(2, finalShape.path("properties").path("title").path("anyOf").size());
     }
 }

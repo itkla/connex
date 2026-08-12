@@ -42,8 +42,13 @@ class AiAssistantPromptAssemblerTest {
                                 + "\"contact\":\"ada@example.com +1 (415) 555-0100\"}"));
 
         assertTrue(prompt.getSystemPrompt().contains("Valid tool step example"));
-        assertTrue(prompt.getSystemPrompt().contains("Valid final step example"));
+        assertTrue(prompt.getSystemPrompt().contains("Valid first final step example"));
         assertTrue(prompt.getSystemPrompt().contains("fewest tool steps"));
+        assertTrue(prompt.getSystemPrompt().contains("useful, specific, and complete"));
+        assertTrue(prompt.getSystemPrompt().contains(
+                "Tool-call efficiency must never make the final answer brief or incomplete"));
+        assertTrue(prompt.getSystemPrompt().contains("Use an empty array"));
+        assertTrue(prompt.getSystemPrompt().contains("title is a short plain-text conversation title"));
         assertTrue(prompt.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
         assertTrue(prompt.getMessages().getLast().getContent().contains("exclusive_step"));
         assertTrue(prompt.getMessages().getLast().getContent().contains("\\\"tool\\\""));
@@ -160,7 +165,7 @@ class AiAssistantPromptAssemblerTest {
         resources.put("r1", new AiChatResourceRegistry.ResourceRef("person", 71));
         resources.put("r2", new AiChatResourceRegistry.ResourceRef("deal", 73));
         String metadata = assembler.finalMetadata(
-                List.of("r1"), resources);
+                41, List.of("r1"), List.of("Show the relationship history"), resources);
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");
         priorAnswer.setContent("Ada Lovelace is advancing the Atlas renewal from r1.");
@@ -201,7 +206,9 @@ class AiAssistantPromptAssemblerTest {
     @Test
     void inaccessibleHistoricalResourcesOmitTheirAssistantAnswerFromReplay() {
         String metadata = assembler.finalMetadata(
+                41,
                 List.of("r1"),
+                List.of(),
                 Map.of("r1", new AiChatResourceRegistry.ResourceRef("person", 71)));
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");

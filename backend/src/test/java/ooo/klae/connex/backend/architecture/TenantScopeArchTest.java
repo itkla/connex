@@ -137,6 +137,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.deleteAllForRecipientAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.clearActorAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.deleteParticipantsForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.AiChatMapper.clearParticipantInvitersAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearSessionCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearMessageAuthorsAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearToolCallExecutorsAnywhere",

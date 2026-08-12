@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
@@ -69,6 +70,7 @@ public class AiInvocationService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final AiOrganizationBudgetCoordinator budgetCoordinator;
 
     /**
      * Completes a masked AI invocation and returns demasked text.
@@ -384,13 +386,27 @@ public class AiInvocationService {
             throw exception;
         }
 
-        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
-                null, null, null, null, null, structured, null);
+        AiOrganizationBudgetCoordinator.Lease budgetLease;
+        try {
+            budgetLease = budgetCoordinator.reserve(orgId, invocation);
+        } catch (AiBudgetExhaustedException exception) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "budget_exhausted", structured, null);
+            throw exception;
+        }
+
+        try {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
+                    null, null, null, null, null, structured, null);
+        } catch (RuntimeException | Error exception) {
+            budgetLease.close();
+            throw exception;
+        }
 
         MediaLeaseGuard mediaLease = MediaLeaseGuard.none();
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
                 workspaceId, orgId, resolved, invocation, correlationId,
-                structured, invocationCommitment);
+                structured, invocationCommitment, budgetLease);
         try {
             if (!invocation.images().isEmpty()) {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
@@ -399,13 +415,16 @@ public class AiInvocationService {
             AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
                     .complete(request(
                             resolved, invocation, outputMode, responseSchema, attemptTracker));
+            attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
         } catch (AiProviderAttemptBlockedException exception) {
             mediaLease.close();
+            attemptTracker.closeBudget();
             throw directAdmissionFailure(exception.reason());
         } catch (AiProviderException exception) {
             mediaLease.close();
+            attemptTracker.closeBudget();
             if (!attemptTracker.failureAudited()) {
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
                         null, null, null, null, "provider_exception", structured, null);
@@ -413,9 +432,11 @@ public class AiInvocationService {
             throw exception;
         } catch (TooManyRequestsException exception) {
             mediaLease.close();
+            attemptTracker.closeBudget();
             throw exception;
         } catch (RuntimeException | Error exception) {
             mediaLease.close();
+            attemptTracker.closeBudget();
             if (!attemptTracker.failureAudited()) {
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
                         null, null, null, null, "invocation_exception", structured, null);
@@ -583,6 +604,7 @@ public class AiInvocationService {
         private final String correlationId;
         private final boolean structured;
         private final Runnable initialCommitment;
+        private AiOrganizationBudgetCoordinator.Lease budgetLease;
         private boolean firstAttempt = true;
         private boolean failureAudited;
 
@@ -593,7 +615,8 @@ public class AiInvocationService {
                 AiInvocation invocation,
                 String correlationId,
                 boolean structured,
-                Runnable initialCommitment) {
+                Runnable initialCommitment,
+                AiOrganizationBudgetCoordinator.Lease budgetLease) {
             this.workspaceId = workspaceId;
             this.orgId = orgId;
             this.resolved = resolved;
@@ -601,6 +624,7 @@ public class AiInvocationService {
             this.correlationId = correlationId;
             this.structured = structured;
             this.initialCommitment = initialCommitment;
+            this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
         }
 
         @Override
@@ -627,20 +651,32 @@ public class AiInvocationService {
             Runnable attemptCommitment = commitment;
             try {
                 if (fallbackAttempt) {
+                    reserveFallbackBudget();
                     emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
                             null, null, null, null, null, structured, null);
                 }
                 return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
+                    aiFeatureGate.requireAiUsable(invocation.feature());
                     attemptCommitment.run();
                     return providerAttempt.get();
                 });
             } catch (AiRestrictionEpoch.EgressRejectedException exception) {
+                closeBudget();
                 failureAudited = true;
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                         null, null, null, null, "restriction_epoch", structured, null);
                 throw new AiProviderAttemptBlockedException(
                         AiProviderAttemptBlockedException.Reason.RESTRICTION_EPOCH);
+            } catch (AiBudgetExhaustedException exception) {
+                throw exception;
+            } catch (ForbiddenException exception) {
+                closeBudget();
+                failureAudited = true;
+                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                        null, null, null, null, "gate", structured, null);
+                throw exception;
             } catch (RuntimeException exception) {
+                closeBudget();
                 failureAudited = true;
                 String reason = exception instanceof AiProviderException
                         ? "provider_exception"
@@ -652,6 +688,35 @@ public class AiInvocationService {
                 if (fallbackAdmission != null) {
                     fallbackAdmission.close();
                 }
+            }
+        }
+
+        private void reserveFallbackBudget() {
+            closeBudget();
+            try {
+                budgetLease = budgetCoordinator.reserve(orgId, invocation);
+            } catch (AiBudgetExhaustedException exception) {
+                failureAudited = true;
+                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                        null, null, null, null, "budget_exhausted", structured, null);
+                throw exception;
+            }
+        }
+
+        private synchronized void settleBudget(int inputTokens, int outputTokens) {
+            AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
+            budgetLease = null;
+            if (activeLease == null) {
+                throw new IllegalStateException("Provider attempt completed without a budget reservation");
+            }
+            activeLease.settle(inputTokens, outputTokens);
+        }
+
+        private synchronized void closeBudget() {
+            AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
+            budgetLease = null;
+            if (activeLease != null) {
+                activeLease.close();
             }
         }
 

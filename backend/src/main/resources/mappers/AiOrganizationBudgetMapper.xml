@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiOrganizationBudgetMapper">
+    <resultMap id="budgetMap" type="ooo.klae.connex.backend.beans.AiOrganizationBudget">
+        <id property="orgId" column="org_id" />
+        <result property="dailyTokenLimit" column="daily_token_limit" />
+    </resultMap>
+
+    <resultMap id="usageMap" type="ooo.klae.connex.backend.beans.AiOrganizationBudgetUsage">
+        <id property="orgId" column="org_id" />
+        <result property="consumedTokens" column="consumed_tokens" />
+    </resultMap>
+
+    <resultMap id="reservationMap" type="ooo.klae.connex.backend.beans.AiOrganizationBudgetReservation">
+        <id property="reservationId" column="reservation_id" />
+        <result property="orgId" column="org_id" />
+        <result property="usageDay" column="usage_day" />
+        <result property="reservedTokens" column="reserved_tokens" />
+    </resultMap>
+
+    <select id="get" resultMap="budgetMap">
+        SELECT org_id, daily_token_limit
+        FROM organization_ai_budget
+        WHERE org_id = #{orgId}
+    </select>
+
+    <select id="getForUpdate" resultMap="budgetMap">
+        SELECT org_id, daily_token_limit
+        FROM organization_ai_budget
+        WHERE org_id = #{orgId}
+        FOR UPDATE
+    </select>
+
+    <insert id="upsert">
+        INSERT INTO organization_ai_budget (org_id, daily_token_limit)
+        VALUES (#{orgId}, #{dailyTokenLimit})
+        ON DUPLICATE KEY UPDATE daily_token_limit = VALUES(daily_token_limit)
+    </insert>
+
+    <insert id="ensureUsage">
+        INSERT IGNORE INTO organization_ai_budget_usage
+            (org_id, usage_day, consumed_tokens)
+        VALUES (#{orgId}, #{usageDay}, 0)
+    </insert>
+
+    <select id="getUsageForUpdate" resultMap="usageMap">
+        SELECT org_id, consumed_tokens
+        FROM organization_ai_budget_usage
+        WHERE org_id = #{orgId} AND usage_day = #{usageDay}
+        FOR UPDATE
+    </select>
+
+    <select id="getConsumedTokens" resultType="long">
+        SELECT COALESCE(MAX(consumed_tokens), 0)
+        FROM organization_ai_budget_usage
+        WHERE org_id = #{orgId} AND usage_day = #{usageDay}
+    </select>
+
+    <delete id="deleteExpiredReservations">
+        DELETE FROM organization_ai_budget_reservation
+        WHERE expires_at &lt;= #{now}
+    </delete>
+
+    <select id="sumReservedTokens" resultType="long">
+        SELECT COALESCE(SUM(reserved_tokens), 0)
+        FROM organization_ai_budget_reservation
+        WHERE org_id = #{orgId} AND usage_day = #{usageDay}
+    </select>
+
+    <insert id="insertReservation">
+        INSERT INTO organization_ai_budget_reservation
+            (reservation_id, org_id, usage_day, reserved_tokens, expires_at)
+        VALUES
+            (#{reservationId}, #{orgId}, #{usageDay}, #{reservedTokens}, #{expiresAt})
+    </insert>
+
+    <select id="getReservationForUpdate" resultMap="reservationMap">
+        SELECT reservation_id, org_id, usage_day, reserved_tokens
+        FROM organization_ai_budget_reservation
+        WHERE reservation_id = #{reservationId}
+        FOR UPDATE
+    </select>
+
+    <delete id="deleteReservation">
+        DELETE FROM organization_ai_budget_reservation
+        WHERE reservation_id = #{reservationId}
+    </delete>
+
+    <update id="addConsumedTokens">
+        UPDATE organization_ai_budget_usage
+        SET consumed_tokens = consumed_tokens + #{consumedTokens}
+        WHERE org_id = #{orgId} AND usage_day = #{usageDay}
+    </update>
+
+    <select id="listDailyUsage" resultType="ooo.klae.connex.backend.dto.AiUsageBreakdownDto">
+        SELECT al.actor_id AS userId,
+               COALESCE(al.actor_label, 'System') AS displayName,
+               JSON_UNQUOTE(JSON_EXTRACT(al.changes, '$.feature')) AS feature,
+               SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(al.changes, '$.inputTokens')) AS UNSIGNED), 0)) AS inputUsage,
+               SUM(COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(al.changes, '$.outputTokens')) AS UNSIGNED), 0)) AS outputUsage
+        FROM audit_log al
+        WHERE al.org_id = #{orgId}
+          AND al.action = 'ai.llm.call'
+          AND JSON_UNQUOTE(JSON_EXTRACT(al.changes, '$.outcome')) = 'success'
+          AND al.created_at &gt;= #{usageDay}
+          AND al.created_at &lt; DATE_ADD(#{usageDay}, INTERVAL 1 DAY)
+        GROUP BY al.actor_id, al.actor_label,
+                 JSON_UNQUOTE(JSON_EXTRACT(al.changes, '$.feature'))
+        ORDER BY inputUsage + outputUsage DESC, displayName ASC, feature ASC
+    </select>
+</mapper>

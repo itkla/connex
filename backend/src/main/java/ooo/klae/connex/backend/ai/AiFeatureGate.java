@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -22,6 +23,7 @@ public class AiFeatureGate {
     private final AiProperties aiProperties;
     private final WorkspaceService workspaceService;
     private final ObjectProvider<AiProviderReadiness> providerReadiness;
+    private final AiWorkspaceGovernanceService governanceService;
 
     /**
      * Evaluates instance, feature, permission, and provider readiness in fail-closed order.
@@ -78,6 +80,7 @@ public class AiFeatureGate {
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
-        return workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE);
+        return governanceService.isEnabled(workspaceId)
+                && workspaceService.permissionsFor(workspaceId, actorId).contains(Permission.AI_USE);
     }
 }

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -17,11 +18,21 @@ import tools.jackson.databind.JsonNode;
 public class AiAssistantStepGuard implements AiRawOutputGuard {
     private static final Set<String> TOP_LEVEL_FIELDS = Set.of("tool", "final");
     private static final Set<String> TOOL_FIELDS = Set.of("name", "args");
-    private static final Set<String> FINAL_FIELDS = Set.of("text", "citations");
+    private static final Set<String> FINAL_FIELDS = Set.of(
+            "text", "citations", "suggestions", "title");
     private static final Pattern HANDLE = Pattern.compile("r[1-9][0-9]*");
+    private static final Pattern HANDLE_REFERENCE = Pattern.compile(
+            "(?<![\\p{L}\\p{N}_])r[1-9][0-9]*(?![\\p{L}\\p{N}_])");
+    private static final Pattern CONTROL_INSTRUCTION = Pattern.compile(
+            "ignore\\s+(?:all\\s+)?(?:previous|prior|above)\\s+instructions?"
+                    + "|system\\s+prompt|developer\\s+(?:message|instructions?)"
+                    + "|tool\\s+(?:call|command)|crm_data|model_output|step\\s+schema",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{([A-Z][1-9][0-9]*)}}");
     private static final int MAX_FINAL_CHARS = 16_000;
     private static final int MAX_CITATIONS = 50;
+    static final int MAX_SUGGESTIONS = 3;
+    static final int MAX_SUGGESTION_CHARS = 160;
 
     private final AiAssistantToolCatalog toolCatalog;
 
@@ -95,9 +106,13 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
         }
         JsonNode text = finalAnswer.get("text");
         JsonNode citations = finalAnswer.get("citations");
+        JsonNode suggestions = finalAnswer.get("suggestions");
+        JsonNode title = finalAnswer.get("title");
         if (text == null || !text.isString() || text.asString().isBlank()
                 || text.asString().length() > MAX_FINAL_CHARS
-                || citations == null || !citations.isArray()) {
+                || citations == null || !citations.isArray()
+                || suggestions == null || !suggestions.isArray()
+                || title == null || (!title.isNull() && !title.isString())) {
             return "final_shape";
         }
         if (citations.size() > MAX_CITATIONS) {
@@ -108,7 +123,59 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
                 return "final_citations";
             }
         }
+        if (suggestions.size() > MAX_SUGGESTIONS) {
+            return "final_suggestions";
+        }
+        Set<String> uniqueSuggestions = new LinkedHashSet<>();
+        for (JsonNode suggestion : suggestions) {
+            if (!suggestion.isString()) {
+                return "final_suggestions";
+            }
+            String value = suggestion.asString().strip();
+            if (!isSafeSuggestion(value)
+                    || !uniqueSuggestions.add(value)) {
+                return "final_suggestions";
+            }
+        }
         return null;
+    }
+
+    static List<String> filterSuggestions(List<String> suggestions) {
+        if (suggestions == null || suggestions.isEmpty()) {
+            return List.of();
+        }
+        Set<String> filtered = new LinkedHashSet<>();
+        for (String suggestion : suggestions) {
+            if (suggestion == null) {
+                continue;
+            }
+            String value = suggestion.strip();
+            if (!isSafeSuggestion(value)) {
+                continue;
+            }
+            filtered.add(value);
+            if (filtered.size() == MAX_SUGGESTIONS) {
+                break;
+            }
+        }
+        return List.copyOf(filtered);
+    }
+
+    private static boolean isSafeSuggestion(String value) {
+        return !value.isBlank()
+                && value.length() <= MAX_SUGGESTION_CHARS
+                && value.indexOf('\n') < 0
+                && value.indexOf('\r') < 0
+                && !containsHandle(value)
+                && !containsControlInstruction(value);
+    }
+
+    static boolean containsHandle(String value) {
+        return value != null && HANDLE_REFERENCE.matcher(value).find();
+    }
+
+    static boolean containsControlInstruction(String value) {
+        return value != null && CONTROL_INSTRUCTION.matcher(value).find();
     }
 
     private static boolean exactFields(JsonNode node, Set<String> expected) {
