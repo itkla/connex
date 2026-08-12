@@ -1,13 +1,14 @@
 'use client';
 
-import { useRef, useState, type Ref } from 'react';
+import { useEffect, useRef, useState, type Ref } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { CheckCircleIcon as CheckCircleSolidIcon } from '@heroicons/react/24/solid';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import type { RecordComment, RecordCommentReactionKey, RecordCommentThread } from '@/app/lib/types';
-import type { DraftKeyParts } from '@/app/lib/formDrafts';
+import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
+import { useFormDraft } from '@/app/hooks/useFormDraft';
 import { formatDateTime, formatRelativeTime } from '@/app/lib/utils';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { commentPlainText } from '@/app/components/records/comments/commentText';
@@ -95,12 +96,37 @@ export default function CommentThread({
     const [replySubmitting, setReplySubmitting] = useState(false);
     const replyToken = useRef<string | null>(null);
 
-    const replyDraftKeyParts: DraftKeyParts = {
+    const [replyDraftKeyParts] = useState<DraftKeyParts>(() => ({
         userId: currentUser.id,
         workspaceId: activeWorkspaceId,
         formType: 'comment',
         scope: `reply:${thread.id}`,
-    };
+    }));
+    const replyDraft = useFormDraft<{ content: string }>({
+        keyParts: replyDraftKeyParts,
+        version: DRAFT_VERSIONS.comment,
+    });
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            const stored = readDraft(replyDraftKeyParts, { version: DRAFT_VERSIONS.comment });
+            const content =
+                stored && typeof stored.data === 'object' && stored.data !== null
+                    ? (stored.data as { content?: unknown }).content
+                    : undefined;
+            if (typeof content === 'string' && content.length > 0) {
+                setReplyValue((current) => (current.length > 0 ? current : content));
+                setReplyOpen(true);
+            }
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [replyDraftKeyParts]);
+
+    useEffect(() => {
+        if (replyOpen && replyValue.length > 0) {
+            replyDraft.persist({ content: replyValue });
+        }
+    }, [replyOpen, replyValue, replyDraft]);
 
     const submitReply = async () => {
         if (replySubmitting || commentPlainText(replyValue).length === 0) return;
@@ -112,6 +138,7 @@ export default function CommentThread({
             setReplyValue('');
             setReplyOpen(false);
             replyToken.current = null;
+            replyDraft.clear();
         }
     };
 
@@ -173,13 +200,13 @@ export default function CommentThread({
                                 onCancel={() => {
                                     setReplyOpen(false);
                                     setReplyValue('');
+                                    replyDraft.clear();
                                 }}
                                 placeholder={t('replyPlaceholder')}
                                 submitLabel={t('reply')}
                                 submitting={replySubmitting}
                                 canSubmit={commentPlainText(replyValue).length > 0}
                                 autoFocus
-                                draftKeyParts={replyDraftKeyParts}
                             />
                         ) : (
                             <button

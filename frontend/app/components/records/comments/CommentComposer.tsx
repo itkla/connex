@@ -119,14 +119,6 @@ export default function CommentComposer({
         }
     }, [draftOrigin, value, draft]);
 
-    useEffect(() => {
-        return () => {
-            if (draftOrigin.enabled && restoreSettled.current && valueRef.current.length === 0) {
-                draft.clear();
-            }
-        };
-    }, [draftOrigin, draft]);
-
     return (
         <div
             className={cn(

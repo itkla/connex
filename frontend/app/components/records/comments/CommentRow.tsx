@@ -171,7 +171,7 @@ export default function CommentRow({
                             placeholder={t('composerPlaceholder')}
                             submitLabel={t('save')}
                             submitting={savingEdit}
-                            canSubmit={commentPlainText(editValue).length > 0}
+                            canSubmit={commentPlainText(editValue).length > 0 && withinEditWindow}
                             autoFocus
                         />
                     </div>

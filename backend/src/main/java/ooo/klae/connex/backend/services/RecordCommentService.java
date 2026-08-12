@@ -350,7 +350,7 @@ public class RecordCommentService {
         Set<Integer> previouslyMentionedIds = mentionedMemberIds(referenceService.referencesFor(
             workspaceId, ReferenceService.SOURCE_COMMENT, sourceId));
         if (recordCommentMapper.updateCommentContent(workspaceId, commentId, content) != 1) {
-            throw new ResourceNotFoundException("Comment not found with id: " + commentId);
+            throw new BadRequestException("The edit window has closed");
         }
         referenceService.syncReferences(
             workspaceId, ReferenceService.SOURCE_COMMENT, sourceId, content);

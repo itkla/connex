@@ -181,11 +181,14 @@
     )
   </insert>
 
+  <!-- The database clock is the authoritative edit deadline: created_at was written
+       with UTC_TIMESTAMP(6), so the same clock decides expiry regardless of JVM skew. -->
   <update id="updateCommentContent">
     UPDATE record_comment
     SET content = #{content},
         edited_at = UTC_TIMESTAMP(6)
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND deleted_at IS NULL
+      AND created_at &gt; UTC_TIMESTAMP(6) - INTERVAL 15 MINUTE
   </update>
 
   <select id="countCommentsInThread" resultType="int">

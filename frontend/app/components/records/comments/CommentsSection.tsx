@@ -13,6 +13,7 @@ import {
     createCommentThread,
     deleteRecordComment,
     editRecordComment,
+    getCommentThread,
     getCommentThreads,
     removeCommentReaction,
     reopenCommentThread,
@@ -88,6 +89,8 @@ export default function CommentsSection({
     const reactionBusyIds = useRef<Set<number>>(new Set());
 
     const highlightedCommentId = searchParams.get('comment');
+    const linkedThreadParam = searchParams.get('thread');
+    const linkedThreadFetched = useRef(false);
     const initialLimit = highlightedCommentId ? DEEP_LINK_LIMIT : PAGE_SIZE;
 
     useEffect(() => {
@@ -110,6 +113,21 @@ export default function CommentsSection({
             active = false;
         };
     }, [targetType, targetId, initialLimit, refreshNonce]);
+
+    useEffect(() => {
+        if (!loaded || loadError || linkedThreadFetched.current) return;
+        linkedThreadFetched.current = true;
+        const linkedThreadId = linkedThreadParam ? Number(linkedThreadParam) : null;
+        if (!linkedThreadId || Number.isNaN(linkedThreadId)) return;
+        if (threads.some((thread) => thread.id === linkedThreadId)) return;
+        getCommentThread(linkedThreadId)
+            .then((thread) => {
+                setThreads((prev) =>
+                    prev.some((existing) => existing.id === thread.id) ? prev : [...prev, thread],
+                );
+            })
+            .catch(() => undefined);
+    }, [loaded, loadError, threads, linkedThreadParam]);
 
     useEffect(() => {
         if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
@@ -215,9 +233,9 @@ export default function CommentsSection({
                     toastError(t('conflict'));
                     setLoaded(false);
                     setRefreshNonce((nonce) => nonce + 1);
-                    return true;
+                } else {
+                    toastError(t('postFailed'));
                 }
-                toastError(t('postFailed'));
                 return false;
             }
         },
@@ -264,11 +282,15 @@ export default function CommentsSection({
                     : targetType === 'company'
                       ? 'companies'
                       : 'deals';
-            const url = `${window.location.origin}/records/${collection}/${targetId}?comment=${comment.id}`;
-            navigator.clipboard
-                .writeText(url)
-                .then(() => toastSuccess(t('linkCopied')))
-                .catch(() => toastError(t('copyFailed')));
+            const url = `${window.location.origin}/records/${collection}/${targetId}?comment=${comment.id}&thread=${comment.threadId}`;
+            try {
+                navigator.clipboard
+                    .writeText(url)
+                    .then(() => toastSuccess(t('linkCopied')))
+                    .catch(() => toastError(t('copyFailed')));
+            } catch {
+                toastError(t('copyFailed'));
+            }
         },
         [targetType, targetId, t],
     );

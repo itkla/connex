@@ -3675,6 +3675,14 @@ export function reopenCommentThread(threadId: number, expectedVersion: number, i
 }
 
 /**
+ * Fetches one comment thread by id for deep-link resolution when the thread
+ * sits beyond the loaded page window.
+ */
+export function getCommentThread(threadId: number, init: RequestInit = {}) {
+    return getJson<Types.RecordCommentThread>(`/api/comment-threads/${threadId}`, init);
+}
+
+/**
  * Ensures the caller's reaction is present on a comment; repeating the request
  * is a no-op. Returns the comment's updated per-reaction aggregate.
  */
