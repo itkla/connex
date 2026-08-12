@@ -141,6 +141,9 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             workspace.getId(), erasedChatSession.getId(), retainedChatOwner.getId());
         aiChatMapper.insertParticipant(
             workspace.getId(), retainedChatSession.getId(), target.getId());
+        User invitationRecipient = newUser();
+        aiChatMapper.insertInvitation(
+            workspace.getId(), retainedChatSession.getId(), invitationRecipient.getId(), target.getId());
 
         offboardingService.eraseOrgDataReferences(target.getId());
 
@@ -200,6 +203,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             Integer.class, workspace.getId(), erasedChatSession.getId()));
         assertFalse(aiChatMapper.isParticipant(
             workspace.getId(), retainedChatSession.getId(), target.getId()));
+        var retainedInvitation = aiChatMapper.getParticipant(
+            workspace.getId(), retainedChatSession.getId(), invitationRecipient.getId());
+        assertNotNull(retainedInvitation);
+        assertNull(retainedInvitation.getInvitedByUserId());
         assertTrue(aiChatMapper.isParticipant(
             workspace.getId(), erasedChatSession.getId(), retainedChatOwner.getId()));
         assertChatTranscriptOwnedBy(

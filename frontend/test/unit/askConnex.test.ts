@@ -100,6 +100,8 @@ describe('Ask Connex turn state reduction', () => {
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'resolved' }).phase).toBe('resolved');
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'failed', reason: 'provider_error' }))
             .toMatchObject({ phase: 'failed', reason: 'provider_error' });
+        expect(reduceAskConnexTurn(running, { type: 'status', status: 'failed', reason: 'budget_exhausted' }))
+            .toMatchObject({ phase: 'failed', reason: 'budget_exhausted' });
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'timed_out', reason: 'generation_timeout' }))
             .toMatchObject({ phase: 'timed_out', reason: 'generation_timeout' });
     });

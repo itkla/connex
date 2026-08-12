@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.ai;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,13 +15,24 @@ import ooo.klae.connex.backend.beans.AiOrganizationBudgetReservation;
 import ooo.klae.connex.backend.beans.AiOrganizationBudgetUsage;
 import ooo.klae.connex.backend.dto.AiUsageBreakdownDto;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiOrganizationBudgetMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.OrgMemberService;
 
 /** Transactional control-plane row locks for the shared organization AI budget ledger. */
 @Service
 @RequiredArgsConstructor
 public class AiBudgetControlOperations {
     private final AiOrganizationBudgetMapper budgetMapper;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
+    private final OrganizationMapper organizationMapper;
+    private final OrgMemberService orgMemberService;
+    private final AuditService auditService;
 
     /** Reserves a conservative provider-call token ceiling or returns an unmetered marker. */
     @Transactional
@@ -92,8 +105,35 @@ public class AiBudgetControlOperations {
 
     /** Replaces the configured organization daily token limit. */
     @Transactional
-    public void saveLimit(int orgId, long dailyTokenLimit) {
+    public void saveLimit(
+            int workspaceId,
+            int orgId,
+            int actorId,
+            long dailyTokenLimit) {
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw administratorRequired();
+        }
+        Integer lockedOrgId = workspaceMapper.lockActiveWorkspaceForShare(workspaceId);
+        if (!Objects.equals(lockedOrgId, orgId)
+                || organizationMapper.lockActiveByIdForShare(orgId) == null
+                || workspaceMapper.lockActiveMembership(workspaceId, actorId) == null) {
+            throw administratorRequired();
+        }
+        orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
         budgetMapper.upsert(orgId, dailyTokenLimit);
+        auditService.recordStrictScoped(
+                "org.ai_budget.save",
+                "organization",
+                orgId,
+                workspaceId,
+                orgId,
+                "Organization " + orgId,
+                "Updated organization AI daily token budget",
+                Map.of("dailyUsageLimit", dailyTokenLimit));
+    }
+
+    private ForbiddenException administratorRequired() {
+        return new ForbiddenException("Requires an organization administrator role");
     }
 
     private static long saturatedAdd(long first, long second) {

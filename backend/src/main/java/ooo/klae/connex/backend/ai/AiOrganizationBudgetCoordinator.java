@@ -7,7 +7,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.stereotype.Service;
 
@@ -79,7 +78,8 @@ public class AiOrganizationBudgetCoordinator {
     public static final class Lease implements AutoCloseable {
         private final AiOrganizationBudgetCoordinator coordinator;
         private final Reservation reservation;
-        private final AtomicBoolean closed = new AtomicBoolean();
+        private Long settlementTokens;
+        private boolean closed;
 
         private Lease(AiOrganizationBudgetCoordinator coordinator, Reservation reservation) {
             this.coordinator = coordinator;
@@ -87,20 +87,24 @@ public class AiOrganizationBudgetCoordinator {
         }
 
         /** Replaces the reservation with actual input and output token usage. */
-        public void settle(int inputTokens, int outputTokens) {
-            if (closed.compareAndSet(false, true)) {
-                coordinator.settle(
-                        reservation,
-                        saturatedAdd(Math.max(0, inputTokens), Math.max(0, outputTokens)));
-            }
+        public synchronized void settle(int inputTokens, int outputTokens) {
+            if (closed) return;
+            settlementTokens = saturatedAdd(
+                    Math.max(0, inputTokens), Math.max(0, outputTokens));
+            coordinator.settle(reservation, settlementTokens);
+            closed = true;
         }
 
         /** Releases a reservation when no provider usage was returned. */
         @Override
-        public void close() {
-            if (closed.compareAndSet(false, true)) {
+        public synchronized void close() {
+            if (closed) return;
+            if (settlementTokens == null) {
                 coordinator.release(reservation);
+            } else {
+                coordinator.settle(reservation, settlementTokens);
             }
+            closed = true;
         }
     }
 }

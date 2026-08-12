@@ -424,6 +424,84 @@ public class WorkspaceService {
             .forEach(userId -> lockAndRequireMember(workspaceId, userId));
     }
 
+    /** Locks current membership and custom-role authority for every requested permission check. */
+    public void lockAndRequirePermissions(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser) {
+        Objects.requireNonNull(requiredByUser, "requiredByUser");
+        TreeSet<Integer> userIds = new TreeSet<>(requiredByUser.keySet());
+        if (userIds.isEmpty()) {
+            throw new IllegalArgumentException("At least one permission check is required");
+        }
+        for (int userId : userIds) {
+            Set<Permission> required = Objects.requireNonNull(
+                    requiredByUser.get(userId), "required permissions");
+            if (userMapper.lockByIdForShare(userId) == null
+                    || userMapper.isAccountDeletionReserved(userId)) {
+                throw authorizationRequired(userId, required);
+            }
+        }
+        if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
+            int firstUserId = userIds.first();
+            throw authorizationRequired(firstUserId, requiredByUser.get(firstUserId));
+        }
+        Map<Integer, WorkspaceMember> memberships = new LinkedHashMap<>();
+        TreeSet<Integer> roleIds = new TreeSet<>();
+        for (int userId : userIds) {
+            WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(
+                    workspaceId, userId);
+            if (!isExactMembership(membership, workspaceId, userId)
+                    || !"active".equals(membership.getStatus())) {
+                throw authorizationRequired(userId, requiredByUser.get(userId));
+            }
+            memberships.put(userId, membership);
+            if (!requiredByUser.get(userId).isEmpty() && membership.getRoleId() != null) {
+                roleIds.add(membership.getRoleId());
+            }
+        }
+        Map<Integer, Set<Permission>> rolePermissions = new LinkedHashMap<>();
+        for (int roleId : roleIds) {
+            if (roleMapper.lockRole(workspaceId, roleId) == null) {
+                int affectedUserId = userIds.stream()
+                    .filter(userId -> Objects.equals(
+                        memberships.get(userId).getRoleId(), roleId))
+                    .findFirst()
+                    .orElseThrow();
+                throw authorizationRequired(
+                    affectedUserId, requiredByUser.get(affectedUserId));
+            }
+            List<String> locked = roleMapper.lockPermissions(workspaceId, roleId);
+            if (locked == null) {
+                int affectedUserId = userIds.stream()
+                    .filter(userId -> Objects.equals(
+                        memberships.get(userId).getRoleId(), roleId))
+                    .findFirst()
+                    .orElseThrow();
+                throw authorizationRequired(
+                    affectedUserId, requiredByUser.get(affectedUserId));
+            }
+            rolePermissions.put(roleId, parsePermissions(locked));
+        }
+        for (int userId : userIds) {
+            WorkspaceMember membership = memberships.get(userId);
+            Set<Permission> effective;
+            if (membership.getRoleId() == null) {
+                Role role = Role.of(membership.getRole());
+                if (role == null) {
+                    throw authorizationRequired(userId, requiredByUser.get(userId));
+                }
+                effective = builtInPermissions(role);
+            } else {
+                effective = rolePermissions.get(membership.getRoleId());
+            }
+            for (Permission required : requiredByUser.get(userId)) {
+                if (effective == null || !effective.contains(required)) {
+                    throw permissionRequired(required);
+                }
+            }
+        }
+    }
+
     /** Returns whether every requested id is an active member of the workspace. */
     public boolean areActiveMembers(int workspaceId, List<Integer> memberIds) {
         return workspaceMapper.countActiveMembers(workspaceId, memberIds) == memberIds.size();
@@ -479,7 +557,7 @@ public class WorkspaceService {
 
     public void requirePermission(int workspaceId, int userId, Permission permission) {
         if (!permissionsFor(workspaceId, userId).contains(permission)) {
-            throw new ForbiddenException("Requires the " + permission + " permission in this workspace");
+            throw permissionRequired(permission);
         }
     }
 
@@ -895,6 +973,21 @@ public class WorkspaceService {
         return membership != null
             && membership.getWorkspaceId() == workspaceId
             && membership.getUserId() == userId;
+    }
+
+    private static ForbiddenException authorizationRequired(
+            int userId, Set<Permission> permissions) {
+        Permission required = permissions.stream().sorted().findFirst().orElse(null);
+        if (required != null) {
+            return permissionRequired(required);
+        }
+        return new ForbiddenException(
+            "User " + userId + " is not a member of this workspace");
+    }
+
+    private static ForbiddenException permissionRequired(Permission permission) {
+        return new ForbiddenException(
+            "Requires the " + permission + " permission in this workspace");
     }
 
     private static void requireLockedRole(WorkspaceMember membership, Role minimum) {

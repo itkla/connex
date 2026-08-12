@@ -119,6 +119,9 @@ public interface AiChatMapper {
     /** Deletes a user's participant grants across every workspace during account erasure. */
     void deleteParticipantsForUserAnywhere(@Param("userId") int userId);
 
+    /** Clears invitation provenance for a permanently erased account across every workspace. */
+    void clearParticipantInvitersAnywhere(@Param("userId") int userId);
+
     /** Clears session provenance for a permanently erased account across every workspace. */
     void clearSessionCreatorsAnywhere(@Param("userId") int userId);
 
@@ -137,6 +140,10 @@ public interface AiChatMapper {
         @Param("userId") int userId);
 
     int countParticipants(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
+    int countAssistantMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
 

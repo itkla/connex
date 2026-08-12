@@ -26,7 +26,6 @@ public class AiOrganizationBudgetService {
     private final AiBudgetControlAccess controlAccess;
     private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
-    private final AuditService auditService;
     private final Clock clock;
 
     /** Returns the current UTC-day budget and member-by-feature usage. */
@@ -47,18 +46,13 @@ public class AiOrganizationBudgetService {
             throw new BadRequestException("Organization AI budget is invalid");
         }
         controlAccess.execute(() -> {
-            operations.saveLimit(orgId, request.dailyUsageLimit());
+            operations.saveLimit(
+                    workspaceId,
+                    orgId,
+                    actorId,
+                    request.dailyUsageLimit());
             return null;
         });
-        auditService.recordStrictIndependentScoped(
-                "org.ai_budget.save",
-                "organization",
-                orgId,
-                workspaceId,
-                orgId,
-                "Organization " + orgId,
-                "Updated organization AI daily token budget",
-                java.util.Map.of("dailyUsageLimit", request.dailyUsageLimit()));
         return snapshot(orgId);
     }
 

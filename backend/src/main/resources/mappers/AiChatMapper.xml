@@ -300,6 +300,12 @@
     WHERE user_id = #{userId}
   </delete>
 
+  <update id="clearParticipantInvitersAnywhere">
+    UPDATE ai_chat_session_participant
+    SET invited_by_user_id = NULL
+    WHERE invited_by_user_id = #{userId}
+  </update>
+
   <update id="clearSessionCreatorsAnywhere">
     UPDATE ai_chat_session
     SET created_by_user_id = NULL
@@ -341,6 +347,14 @@
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
       AND status = 'joined'
+  </select>
+
+  <select id="countAssistantMessages" resultType="int">
+    SELECT COUNT(*)
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND author_kind = 'assistant'
   </select>
 
   <select id="nextMessageSequence" resultType="int">

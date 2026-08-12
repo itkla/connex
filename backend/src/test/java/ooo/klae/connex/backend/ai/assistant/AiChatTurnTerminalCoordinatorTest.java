@@ -84,8 +84,15 @@ class AiChatTurnTerminalCoordinatorTest {
         for (String reason : List.of(
                 "provider_error",
                 "quota_exhausted",
+                "budget_exhausted",
+                "org_invocation_quota_exhausted",
+                "invocation_capacity_exhausted",
                 "malformed_output",
+                "schema_repair_failed",
+                "no_progress",
+                "agent_backstop_exceeded",
                 "step_cap_exceeded",
+                "workspace_disabled",
                 "internal_error")) {
             coordinator.listener(TURN).onTerminal(
                     AiGenerationTaskResult.Outcome.FAILED, reason);

@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -37,6 +39,7 @@ import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -182,6 +185,33 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
                 .thenThrow(new AiProviderException("provider"));
         assertTerminal("provider_error");
+    }
+
+    @Test
+    void budgetExhaustionPersistsItsDedicatedTerminalReasonEndToEnd() {
+        when(invocationService.completeStructured(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class)))
+                .thenThrow(new AiBudgetExhaustedException());
+        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+        when(tenantWorkScope.inWorkspace(
+                eq(TURN.workspaceId()),
+                org.mockito.ArgumentMatchers.<Supplier<Boolean>>any()))
+                .thenAnswer(invocation -> {
+                    Supplier<Boolean> work = invocation.getArgument(1);
+                    return work.get();
+                });
+        when(persistenceService.markTerminal(
+                TURN, "failed", "budget_exhausted")).thenReturn(true);
+        AiChatTurnTerminalCoordinator terminalCoordinator =
+                new AiChatTurnTerminalCoordinator(
+                        tenantWorkScope, persistenceService, realtimeDispatcher);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+        terminalCoordinator.listener(TURN).onTerminal(result.outcome(), result.reason());
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("budget_exhausted", result.reason());
+        verify(persistenceService).markTerminal(TURN, "failed", "budget_exhausted");
     }
 
     @Test

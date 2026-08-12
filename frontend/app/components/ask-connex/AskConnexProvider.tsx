@@ -183,6 +183,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const tempMessageIdRef = useRef(-1);
     const activeSessionRef = useRef<AiChatSession | null>(null);
     const typingRef = useRef(false);
+    const sessionsRefreshVersionRef = useRef(0);
+    const transcriptRefreshVersionRef = useRef(0);
+    const realtimeRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
 
     const contextResult = useMemo(
         () => mergeAskConnexContext(context.record, composer),
@@ -226,11 +229,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [openDrawer]);
 
     const refreshSessions = useCallback(async (signal: AbortSignal): Promise<AiChatSession[]> => {
+        const refreshVersion = ++sessionsRefreshVersionRef.current;
         const [page, invitationPage] = await Promise.all([
             getAiChatSessions({ page: 1, size: 25 }, { signal }),
             getAiChatInvitations({ page: 1, size: 25 }, { signal }),
         ]);
-        if (signal.aborted) return [];
+        if (signal.aborted || refreshVersion !== sessionsRefreshVersionRef.current) return [];
         setSessions(page.items.filter((session) => !session.archived));
         setInvitations(invitationPage.items.filter((session) => !session.archived));
         return page.items;
@@ -254,8 +258,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         signal: AbortSignal,
         animateNew: boolean,
     ): Promise<AiChatSession | null> => {
+        const refreshVersion = ++transcriptRefreshVersionRef.current;
         const detail = await getAiChatSession(sessionId, { page: 1, size: 50 }, { signal });
-        if (signal.aborted) return null;
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
         const known = new Set(messagesRef.current.map(
             (message) => `${message.seq}:${message.authorKind}:${message.content}`,
         ));
@@ -279,6 +284,26 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setLoadError(null);
         return detail.session;
     }, [refreshCollaboration]);
+
+    const clearActiveSession = useCallback(() => {
+        sessionControllerRef.current?.abort();
+        transcriptRefreshVersionRef.current += 1;
+        safeStorageRemove(sessionKey);
+        safeStorageRemove(turnKey);
+        setActiveSession(null);
+        activeSessionRef.current = null;
+        setParticipants([]);
+        setPresence(null);
+        messagesRef.current = [];
+        setMessages([]);
+        setFreshMessageIds(new Set());
+        setComposer('');
+        setSubmissionBlocked(false);
+        setUnavailableReason(null);
+        dispatchTurn({ type: 'reset' });
+        setLoadState('ready');
+        setLoadError(null);
+    }, [sessionKey, turnKey]);
 
     const pollDurableTurn = useCallback(async (
         sessionId: number,
@@ -338,16 +363,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         } catch (error) {
             if (signal.aborted) return;
             if (error instanceof ApiError && error.status === 403) {
-                setUnavailableReason(error.message);
-                dispatchTurn({ type: 'status', status: 'failed', reason: error.message });
-                deferredErrorToast(error.message);
+                clearActiveSession();
                 return;
             }
             setSubmissionBlocked(true);
             dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
             deferredErrorToast(error instanceof ApiError ? error.message : t('toast.requestFailed'));
         }
-    }, [pollDurableTurn, refreshSessions, refreshTranscript, t, turnKey]);
+    }, [clearActiveSession, pollDurableTurn, refreshSessions, refreshTranscript, t, turnKey]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -359,6 +382,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const storedTurn = parseStoredAskConnexTurn(safeStorageGet(turnKey));
 
         const initialize = async () => {
+            let selectionLoadStarted = false;
             await Promise.resolve();
             if (controller.signal.aborted) return;
             setStateIdentity(identity);
@@ -396,6 +420,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     setLoadState('ready');
                     return;
                 }
+                selectionLoadStarted = true;
                 await refreshTranscript(storedSessionId, controller.signal, false);
                 if (storedTurn?.sessionId === storedSessionId) {
                     dispatchTurn({
@@ -409,10 +434,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
             } catch (error) {
                 if (controller.signal.aborted) return;
-                if (error instanceof ApiError && error.status === 404) {
-                    safeStorageRemove(sessionKey);
-                    safeStorageRemove(turnKey);
-                    setLoadState('ready');
+                if (selectionLoadStarted && error instanceof ApiError
+                        && (error.status === 403 || error.status === 404)) {
+                    clearActiveSession();
                     return;
                 }
                 if (error instanceof ApiError && error.status === 403) {
@@ -432,7 +456,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         void initialize();
         return () => controller.abort();
-    }, [activeWorkspaceId, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, sessionKey, sharePermission, switching, t, turnKey, userId]);
+    }, [activeWorkspaceId, clearActiveSession, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, sessionKey, sharePermission, switching, t, turnKey, userId]);
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
@@ -458,35 +482,38 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             await refreshTranscript(session.id, signal, false);
         } catch (error) {
             if (signal.aborted) return;
-            if (error instanceof ApiError && error.status === 403) {
-                setUnavailableReason(error.message);
-                setLoadState('forbidden');
+            if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                clearActiveSession();
             } else {
                 setLoadError(error instanceof ApiError ? error : new Error(t('toast.requestFailed')));
                 setLoadState('error');
+                deferredErrorToast(error instanceof ApiError ? error.message : t('toast.requestFailed'));
             }
-            deferredErrorToast(error instanceof ApiError ? error.message : t('toast.requestFailed'));
         }
-    }, [refreshTranscript, sessionKey, t, turnKey, working]);
+    }, [clearActiveSession, refreshTranscript, sessionKey, t, turnKey, working]);
 
     const newChat = useCallback(() => {
         if (working) return;
-        sessionControllerRef.current?.abort();
-        safeStorageRemove(sessionKey);
-        safeStorageRemove(turnKey);
-        setActiveSession(null);
-        activeSessionRef.current = null;
-        setParticipants([]);
-        setPresence(null);
-        messagesRef.current = [];
-        setMessages([]);
-        setFreshMessageIds(new Set());
-        setComposer('');
-        setSubmissionBlocked(false);
-        dispatchTurn({ type: 'reset' });
-        setLoadState('ready');
-        setLoadError(null);
-    }, [sessionKey, turnKey, working]);
+        clearActiveSession();
+    }, [clearActiveSession, working]);
+
+    const enqueueRealtimeRefresh = useCallback((sessionId: number, signal: AbortSignal) => {
+        realtimeRefreshQueueRef.current = realtimeRefreshQueueRef.current.then(async () => {
+            if (signal.aborted) return;
+            try {
+                await refreshSessions(signal);
+                const session = activeSessionRef.current;
+                if (session?.id === sessionId) {
+                    await refreshTranscript(session.id, signal, true);
+                }
+            } catch (error) {
+                if (signal.aborted) return;
+                if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                    clearActiveSession();
+                }
+            }
+        });
+    }, [clearActiveSession, refreshSessions, refreshTranscript]);
 
     useEffect(() => {
         if (userId === null || activeWorkspaceId === null || switching) return;
@@ -495,19 +522,24 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (frame.workspaceId !== activeWorkspaceId) return;
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
-                void refreshSessions(signal).catch(() => {});
-                if (activeSessionRef.current?.id !== frame.sessionId) return;
-                void refreshTranscript(frame.sessionId, signal, true).catch((error: unknown) => {
-                    if (signal.aborted) return;
-                    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
-                        newChat();
+                if (frame.status === 'revoked') {
+                    sessionsRefreshVersionRef.current += 1;
+                    setSessions((current) => current.filter(
+                        (session) => session.id !== frame.sessionId,
+                    ));
+                    setInvitations((current) => current.filter(
+                        (session) => session.id !== frame.sessionId,
+                    ));
+                    if (activeSessionRef.current?.id === frame.sessionId) {
+                        clearActiveSession();
                     }
-                });
+                }
+                enqueueRealtimeRefresh(frame.sessionId, signal);
             },
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, newChat, refreshSessions, refreshTranscript, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, switching, userId]);
 
     useEffect(() => {
         const session = activeSession;
@@ -516,22 +548,31 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
         const sessionId = session.id;
         const controller = new AbortController();
+        let timeout: number | null = null;
         const heartbeat = async () => {
+            const startedAt = performance.now();
             try {
                 const snapshot = await touchAiChatPresence(
                     sessionId,
                     typingRef.current,
                     { signal: controller.signal },
                 );
-                if (!controller.signal.aborted && activeSessionRef.current?.id === sessionId) {
+                if (!controller.signal.aborted
+                        && activeSessionRef.current?.id === sessionId) {
                     setPresence(snapshot);
                 }
-            } catch {}
+            } catch {} finally {
+                if (!controller.signal.aborted) {
+                    const elapsed = performance.now() - startedAt;
+                    timeout = window.setTimeout(
+                        () => void heartbeat(), Math.max(0, 4_000 - elapsed),
+                    );
+                }
+            }
         };
         void heartbeat();
-        const interval = window.setInterval(() => void heartbeat(), 20_000);
         return () => {
-            window.clearInterval(interval);
+            if (timeout !== null) window.clearTimeout(timeout);
             controller.abort();
             void leaveAiChatPresence(sessionId).catch(() => {});
         };

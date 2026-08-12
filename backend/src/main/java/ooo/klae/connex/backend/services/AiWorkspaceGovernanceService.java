@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +13,9 @@ import ooo.klae.connex.backend.dto.AiWorkspaceGovernanceRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiWorkspaceGovernanceMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /** Workspace-level AI kill switch and bounded assistant turn configuration. */
 @Service
@@ -23,6 +27,9 @@ public class AiWorkspaceGovernanceService {
     private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
     private final AuditService auditService;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
+    private final OrganizationMapper organizationMapper;
 
     /** Returns administrator-visible governance for the active workspace. */
     @Transactional(readOnly = true)
@@ -37,11 +44,12 @@ public class AiWorkspaceGovernanceService {
             int workspaceId,
             int actorId,
             AiWorkspaceGovernanceRequest request) {
-        requireAdministrator(workspaceId, actorId);
+        int orgId = requireAdministrator(workspaceId, actorId);
         if (request == null || request.enabled() == null || request.assistantMaxSteps() == null
                 || request.assistantMaxSteps() < 1 || request.assistantMaxSteps() > 12) {
             throw new BadRequestException("Workspace AI governance is invalid");
         }
+        lockAdministrator(workspaceId, orgId, actorId);
         governanceMapper.upsert(
                 workspaceId,
                 request.enabled(),
@@ -82,10 +90,29 @@ public class AiWorkspaceGovernanceService {
         return defaults;
     }
 
-    private void requireAdministrator(int workspaceId, int actorId) {
+    private int requireAdministrator(int workspaceId, int actorId) {
         if (workspaceService.getCurrentWorkspaceId() != workspaceId) {
             throw new ForbiddenException("AI governance is restricted to the active workspace");
         }
-        orgMemberService.requireOrgAdmin(workspaceService.getCurrentOrgId(), actorId);
+        int orgId = workspaceService.getCurrentOrgId();
+        orgMemberService.requireOrgAdmin(orgId, actorId);
+        return orgId;
+    }
+
+    private void lockAdministrator(int workspaceId, int orgId, int actorId) {
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw administratorRequired();
+        }
+        Integer lockedOrgId = workspaceMapper.lockActiveWorkspaceForShare(workspaceId);
+        if (!Objects.equals(lockedOrgId, orgId)
+                || organizationMapper.lockActiveByIdForShare(orgId) == null
+                || workspaceMapper.lockActiveMembership(workspaceId, actorId) == null) {
+            throw administratorRequired();
+        }
+        orgMemberService.requireOrgAdminForUpdate(orgId, actorId);
+    }
+
+    private ForbiddenException administratorRequired() {
+        return new ForbiddenException("Requires an organization administrator role");
     }
 }

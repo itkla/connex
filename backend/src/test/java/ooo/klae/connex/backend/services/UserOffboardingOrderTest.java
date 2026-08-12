@@ -232,6 +232,7 @@ class UserOffboardingOrderTest {
         order.verify(savedViewMapper).deleteForUserAnywhere(9);
         order.verify(dealDuplicateReviewProofMapper).deleteForActorAnywhere(9);
         order.verify(aiChatMapper).deleteParticipantsForUserAnywhere(9);
+        order.verify(aiChatMapper).clearParticipantInvitersAnywhere(9);
         order.verify(notificationMapper)
             .deleteHistoricalNotificationBaselinesForRecipientAnywhere(9);
         order.verify(notificationMapper).deleteAllForRecipientAnywhere(9);

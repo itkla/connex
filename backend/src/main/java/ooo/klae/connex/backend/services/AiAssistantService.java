@@ -249,19 +249,34 @@ public class AiAssistantService {
     public AiChatSessionDto setShared(int id, boolean shared) {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
-        workspaceService.lockAndRequireMember(workspaceId, userId);
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_SESSION_SHARE);
+        workspaceService.lockAndRequirePermissions(
+                workspaceId,
+                Map.of(userId, Set.of(Permission.AI_USE, Permission.AI_SESSION_SHARE)));
         AiChatSession session = requireOwnedLocked(workspaceId, userId, id);
-        if (!ACTIVE.equals(session.getStatus())) {
+        if (shared && !ACTIVE.equals(session.getStatus())) {
             throw new ConflictException("Archived sessions cannot be shared");
+        }
+        if (shared && !SHARED.equals(session.getVisibility())
+                && chatMapper.countActiveTurns(workspaceId, id) != 0) {
+            throw new ConflictException("Sessions with active turns cannot be shared");
+        }
+        if (shared && !SHARED.equals(session.getVisibility())
+                && chatMapper.countAssistantMessages(workspaceId, id) != 0) {
+            throw new ConflictException(
+                    "Sessions with existing assistant answers cannot be shared");
         }
         String visibility = shared ? SHARED : PRIVATE;
         if (!visibility.equals(session.getVisibility())
                 && chatMapper.updateSession(workspaceId, id, null, null, visibility) != 1) {
             throw inaccessible();
         }
+        List<Integer> revokedUserIds = List.of();
         if (!shared) {
+            revokedUserIds = chatMapper.listParticipants(workspaceId, id).stream()
+                    .map(AiChatParticipant::getUserId)
+                    .distinct()
+                    .sorted()
+                    .toList();
             chatMapper.deleteParticipantsForSession(workspaceId, id);
             presenceRegistry.clear(workspaceId, id);
         }
@@ -272,6 +287,8 @@ public class AiAssistantService {
                 "Assistant session " + id,
                 shared ? "Shared assistant session" : "Made assistant session private",
                 null);
+        revokedUserIds.forEach(targetUserId -> realtimeDispatcher.userAfterCommit(
+                targetUserId, sessionFrame(workspaceId, id, "revoked")));
         realtimeDispatcher.sessionAfterCommit(
                 workspaceId, id, sessionFrame(workspaceId, id, shared ? SHARED : PRIVATE));
         return AiChatSessionDto.from(requireSession(workspaceId, userId, id));
@@ -286,10 +303,11 @@ public class AiAssistantService {
         if (targetUserId == userId) {
             throw new BadRequestException("The session owner is already a participant");
         }
-        workspaceService.lockAndRequireMembers(
-                workspaceId, List.of(userId, targetUserId));
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_SESSION_SHARE);
+        workspaceService.lockAndRequirePermissions(
+                workspaceId,
+                Map.of(
+                        userId, Set.of(Permission.AI_USE, Permission.AI_SESSION_SHARE),
+                        targetUserId, Set.of(Permission.AI_USE)));
         AiChatSession session = requireOwnedLocked(workspaceId, userId, id);
         requireSharedActive(session);
         AiChatParticipant existing = chatMapper.getParticipant(
@@ -326,8 +344,8 @@ public class AiAssistantService {
     public AiChatSessionDto join(int id) {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
-        workspaceService.lockAndRequireMember(workspaceId, userId);
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
+        workspaceService.lockAndRequirePermissions(
+                workspaceId, Map.of(userId, Set.of(Permission.AI_USE)));
         AiChatSession session = requireLocked(workspaceId, userId, id);
         requireSharedActive(session);
         AiChatParticipant invitation = chatMapper.getParticipant(workspaceId, id, userId);
@@ -364,16 +382,21 @@ public class AiAssistantService {
     public void removeParticipant(int id, int targetUserId) {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
-        workspaceService.lockAndRequireMembers(
-                workspaceId, List.of(userId, targetUserId));
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_SESSION_SHARE);
+        if (targetUserId == userId) {
+            throw inaccessible();
+        }
+        workspaceService.lockAndRequirePermissions(
+                workspaceId,
+                Map.of(
+                        userId, Set.of(Permission.AI_USE, Permission.AI_SESSION_SHARE),
+                        targetUserId, Set.of()));
         requireOwnedLocked(workspaceId, userId, id);
-        if (targetUserId == userId
-                || chatMapper.deleteParticipant(workspaceId, id, targetUserId) != 1) {
+        if (chatMapper.deleteParticipant(workspaceId, id, targetUserId) != 1) {
             throw inaccessible();
         }
         presenceRegistry.remove(workspaceId, id, targetUserId);
+        realtimeDispatcher.userAfterCommit(
+                targetUserId, sessionFrame(workspaceId, id, "revoked"));
         realtimeDispatcher.sessionAfterCommit(
                 workspaceId, id, sessionFrame(workspaceId, id, "participants_changed"));
     }
@@ -520,7 +543,7 @@ public class AiAssistantService {
                 participant.getUserId(),
                 user.getDisplayName(),
                 user.getProfilePictureUrl(),
-                participant.getRole(),
+                "participant",
                 participant.getStatus(),
                 currentUser);
     }

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -23,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
@@ -36,12 +38,14 @@ import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
+import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -55,6 +59,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoSpyBean private WorkspaceService workspaceService;
+    @MockitoSpyBean private AiChatRealtimeDispatcher realtimeDispatcher;
 
     @Test
     void createDefaultsToPrivateActiveAndOwnerCanRead() {
@@ -297,6 +302,56 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertNotNull(unchanged);
         assertEquals("private", unchanged.getVisibility());
         assertEquals(0, chatMapper.countParticipants(workspace.getId(), created.getId()));
+        User participant = aiUser("admin");
+        authenticateAs(participant, workspace.getId());
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.get(created.getId(), 1, 50));
+    }
+
+    @Test
+    void privateNoteDerivedAssistantContentCannotBecomeShared() {
+        AiChatSessionDto created = service.create(createRequest("Private-note history"));
+        assistantMessage(
+                created.getId(),
+                1,
+                "Confidential note-derived answer",
+                "{\"citations\":[],\"resources\":[]}");
+
+        ConflictException conflict = assertThrows(
+                ConflictException.class,
+                () -> service.setShared(created.getId(), true));
+
+        AiChatSession unchanged = chatMapper.getSessionById(
+                workspace.getId(), currentUser.getId(), created.getId());
+        assertEquals("Sessions with existing assistant answers cannot be shared",
+                conflict.getMessage());
+        assertNotNull(unchanged);
+        assertEquals("private", unchanged.getVisibility());
+        assertEquals(0, chatMapper.countParticipants(workspace.getId(), created.getId()));
+        User viewer = aiUser("admin");
+        authenticateAs(viewer, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> service.get(created.getId(), 1, 50));
+    }
+
+    @Test
+    void memberWithoutAiUseCannotBeInvitedOrJoin() {
+        AiChatSessionDto created = service.create(createRequest("AI permission boundary"));
+        service.setShared(created.getId(), true);
+        User member = newUser();
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.invite(created.getId(), member.getId()));
+        assertEquals(0, chatMapper.countInvitedSessions(workspace.getId(), member.getId()));
+
+        chatMapper.insertInvitation(
+                workspace.getId(), created.getId(), member.getId(), currentUser.getId());
+        authenticateAs(member, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> service.join(created.getId()));
+        assertEquals(0, chatMapper.countAccessibleSessions(
+                workspace.getId(), member.getId()));
     }
 
     @Test
@@ -305,7 +360,15 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         service.setShared(created.getId(), true);
         User participant = aiUser("admin");
 
-        assertEquals("invited", service.invite(created.getId(), participant.getId()).status());
+        var invitedDto = service.invite(created.getId(), participant.getId());
+        AiChatParticipant invited = chatMapper.getParticipant(
+                workspace.getId(),
+                created.getId(),
+                participant.getId());
+        assertEquals("invited", invitedDto.status());
+        assertEquals("participant", invitedDto.role());
+        assertNotNull(invited);
+        assertEquals("member", invited.getRole());
         authenticateAs(participant, workspace.getId());
         assertEquals(1, service.pageInvitations(1, 25).total());
         assertThrows(ForbiddenException.class, () -> service.get(created.getId(), 1, 50));
@@ -352,14 +415,58 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         service.join(created.getId());
         service.touchPresence(created.getId(), true);
         authenticateAs(currentUser, workspace.getId());
+        clearInvocations(realtimeDispatcher);
 
         service.setShared(created.getId(), false);
 
         assertEquals(List.of(currentUser.getId()),
                 chatMapper.listRealtimeRecipientUserIds(workspace.getId(), created.getId()));
         assertEquals(0, service.presence(created.getId()).present().size());
+        verify(realtimeDispatcher).userAfterCommit(
+                participant.getId(),
+                new AiChatStepFrameDto(
+                        workspace.getId(), created.getId(), 0, 0,
+                        "session", null, "revoked", null));
         authenticateAs(participant, workspace.getId());
         assertThrows(ForbiddenException.class, () -> service.get(created.getId(), 1, 50));
+    }
+
+    @Test
+    void archivedSharedSessionCanBeMadePrivateAndRevokesParticipants() {
+        AiChatSessionDto created = service.create(createRequest("Archived shared session"));
+        service.setShared(created.getId(), true);
+        User participant = aiUser("admin");
+        service.invite(created.getId(), participant.getId());
+        authenticateAs(participant, workspace.getId());
+        service.join(created.getId());
+        authenticateAs(currentUser, workspace.getId());
+        service.archive(created.getId());
+
+        AiChatSessionDto unshared = service.setShared(created.getId(), false);
+
+        assertEquals("archived", unshared.getStatus());
+        assertEquals("private", unshared.getVisibility());
+        authenticateAs(participant, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> service.get(created.getId(), 1, 50));
+    }
+
+    @Test
+    void removedParticipantReceivesDirectRevocationFrame() {
+        AiChatSessionDto created = service.create(createRequest("Direct revocation"));
+        service.setShared(created.getId(), true);
+        User participant = aiUser("admin");
+        service.invite(created.getId(), participant.getId());
+        clearInvocations(realtimeDispatcher);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.removeParticipant(created.getId(), currentUser.getId()));
+        service.removeParticipant(created.getId(), participant.getId());
+
+        verify(realtimeDispatcher).userAfterCommit(
+                participant.getId(),
+                new AiChatStepFrameDto(
+                        workspace.getId(), created.getId(), 0, 0,
+                        "session", null, "revoked", null));
     }
 
     @Test

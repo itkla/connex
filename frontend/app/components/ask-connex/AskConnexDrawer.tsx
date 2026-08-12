@@ -270,9 +270,13 @@ function TranscriptMessage({
 }
 
 function PresenceStrip({ presence, labels }: { presence: AiChatPresence; labels: AskConnexDrawerLabels }) {
-    const typingNames = presence.present
-        .filter((participant) => presence.typingUserIds.includes(participant.userId))
-        .map((participant) => participant.displayName);
+    const typingUserIds = new Set(presence.typingUserIds);
+    const typingNames: string[] = [];
+    for (const participant of presence.present) {
+        if (typingUserIds.has(participant.userId)) {
+            typingNames.push(participant.displayName);
+        }
+    }
 
     return (
         <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-4 py-2">

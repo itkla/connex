@@ -104,7 +104,7 @@ public class AiChatTurnPersistenceService {
         return new AiChatQueuedTurn(
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
                 message.getSeq(), restrictionEpoch,
-                chatMapper.countParticipants(workspaceId, sessionId) == 0,
+                !SHARED.equals(session.getVisibility()),
                 request.pageContext());
     }
 
