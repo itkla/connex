@@ -18,7 +18,7 @@ permissions:
 # is left exactly as it was. The mode is derived from the event here because job outputs are not
 # available at workflow level — it must stay consistent with the metadata job's derivation.
 concurrency:
-  group: release-${{ github.repository }}${{ github.event_name == 'push' && '' || '-dry-run' }}
+  group: release-${{ github.repository }}${{ github.event_name == 'workflow_dispatch' && '-dry-run' || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -418,7 +418,8 @@ jobs:
               echo "### Exercised"
               echo
               echo "- Strict release-version validation"
-              echo "- Release preconditions and immutable publication policy"
+              echo "- Release preconditions applicable to a dry run, including the immutable"
+              echo "  publication policy and the requested version being unpublished"
               echo "- Current main-head requirement"
               echo "- Required ci.yml, security.yml, and deploy-smoke.yml results"
               echo "- Backend, frontend, and OCR image builds with release build arguments"
@@ -435,6 +436,8 @@ jobs:
             echo
             echo "### Not exercised"
             echo
+            echo "- Release-tag existence and its binding to this commit"
+            echo "- Candidate image descriptors and the workflow-artifact handoff"
             echo "- GHCR push and registry round-trip"
             echo "- BuildKit max-mode provenance export"
             echo "- GitHub artifact attestation (actions/attest)"

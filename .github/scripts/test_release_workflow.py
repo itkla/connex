@@ -395,6 +395,30 @@ def publication_gate_errors(workflow: dict[str, object]) -> list[str]:
     return errors
 
 
+
+def evaluate_concurrency_group(group: str, event_name: str) -> str:
+    """
+    Resolves the workflow concurrency group for one event, mimicking GitHub's expression
+    semantics: `&&` and `||` yield an operand rather than a boolean, and the empty string is
+    falsy. Writing `cond && '' || '-suffix'` therefore produces '-suffix' on *both* branches,
+    silently collapsing the publication and dry-run groups into one.
+    """
+    pattern = re.compile(
+        r"\$\{\{\s*github\.event_name\s*==\s*'(?P<event>[a-z_]+)'"
+        r"\s*&&\s*'(?P<when_true>[^']*)'"
+        r"\s*\|\|\s*'(?P<when_false>[^']*)'\s*\}\}"
+    )
+
+    def resolve(match):
+        left = match.group("when_true") if event_name == match.group("event") else ""
+        return left if left else match.group("when_false")
+
+    resolved, count = pattern.subn(resolve, group)
+    if count != 1:
+        raise AssertionError(f"expected exactly one event-conditional suffix, found {count}")
+    return resolved
+
+
 class ReleaseWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -531,15 +555,14 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def test_dry_runs_cannot_queue_ahead_of_a_publication(self) -> None:
         group = self.workflow["concurrency"]["group"]
 
-        self.assertIn("github.event_name == 'push'", group)
-        self.assertIn("-dry-run", group)
-        self.assertEqual(
-            "release-${{ github.repository }}",
-            group.replace(
-                "${{ github.event_name == 'push' && '' || '-dry-run' }}", ""
-            ),
-        )
+        publish_group = evaluate_concurrency_group(group, "push")
+        dry_run_group = evaluate_concurrency_group(group, "workflow_dispatch")
+
+        self.assertEqual("release-${{ github.repository }}", publish_group)
+        self.assertEqual("release-${{ github.repository }}-dry-run", dry_run_group)
+        self.assertNotEqual(publish_group, dry_run_group)
         self.assertIs(False, self.workflow["concurrency"]["cancel-in-progress"])
+
 
     def test_dispatch_requires_version_and_job_output_derives_mode_from_event(self) -> None:
         events = self.workflow_events()
@@ -940,7 +963,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         summary = self.named_step("dry-run-summary", "Record dry-run coverage")["run"]
         for covered in (
             "Strict release-version validation",
-            "immutable publication policy",
+            "publication policy and the requested version being unpublished",
             "Current main-head requirement",
             "ci.yml, security.yml, and deploy-smoke.yml",
             "image builds with release build arguments",
@@ -950,6 +973,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ):
             self.assertIn(covered, summary)
         for uncovered in (
+            "Release-tag existence and its binding to this commit",
+            "Candidate image descriptors and the workflow-artifact handoff",
             "GHCR push and registry round-trip",
             "GitHub artifact attestation",
             "actions/attest",
