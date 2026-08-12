@@ -269,7 +269,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                             key={`company-${company.id}`}
                             targetType="company"
                             targetId={company.id}
-                            currentUserId={currentUser.id}
+                            currentUser={{ id: currentUser.id, displayName: currentUser.displayName, profilePictureUrl: currentUser.profilePictureUrl }}
                             canComment={effectivePermissions.includes("COMMENT_CREATE")}
                             canModerate={effectivePermissions.includes("COMMENT_MODERATE")}
                         />

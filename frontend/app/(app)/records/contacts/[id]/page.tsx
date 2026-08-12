@@ -374,7 +374,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             key={`person-${contact.id}`}
                             targetType="person"
                             targetId={contact.id}
-                            currentUserId={currentUser.id}
+                            currentUser={{ id: currentUser.id, displayName: currentUser.displayName, profilePictureUrl: currentUser.profilePictureUrl }}
                             canComment={effectivePermissions.includes("COMMENT_CREATE")}
                             canModerate={effectivePermissions.includes("COMMENT_MODERATE")}
                         />
