@@ -47,7 +47,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { uploadAttachment } from "@/app/lib/api";
-import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from "@/app/lib/managed-image";
+import { defaultAltFromFileName, isManagedImageFile, MANAGED_IMAGE_ACCEPT } from "@/app/lib/managed-image";
 import { toastError } from "@/app/lib/toast";
 import { canMoveTopLevelBlock, moveTopLevelBlock } from "./BlockReorder";
 import { normalizeEditorLinkHref } from "./editorLinks";
@@ -118,11 +118,6 @@ type Props = {
     filePickerOpen?: boolean;
     onFilePickerOpenChange?: (open: boolean) => void;
 };
-
-function defaultAltFromFileName(fileName: string): string {
-    const base = fileName.replace(/\.[^.]+$/u, "").replace(/[_-]+/gu, " ").trim();
-    return base || fileName;
-}
 
 function toolbarButtonClass(active = false) {
     return cn(

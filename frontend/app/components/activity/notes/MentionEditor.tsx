@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
@@ -286,6 +286,17 @@ function menuPosition(range: Range): MenuPosition {
     };
 }
 
+export type MentionEditorHandle = {
+    /**
+     * Appends literal text to the end of the editable content as its own
+     * paragraph and emits the serialized value. The append goes through the
+     * editor's DOM — never through an external value push — so uncommitted
+     * typing and the caret survive: the DOM stays the source of truth and the
+     * next input's serialization includes the appended text.
+     */
+    appendParagraph: (text: string) => void;
+};
+
 type Props = {
     id?: string;
     value: string;
@@ -305,6 +316,8 @@ type Props = {
     mentionTypes?: Partial<Record<'@' | '#', readonly NoteReferenceType[]>>;
     /** Request context inherited from the host overlay, including its workspace header and abort signal. */
     requestInit?: RequestInit;
+    /** Receives the imperative {@link MentionEditorHandle} for caret-safe programmatic inserts. */
+    handleRef?: Ref<MentionEditorHandle>;
 };
 
 /**
@@ -337,6 +350,7 @@ export default function MentionEditor({
     onSubmit,
     mentionTypes,
     requestInit,
+    handleRef,
 }: Props) {
     const t = useTranslations('ActivityNotesEditor');
     const editorRef = useRef<HTMLDivElement>(null);
@@ -516,6 +530,20 @@ export default function MentionEditor({
         lastValue.current = serialized;
         onChange(serialized);
     }, [onChange]);
+
+    useImperativeHandle(
+        handleRef,
+        () => ({
+            appendParagraph: (text: string) => {
+                const el = editorRef.current;
+                if (!el) return;
+                const gap = serialize(el).trim().length > 0 ? '\n\n' : '';
+                el.appendChild(document.createTextNode(gap + text));
+                emit();
+            },
+        }),
+        [emit],
+    );
 
     const closeMenu = useCallback(() => {
         setQuery(null);

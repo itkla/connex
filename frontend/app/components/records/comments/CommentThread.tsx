@@ -39,6 +39,7 @@ type Props = {
         clientToken: string,
     ) => Promise<boolean>;
     onSubmitEdit: (comment: RecordComment, content: string) => Promise<boolean>;
+    onAttachImage: (file: File) => Promise<string | null>;
     onCopyLink: (comment: RecordComment) => void;
     onDelete: (comment: RecordComment) => void;
     onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
@@ -73,6 +74,7 @@ export default function CommentThread({
     transitioning,
     onSubmitReply,
     onSubmitEdit,
+    onAttachImage,
     onCopyLink,
     onDelete,
     onToggleReaction,
@@ -179,6 +181,7 @@ export default function CommentThread({
                         onToggleReaction={onToggleReaction}
                         onCopyLink={onCopyLink}
                         onSubmitEdit={onSubmitEdit}
+                        onAttachImage={onAttachImage}
                         onResolve={onResolve}
                     />
                 );
@@ -213,6 +216,7 @@ export default function CommentThread({
                                 submitting={replySubmitting}
                                 canSubmit={commentPlainText(replyValue).length > 0}
                                 autoFocus
+                                onAttachImage={onAttachImage}
                             />
                         ) : (
                             <button

@@ -17,6 +17,16 @@ export const MANAGED_IMAGE_ACCEPT = [
     ...MANAGED_IMAGE_EXTENSIONS,
 ].join(',');
 
+/**
+ * Derives readable default alt text from an uploaded file name: the extension
+ * is dropped and separator runs collapse to spaces, falling back to the raw
+ * name when nothing remains.
+ */
+export function defaultAltFromFileName(fileName: string): string {
+    const base = fileName.replace(/\.[^.]+$/u, '').replace(/[_-]+/gu, ' ').trim();
+    return base || fileName;
+}
+
 function ascii(bytes: Uint8Array, offset: number, expected: string): boolean {
     if (bytes.length < offset + expected.length) return false;
     return Array.from(expected).every(

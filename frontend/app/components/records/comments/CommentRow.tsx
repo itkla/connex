@@ -55,6 +55,7 @@ type Props = {
     onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
     onCopyLink: (comment: RecordComment) => void;
     onSubmitEdit: (comment: RecordComment, content: string) => Promise<boolean>;
+    onAttachImage: (file: File) => Promise<string | null>;
     onResolve?: () => void;
 };
 
@@ -81,6 +82,7 @@ export default function CommentRow({
     onToggleReaction,
     onCopyLink,
     onSubmitEdit,
+    onAttachImage,
     onResolve,
 }: Props) {
     const t = useTranslations('Comments');
@@ -175,6 +177,7 @@ export default function CommentRow({
                             submitting={savingEdit}
                             canSubmit={commentPlainText(editValue).length > 0 && withinEditWindow}
                             autoFocus
+                            onAttachImage={onAttachImage}
                         />
                     </div>
                 ) : (
