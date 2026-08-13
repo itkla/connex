@@ -177,13 +177,12 @@ class AiInvocationServiceTest {
     }
 
     @Test
-    void completeUsesTheSharedTokenToUtf8ByteBoundary() {
-        AiInvocation invocation = invocation("Summarize relationship state");
+    void completeAdmitsJapaneseDenseInputAtTheConservativeByteBoundary() {
+        AiInvocation invocation = invocation("関係性を要約してください。".repeat(256));
         int serializedBytes = service.serializedPromptBytes(
                 invocation.prompt(), null, AiReasoningMode.NONE);
-        int exactEstimatedContext = invocation.maxTokens()
-                + AiProviderCapabilities.estimatedTokensForBytes(serializedBytes);
-        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(exactEstimatedContext);
+        int exactConservativeContext = invocation.maxTokens() + serializedBytes;
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(exactConservativeContext);
         providerReturns(new AiCompletionResult(
                 "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
 
@@ -191,6 +190,23 @@ class AiInvocationServiceTest {
 
         assertEquals("Mina Patel is ready for follow-up.", outcome.text());
         verify(aiProvider).complete(any());
+    }
+
+    @Test
+    void completeRejectsJapaneseDenseInputOneByteBeyondTheConservativeBoundary() {
+        AiInvocation invocation = invocation("関係性を要約してください。".repeat(256));
+        int serializedBytes = service.serializedPromptBytes(
+                invocation.prompt(), null, AiReasoningMode.NONE);
+        when(aiProvider.contextWindowTokens(resolved.target()))
+                .thenReturn(invocation.maxTokens() + serializedBytes - 1);
+
+        AiProviderException thrown = assertThrows(
+                AiProviderException.class,
+                () -> service.complete(invocation));
+
+        assertEquals("AI prompt exceeds the configured model context window", thrown.getMessage());
+        assertEquals("context_window", singleAuditMetadata().get("reason"));
+        verify(aiProvider, never()).complete(any());
     }
 
     @Test

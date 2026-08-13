@@ -615,7 +615,7 @@ public class AiInvocationService {
     }
 
     private static int providerInputByteCeiling(int contextTokens, int outputTokens) {
-        return AiProviderCapabilities.estimatedInputByteCeiling(
+        return AiProviderCapabilities.conservativeInputByteCeiling(
                 contextTokens, outputTokens);
     }
 

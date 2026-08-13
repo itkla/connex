@@ -230,7 +230,7 @@ class AiChatAgentLoopServiceTest {
         when(writeToolService.executeAuto(eq(TURN), eq(29), any())).thenAnswer(invocation -> {
             Consumer<AiAssistantToolResult> guard = invocation.getArgument(2);
             guard.accept(toolResult);
-            return new AiAssistantWriteToolService.WriteExecution(null, toolResult);
+            return new AiAssistantWriteToolService.WriteExecution(null, toolResult, false);
         });
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
@@ -314,7 +314,7 @@ class AiChatAgentLoopServiceTest {
         when(writeToolService.executeAuto(eq(TURN), eq(30), any())).thenAnswer(invocation -> {
             Consumer<AiAssistantToolResult> guard = invocation.getArgument(2);
             guard.accept(expectedWriteResult);
-            return new AiAssistantWriteToolService.WriteExecution(null, expectedWriteResult);
+            return new AiAssistantWriteToolService.WriteExecution(null, expectedWriteResult, false);
         });
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
@@ -323,6 +323,72 @@ class AiChatAgentLoopServiceTest {
         assertEquals("tool_result_budget_exhausted", result.reason());
         verify(writeToolService).executeAuto(eq(TURN), eq(30), any());
         verify(persistenceService).failTool(eq(TURN), eq(30), any());
+    }
+
+    @Test
+    void executedAutoReplayUnderSmallerBudgetReportsTruncatedExecutedOutcome()
+            throws Exception {
+        AiChatMessage userMessage = message(TURN.userMessageId(), "Create the follow-up note");
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+                new AiChatMemory(
+                        List.of(userMessage),
+                        new AiAssistantPromptBudget(
+                                64, 4_096, 256, 256, 2_048, 4_808),
+                        0,
+                        0));
+        JsonNode writeArgs = objectMapper.readTree(
+                "{\"handle\":\"r1\",\"content\":\"Follow up\"}");
+        AiAssistantStep writeStep = new AiAssistantStep(
+                new AiAssistantStep.Tool("create_note", writeArgs), null);
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null,
+                new AiAssistantStep.FinalAnswer(
+                        "The follow-up note was created.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(writeStep), parsed(finalStep));
+        AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
+                "create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        when(writeToolService.prepare(
+                eq("create_note"), eq(writeArgs), any(), eq(TURN.restrictionEpoch())))
+                .thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 1, write)).thenReturn(
+                new AiAssistantToolProposal(30, "executed", null, false));
+        AiAssistantToolResult storedReceipt = new AiAssistantToolResult(
+                Map.of(
+                        "toolCallId", 30,
+                        "tool", "create_note",
+                        "tier", "auto",
+                        "status", "executed",
+                        "outcome", Map.of(
+                                "recordType", "note",
+                                "details", "STORED_EXECUTION_DETAILS".repeat(200))),
+                List.of());
+        when(writeToolService.executeAuto(eq(TURN), eq(30), any())).thenReturn(
+                new AiAssistantWriteToolService.WriteExecution(
+                        null, storedReceipt, true));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String replayPrompt = invocations.getAllValues().getLast().prompt().getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(replayPrompt.contains("\"status\":\"executed\""));
+        assertTrue(replayPrompt.contains("\"detailsTruncated\":true"));
+        assertTrue(replayPrompt.contains("stored outcome was truncated"));
+        assertFalse(replayPrompt.contains("STORED_EXECUTION_DETAILS"));
+        verify(persistenceService, never()).failTool(eq(TURN), eq(30), any());
     }
 
     @Test

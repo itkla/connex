@@ -231,23 +231,39 @@ public class AiChatAgentLoopService {
                         try {
                             requireCurrentToolExecution(turn);
                             int guardedStepNumber = stepNumber;
-                            AiAssistantToolResult toolResult = write.tier()
-                                    == AiAssistantToolCatalog.ToolTier.AUTO
-                                    ? writeToolService.executeAuto(
-                                            turn,
-                                            toolCallId,
-                                            candidate -> promptAssembler
-                                                    .requireAdditionalToolResultCapacity(
-                                                            toolTurns,
-                                                            new ToolTurn(
-                                                                    guardedStepNumber,
-                                                                    step.tool().name(),
-                                                                    candidate),
-                                                            maskingContext,
-                                                            memory.budget()))
-                                            .toolResult()
-                                    : writeToolService.proposalResult(write, proposal);
-                            if (write.tier() != AiAssistantToolCatalog.ToolTier.AUTO) {
+                            AiAssistantToolResult toolResult;
+                            boolean replayed = false;
+                            if (write.tier() == AiAssistantToolCatalog.ToolTier.AUTO) {
+                                AiAssistantWriteToolService.WriteExecution execution =
+                                        writeToolService.executeAuto(
+                                                turn,
+                                                toolCallId,
+                                                candidate -> promptAssembler
+                                                        .requireAdditionalToolResultCapacity(
+                                                                toolTurns,
+                                                                new ToolTurn(
+                                                                        guardedStepNumber,
+                                                                        step.tool().name(),
+                                                                        candidate),
+                                                                maskingContext,
+                                                                memory.budget()));
+                                toolResult = execution.toolResult();
+                                replayed = execution.replayed();
+                                if (replayed) {
+                                    List<ToolTurn> replayTurns = promptAssembler.withExecutedReplay(
+                                            toolTurns,
+                                            new ToolTurn(
+                                                    stepNumber,
+                                                    step.tool().name(),
+                                                    toolResult),
+                                            maskingContext,
+                                            memory.budget());
+                                    toolTurns.clear();
+                                    toolTurns.addAll(replayTurns);
+                                    toolResult = toolTurns.getLast().result();
+                                }
+                            } else {
+                                toolResult = writeToolService.proposalResult(write, proposal);
                                 promptAssembler.requireAdditionalToolResultCapacity(
                                         toolTurns,
                                         new ToolTurn(
@@ -271,8 +287,10 @@ public class AiChatAgentLoopService {
                             } else {
                                 noProgressSteps++;
                             }
-                            toolTurns.add(new ToolTurn(
-                                    stepNumber, step.tool().name(), toolResult));
+                            if (!replayed) {
+                                toolTurns.add(new ToolTurn(
+                                        stepNumber, step.tool().name(), toolResult));
+                            }
                             if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                                 return AiGenerationTaskResult.failed("no_progress");
                             }

@@ -33,6 +33,8 @@ class AiAssistantPromptBudgetTest {
                         + budget.pageContextBytes() + budget.toolResultBytes());
         assertEquals(98_304, AiProviderCapabilities.estimatedInputByteCeiling(
                 32_768, budget.maxOutputTokens()));
+        assertEquals(24_576, AiProviderCapabilities.conservativeInputByteCeiling(
+                32_768, budget.maxOutputTokens()));
         assertTrue(budget.compactionSourceBytes() * 12 + 8_192
                 <= AiProviderCapabilities.estimatedInputByteCeiling(
                         32_768, budget.maxOutputTokens()));

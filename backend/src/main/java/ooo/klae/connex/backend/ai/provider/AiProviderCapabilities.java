@@ -24,15 +24,20 @@ public record AiProviderCapabilities(
      * @return estimated UTF-8 bytes available for serialized provider input
      */
     public static int estimatedInputByteCeiling(int contextTokens, int outputTokens) {
-        if (contextTokens < 1 || outputTokens < 0) {
-            throw new IllegalArgumentException("AI context and output budgets must be non-negative");
-        }
-        int inputTokens = Math.max(
-                1,
-                contextTokens - Math.min(contextTokens - 1, outputTokens));
+        int inputTokens = inputTokenBudget(contextTokens, outputTokens);
         return inputTokens > Integer.MAX_VALUE / ESTIMATED_UTF8_BYTES_PER_TOKEN
                 ? Integer.MAX_VALUE
                 : inputTokens * ESTIMATED_UTF8_BYTES_PER_TOKEN;
+    }
+
+    /**
+     * Converts a token-denominated context window into a conservative UTF-8 admission ceiling.
+     * @param contextTokens provider context-window tokens
+     * @param outputTokens output tokens reserved from that context
+     * @return maximum admitted UTF-8 bytes under the dense one-token-per-byte assumption
+     */
+    public static int conservativeInputByteCeiling(int contextTokens, int outputTokens) {
+        return inputTokenBudget(contextTokens, outputTokens);
     }
 
     /**
@@ -46,5 +51,14 @@ public record AiProviderCapabilities(
         }
         return utf8Bytes / ESTIMATED_UTF8_BYTES_PER_TOKEN
                 + (utf8Bytes % ESTIMATED_UTF8_BYTES_PER_TOKEN == 0 ? 0 : 1);
+    }
+
+    private static int inputTokenBudget(int contextTokens, int outputTokens) {
+        if (contextTokens < 1 || outputTokens < 0) {
+            throw new IllegalArgumentException("AI context and output budgets must be non-negative");
+        }
+        return Math.max(
+                1,
+                contextTokens - Math.min(contextTokens - 1, outputTokens));
     }
 }

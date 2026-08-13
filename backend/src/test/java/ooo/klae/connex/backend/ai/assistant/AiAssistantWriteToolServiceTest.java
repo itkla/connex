@@ -594,7 +594,15 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
-    void executedReplayGuardsTheExactResultWithoutRepeatingTheMutation() throws Exception {
+    void firstExecutionCommitsThenReplaySkipsTheGuardWithoutRepeatingTheMutation()
+            throws Exception {
+        when(personService.getPersonById(31)).thenReturn(person(31));
+        doAnswer(invocation -> {
+            Note created = invocation.getArgument(0);
+            created.setId(75);
+            created.setVisibility("workspace");
+            return created;
+        }).when(noteService).create(any(Note.class));
         AiAssistantPreparedWrite write = prepared(
                 "create_note",
                 "{\"handle\":\"r1\",\"content\":\"Same request\","
@@ -602,24 +610,30 @@ class AiAssistantWriteToolServiceTest {
                 "person",
                 31);
         stored(write, 29);
-        storedToolCall.setStatus("executed");
-        storedToolCall.setResultJson("{\"tier\":\"auto\",\"outcome\":{"
-                + "\"status\":\"executed\",\"recordType\":\"note\","
-                + "\"visibility\":\"workspace\"}} ");
-        AtomicBoolean guarded = new AtomicBoolean();
+        AtomicBoolean firstExecutionGuarded = new AtomicBoolean();
+        AiAssistantWriteToolService.WriteExecution firstExecution = service.executeAuto(
+                TURN,
+                29,
+                result -> firstExecutionGuarded.set(true));
+        AtomicBoolean replayGuarded = new AtomicBoolean();
 
         AiAssistantWriteToolService.WriteExecution replay = service.executeAuto(
                 TURN,
                 29,
                 result -> {
-                    assertEquals("executed", result.data().get("status"));
-                    guarded.set(true);
+                    replayGuarded.set(true);
+                    throw new AiAssistantLoopException(
+                            "tool_result_budget_exhausted",
+                            "tool_result_budget_exhausted");
                 });
 
-        assertTrue(guarded.get());
+        assertTrue(firstExecutionGuarded.get());
+        assertFalse(firstExecution.replayed());
+        assertFalse(replayGuarded.get());
+        assertTrue(replay.replayed());
         assertEquals("executed", replay.toolResult().data().get("status"));
-        verify(noteService, never()).create(any(Note.class));
-        verify(chatMapper, never()).updateToolCall(
+        verify(noteService).create(any(Note.class));
+        verify(chatMapper).updateToolCall(
                 eq(TURN.workspaceId()),
                 eq(TURN.userMessageId()),
                 eq(29),

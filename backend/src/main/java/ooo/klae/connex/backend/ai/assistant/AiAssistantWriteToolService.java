@@ -141,7 +141,7 @@ public class AiAssistantWriteToolService {
             toolCall.setToolName(write.toolName());
             toolCall.setStatus(proposal.status());
             toolCall.setResultJson(proposal.resultJson());
-            return execution(toolCall).toolResult();
+            return execution(toolCall, true).toolResult();
         }
         return modelResult(
                 proposal.id(), write.toolName(), write.tier().name().toLowerCase(),
@@ -195,9 +195,7 @@ public class AiAssistantWriteToolService {
             throw new ConflictException("Assistant turn is no longer active");
         }
         if (EXECUTED.equals(toolCall.getStatus())) {
-            WriteExecution replay = execution(toolCall);
-            resultGuard.accept(replay.toolResult());
-            return replay;
+            return execution(toolCall, true);
         }
         if (toolCall.getMessageId() != turn.userMessageId()) {
             throw new ConflictException("Assistant tool replay is not executable");
@@ -226,7 +224,7 @@ public class AiAssistantWriteToolService {
         String resultJson = resultEnvelope(write, outcome, null);
         toolCall.setStatus(EXECUTED);
         toolCall.setResultJson(resultJson);
-        WriteExecution execution = execution(toolCall);
+        WriteExecution execution = execution(toolCall, false);
         resultGuard.accept(execution.toolResult());
         if (chatMapper.updateToolCall(
                 turn.workspaceId(), toolCall.getMessageId(), toolCall.getId(),
@@ -710,10 +708,10 @@ public class AiAssistantWriteToolService {
         return undo;
     }
 
-    private WriteExecution execution(AiChatToolCall toolCall) {
+    private WriteExecution execution(AiChatToolCall toolCall, boolean replayed) {
         AiAssistantToolCallDto dto = dto(toolCall);
         return new WriteExecution(dto, modelResult(
-                dto.id(), toolCall.getToolName(), dto.tier(), dto.status(), dto.result()));
+                dto.id(), toolCall.getToolName(), dto.tier(), dto.status(), dto.result()), replayed);
     }
 
     private static AiAssistantToolResult modelResult(
@@ -1090,7 +1088,8 @@ public class AiAssistantWriteToolService {
     /** Auto-tier execution result for the next model step and API clients. */
     public record WriteExecution(
             AiAssistantToolCallDto toolCall,
-            AiAssistantToolResult toolResult) {
+            AiAssistantToolResult toolResult,
+            boolean replayed) {
     }
 
     private record Actor(int workspaceId, int userId) {
