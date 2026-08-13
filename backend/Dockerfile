@@ -3,7 +3,7 @@
 ARG BUILD_TIME
 ARG SOURCE_DATE_EPOCH
 
-FROM eclipse-temurin:26-jdk-noble@sha256:892b3d1ed859f102db403e01415ecd05b1dd8ed6679857fe19044a49e45a911e AS build
+FROM eclipse-temurin:26-jdk-noble@sha256:e198c796c8b49353f02deb9d7ca82952abc634395c575ca03385c467d223f6e3 AS build
 WORKDIR /workspace
 ARG VERSION=0.0.0-dev
 ARG BUILD_TIME
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.gradle \
     && ./gradlew bootWar -Pversion=${VERSION} "$@" --no-daemon --stacktrace \
     && find build/libs -name '*.war' ! -name '*-plain.war' -exec cp {} /workspace/app.war \;
 
-FROM eclipse-temurin:26-jre-noble@sha256:3bb9b9007f221fe09932f05a3362a340ecccaa6dbada7f1edf646f952ff597d8 AS runtime
+FROM eclipse-temurin:26-jre-noble@sha256:d095323f078a68e0663f7bb7ff103f6275227a929c3ecc6f6fb626ebe6e4d51a AS runtime
 WORKDIR /app
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-backend" \
