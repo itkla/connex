@@ -113,6 +113,20 @@ class AiAssistantControllerTest {
     }
 
     @Test
+    void turnGetExposesPartialContentAndCancelReturnsNoContent() throws Exception {
+        when(turnService.get(42, 19)).thenReturn(
+                new AiChatTurnDto(19, 42, "running", null, "Partial 😀"));
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/turns/19"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.partialContent").value("Partial 😀"));
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/turns/19/cancel"))
+                .andExpect(status().isNoContent());
+
+        verify(turnService).cancel(42, 19);
+    }
+
+    @Test
     void attachmentEndpointsUseSessionScopedMultipartContract() throws Exception {
         AiChatAttachmentDto attachment = new AiChatAttachmentDto(
                 91, "notes.txt", "text/plain", 7, "text",

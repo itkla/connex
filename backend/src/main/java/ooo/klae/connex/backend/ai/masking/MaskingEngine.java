@@ -68,6 +68,9 @@ public final class MaskingEngine {
         if (verdict.excluded()) {
             return OMITTED_BY_POLICY;
         }
+        if (ctx.privacyMode() == ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
+            return redactContactData(sanitizedText);
+        }
         return maskSanitizedFreeText(sanitizedText, ctx);
     }
 
@@ -159,11 +162,14 @@ public final class MaskingEngine {
             masked = identifierPattern(entry.rawValue()).matcher(masked)
                     .replaceAll(Matcher.quoteReplacement(entry.token()));
         }
-        masked = EMAIL_ADDRESS.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
-        masked = URL.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
-        masked = PHONE_LIKE_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
-        masked = LONG_DIGIT_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
-        return masked;
+        return redactContactData(masked);
+    }
+
+    private static String redactContactData(String text) {
+        String redacted = EMAIL_ADDRESS.matcher(text).replaceAll(Matcher.quoteReplacement(REDACTED));
+        redacted = URL.matcher(redacted).replaceAll(Matcher.quoteReplacement(REDACTED));
+        redacted = PHONE_LIKE_RUN.matcher(redacted).replaceAll(Matcher.quoteReplacement(REDACTED));
+        return LONG_DIGIT_RUN.matcher(redacted).replaceAll(Matcher.quoteReplacement(REDACTED));
     }
 
     private static String canonicalToken(String tokenBody) {
@@ -231,6 +237,14 @@ public final class MaskingEngine {
      */
     public static String maskField(EntityKind kind, String rawValue, MaskingContext ctx) {
         Objects.requireNonNull(ctx, "ctx");
+        if (ctx.privacyMode() == ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
+            Objects.requireNonNull(kind, "kind");
+            if (rawValue == null || rawValue.isBlank()) {
+                throw new IllegalArgumentException("Cannot disclose a blank identifier");
+            }
+            return stripInjectedTokenDelimiters(normalizeSeparators(
+                    Normalizer.normalize(rawValue, Normalizer.Form.NFKC))).strip();
+        }
         return ctx.tokenFor(kind, rawValue);
     }
 

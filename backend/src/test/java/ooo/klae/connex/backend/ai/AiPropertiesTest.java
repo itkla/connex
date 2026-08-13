@@ -37,6 +37,8 @@ class AiPropertiesTest {
         String yaml = new String(applicationConfig.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
         assertFalse(new AiProperties().isEnabled());
+        assertFalse(new AiProperties().isUnmaskedModeEnabled());
+        assertEquals(Duration.ofSeconds(30), new AiProperties().getStreamIdleTimeout());
         assertTrue(new AiProperties().getNat64Prefixes().isEmpty());
         assertEquals(2, new AiProperties().getMaxConcurrentMediaRequests());
         assertEquals(1, new AiProperties().getMaxConcurrentMediaRequestsPerOrg());
@@ -49,6 +51,10 @@ class AiPropertiesTest {
         assertEquals(33554432, new AiProperties().getGenerationMaxRetainedResultBytesPerWorkspace());
         assertEquals(16777216, new AiProperties().getGenerationMaxRetainedResultBytesPerUser());
         assertTrue(yaml.contains("enabled: ${CONNEX_AI_ENABLED:false}"));
+        assertTrue(yaml.contains(
+                "unmasked-mode-enabled: ${CONNEX_AI_UNMASKED_MODE_ENABLED:false}"));
+        assertTrue(yaml.contains(
+                "stream-idle-timeout: ${CONNEX_AI_STREAM_IDLE_TIMEOUT:30s}"));
         assertTrue(yaml.contains("deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}"));
         assertTrue(yaml.contains("assistant-chat: ${CONNEX_AI_FEATURES_ASSISTANT_CHAT:true}"));
         assertTrue(yaml.contains("nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}"));
@@ -104,6 +110,8 @@ class AiPropertiesTest {
                 .withProperty("connex.ai.features.assistant-chat", "false")
                 .withProperty("connex.ai.assistant-max-output-tokens", "7777")
                 .withProperty("connex.ai.assistant-thinking-enabled", "false")
+                .withProperty("connex.ai.unmasked-mode-enabled", "true")
+                .withProperty("connex.ai.stream-idle-timeout", "45s")
                 .withProperty("connex.ai.invocation-quota-window", "15m");
 
         AiProperties properties = Binder.get(environment)
@@ -115,6 +123,8 @@ class AiPropertiesTest {
         assertTrue(properties.isFeatureEnabled(AiFeature.REPORT_NARRATIVE));
         assertEquals(7777, properties.getAssistantMaxOutputTokens());
         assertFalse(properties.isAssistantThinkingEnabled());
+        assertTrue(properties.isUnmaskedModeEnabled());
+        assertEquals(Duration.ofSeconds(45), properties.getStreamIdleTimeout());
         assertEquals(Duration.ofMinutes(15), properties.getInvocationQuotaWindow());
     }
 

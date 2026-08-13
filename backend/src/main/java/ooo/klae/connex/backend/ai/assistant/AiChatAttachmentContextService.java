@@ -105,7 +105,7 @@ public class AiChatAttachmentContextService {
         } catch (IOException exception) {
             throw new ServiceUnavailableException("Assistant attachment could not be closed");
         }
-        MaskingContext context = new MaskingContext();
+        MaskingContext context = new MaskingContext(turn.privacyMode());
         AiInvocation invocation = new AiInvocation(
                 AiFeature.ASSISTANT_CHAT,
                 context,

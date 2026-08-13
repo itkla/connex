@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.ai.masking.CompletionNormalizer;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
@@ -118,7 +119,8 @@ public class AiInvocationService {
                 adapter.contextWindowTokens(resolved.target()),
                 adapter.maxOutputTokens(resolved.target()),
                 adapter.toolCallingCapability(resolved.target()),
-                adapter.nativeToolReasoningCapability(resolved.target()));
+                adapter.nativeToolReasoningCapability(resolved.target()),
+                adapter.supportsStreaming(resolved.target()));
     }
 
     /**
@@ -164,7 +166,7 @@ public class AiInvocationService {
                 invocation, AiOutputMode.TEXT, null,
                 NO_INVOCATION_COMMITMENT, NO_INVOCATION_COMMITMENT)) {
             AiCompletionResult result = raw.result();
-            Demasker.DemaskResult demasked = Demasker.demask(
+            Demasker.DemaskResult demasked = demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
             raw.close();
             emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
@@ -197,7 +199,7 @@ public class AiInvocationService {
                 admission::commitInvocation,
                 Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard"))) {
             AiCompletionResult result = raw.result();
-            Demasker.DemaskResult demasked = Demasker.demask(
+            Demasker.DemaskResult demasked = demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
             raw.close();
             emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
@@ -493,7 +495,7 @@ public class AiInvocationService {
                     raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
                     rejectionReason, stripped, true, captureRepair);
         }
-        int warnings = Demasker.demaskTree(object, invocation.context());
+        int warnings = demaskTree(object, invocation.context());
         T value;
         try {
             value = objectMapper.treeToValue(object, type);
@@ -572,7 +574,7 @@ public class AiInvocationService {
                             ? "native_unknown_tool"
                             : "native_invalid_arguments");
         }
-        int warnings = Demasker.demaskTree(arguments, invocation.context());
+        int warnings = demaskTree(arguments, invocation.context());
         raw.close();
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
@@ -716,7 +718,21 @@ public class AiInvocationService {
             throw new AiImageInputUnsupportedException();
         }
 
+        if (invocation.context().privacyMode() == AiPrivacyMode.UNMASKED
+                && resolved.privacyMode() != AiPrivacyMode.UNMASKED) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "provider", structured, null);
+            throw new ForbiddenException("AI privacy attestation is no longer current");
+        }
+
         AiProvider adapter = aiProviderRouter.adapterFor(resolved.provider());
+        boolean streamed = invocation.streamObserver() != null;
+        if (streamed && (invocation.context().privacyMode() != AiPrivacyMode.UNMASKED
+                || !adapter.supportsStreaming(resolved.target()))) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "provider_capability", structured, null);
+            throw new AiProviderException("AI provider streaming is not available");
+        }
         if (nativeTools != null
                 && adapter.toolCallingCapability(resolved.target())
                         != AiToolCallingMode.NATIVE_FUNCTIONS) {
@@ -800,9 +816,16 @@ public class AiInvocationService {
                         workspaceId, orgId, correlationId, resolved, effectiveInvocation, structured,
                         outputTokensClamped));
             }
-            AiCompletionResult result = withConservativeUsage(adapter.complete(request(
+            AiCompletionRequest providerRequest = request(
                     resolved, effectiveInvocation, outputMode, responseSchema, nativeTools,
-                    reasoningMode, attemptTracker)), effectiveInvocation, serializedPrompt);
+                    reasoningMode, attemptTracker);
+            AiCompletionResult providerResult = streamed
+                    ? adapter.completeStreaming(
+                            providerRequest,
+                            Objects.requireNonNull(effectiveInvocation.streamObserver()))
+                    : adapter.complete(providerRequest);
+            AiCompletionResult result = withConservativeUsage(
+                    providerResult, effectiveInvocation, serializedPrompt);
             attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease,
@@ -841,7 +864,7 @@ public class AiInvocationService {
                 invocation.feature(), invocation.context(), invocation.prompt(), invocation.images(),
                 maxTokens, invocation.temperature(), invocation.reasoningRequested(),
                 invocation.callerDeadline(), invocation.protocol(), invocation.nativeToolsDegradedStatus(),
-                true);
+                true, invocation.streamObserver());
     }
 
     private RuntimeException directAdmissionFailure(
@@ -927,7 +950,7 @@ public class AiInvocationService {
         } catch (MaskingLeakException exception) {
             return new ReasoningNormalization(Optional.empty(), "reasoning_identifier_leak");
         }
-        Demasker.DemaskResult demasked = Demasker.demask(
+        Demasker.DemaskResult demasked = demask(
                 maskedReasoning, invocation.context());
         if (demasked.warnings() != 0) {
             return new ReasoningNormalization(Optional.empty(), "reasoning_placeholder");
@@ -1105,6 +1128,7 @@ public class AiInvocationService {
                     .toList());
         }
         metadata.put("structured", structured);
+        metadata.put("streamed", invocation.streamObserver() != null);
         metadata.put("reasoningRequested", invocation.reasoningRequested());
         if (outputTokensClamped) {
             metadata.put("outputTokensClamped", true);
@@ -1155,7 +1179,8 @@ public class AiInvocationService {
         }
         if (providerRejection != null) {
             metadata.put("providerStatus", providerRejection.statusCode());
-            if (providerRejection.providerDetail() != null) {
+            if (invocation.context().privacyMode() == AiPrivacyMode.MASKED
+                    && providerRejection.providerDetail() != null) {
                 metadata.put("providerDetail", providerRejection.providerDetail());
             }
         }
@@ -1327,6 +1352,16 @@ public class AiInvocationService {
             }
         }
 
+        @Override
+        public void checkpoint() {
+            aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
+                requireCurrentProviderSnapshot();
+                aiFeatureGate.requireAiUsable(invocation.feature());
+                providerAttemptGuard.run();
+                return Boolean.TRUE;
+            });
+        }
+
         private void requireCurrentProviderSnapshot() {
             ResolvedAiProvider current = aiProviderConfigService.resolveForOrg(orgId, userId);
             if (!resolved.equals(current)) {
@@ -1391,6 +1426,18 @@ public class AiInvocationService {
             Instant callerDeadline = invocation.callerDeadline();
             return callerDeadline != null && !clock.instant().isBefore(callerDeadline);
         }
+    }
+
+    private static Demasker.DemaskResult demask(String text, MaskingContext context) {
+        return context.privacyMode() == AiPrivacyMode.UNMASKED
+                ? new Demasker.DemaskResult(text == null ? "" : text, 0)
+                : Demasker.demask(text, context);
+    }
+
+    private static int demaskTree(JsonNode node, MaskingContext context) {
+        return context.privacyMode() == AiPrivacyMode.UNMASKED
+                ? 0
+                : Demasker.demaskTree(node, context);
     }
 
     private record MalformedDiagnostic(

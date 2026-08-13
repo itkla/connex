@@ -79,6 +79,15 @@ report narratives, or provider-backed business-card extraction with
 `CONNEX_AI_FEATURES_INTRO_RATIONALE=false`, `CONNEX_AI_FEATURES_REPORT_NARRATIVE=false`, or
 `CONNEX_AI_FEATURES_BUSINESS_CARD_EXTRACTION=false`. An absent per-feature setting defaults on, but
 the master switch, `AI_USE`, and organization-provider readiness remain mandatory.
+Unmasked AI disclosure remains independently disabled unless
+`CONNEX_AI_UNMASKED_MODE_ENABLED=true`. Even with that deployment flag, an organization stays in
+masked mode until an org admin completes recent-authentication step-up and attests that its exact
+provider destination has current zero-data-retention terms. Changing the provider, region,
+endpoint, API version, deployment, project, model, or internal-endpoint posture invalidates that
+attestation and returns the organization to masked mode. Leave the flag false until the deployment's
+privacy and legal approvals are complete. Streaming uses a 30-second provider inactivity limit by
+default; override it with `CONNEX_AI_STREAM_IDLE_TIMEOUT` only when the provider's documented event
+cadence requires a different bounded value.
 Cache-miss text generation defaults to 300 admitted provider attempts per organization in a rolling
 10-minute window (`CONNEX_AI_INVOCATION_QUOTA_ATTEMPTS_PER_ORG` and
 `CONNEX_AI_INVOCATION_QUOTA_WINDOW`), with 30 seconds between forced refresh attempts for the same

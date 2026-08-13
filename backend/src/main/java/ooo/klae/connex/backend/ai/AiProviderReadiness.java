@@ -14,4 +14,9 @@ public interface AiProviderReadiness {
 
     Optional<AiGenerationProfile> generationProfileForOrg(
             int orgId, int maxTokens, double temperature);
+
+    /** Returns the current fail-closed provider disclosure mode for an organization. */
+    default AiPrivacyMode privacyModeForOrg(int orgId) {
+        return AiPrivacyMode.MASKED;
+    }
 }

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.JsonNode;
@@ -50,6 +51,12 @@ public class VertexAdapter implements AiProvider {
     @Override
     public String providerId() {
         return PROVIDER_VERTEX;
+    }
+
+    @Override
+    public boolean supportsStreaming(AiProviderTarget target) {
+        return target != null && target.modelId() != null
+                && target.modelId().startsWith("gemini");
     }
 
     @Override
@@ -154,6 +161,7 @@ public class VertexAdapter implements AiProvider {
             String responseBody = request.providerAttemptExecutor().execute(() -> {
                 String accessToken = googleAccessTokenClient.accessToken(
                         request.credentials(), deadline);
+                request.providerAttemptExecutor().checkpoint();
                 return vertexClient.complete(endpoint, accessToken, requestBody, deadline);
             });
             return switch (family) {
@@ -162,6 +170,53 @@ public class VertexAdapter implements AiProvider {
                 case CLAUDE -> parseClaudeResponse(
                         responseBody, enforcement, request.reasoningMode());
             };
+        } catch (AiProviderException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new AiProviderException("Vertex adapter failed");
+        }
+    }
+
+    @Override
+    public AiCompletionResult completeStreaming(
+            AiCompletionRequest request,
+            AiProviderStreamObserver observer) {
+        if (request == null || observer == null) {
+            throw new AiProviderException("AI streaming completion request is required");
+        }
+        AiRequestDeadline deadline = request.providerAttemptExecutor()
+                .deadline(aiProperties.getRequestTimeoutMs());
+        AiProviderTarget target = request.target();
+        if (!PROVIDER_VERTEX.equals(target.provider()) || !supportsStreaming(target)) {
+            throw new AiProviderException("Unsupported AI streaming provider");
+        }
+        try {
+            String projectId = requirePattern(target.projectId(), VERTEX_PROJECT_ID,
+                    "Invalid Vertex project id");
+            String region = requirePattern(target.region(), VERTEX_REGION, "Invalid Vertex region");
+            String modelId = requireModelId(target.modelId());
+            if (!request.images().isEmpty()
+                    && !AiImageInputSupport.supports(PROVIDER_VERTEX, modelId, region)) {
+                throw new AiProviderException(
+                        "Vertex model does not support image input in this region");
+            }
+            AiStructuredOutputEnforcement enforcement = requestedEnforcement(
+                    request, ModelFamily.GEMINI, structuredOutputCapability(target));
+            String requestBody = buildGeminiRequest(request, enforcement);
+            URI endpoint = streamingEndpoint(projectId, region, modelId);
+            return request.providerAttemptExecutor().executeStream(() -> {
+                String accessToken = googleAccessTokenClient.accessToken(
+                        request.credentials(), deadline);
+                request.providerAttemptExecutor().checkpoint();
+                return vertexClient.stream(
+                        endpoint,
+                        accessToken,
+                        requestBody,
+                        deadline,
+                        new VertexSseAccumulator(
+                                objectMapper, observer, enforcement, request.reasoningMode()),
+                        observer);
+            });
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -179,6 +234,15 @@ public class VertexAdapter implements AiProvider {
                 + "/publishers/" + publisher
                 + "/models/" + encodePathSegment(modelId)
                 + operation);
+    }
+
+    private URI streamingEndpoint(String projectId, String region, String modelId) {
+        String host = region + "-aiplatform.googleapis.com";
+        return URI.create("https://" + host
+                + "/v1/projects/" + encodePathSegment(projectId)
+                + "/locations/" + encodePathSegment(region)
+                + "/publishers/google/models/" + encodePathSegment(modelId)
+                + ":streamGenerateContent?alt=sse");
     }
 
     private String buildGeminiRequest(

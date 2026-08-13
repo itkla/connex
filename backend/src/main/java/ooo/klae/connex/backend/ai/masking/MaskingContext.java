@@ -15,6 +15,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
+
 /**
  * Ephemeral per-request token map for AI masking. The map is never persisted or serialized, and
  * {@link #toString()} is redacted so accidental logs do not reveal raw CRM identifiers. Connex
@@ -30,6 +32,22 @@ public final class MaskingContext {
     private final Map<String, String> rawIdentifierToToken = new LinkedHashMap<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
+    private final AiPrivacyMode privacyMode;
+
+    /** Creates a request-local masked context. */
+    public MaskingContext() {
+        this(AiPrivacyMode.MASKED);
+    }
+
+    /** Creates a request-local context for the resolved provider disclosure posture. */
+    public MaskingContext(AiPrivacyMode privacyMode) {
+        this.privacyMode = Objects.requireNonNull(privacyMode, "privacyMode");
+    }
+
+    /** Returns the immutable disclosure posture captured before prompt assembly. */
+    public AiPrivacyMode privacyMode() {
+        return privacyMode;
+    }
 
     /**
      * Returns a stable placeholder for an identifier within this request, assigning by first

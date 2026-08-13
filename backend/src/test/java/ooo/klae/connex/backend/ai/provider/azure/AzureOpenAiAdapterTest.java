@@ -35,6 +35,8 @@ import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.openai.OpenAiSseAccumulator;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
@@ -138,6 +140,34 @@ class AzureOpenAiAdapterTest {
                 .path("type").asString());
         assertEquals(AiStructuredOutputEnforcement.JSON_SCHEMA,
                 result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void completeStreamingRequestsUsageSseAndReturnsNormalizedResult() throws Exception {
+        AiCompletionResult streamed = new AiCompletionResult(
+                "{\"final\":{\"text\":\"Hello\"}}", 3, 2, "stop",
+                AiStructuredOutputEnforcement.JSON_OBJECT);
+        when(azureOpenAiClient.stream(
+                any(URI.class), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class),
+                any(AiProviderStreamObserver.class))).thenReturn(streamed);
+        AiProviderStreamObserver observer = text -> {
+        };
+
+        AiCompletionResult result = adapter.completeStreaming(
+                validRequest(
+                        "https://connex.openai.azure.com", "system", AiOutputMode.JSON),
+                observer);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(azureOpenAiClient).stream(
+                any(URI.class), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class),
+                org.mockito.ArgumentMatchers.same(observer));
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        assertEquals(true, body.path("stream").asBoolean());
+        assertEquals(true, body.path("stream_options").path("include_usage").asBoolean());
+        assertSame(streamed, result);
     }
 
     @Test

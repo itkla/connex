@@ -306,12 +306,14 @@ connex:
         # vector, so the org-level allowInternalEndpoint flag is honored only when the operator of
         # a self-hosted instance opts in.
         allow-internal-endpoints: ${CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS:false}
+        unmasked-mode-enabled: ${CONNEX_AI_UNMASKED_MODE_ENABLED:false}
         # Comma-separated RFC 6052 network-specific prefixes used by this deployment's translators.
         # Invalid or overlapping prefixes fail startup; unclassified org-controlled IPv6 fails closed
         # whenever any valid RFC 6052 interpretation could reach a blocked IPv4 destination.
         nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}
         connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
         request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
+        stream-idle-timeout: ${CONNEX_AI_STREAM_IDLE_TIMEOUT:30s}
         max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}
         max-concurrent-media-requests: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS:2}
         max-concurrent-media-requests-per-org: ${CONNEX_AI_MAX_CONCURRENT_MEDIA_REQUESTS_PER_ORG:1}

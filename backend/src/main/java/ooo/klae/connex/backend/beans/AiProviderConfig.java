@@ -26,6 +26,10 @@ public class AiProviderConfig {
     private String credentialLast4;
     private boolean noTrainingAttested;
     private LocalDateTime attestedAt;
+    private boolean zeroDataRetentionAttested;
+    private Integer zdrAttestedByUserId;
+    private LocalDateTime zdrAttestedAt;
+    private Integer zdrAttestationVersion;
     private boolean enabled;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

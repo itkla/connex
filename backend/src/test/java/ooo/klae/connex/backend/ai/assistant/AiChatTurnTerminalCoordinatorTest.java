@@ -10,7 +10,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -132,7 +131,7 @@ class AiChatTurnTerminalCoordinatorTest {
                 AiGenerationTaskResult.Outcome.RESOLVED, null);
 
         assertTrue(claimed);
-        verifyNoInteractions(persistenceService);
+        verify(persistenceService).terminalOffset(TURN);
         verify(dispatcher).sessionNow(
                 TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),

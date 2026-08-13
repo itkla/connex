@@ -244,6 +244,27 @@ class OpenAiCompatibleAdapterTest {
     }
 
     @Test
+    void completeStreamingAddsSseFlagsToExistingStructuredRequest() throws Exception {
+        when(openAiCompatibleClient.stream(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class)))
+                .thenReturn(new AiCompletionResult("Done", 4, 1, "stop"));
+
+        AiCompletionResult result = adapter.completeStreaming(schemaRequest(), text -> {});
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient).stream(
+                eq(URI.create("https://api.example.test/v1/chat/completions")), eq(false),
+                eq(credentials()), bodyCaptor.capture(), any(AiRequestDeadline.class),
+                any(OpenAiSseAccumulator.class));
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        assertTrue(body.path("stream").asBoolean());
+        assertTrue(body.path("stream_options").path("include_usage").asBoolean());
+        assertEquals("json_schema", body.path("response_format").path("type").asString());
+        assertEquals("Done", result.text());
+    }
+
+    @Test
     void complete_translatesNativeToolsExchangesAndToolCalls() throws Exception {
         String firstSignature = "signed replay token /+==\nline two";
         String secondSignature = "response token one /+==";

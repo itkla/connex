@@ -28,6 +28,7 @@ import org.mockito.InOrder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -59,6 +60,7 @@ class AiChatTurnPersistenceServiceTest {
     private AiAssistantIdentifierResolver identifierResolver;
     private AiAssistantToolExecutor toolExecutor;
     private AiChatTurn storedTurn;
+    private AiChatRealtimeDispatcher realtimeDispatcher;
     private AiChatTurnPersistenceService service;
 
     @BeforeEach
@@ -70,6 +72,7 @@ class AiChatTurnPersistenceServiceTest {
         governanceService = mock(AiWorkspaceGovernanceService.class);
         identifierResolver = mock(AiAssistantIdentifierResolver.class);
         toolExecutor = mock(AiAssistantToolExecutor.class);
+        realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
@@ -79,7 +82,7 @@ class AiChatTurnPersistenceServiceTest {
                 identifierResolver,
                 toolExecutor,
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                mock(AiChatRealtimeDispatcher.class),
+                realtimeDispatcher,
                 JsonMapper.builder().build());
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
@@ -140,6 +143,86 @@ class AiChatTurnPersistenceServiceTest {
         toolOrder.verify(chatMapper).updateToolCall(
                 TURN.workspaceId(), TURN.userMessageId(), 29,
                 "failed", "{\"reason\":\"internal_error\"}", TURN.userId());
+    }
+
+    @Test
+    void appendPartialBatchPersistsAndPublishesTheSameUtf16Batch() {
+        AiChatQueuedTurn streamed = new AiChatQueuedTurn(
+                7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
+                AiPrivacyMode.UNMASKED, true);
+        storedTurn.setStreamed(true);
+        storedTurn.setPartialContentUtf16Offset(0);
+        when(chatMapper.appendTurnPartialContent(7, 13, 17, 0, "A😀", 3)).thenReturn(1);
+
+        assertEquals(3, service.appendPartialBatch(streamed, 0, "A😀"));
+
+        verify(realtimeDispatcher).sessionAfterCommit(
+                org.mockito.ArgumentMatchers.eq(7),
+                org.mockito.ArgumentMatchers.eq(13),
+                argThat(frame -> frame.seq() == 0
+                        && "delta".equals(frame.kind())
+                        && "A😀".equals(frame.text())));
+    }
+
+    @Test
+    void ownerCanCancelActiveTurnAndTerminalTurnConflicts() {
+        when(chatMapper.cancelTurn(TURN.workspaceId(), TURN.sessionId(), TURN.turnId()))
+                .thenReturn(1);
+
+        service.cancel(TURN.sessionId(), TURN.turnId());
+
+        verify(chatMapper).cancelTurn(TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        verify(realtimeDispatcher).sessionAfterCommit(
+                org.mockito.ArgumentMatchers.eq(TURN.workspaceId()),
+                org.mockito.ArgumentMatchers.eq(TURN.sessionId()),
+                argThat(frame -> "cancelled".equals(frame.status())));
+
+        storedTurn.setStatus("resolved");
+        assertThrows(ConflictException.class,
+                () -> service.cancel(TURN.sessionId(), TURN.turnId()));
+    }
+
+    @Test
+    void joinedNonRequesterCannotCancelAnotherParticipantsTurn() {
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(99);
+        session.setVisibility("shared");
+        session.setStatus("active");
+        storedTurn.setRequestedByUserId(88);
+        when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        when(chatMapper.isParticipant(
+                TURN.workspaceId(), TURN.sessionId(), TURN.userId())).thenReturn(true);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.cancel(TURN.sessionId(), TURN.turnId()));
+
+        verify(chatMapper, never()).cancelTurn(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+    }
+
+    @Test
+    void nonParticipantCannotCancelAndJoinedRequesterCan() {
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(99);
+        session.setVisibility("shared");
+        session.setStatus("active");
+        when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.cancel(TURN.sessionId(), TURN.turnId()));
+
+        when(chatMapper.isParticipant(
+                TURN.workspaceId(), TURN.sessionId(), TURN.userId())).thenReturn(true);
+        when(chatMapper.cancelTurn(TURN.workspaceId(), TURN.sessionId(), TURN.turnId()))
+                .thenReturn(1);
+
+        service.cancel(TURN.sessionId(), TURN.turnId());
+
+        verify(chatMapper).cancelTurn(TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
     }
 
     @Test

@@ -67,6 +67,21 @@ public class AiFeatureGate {
         }
     }
 
+    /** Resolves the current fail-closed privacy mode after the complete feature gate passes. */
+    public AiPrivacyMode privacyModeIfUsable(AiFeature feature) {
+        if (!hasFeaturePermission(feature)) {
+            return AiPrivacyMode.MASKED;
+        }
+        AiProviderReadiness readiness = providerReadiness.getIfAvailable();
+        if (readiness == null) {
+            return AiPrivacyMode.MASKED;
+        }
+        int orgId = workspaceService.getCurrentOrgId();
+        return readiness.isReadyForOrg(orgId)
+                ? readiness.privacyModeForOrg(orgId)
+                : AiPrivacyMode.MASKED;
+    }
+
     private boolean readiness(int orgId, boolean imageInput) {
         AiProviderReadiness readiness = providerReadiness.getIfAvailable();
         return readiness != null && (imageInput

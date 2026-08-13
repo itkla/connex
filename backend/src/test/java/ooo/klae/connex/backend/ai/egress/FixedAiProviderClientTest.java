@@ -30,6 +30,8 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 
 class FixedAiProviderClientTest {
     private static final String HOST = "fixed-provider.example.test";
@@ -227,6 +229,52 @@ class FixedAiProviderClientTest {
             assertEquals("Fixed provider test response exceeded the configured size limit",
                     exception.getMessage());
             assertFalse(String.valueOf(exception).contains("SENSITIVE_RESPONSE"));
+        } finally {
+            client.shutdown();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void streamingResponseUsesDistinctIdleTimeout() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/idle", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.flush();
+                Thread.sleep(500);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        AiProperties properties = properties(1000, 1024);
+        properties.setStreamIdleTimeout(Duration.ofMillis(50));
+        FixedAiProviderClient client = new FixedAiProviderClient(
+                properties, host -> InetAddress.getLoopbackAddress());
+        URI endpoint = URI.create(
+                "http://" + HOST + ":" + server.getAddress().getPort() + "/idle");
+        try {
+            assertThrows(AiProviderIdleTimeoutException.class, () -> client.postStream(
+                    endpoint,
+                    Set.of(HOST),
+                    Map.of("Accept", "text/event-stream"),
+                    ContentType.APPLICATION_JSON,
+                    REQUEST_BODY,
+                    AiRequestDeadline.afterMillis(1000),
+                    "Fixed provider test",
+                    new AiProviderStreamObserver() {
+                        @Override
+                        public void onContentDelta(String text) {
+                        }
+                    },
+                    input -> {
+                        AiSseEventReader.read(input, ignored -> {
+                        });
+                        return "done";
+                    }));
         } finally {
             client.shutdown();
             server.stop(0);

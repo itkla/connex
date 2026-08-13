@@ -37,7 +37,8 @@ public class AiChatTurnTerminalCoordinator {
             INTERNAL_ERROR);
     private static final Set<String> TIMED_OUT_REASONS = Set.of(
             "generation_timeout",
-            "turn_deadline_exceeded");
+            "turn_deadline_exceeded",
+            "provider_idle_timeout");
 
     private final TenantWorkScope tenantWorkScope;
     private final AiChatTurnPersistenceService persistenceService;
@@ -63,9 +64,11 @@ public class AiChatTurnTerminalCoordinator {
             AiGenerationTaskResult.Outcome outcome,
             String reason) {
         if (outcome == AiGenerationTaskResult.Outcome.RESOLVED) {
+            int terminalOffset = tenantWorkScope.inWorkspace(
+                    turn.workspaceId(), () -> persistenceService.terminalOffset(turn));
             publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                    0, "terminal", null, "resolved", null));
+                    terminalOffset, "terminal", null, "resolved", null));
             return true;
         }
         String status = outcome == AiGenerationTaskResult.Outcome.TIMED_OUT
@@ -76,9 +79,11 @@ public class AiChatTurnTerminalCoordinator {
                 turn.workspaceId(),
                 () -> persistenceService.markTerminal(turn, status, stableReason));
         if (changed) {
+            int terminalOffset = tenantWorkScope.inWorkspace(
+                    turn.workspaceId(), () -> persistenceService.terminalOffset(turn));
             publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                    0, "terminal", null, status, stableReason));
+                    terminalOffset, "terminal", null, status, stableReason));
         }
         return changed;
     }

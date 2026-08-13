@@ -13,6 +13,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
+
 import tools.jackson.databind.ObjectMapper;
 
 class MaskingEngineTest {
@@ -231,6 +233,21 @@ class MaskingEngineTest {
 
         assertEquals("Met " + company + " and " + company + ".", masked);
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
+    @Test
+    void unmaskedModeKeepsIdentifiersWhileUniversalScreensStillApply() {
+        MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
+
+        assertEquals("Mina Patel",
+                MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context));
+        assertEquals("Met Mina Patel",
+                MaskingEngine.maskFreeText("Met Mina Patel", context));
+        assertEquals("Email [redacted]",
+                MaskingEngine.maskFreeText("Email mina@example.com", context));
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY,
+                MaskingEngine.maskFreeText("Medical history discussed", context));
+        assertTrue(context.tokenBindings().isEmpty());
     }
 
     private static boolean containsIgnoreCase(String value, String needle) {

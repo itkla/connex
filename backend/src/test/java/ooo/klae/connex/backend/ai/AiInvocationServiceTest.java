@@ -189,6 +189,80 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void completeStreamingUnmaskedSkipsDemaskingAndAuditsDisclosurePosture() {
+        ResolvedAiProvider unmasked = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(unmasked);
+        when(aiProvider.supportsStreaming(unmasked.target())).thenReturn(true);
+        when(aiProvider.completeStreaming(any(AiCompletionRequest.class), any()))
+                .thenAnswer(call -> {
+                    AiCompletionRequest request = call.getArgument(0);
+                    return request.providerAttemptExecutor().executeStream(() -> {
+                        providerTransport.run();
+                        return new AiCompletionResult("{{P1}}", 12, 4, "end_turn");
+                    });
+                });
+        AiInvocation invocation = unmaskedStreamingInvocation();
+
+        AiCompletionOutcome outcome = service.complete(invocation);
+
+        assertEquals("{{P1}}", outcome.text());
+        assertEquals(0, outcome.demaskWarnings());
+        assertTrue(auditMetadata().stream()
+                .allMatch(metadata -> Boolean.TRUE.equals(metadata.get("streamed"))));
+        verify(aiProvider, never()).complete(any());
+        verify(providerTransport).run();
+    }
+
+    @Test
+    void completeStreamingRechecksAttestationSnapshotBeforeProviderEgress() {
+        ResolvedAiProvider unmasked = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
+                .thenReturn(unmasked, resolved);
+        when(aiProvider.supportsStreaming(unmasked.target())).thenReturn(true);
+        when(aiProvider.completeStreaming(any(AiCompletionRequest.class), any()))
+                .thenAnswer(call -> {
+                    AiCompletionRequest request = call.getArgument(0);
+                    return request.providerAttemptExecutor().executeStream(() -> {
+                        providerTransport.run();
+                        return new AiCompletionResult("unused", 1, 1, "end_turn");
+                    });
+                });
+
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> service.complete(unmaskedStreamingInvocation()));
+
+        assertEquals("AI provider configuration changed before egress", exception.getMessage());
+        assertEquals("failure", singleAuditMetadata().get("outcome"));
+        verify(providerTransport, never()).run();
+    }
+
+    @Test
+    void completeStreamingRechecksAttestationAfterNestedProviderPreparation() {
+        ResolvedAiProvider unmasked = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
+                .thenReturn(unmasked, unmasked, resolved);
+        when(aiProvider.supportsStreaming(unmasked.target())).thenReturn(true);
+        when(aiProvider.completeStreaming(any(AiCompletionRequest.class), any()))
+                .thenAnswer(call -> {
+                    AiCompletionRequest request = call.getArgument(0);
+                    return request.providerAttemptExecutor().executeStream(() -> {
+                        request.providerAttemptExecutor().checkpoint();
+                        providerTransport.run();
+                        return new AiCompletionResult("unused", 1, 1, "end_turn");
+                    });
+                });
+
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> service.complete(unmaskedStreamingInvocation()));
+
+        assertEquals("AI provider configuration changed before egress", exception.getMessage());
+        assertEquals("failure", singleAuditMetadata().get("outcome"));
+        verify(providerTransport, never()).run();
+    }
+
+    @Test
     void completeNativeToolsValidatesMaskedArgumentsAndRecordsProtocol() throws Exception {
         when(aiProvider.toolCallingCapability(resolved.target()))
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
@@ -1030,6 +1104,30 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void unmaskedProviderRejectionNeverAuditsProviderDetail() {
+        ResolvedAiProvider unmasked = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(unmasked);
+        when(aiProvider.supportsStreaming(unmasked.target())).thenReturn(true);
+        when(aiProvider.completeStreaming(any(AiCompletionRequest.class), any()))
+                .thenAnswer(call -> {
+                    AiCompletionRequest request = call.getArgument(0);
+                    return request.providerAttemptExecutor().executeStream(() -> {
+                        throw new AiProviderRequestRejectedException(
+                                "provider", 400, "Mina Patel raw echoed request");
+                    });
+                });
+
+        assertThrows(
+                AiProviderRequestRejectedException.class,
+                () -> service.complete(unmaskedStreamingInvocation()));
+
+        Map<?, ?> failure = singleAuditMetadata();
+        assertEquals(400, failure.get("providerStatus"));
+        assertFalse(failure.containsKey("providerDetail"));
+        assertFalse(failure.toString().contains("Mina Patel"));
+    }
+
+    @Test
     void completeStructured_cleanObject_returnsParsedDemaskedValue() {
         AiInvocation invocation = invocation("Summarize relationship state");
         providerReturns(new AiCompletionResult(
@@ -1644,6 +1742,24 @@ class AiInvocationServiceTest {
                 .userTurn(maskedPromptText + " for " + person)
                 .build();
         return new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+    }
+
+    private AiInvocation unmaskedStreamingInvocation() {
+        MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
+        MaskedPrompt prompt = PromptAssembly.builder()
+                .system("Use concise analysis")
+                .userTurn("Summarize relationship state")
+                .build();
+        return new AiInvocation(FEATURE, context, prompt, 64, 0.2)
+                .withStreamObserver(text -> {});
+    }
+
+    private ResolvedAiProvider unmaskedResolved() {
+        return new ResolvedAiProvider(
+                resolved.provider(), resolved.region(), resolved.modelId(), resolved.endpoint(),
+                resolved.apiVersion(), resolved.deployment(), resolved.projectId(),
+                resolved.allowInternalEndpoint(), resolved.imageInputSupported(),
+                AiPrivacyMode.UNMASKED, resolved.credentials());
     }
 
     private AiInvocation invocation(String maskedPromptText, Instant callerDeadline) {

@@ -269,7 +269,7 @@ class AuditServiceTest {
         entry.setChanges("""
                 {"provider":"vertex","region":"secret region value","model":"claude-sonnet-4@20250514",
                 "feature":"assistant.chat","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
-                "structured":true,"protocol":"native_tools",
+                "structured":true,"streamed":true,"protocol":"native_tools",
                 "outputTokensClamped":true,
                 "nativeToolsDegraded":true,"nativeToolsDegradedStatus":404,
                 "structuredEnforcement":"json_schema","inputTokens":80,
@@ -294,6 +294,7 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains("outputTokensClamped"));
         assertTrue(result.getChanges().contains("native_tool_call"));
         assertTrue(result.getChanges().contains("nativeToolsDegraded"));
+        assertTrue(result.getChanges().contains("streamed"));
         assertTrue(result.getChanges().contains("404"));
         assertTrue(result.getChanges().contains("317"));
         assertTrue(result.getChanges().contains("objectExtracted"));

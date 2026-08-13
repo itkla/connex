@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.provider;
 
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicReference;
 
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 
@@ -27,4 +28,18 @@ public interface AiProviderAttemptExecutor {
      * @return provider response body
      */
     String execute(Supplier<String> attempt);
+
+    /** Executes one provider send that returns a normalized streamed completion. */
+    default AiCompletionResult executeStream(Supplier<AiCompletionResult> attempt) {
+        AtomicReference<AiCompletionResult> result = new AtomicReference<>();
+        execute(() -> {
+            result.set(Objects.requireNonNull(attempt, "attempt").get());
+            return "";
+        });
+        return Objects.requireNonNull(result.get(), "streamed completion");
+    }
+
+    /** Revalidates the current invocation gates immediately before a nested provider send. */
+    default void checkpoint() {
+    }
 }

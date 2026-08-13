@@ -23,6 +23,9 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
 import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
+import ooo.klae.connex.backend.ai.egress.AiSseEventReader;
+import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 
 /**
@@ -92,6 +95,65 @@ public class VertexClient {
             throw new AiProviderException("Vertex invocation failed with status " + response.statusCode());
         }
         return new String(response.body(), StandardCharsets.UTF_8);
+    }
+
+    /** Streams and normalizes one Vertex Gemini completion. */
+    public AiCompletionResult stream(
+            URI endpoint,
+            String accessToken,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            VertexSseAccumulator accumulator,
+            AiProviderStreamObserver observer) {
+        String host = requireVertexEndpoint(endpoint);
+        requireHeaderValue(accessToken);
+        requireText(requestBodyJson, "request body");
+        Objects.requireNonNull(deadline, "deadline");
+        Objects.requireNonNull(accumulator, "accumulator");
+        byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
+        if (providerClient != null) {
+            FixedAiProviderClient.StreamResponse<AiCompletionResult> response =
+                    providerClient.postStream(
+                            endpoint,
+                            Set.of(host),
+                            Map.of(
+                                    "Content-Type", ContentType.APPLICATION_JSON.getMimeType(),
+                                    "Accept", MediaType.TEXT_EVENT_STREAM_VALUE,
+                                    "Authorization", "Bearer " + accessToken),
+                            ContentType.APPLICATION_JSON,
+                            body,
+                            deadline,
+                            "Vertex invocation",
+                            observer,
+                            input -> {
+                                AiSseEventReader.read(
+                                        input, accumulator::accept,
+                                        accumulator::onTransportActivity);
+                                return accumulator.finish();
+                            });
+            if (response.statusCode() < 200 || response.statusCode() > 299) {
+                throw new AiProviderException(
+                        "Vertex invocation failed with status " + response.statusCode());
+            }
+            return Objects.requireNonNull(response.value(), "Vertex streaming response");
+        }
+        RestClient.RequestBodySpec spec = restClient.post()
+                .uri(endpoint)
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .header("Authorization", "Bearer " + accessToken);
+        AiEgressGuard.requireFetchableHost(host, false);
+        return spec.body(body).exchange((request, response) -> {
+            if (response.getStatusCode().isError()) {
+                throw new AiProviderException(
+                        "Vertex invocation failed with status "
+                                + response.getStatusCode().value());
+            }
+            AiSseEventReader.read(
+                    response.getBody(), accumulator::accept,
+                    accumulator::onTransportActivity);
+            return accumulator.finish();
+        });
     }
 
     private VertexResponse sendOnce(
