@@ -35,8 +35,18 @@ import ErrorState from '@/app/components/ErrorState';
 import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
-import type { AskConnexAttachment, AskConnexFileAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
+import AskConnexToolCard, {
+    type AskConnexToolCardLabels,
+} from '@/app/components/ask-connex/AskConnexToolCard';
+import type {
+    AskConnexAttachment,
+    AskConnexFileAttachment,
+    AskConnexToolAction,
+    AskConnexToolCardState,
+    AskConnexTurnState,
+} from '@/app/lib/askConnex';
 import {
+    anchorAskConnexToolCards,
     askConnexCitationHref,
     askConnexCitations,
     askConnexTranscript,
@@ -191,6 +201,7 @@ type AskConnexDrawerLabels = {
     turnWorking: string;
     uploadProgress: (progress: number) => string;
     uploadRemoving: string;
+    toolCard: AskConnexToolCardLabels;
 };
 
 type AskConnexDrawerProps = {
@@ -219,6 +230,7 @@ type AskConnexDrawerProps = {
     contentTooLong: boolean;
     working: boolean;
     turn: AskConnexTurnState;
+    toolCalls: AskConnexToolCardState[];
     unavailable: UnavailableState;
     starterPrompts: string[];
     labels: AskConnexDrawerLabels;
@@ -240,6 +252,7 @@ type AskConnexDrawerProps = {
     onAttachFiles: (files: File[]) => void;
     onRemoveFileAttachment: (attachment: AskConnexFileAttachment) => void;
     onSend: (content?: string) => void;
+    onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 };
 
 type ConversationSurfaceProps = Omit<
@@ -372,16 +385,20 @@ function TranscriptMessage({
     firstInGroup,
     lastInGroup,
     suggestions,
+    toolCalls,
     labels,
     onSend,
+    onToolAction,
 }: {
     message: AiChatMessage;
     fresh: boolean;
     firstInGroup: boolean;
     lastInGroup: boolean;
     suggestions: string[];
+    toolCalls: AskConnexToolCardState[];
     labels: AskConnexDrawerLabels;
     onSend: (content?: string) => void;
+    onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
     const format = useFormatter();
     const reduceMotion = useReducedMotion() ?? false;
@@ -423,6 +440,14 @@ function TranscriptMessage({
                 </motion.div>
                 {!user ? <MessageCitations citations={message.citations} labels={labels} /> : null}
                 {!user ? (
+                    <ToolCallCards
+                        cards={toolCalls}
+                        labels={labels.toolCard}
+                        actionsDisabled={false}
+                        onAction={onToolAction}
+                    />
+                ) : null}
+                {!user ? (
                     <MessageSuggestions
                         suggestions={suggestions}
                         label={labels.suggestedFollowUps}
@@ -436,6 +461,33 @@ function TranscriptMessage({
                 ) : null}
             </MessageContent>
         </Message>
+    );
+}
+
+function ToolCallCards({
+    cards,
+    labels,
+    actionsDisabled,
+    onAction,
+}: {
+    cards: AskConnexToolCardState[];
+    labels: AskConnexToolCardLabels;
+    actionsDisabled: boolean;
+    onAction: (toolCallId: number, action: AskConnexToolAction) => void;
+}) {
+    if (cards.length === 0) return null;
+    return (
+        <div className="space-y-2">
+            {cards.map((card) => (
+                <AskConnexToolCard
+                    key={card.id}
+                    card={card}
+                    labels={labels}
+                    actionsDisabled={actionsDisabled}
+                    onAction={onAction}
+                />
+            ))}
+        </div>
     );
 }
 
@@ -732,6 +784,7 @@ function ConversationSurface({
     contentTooLong,
     working,
     turn,
+    toolCalls,
     unavailable,
     starterPrompts,
     labels,
@@ -749,6 +802,7 @@ function ConversationSurface({
     onAttachFiles,
     onRemoveFileAttachment,
     onSend,
+    onToolAction,
     open,
 }: ConversationSurfaceProps) {
     const transcript = useMemo(
@@ -757,6 +811,10 @@ function ConversationSurface({
     );
     const visibleMessages = transcript.messages;
     const groups = useMemo(() => groupAskConnexMessages(visibleMessages), [visibleMessages]);
+    const toolCardAnchors = useMemo(
+        () => anchorAskConnexToolCards(toolCalls, visibleMessages),
+        [toolCalls, visibleMessages],
+    );
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [recordPickerRequest, setRecordPickerRequest] = useState(0);
     const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
@@ -840,7 +898,7 @@ function ConversationSurface({
                                     <HistorySummaryMarker label={labels.historySummarized} />
                                 </MessageScrollerItem>
                             ) : null}
-                            {loadState === 'ready' && visibleMessages.length === 0 ? (
+                            {loadState === 'ready' && visibleMessages.length === 0 && toolCalls.length === 0 ? (
                                 <MessageScrollerItem messageId="empty">
                                     <EmptyState
                                         icon={SparklesIcon}
@@ -891,8 +949,10 @@ function ConversationSurface({
                                                             firstInGroup={index === 0}
                                                             lastInGroup={index === group.messages.length - 1}
                                                             suggestions={message.id === latestMessageId ? suggestions : []}
+                                                            toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
                                                             labels={labels}
                                                             onSend={onSend}
+                                                            onToolAction={onToolAction}
                                                         />
                                                     ))}
                                                 </MessageGroup>
@@ -901,6 +961,22 @@ function ConversationSurface({
                                     })}
                                 </>
                             ) : null}
+                            {[...toolCardAnchors.byTurnId.entries()].map(([turnId, cards]) => (
+                                <MessageScrollerItem
+                                    key={`tool-turn:${turnId}`}
+                                    messageId={`tool-turn:${turnId}`}
+                                    className="px-4 pt-5 last:pb-5"
+                                >
+                                    <div className="pl-10">
+                                        <ToolCallCards
+                                            cards={cards}
+                                            labels={labels.toolCard}
+                                            actionsDisabled={loadState !== 'ready' || activeSession === null}
+                                            onAction={onToolAction}
+                                        />
+                                    </div>
+                                </MessageScrollerItem>
+                            ))}
                             {turn.phase !== 'idle' ? (
                                 <MessageScrollerItem messageId={`turn:${turn.turnId ?? turn.phase}`}>
                                     <TurnActivity turn={turn} labels={labels} />
@@ -1134,6 +1210,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         contentTooLong: props.contentTooLong,
         working: props.working,
         turn: props.turn,
+        toolCalls: props.toolCalls,
         unavailable: props.unavailable,
         starterPrompts: props.starterPrompts,
         labels: props.labels,
@@ -1154,6 +1231,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onAttachFiles: props.onAttachFiles,
         onRemoveFileAttachment: props.onRemoveFileAttachment,
         onSend: props.onSend,
+        onToolAction: props.onToolAction,
     };
 
     const desktopPanel = !isMobile && desktopRoot ? createPortal(

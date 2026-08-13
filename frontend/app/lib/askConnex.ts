@@ -1,5 +1,12 @@
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
-import type { AiChatCitation, AiChatMessage, AiChatPageContext, Page } from '@/app/lib/types';
+import type {
+    AiAssistantToolCall,
+    AiAssistantToolCallMutation,
+    AiChatCitation,
+    AiChatMessage,
+    AiChatPageContext,
+    Page,
+} from '@/app/lib/types';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -135,6 +142,78 @@ export type AskConnexTurnEvent =
     | { type: 'status'; status: string; reason?: string | null }
     | { type: 'reset' };
 
+/** User action exposed by an assistant tool-call card. */
+export type AskConnexToolAction = 'approve' | 'reject' | 'undo';
+
+/** Localized failure category retained on a card after an action rolls back. */
+export type AskConnexToolCardFailure =
+    | 'proposalChanged'
+    | 'proposalPermissionLost'
+    | 'proposalUnavailable'
+    | 'undoConflict'
+    | 'actionFailed';
+
+/** Localized summaries for the complete current assistant write-tool catalog. */
+export type AskConnexToolSummaryLabels = {
+    createActivity: string;
+    createTask: string;
+    createNote: string;
+    addTag: string;
+    changeDealStage: string;
+    changeDealStageTo: (value: string) => string;
+    assignOwner: string;
+    assignOwnerTo: (value: string) => string;
+    removeOwner: string;
+    runWriteTool: string;
+    requestRejected: string;
+    requestFailed: string;
+    createdRecordRemoved: string;
+    activityCreated: string;
+    taskCreated: string;
+    noteCreated: string;
+    tagAdded: string;
+    tagAlreadyPresent: string;
+    dealStageChanged: string;
+    ownerRemoved: string;
+    ownerAssigned: string;
+    requestCompleted: string;
+};
+
+/** Client interaction state layered over one viewer-safe tool-call projection. */
+export type AskConnexToolCardState = AiAssistantToolCall & {
+    pendingAction: AskConnexToolAction | null;
+    failure: AskConnexToolCardFailure | null;
+    undoBlocked: boolean;
+};
+
+/** Events that reconcile server tool-call state with local card actions. */
+export type AskConnexToolCardsEvent =
+    | { type: 'replace'; toolCalls: readonly AiAssistantToolCall[] }
+    | { type: 'actionStarted'; toolCallId: number; action: AskConnexToolAction }
+    | {
+        type: 'actionFailed';
+        toolCallId: number;
+        action: AskConnexToolAction;
+        failure: AskConnexToolCardFailure;
+    }
+    | {
+        type: 'actionApplied';
+        toolCallId: number;
+        action: AskConnexToolAction;
+        mutation: AiAssistantToolCallMutation;
+    }
+    | { type: 'actionSettled'; toolCall: AiAssistantToolCall }
+    | { type: 'reset' };
+
+/** Tool cards partitioned by their transcript message or unresolved turn anchor. */
+export type AskConnexToolCardAnchors = {
+    byMessageId: ReadonlyMap<number, AskConnexToolCardState[]>;
+    byTurnId: ReadonlyMap<number, AskConnexToolCardState[]>;
+};
+
+/** Initial assistant tool-card collection for an unloaded or empty session. */
+export const EMPTY_ASK_CONNEX_TOOL_CARDS: AskConnexToolCardState[] = [];
+
 /** Initial state for a provider with no active or recently completed turn. */
 export const EMPTY_ASK_CONNEX_TURN: AskConnexTurnState = {
     phase: 'idle',
@@ -143,6 +222,192 @@ export const EMPTY_ASK_CONNEX_TURN: AskConnexTurnState = {
     generationHandle: null,
     reason: null,
 };
+
+function toolCardState(toolCall: AiAssistantToolCall): AskConnexToolCardState {
+    return {
+        ...toolCall,
+        pendingAction: null,
+        failure: null,
+        undoBlocked: false,
+    };
+}
+
+function sameToolCallProjection(
+    current: AskConnexToolCardState,
+    incoming: AiAssistantToolCall,
+): boolean {
+    return current.status === incoming.status
+        && current.updatedAt === incoming.updatedAt
+        && current.undoAvailable === incoming.undoAvailable
+        && current.undoExpiresAt === incoming.undoExpiresAt;
+}
+
+/** Reduces canonical tool-call refreshes and in-flight actions without re-arming terminal cards. */
+export function reduceAskConnexToolCards(
+    state: AskConnexToolCardState[],
+    event: AskConnexToolCardsEvent,
+): AskConnexToolCardState[] {
+    if (event.type === 'reset') return EMPTY_ASK_CONNEX_TOOL_CARDS;
+    if (event.type === 'replace') {
+        const currentById = new Map(state.map((card) => [card.id, card]));
+        return event.toolCalls.map((toolCall) => {
+            const current = currentById.get(toolCall.id);
+            if (!current || !sameToolCallProjection(current, toolCall)) {
+                return toolCardState(toolCall);
+            }
+            return {
+                ...toolCall,
+                pendingAction: current.pendingAction,
+                failure: current.failure,
+                undoBlocked: current.undoBlocked,
+            };
+        });
+    }
+    if (event.type === 'actionSettled') {
+        return state.map((card) => card.id === event.toolCall.id
+            ? toolCardState(event.toolCall)
+            : card);
+    }
+    return state.map((card) => {
+        if (card.id !== event.toolCallId) return card;
+        if (event.type === 'actionStarted') {
+            return { ...card, pendingAction: event.action, failure: null };
+        }
+        if (card.pendingAction !== event.action) return card;
+        if (event.type === 'actionFailed') {
+            return {
+                ...card,
+                pendingAction: null,
+                failure: event.failure,
+                undoBlocked: card.undoBlocked || event.failure === 'undoConflict',
+            };
+        }
+        if (event.type === 'actionApplied') {
+            return {
+                ...card,
+                status: event.mutation.status,
+                undoAvailable: event.mutation.undoAvailable,
+                undoExpiresAt: event.mutation.undoExpiresAt,
+                pendingAction: null,
+                failure: null,
+                undoBlocked: false,
+            };
+        }
+        return card;
+    });
+}
+
+/** Returns controls allowed by a card's tier, durable state, and live undo deadline. */
+export function askConnexToolCardAffordances(
+    card: AskConnexToolCardState,
+    now: number,
+): AskConnexToolAction[] {
+    if (card.tier === 'confirm'
+        && card.status === 'proposed'
+        && (card.failure === null || card.failure === 'proposalChanged')) {
+        if (card.failure === 'proposalChanged') return ['reject'];
+        return ['reject', 'approve'];
+    }
+    if (card.tier !== 'auto'
+        || card.status !== 'executed'
+        || !card.undoAvailable
+        || card.undoBlocked
+        || card.undoExpiresAt === null) return [];
+    const expiresAt = Date.parse(card.undoExpiresAt);
+    return Number.isFinite(expiresAt) && now <= expiresAt ? ['undo'] : [];
+}
+
+/** Derives the visual expiry state for an executed auto-tier card. */
+export function askConnexToolCardStatus(
+    card: AskConnexToolCardState,
+    now: number,
+): AskConnexToolCardState['status'] | 'expired' {
+    if (card.tier !== 'auto' || card.status !== 'executed' || card.undoExpiresAt === null) {
+        return card.status;
+    }
+    const expiresAt = Date.parse(card.undoExpiresAt);
+    return Number.isFinite(expiresAt) && now > expiresAt ? 'expired' : card.status;
+}
+
+/** Resolves a viewer-authorized assistant tool target to its record-detail route. */
+export function askConnexToolTargetHref(target: AiAssistantToolCall['target']): string | null {
+    if (target.id === null) return null;
+    if (target.kind === 'person') return `/records/contacts/${target.id}`;
+    if (target.kind === 'company') return `/records/companies/${target.id}`;
+    return `/records/deals/${target.id}`;
+}
+
+function summaryValue(summary: string, prefix: string): string | null {
+    return summary.startsWith(prefix) && summary.length > prefix.length
+        ? summary.slice(prefix.length).trim()
+        : null;
+}
+
+/** Localizes one resolved tool request while retaining viewer-safe dynamic record values. */
+export function askConnexToolRequestSummary(
+    toolCall: AiAssistantToolCall,
+    labels: AskConnexToolSummaryLabels,
+): string {
+    if (toolCall.toolName === 'create_activity') return labels.createActivity;
+    if (toolCall.toolName === 'create_task') return labels.createTask;
+    if (toolCall.toolName === 'create_note') return labels.createNote;
+    if (toolCall.toolName === 'add_tag') return labels.addTag;
+    if (toolCall.toolName === 'change_deal_stage') {
+        const stage = summaryValue(toolCall.requestSummary, 'Change deal stage to:');
+        return stage === null ? labels.changeDealStage : labels.changeDealStageTo(stage);
+    }
+    if (toolCall.toolName === 'assign_owner') {
+        if (toolCall.requestSummary === 'Remove the current owner') return labels.removeOwner;
+        const owner = summaryValue(toolCall.requestSummary, 'Assign owner:');
+        return owner === null ? labels.assignOwner : labels.assignOwnerTo(owner);
+    }
+    return labels.runWriteTool;
+}
+
+/** Localizes one terminal tool outcome without exposing private result data. */
+export function askConnexToolOutcomeSummary(
+    toolCall: AiAssistantToolCall,
+    labels: AskConnexToolSummaryLabels,
+): string | null {
+    if (toolCall.outcomeSummary === null) return null;
+    if (toolCall.status === 'rejected') return labels.requestRejected;
+    if (toolCall.status === 'failed') return labels.requestFailed;
+    if (toolCall.status === 'undone') return labels.createdRecordRemoved;
+    if (toolCall.toolName === 'create_activity') return labels.activityCreated;
+    if (toolCall.toolName === 'create_task') return labels.taskCreated;
+    if (toolCall.toolName === 'create_note') return labels.noteCreated;
+    if (toolCall.toolName === 'add_tag') {
+        if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;
+        if (toolCall.outcomeSummary === 'Tag was already present') return labels.tagAlreadyPresent;
+        return labels.requestCompleted;
+    }
+    if (toolCall.toolName === 'change_deal_stage') return labels.dealStageChanged;
+    if (toolCall.toolName === 'assign_owner') {
+        return toolCall.outcomeSummary === 'Owner removed'
+            ? labels.ownerRemoved
+            : labels.ownerAssigned;
+    }
+    return labels.requestCompleted;
+}
+
+/** Anchors each card to its visible assistant message, falling back to its durable turn id. */
+export function anchorAskConnexToolCards(
+    cards: readonly AskConnexToolCardState[],
+    messages: readonly AiChatMessage[],
+): AskConnexToolCardAnchors {
+    const visibleMessageIds = new Set(messages.map((message) => message.id));
+    const byMessageId = new Map<number, AskConnexToolCardState[]>();
+    const byTurnId = new Map<number, AskConnexToolCardState[]>();
+    for (const card of cards) {
+        if (card.messageId !== null) {
+            if (!visibleMessageIds.has(card.messageId)) continue;
+            byMessageId.set(card.messageId, [...(byMessageId.get(card.messageId) ?? []), card]);
+            continue;
+        }
+        byTurnId.set(card.turnId, [...(byTurnId.get(card.turnId) ?? []), card]);
+    }
+    return { byMessageId, byTurnId };
+}
 
 /** Builds the active-session key using the established user/workspace preference scheme. */
 export function askConnexSessionStorageKey(userId: number | null, workspaceId: number | null): string {

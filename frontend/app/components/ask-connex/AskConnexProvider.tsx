@@ -20,10 +20,13 @@ import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import {
     ApiError,
+    approveAiAssistantToolCall,
     archiveAiChatSession,
     createAiChatSession,
     deleteAiChatAttachment,
     getActiveWorkspaceMembers,
+    getAiAssistantToolCall,
+    getAiAssistantToolCalls,
     getAiChatAttachments,
     getAiChatInvitations,
     getAiChatParticipants,
@@ -36,15 +39,18 @@ import {
     joinAiChatSession,
     leaveAiChatPresence,
     leaveAiChatSession,
+    rejectAiAssistantToolCall,
     removeAiChatParticipant,
     resolveAcceptedAiGeneration,
     setAiChatSessionShared,
     startAiChatTurn,
     touchAiChatPresence,
+    undoAiAssistantToolCall,
     uploadAiChatAttachment,
     updateAiChatSession,
 } from '@/app/lib/api';
 import {
+    EMPTY_ASK_CONNEX_TOOL_CARDS,
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
     activeRecordAskConnexContext,
@@ -56,12 +62,15 @@ import {
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
+    reduceAskConnexToolCards,
     reduceAskConnexTurn,
     removeReadyAskConnexFile,
     removeAskConnexAttachment,
     serializeStoredAskConnexTurn,
     type AskConnexAttachment,
     type AskConnexFileAttachment,
+    type AskConnexToolAction,
+    type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
@@ -117,6 +126,15 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 
 function deferredErrorToast(message: string): void {
     window.setTimeout(() => toastError(message), 0);
+}
+
+function toolCardFailure(error: unknown, action: AskConnexToolAction): AskConnexToolCardFailure {
+    if (!(error instanceof ApiError)) return 'actionFailed';
+    if (action === 'undo' && error.status === 409) return 'undoConflict';
+    if (action !== 'undo' && error.status === 409) return 'proposalChanged';
+    if (action !== 'undo' && error.status === 403) return 'proposalPermissionLost';
+    if (action !== 'undo' && error.status === 404) return 'proposalUnavailable';
+    return 'actionFailed';
 }
 
 function safeStorageSet(key: string, value: string): void {
@@ -205,6 +223,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [submitting, setSubmitting] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
     const [turn, dispatchTurn] = useReducer(reduceAskConnexTurn, EMPTY_ASK_CONNEX_TURN);
+    const [toolCalls, dispatchToolCalls] = useReducer(
+        reduceAskConnexToolCards,
+        EMPTY_ASK_CONNEX_TOOL_CARDS,
+    );
 
     const messagesRef = useRef<AiChatMessage[]>([]);
     const identityControllerRef = useRef<AbortController | null>(null);
@@ -218,6 +240,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const transcriptRefreshVersionRef = useRef(0);
     const realtimeRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
     const submittingRef = useRef(false);
+    const toolActionsRef = useRef<Set<number>>(new Set());
 
     const contextResult = useMemo(
         () => mergeAskConnexContext(context.record, composer),
@@ -237,10 +260,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         (attachment) => attachment.status !== 'failed',
     ).length;
     const contextOverflow = contextResult.pageContext.length + fileContextCount > 10;
+    const toolActionPending = toolCalls.some((toolCall) => toolCall.pendingAction !== null);
     const working = submitting
         || turn.phase === 'accepted'
         || turn.phase === 'running'
-        || fileOperationPending;
+        || fileOperationPending
+        || toolActionPending;
     const scoped = stateIdentity === identity && !switching;
 
     useEffect(() => {
@@ -304,13 +329,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         animateNew: boolean,
     ): Promise<AiChatSession | null> => {
         const refreshVersion = ++transcriptRefreshVersionRef.current;
-        const [firstDetail, attachments] = await Promise.all([
+        const [firstDetail, attachments, refreshedToolCalls] = await Promise.all([
             getAiChatSession(
                 sessionId,
                 { page: 1, size: ASK_CONNEX_MESSAGE_PAGE_SIZE },
                 { signal },
             ),
             getAiChatAttachments(sessionId, { signal }),
+            getAiAssistantToolCalls(sessionId, { signal }),
         ]);
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
         const nextMessages = await loadAskConnexLatestMessages(
@@ -336,6 +362,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
                 .map((message) => message.id))
             : new Set());
+        dispatchToolCalls({ type: 'replace', toolCalls: refreshedToolCalls });
         setFileAttachments(attachments.map(readyFileAttachment));
         setActiveSession(firstDetail.session);
         activeSessionRef.current = firstDetail.session;
@@ -371,6 +398,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         submittingRef.current = false;
         setSubmitting(false);
         dispatchTurn({ type: 'reset' });
+        dispatchToolCalls({ type: 'reset' });
         setLoadState('ready');
         setLoadError(null);
     }, [sessionKey, turnKey]);
@@ -485,6 +513,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
             dispatchTurn({ type: 'reset' });
+            dispatchToolCalls({ type: 'reset' });
             setLoadState('loading');
             setLoadError(null);
 
@@ -566,6 +595,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         submittingRef.current = false;
         setSubmitting(false);
         dispatchTurn({ type: 'reset' });
+        dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         try {
             await refreshTranscript(session.id, signal, false);
@@ -928,6 +958,67 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [activeSession, newChat, t, working]);
 
+    const performToolAction = useCallback(async (
+        toolCallId: number,
+        action: AskConnexToolAction,
+    ) => {
+        const session = activeSessionRef.current;
+        const signal = identityControllerRef.current?.signal;
+        const card = toolCalls.find((toolCall) => toolCall.id === toolCallId);
+        if (!session || !signal || signal.aborted || !card || toolActionsRef.current.has(toolCallId)) {
+            return;
+        }
+        const operationEpoch = sessionEpochRef.current;
+        toolActionsRef.current.add(toolCallId);
+        dispatchToolCalls({ type: 'actionStarted', toolCallId, action });
+        try {
+            const mutation = action === 'approve'
+                ? await approveAiAssistantToolCall(session.id, toolCallId, { signal })
+                : action === 'reject'
+                    ? await rejectAiAssistantToolCall(session.id, toolCallId, { signal })
+                    : await undoAiAssistantToolCall(session.id, toolCallId, { signal });
+            if (signal.aborted
+                || operationEpoch !== sessionEpochRef.current
+                || activeSessionRef.current?.id !== session.id) return;
+            dispatchToolCalls({ type: 'actionApplied', toolCallId, action, mutation });
+            try {
+                const refreshed = await getAiAssistantToolCall(session.id, toolCallId, { signal });
+                if (signal.aborted
+                    || operationEpoch !== sessionEpochRef.current
+                    || activeSessionRef.current?.id !== session.id) return;
+                dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+            } catch {
+                if (!signal.aborted
+                    && operationEpoch === sessionEpochRef.current
+                    && activeSessionRef.current?.id === session.id) {
+                    toastError(t('toast.toolActionRefreshFailed'));
+                }
+            }
+        } catch (error) {
+            if (signal.aborted
+                || operationEpoch !== sessionEpochRef.current
+                || activeSessionRef.current?.id !== session.id) return;
+            const failure = toolCardFailure(error, action);
+            dispatchToolCalls({ type: 'actionFailed', toolCallId, action, failure });
+            toastError(t(`toolCards.failures.${failure}`));
+            if (action !== 'undo'
+                && error instanceof ApiError
+                && error.status === 409) {
+                try {
+                    const refreshed = await getAiAssistantToolCall(session.id, toolCallId, { signal });
+                    if (!signal.aborted
+                        && operationEpoch === sessionEpochRef.current
+                        && activeSessionRef.current?.id === session.id
+                        && refreshed.status !== 'proposed') {
+                        dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+                    }
+                } catch {}
+            }
+        } finally {
+            toolActionsRef.current.delete(toolCallId);
+        }
+    }, [t, toolCalls]);
+
     const send = useCallback(async (contentOverride?: string) => {
         const requestContent = contentOverride ?? composer;
         const content = askConnexMessageContent(requestContent);
@@ -1141,6 +1232,64 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnResolved: t('turnResolved'),
         turnTimedOut: t('turnTimedOut'),
         turnWorking: t('turnWorking'),
+        toolCard: {
+            actionFailed: t('toolCards.failures.actionFailed'),
+            approve: t('toolCards.actions.approve'),
+            approveAria: (target: string) => t('toolCards.actions.approveAria', { target }),
+            approving: t('toolCards.actions.approving'),
+            beforeApproval: t('toolCards.change.beforeApproval'),
+            executedDetail: t('toolCards.states.executedDetail'),
+            executedStatus: t('toolCards.states.executed'),
+            expiredDetail: t('toolCards.states.expiredDetail'),
+            expiredStatus: t('toolCards.states.expired'),
+            failedDetail: t('toolCards.states.failedDetail'),
+            failedStatus: t('toolCards.states.failed'),
+            ifApproved: t('toolCards.change.ifApproved'),
+            noChangeYet: t('toolCards.change.noChangeYet'),
+            outcome: t('toolCards.outcome'),
+            pendingDetail: t('toolCards.states.pendingDetail'),
+            pendingStatus: t('toolCards.states.pending'),
+            proposalChanged: t('toolCards.failures.proposalChanged'),
+            proposalPermissionLost: t('toolCards.failures.proposalPermissionLost'),
+            proposalUnavailable: t('toolCards.failures.proposalUnavailable'),
+            recordLink: (target: string) => t('toolCards.recordLink', { target }),
+            reject: t('toolCards.actions.reject'),
+            rejectAria: (target: string) => t('toolCards.actions.rejectAria', { target }),
+            rejectedDetail: t('toolCards.states.rejectedDetail'),
+            rejectedStatus: t('toolCards.states.rejected'),
+            rejecting: t('toolCards.actions.rejecting'),
+            restrictedTarget: t('toolCards.restrictedTarget'),
+            undo: t('toolCards.actions.undo'),
+            undoAria: (target: string) => t('toolCards.actions.undoAria', { target }),
+            undoConflict: t('toolCards.failures.undoConflict'),
+            undoneDetail: t('toolCards.states.undoneDetail'),
+            undoneStatus: t('toolCards.states.undone'),
+            undoing: t('toolCards.actions.undoing'),
+            summaries: {
+                createActivity: t('toolCards.summaries.createActivity'),
+                createTask: t('toolCards.summaries.createTask'),
+                createNote: t('toolCards.summaries.createNote'),
+                addTag: t('toolCards.summaries.addTag'),
+                changeDealStage: t('toolCards.summaries.changeDealStage'),
+                changeDealStageTo: (value: string) => t('toolCards.summaries.changeDealStageTo', { value }),
+                assignOwner: t('toolCards.summaries.assignOwner'),
+                assignOwnerTo: (value: string) => t('toolCards.summaries.assignOwnerTo', { value }),
+                removeOwner: t('toolCards.summaries.removeOwner'),
+                runWriteTool: t('toolCards.summaries.runWriteTool'),
+                requestRejected: t('toolCards.summaries.requestRejected'),
+                requestFailed: t('toolCards.summaries.requestFailed'),
+                createdRecordRemoved: t('toolCards.summaries.createdRecordRemoved'),
+                activityCreated: t('toolCards.summaries.activityCreated'),
+                taskCreated: t('toolCards.summaries.taskCreated'),
+                noteCreated: t('toolCards.summaries.noteCreated'),
+                tagAdded: t('toolCards.summaries.tagAdded'),
+                tagAlreadyPresent: t('toolCards.summaries.tagAlreadyPresent'),
+                dealStageChanged: t('toolCards.summaries.dealStageChanged'),
+                ownerRemoved: t('toolCards.summaries.ownerRemoved'),
+                ownerAssigned: t('toolCards.summaries.ownerAssigned'),
+                requestCompleted: t('toolCards.summaries.requestCompleted'),
+            },
+        },
     }), [t, tDisclosure]);
 
     const value = useMemo<AskConnexContextValue>(
@@ -1177,6 +1326,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 contentTooLong={scoped && contentTooLong}
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
+                toolCalls={scoped ? toolCalls : EMPTY_ASK_CONNEX_TOOL_CARDS}
                 unavailable={unavailable}
                 starterPrompts={starterPrompts}
                 labels={labels}
@@ -1198,6 +1348,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onAttachFiles={(files) => void attachFiles(files)}
                 onRemoveFileAttachment={(attachment) => void removeFileAttachment(attachment)}
                 onSend={(content) => void send(content)}
+                onToolAction={(toolCallId, action) => void performToolAction(toolCallId, action)}
             />
         </AskConnexContext.Provider>
     );

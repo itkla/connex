@@ -2458,6 +2458,42 @@ export type AiChatTurn = {
     terminalReason: string | null;
 };
 
+/** Viewer-authorized target identity for an assistant write-tool call. */
+export type AiAssistantToolCallTarget = {
+    kind: AiChatPageContextKind;
+    id: number | null;
+    label: string | null;
+};
+
+/** Viewer-safe transcript projection for one assistant write-tool call. */
+export type AiAssistantToolCall = {
+    id: number;
+    toolName: string;
+    tier: 'auto' | 'confirm';
+    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone';
+    target: AiAssistantToolCallTarget;
+    requestSummary: string;
+    outcomeSummary: string | null;
+    messageId: number | null;
+    turnId: number;
+    undoExpiresAt: string | null;
+    undoAvailable: boolean;
+    createdAt: string;
+    updatedAt: string;
+    executedAt: string | null;
+};
+
+/** Mutation response returned after approving, rejecting, or undoing a tool call. */
+export type AiAssistantToolCallMutation = {
+    id: number;
+    tool: string;
+    tier: 'auto' | 'confirm';
+    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone';
+    result: unknown;
+    undoAvailable: boolean;
+    undoExpiresAt: string | null;
+};
+
 /** Minimal assistant-turn result retained behind the shared generation handle. */
 export type AiChatTurnGenerationResult = {
     turnId: number;

@@ -383,6 +383,72 @@
     "budgetExhausted": "The organization daily AI token budget is exhausted.",
     "toolResultBudgetExhausted": "This turn ran out of context space while gathering relationship data. Try a more focused record set or date range.",
     "turnTimedOut": "This turn timed out before it could finish.",
+    "toolCards": {
+      "outcome": "Outcome",
+      "recordLink": "Open {target}",
+      "restrictedTarget": "Restricted record",
+      "states": {
+        "pending": "Needs approval",
+        "pendingDetail": "Nothing has happened yet. Review the exact action before approving.",
+        "executed": "Completed",
+        "executedDetail": "This action has already been completed.",
+        "rejected": "Rejected",
+        "rejectedDetail": "This proposal was rejected. No change was made.",
+        "undone": "Undone",
+        "undoneDetail": "The assistant-created record was removed.",
+        "failed": "Failed",
+        "failedDetail": "This action did not complete.",
+        "expired": "Undo expired",
+        "expiredDetail": "This action completed, but its undo window is closed."
+      },
+      "change": {
+        "beforeApproval": "Before approval",
+        "noChangeYet": "No change",
+        "ifApproved": "If approved"
+      },
+      "actions": {
+        "approve": "Approve",
+        "approveAria": "Approve the proposed action for {target}",
+        "approving": "Approving…",
+        "reject": "Reject",
+        "rejectAria": "Reject the proposed action for {target}",
+        "rejecting": "Rejecting…",
+        "undo": "Undo",
+        "undoAria": "Undo the assistant action for {target}",
+        "undoing": "Undoing…"
+      },
+      "failures": {
+        "proposalChanged": "The target changed after this proposal was shown. Reject it and ask for a new proposal.",
+        "proposalPermissionLost": "You no longer have permission to approve this proposal.",
+        "proposalUnavailable": "This proposal is no longer available. Its permissions or target may have changed.",
+        "undoConflict": "This record changed after the assistant created it, so it can’t be undone safely.",
+        "actionFailed": "This action did not complete. Try again."
+      },
+      "summaries": {
+        "createActivity": "Create an activity",
+        "createTask": "Create a task",
+        "createNote": "Create a note",
+        "addTag": "Add an existing tag",
+        "changeDealStage": "Change the deal stage",
+        "changeDealStageTo": "Change deal stage to: {value}",
+        "assignOwner": "Assign an owner",
+        "assignOwnerTo": "Assign owner: {value}",
+        "removeOwner": "Remove the current owner",
+        "runWriteTool": "Run a write action",
+        "requestRejected": "Request rejected",
+        "requestFailed": "Request failed",
+        "createdRecordRemoved": "Created record removed",
+        "activityCreated": "Activity created",
+        "taskCreated": "Task created",
+        "noteCreated": "Note created",
+        "tagAdded": "Tag added",
+        "tagAlreadyPresent": "Tag was already present",
+        "dealStageChanged": "Deal stage changed",
+        "ownerRemoved": "Owner removed",
+        "ownerAssigned": "Owner assigned",
+        "requestCompleted": "Request completed"
+      }
+    },
     "upload": {
       "progress": "Uploading {progress}%",
       "removing": "Removing…",
@@ -435,7 +501,8 @@
       "participantRemoved": "Participant removed",
       "requestFailed": "Ask Connex request failed",
       "turnFailed": "Ask Connex could not complete the turn",
-      "turnTimedOut": "Ask Connex timed out"
+      "turnTimedOut": "Ask Connex timed out",
+      "toolActionRefreshFailed": "The action completed, but its latest status could not be loaded"
     },
     "citations": "Sources",
     "citationKindPerson": "Contact",
