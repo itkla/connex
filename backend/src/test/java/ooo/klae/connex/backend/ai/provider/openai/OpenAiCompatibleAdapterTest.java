@@ -98,6 +98,26 @@ class OpenAiCompatibleAdapterTest {
                 target("https://api.example.test/v1", false, "google/gemma-4-31b-it")));
         assertEquals(4_096, adapter.maxOutputTokens(
                 target("https://api.example.test/v1", false, "unknown-modern-model")));
+        assertEquals(4_096, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemini-2.5-flash-image")));
+        assertEquals(4_096, adapter.maxOutputTokens(
+                target("https://api.example.test/v1", false, "gemini-2.5-flash-image")));
+        assertEquals(4_096, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemini-2.5-flash-preview-tts")));
+        assertEquals(2_097_152, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemini-1.5-pro")));
+        assertEquals(1_048_576, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gemini-2.0-flash")));
+        assertEquals(8_192, adapter.maxOutputTokens(
+                target("https://api.example.test/v1", false, "gemini-1.5-flash-8b")));
+        assertEquals(200_000, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "o3")));
+        assertEquals(100_000, adapter.maxOutputTokens(
+                target("https://api.example.test/v1", false, "o4-mini")));
+        assertEquals(128_000, adapter.contextWindowTokens(
+                target("https://api.example.test/v1", false, "gpt-4.5-preview")));
+        assertEquals(16_384, adapter.maxOutputTokens(
+                target("https://api.example.test/v1", false, "gpt-4.5-preview")));
     }
 
     @Test

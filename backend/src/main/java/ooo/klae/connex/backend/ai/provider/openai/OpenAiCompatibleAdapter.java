@@ -47,6 +47,16 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     private static final int CONSERVATIVE_TOKEN_FALLBACK = 4_096;
     private static final Pattern GEMINI_TEXT_MODEL = Pattern.compile(
             "^gemini-(?:2\\.5|3(?:\\.\\d+)?)-(?:flash|pro)(?:[-.@].*)?$");
+    private static final Pattern GEMINI_LEGACY_PRO_MODEL = Pattern.compile(
+            "^gemini-1\\.5-pro(?:[-.@].*)?$");
+    private static final Pattern GEMINI_LEGACY_FLASH_MODEL = Pattern.compile(
+            "^gemini-(?:1\\.5|2\\.0)-flash(?:-(?:8b|lite))?(?:[-.@].*)?$");
+    private static final Pattern OPENAI_REASONING_MODEL = Pattern.compile(
+            "^o[134](?:-(?:mini|pro))?(?:-\\d{4}-\\d{2}-\\d{2})?$");
+    private static final Pattern GPT_FOUR_FIVE_MODEL = Pattern.compile(
+            "^gpt-4\\.5(?:-preview)?(?:-\\d{4}-\\d{2}-\\d{2})?$");
+    private static final Pattern NON_TEXT_MODEL_VARIANT = Pattern.compile(
+            ".*-(?:image|live|tts|audio|native-audio|embedding|exp-image)(?:[-.@].*)?$");
     private static final Pattern GPT_FOUR_O_TEXT_MODEL = Pattern.compile(
             "^gpt-4o(?:-mini)?(?:-\\d{4}-\\d{2}-\\d{2})?$");
     private static final Pattern GPT_FOUR_ONE_TEXT_MODEL = Pattern.compile(
@@ -94,16 +104,30 @@ public class OpenAiCompatibleAdapter implements AiProvider {
      * @see <a href="https://developers.openai.com/api/docs/models/gpt-5.4">GPT-5.4 limits</a>
      * @see <a href="https://developers.openai.com/api/docs/models/gpt-4.1">GPT-4.1 limits</a>
      * @see <a href="https://developers.openai.com/api/docs/models/gpt-4o">GPT-4o limits</a>
+     * @see <a href="https://developers.openai.com/api/docs/models/o3">OpenAI o-series limits</a>
+     * @see <a href="https://ai.google.dev/gemini-api/docs/models">Gemini 1.5/2.0 limits</a>
      * @see <a href="https://platform.claude.com/docs/en/about-claude/models/overview">Claude model limits</a>
      */
     @Override
     public int contextWindowTokens(AiProviderTarget target) {
         String modelId = normalizedModelId(target);
-        if (modelId == null) {
+        if (modelId == null || NON_TEXT_MODEL_VARIANT.matcher(modelId).matches()) {
             return CONSERVATIVE_TOKEN_FALLBACK;
         }
         if (GEMINI_TEXT_MODEL.matcher(modelId).matches()) {
             return 1_048_576;
+        }
+        if (GEMINI_LEGACY_PRO_MODEL.matcher(modelId).matches()) {
+            return 2_097_152;
+        }
+        if (GEMINI_LEGACY_FLASH_MODEL.matcher(modelId).matches()) {
+            return 1_048_576;
+        }
+        if (OPENAI_REASONING_MODEL.matcher(modelId).matches()) {
+            return 200_000;
+        }
+        if (GPT_FOUR_FIVE_MODEL.matcher(modelId).matches()) {
+            return 128_000;
         }
         if (GPT_FOUR_ONE_TEXT_MODEL.matcher(modelId).matches()) {
             return 1_047_576;
@@ -151,11 +175,21 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     @Override
     public int maxOutputTokens(AiProviderTarget target) {
         String modelId = normalizedModelId(target);
-        if (modelId == null) {
+        if (modelId == null || NON_TEXT_MODEL_VARIANT.matcher(modelId).matches()) {
             return CONSERVATIVE_TOKEN_FALLBACK;
         }
         if (GEMINI_TEXT_MODEL.matcher(modelId).matches()) {
             return 65_536;
+        }
+        if (GEMINI_LEGACY_PRO_MODEL.matcher(modelId).matches()
+                || GEMINI_LEGACY_FLASH_MODEL.matcher(modelId).matches()) {
+            return 8_192;
+        }
+        if (OPENAI_REASONING_MODEL.matcher(modelId).matches()) {
+            return 100_000;
+        }
+        if (GPT_FOUR_FIVE_MODEL.matcher(modelId).matches()) {
+            return 16_384;
         }
         if (GPT_FIVE_CHAT_MODEL.matcher(modelId).matches()) {
             return 16_384;
