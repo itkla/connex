@@ -2402,6 +2402,19 @@ export type AiChatRealtimeFrame = {
     reason: string | null;
 };
 
+/**
+ * One live streamed answer fragment for an unmasked-organization assistant turn. `seq` is the
+ * character offset of `text` within the turn's full streamed answer — it starts at 0 and grows
+ * monotonically, so the client can reassemble fragments, detect gaps, and de-duplicate overlap
+ * against a REST-hydrated persisted partial by comparing offsets against applied length.
+ */
+export type AiChatDeltaFrame = {
+    turnId: number;
+    seq: number;
+    kind: 'delta';
+    text: string;
+};
+
 /** Active workspace AI kill switch and assistant turn limit. */
 export type AiWorkspaceGovernance = {
     workspaceId: number;
@@ -2450,12 +2463,13 @@ export type AiChatTurnAccepted = {
     status: string;
 };
 
-/** Caller-safe durable state for one assistant turn. */
+/** Caller-safe durable state for one assistant turn, including the persisted streamed partial. */
 export type AiChatTurn = {
     turnId: number;
     sessionId: number;
     status: string;
     terminalReason: string | null;
+    partialContent?: string | null;
 };
 
 /** Viewer-authorized target identity for an assistant write-tool call. */

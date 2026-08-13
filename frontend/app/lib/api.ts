@@ -5065,6 +5065,19 @@ export function getAiChatTurn(
     );
 }
 
+/** Requests a server-side stop of one in-flight assistant turn. */
+export function cancelAiChatTurn(
+    sessionId: number,
+    turnId: number,
+    init: RequestInit = {},
+) {
+    return postJson<void>(
+        `/api/ai/assistant/sessions/${sessionId}/turns/${turnId}/cancel`,
+        {},
+        init,
+    );
+}
+
 export function getAiAssistantToolCalls(
     sessionId: number,
     params: { pendingOnly?: boolean } = {},

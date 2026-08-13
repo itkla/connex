@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
     ArchiveBoxIcon,
     ArrowRightStartOnRectangleIcon,
@@ -19,6 +19,8 @@ import {
     PencilSquareIcon,
     PlusIcon,
     SparklesIcon,
+    StopCircleIcon,
+    StopIcon,
     UserGroupIcon,
     UserPlusIcon,
     UserIcon,
@@ -54,6 +56,7 @@ import {
     hasPendingAskConnexFileOperation,
     latestAskConnexSuggestions,
 } from '@/app/lib/askConnex';
+import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
 import { easeOut, instant, springSmooth } from '@/app/lib/motion';
 import { formatFileSize } from '@/app/lib/utils';
 import type {
@@ -187,6 +190,8 @@ type AskConnexDrawerLabels = {
     shareDescription: string;
     shared: string;
     shareTitle: string;
+    stop: string;
+    stopping: string;
     suggestedFollowUps: string;
     thinking: string;
     title: string;
@@ -194,9 +199,11 @@ type AskConnexDrawerLabels = {
     typing: (names: string) => string;
     unshare: string;
     turnAccepted: string;
+    turnCancelled: string;
     turnFailed: string;
     turnImageUnsupported: string;
     turnResolved: string;
+    turnStreaming: string;
     turnTimedOut: string;
     turnWorking: string;
     uploadProgress: (progress: number) => string;
@@ -230,6 +237,9 @@ type AskConnexDrawerProps = {
     contentTooLong: boolean;
     working: boolean;
     turn: AskConnexTurnState;
+    streamStore: AskConnexStreamStore;
+    streaming: boolean;
+    cancelling: boolean;
     toolCalls: AskConnexToolCardState[];
     actionableToolCallIds: ReadonlySet<number>;
     unavailable: UnavailableState;
@@ -253,6 +263,7 @@ type AskConnexDrawerProps = {
     onAttachFiles: (files: File[]) => void;
     onRemoveFileAttachment: (attachment: AskConnexFileAttachment) => void;
     onSend: (content?: string) => void;
+    onCancelTurn: () => void;
     onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 };
 
@@ -526,7 +537,19 @@ function PresenceStrip({ presence, labels }: { presence: AiChatPresence; labels:
     );
 }
 
-function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskConnexDrawerLabels }) {
+function TurnActivity({
+    turn,
+    streaming,
+    cancelling,
+    labels,
+    onCancel,
+}: {
+    turn: AskConnexTurnState;
+    streaming: boolean;
+    cancelling: boolean;
+    labels: AskConnexDrawerLabels;
+    onCancel: () => void;
+}) {
     if (turn.phase === 'idle') return null;
     if (turn.phase === 'resolved') {
         return (
@@ -558,11 +581,73 @@ function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskC
             </div>
         );
     }
+    if (turn.phase === 'cancelled') {
+        return (
+            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
+                <StopCircleIcon className="size-3.5" />
+                <span>{labels.turnCancelled}</span>
+            </div>
+        );
+    }
     return (
-        <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
+        <div role="status" className="flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground">
             <SparklesIcon className="size-3.5" />
-            <span>{turn.phase === 'accepted' ? labels.turnAccepted : labels.turnWorking}</span>
+            <span>{cancelling
+                ? labels.stopping
+                : turn.phase === 'accepted'
+                    ? labels.turnAccepted
+                    : streaming
+                        ? labels.turnStreaming
+                        : labels.turnWorking}</span>
+            <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={labels.stop}
+                disabled={cancelling}
+                onClick={onCancel}
+            >
+                <StopIcon className="size-3.5" />
+            </Button>
         </div>
+    );
+}
+
+function StreamingTail({
+    store,
+    turn,
+    labels,
+}: {
+    store: AskConnexStreamStore;
+    turn: AskConnexTurnState;
+    labels: AskConnexDrawerLabels;
+}) {
+    const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, () => null);
+    if (snapshot === null || snapshot.text.length === 0 || snapshot.turnId !== turn.turnId) {
+        return null;
+    }
+    const live = turn.phase === 'accepted' || turn.phase === 'running';
+
+    return (
+        <MessageScrollerItem messageId="streaming-tail" className="px-4 pt-5 last:pb-5">
+            <MessageGroup>
+                <Message align="start">
+                    <SenderAvatar user={false} label={labels.assistantAuthor} />
+                    <MessageContent className="w-auto max-w-[85%] gap-1.5">
+                        <MessageHeader>{labels.assistantAuthor}</MessageHeader>
+                        <div className="whitespace-pre-wrap break-words rounded-2xl bg-muted px-3.5 py-2.5 text-sm leading-relaxed text-foreground">
+                            {snapshot.text}
+                            {live ? (
+                                <span
+                                    aria-hidden
+                                    className="ml-px inline-block h-[1em] w-0.5 translate-y-[0.125em] rounded-full bg-foreground/70 animate-caret-blink motion-reduce:animate-none"
+                                />
+                            ) : null}
+                        </div>
+                    </MessageContent>
+                </Message>
+            </MessageGroup>
+        </MessageScrollerItem>
     );
 }
 
@@ -790,6 +875,9 @@ function ConversationSurface({
     contentTooLong,
     working,
     turn,
+    streamStore,
+    streaming,
+    cancelling,
     toolCalls,
     actionableToolCallIds,
     unavailable,
@@ -809,6 +897,7 @@ function ConversationSurface({
     onAttachFiles,
     onRemoveFileAttachment,
     onSend,
+    onCancelTurn,
     onToolAction,
     open,
 }: ConversationSurfaceProps) {
@@ -1011,9 +1100,18 @@ function ConversationSurface({
                                     })}
                                 </>
                             ) : null}
+                            {loadState === 'ready' ? (
+                                <StreamingTail store={streamStore} turn={turn} labels={labels} />
+                            ) : null}
                             {turn.phase !== 'idle' ? (
                                 <MessageScrollerItem messageId={`turn:${turn.turnId ?? turn.phase}`}>
-                                    <TurnActivity turn={turn} labels={labels} />
+                                    <TurnActivity
+                                        turn={turn}
+                                        streaming={streaming}
+                                        cancelling={cancelling}
+                                        labels={labels}
+                                        onCancel={onCancelTurn}
+                                    />
                                 </MessageScrollerItem>
                             ) : null}
                         </MessageScrollerContent>
@@ -1244,6 +1342,9 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         contentTooLong: props.contentTooLong,
         working: props.working,
         turn: props.turn,
+        streamStore: props.streamStore,
+        streaming: props.streaming,
+        cancelling: props.cancelling,
         toolCalls: props.toolCalls,
         actionableToolCallIds: props.actionableToolCallIds,
         unavailable: props.unavailable,
@@ -1266,6 +1367,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onAttachFiles: props.onAttachFiles,
         onRemoveFileAttachment: props.onRemoveFileAttachment,
         onSend: props.onSend,
+        onCancelTurn: props.onCancelTurn,
         onToolAction: props.onToolAction,
     };
 

@@ -1,7 +1,7 @@
 import { Client, type IMessage } from "@stomp/stompjs";
 
 import { csrfHeader } from "@/app/lib/api";
-import { type AiChatRealtimeFrame, type Notification } from "@/app/lib/types";
+import { type AiChatDeltaFrame, type AiChatRealtimeFrame, type Notification } from "@/app/lib/types";
 
 const NOTIFICATIONS_QUEUE = "/user/queue/notifications";
 const AI_CHAT_QUEUE = "/user/queue/ai-chat";
@@ -45,6 +45,7 @@ export type NotificationSocket = {
 /** Callbacks for one authenticated assistant-session realtime stream. */
 export type AiChatSocketHandlers = {
     onFrame: (frame: AiChatRealtimeFrame) => void;
+    onDelta?: (frame: AiChatDeltaFrame) => void;
     onStatusChange?: (status: RealtimeStatus) => void;
 };
 
@@ -87,13 +88,27 @@ function parseFrame(message: IMessage): RealtimeNotificationFrame | null {
     return parsed as RealtimeNotificationFrame;
 }
 
-function parseAiChatFrame(message: IMessage): AiChatRealtimeFrame | null {
-    let parsed: unknown;
+function parseJsonBody(message: IMessage): unknown {
     try {
-        parsed = JSON.parse(message.body);
+        return JSON.parse(message.body);
     } catch {
         return null;
     }
+}
+
+function parseAiChatDeltaFrame(parsed: unknown): AiChatDeltaFrame | null {
+    if (typeof parsed !== "object" || parsed === null) return null;
+    if (Reflect.get(parsed, "kind") !== "delta") return null;
+    const turnId = Reflect.get(parsed, "turnId");
+    const seq = Reflect.get(parsed, "seq");
+    const text = Reflect.get(parsed, "text");
+    if (typeof turnId !== "number" || !Number.isSafeInteger(turnId) || turnId <= 0) return null;
+    if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
+    if (typeof text !== "string") return null;
+    return { turnId, seq, kind: "delta", text };
+}
+
+function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
     if (typeof parsed !== "object" || parsed === null) return null;
     const workspaceId = Reflect.get(parsed, "workspaceId");
     const sessionId = Reflect.get(parsed, "sessionId");
@@ -184,10 +199,16 @@ export function createNotificationSocket(handlers: NotificationSocketHandlers): 
     }, handlers.onStatusChange);
 }
 
-/** Creates a metadata-only assistant-session socket on the authenticated user's queue. */
+/** Creates an assistant-session socket carrying metadata frames and streamed answer deltas. */
 export function createAiChatSocket(handlers: AiChatSocketHandlers): NotificationSocket {
     return createUserQueueSocket(AI_CHAT_QUEUE, (message) => {
-        const frame = parseAiChatFrame(message);
+        const parsed = parseJsonBody(message);
+        const delta = parseAiChatDeltaFrame(parsed);
+        if (delta) {
+            handlers.onDelta?.(delta);
+            return;
+        }
+        const frame = parseAiChatFrame(parsed);
         if (frame) handlers.onFrame(frame);
     }, handlers.onStatusChange);
 }
