@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ExecutedReplay;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolBudgetAudit;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -40,7 +41,6 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
-import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
@@ -173,8 +173,16 @@ public class AiChatAgentLoopService {
                                     stepRepair);
                     AiAssistantPromptAssembler.NativeReplay nativeReplay = nativeTools
                             ? promptAssembler.nativeReplay(
-                                    toolTurns, maskingContext, memory.budget(), stepRepair)
-                            : new AiAssistantPromptAssembler.NativeReplay(List.of(), null);
+                                    toolTurns,
+                                    nativeCalls,
+                                    maskingContext,
+                                    memory.budget(),
+                                    stepRepair)
+                            : new AiAssistantPromptAssembler.NativeReplay(
+                                    List.of(), null, ToolBudgetAudit.NONE);
+                    if (nativeTools) {
+                        toolBudgetAudit = nativeReplay.audit();
+                    }
                     AiInvocation invocation = new AiInvocation(
                             AiFeature.ASSISTANT_CHAT,
                             maskingContext,
@@ -206,10 +214,7 @@ public class AiChatAgentLoopService {
                         if (nativeTools) {
                             AiNativeToolRequest nativeRequest = new AiNativeToolRequest(
                                     nativeDefinitions,
-                                    nativeExchanges(
-                                            toolTurns,
-                                            nativeCalls,
-                                            nativeReplay.toolResults()),
+                                    nativeReplay.exchanges(),
                                     nativeReplay.repairMessage());
                             nativeProviderAttempts++;
                             NativeStepAttempt nativeAttempt = nativeStepAttempt(
@@ -297,20 +302,22 @@ public class AiChatAgentLoopService {
                     String argumentsJson = serialize(step.tool().args());
                     String toolCallKey = step.tool().name() + "\n"
                             + serialize(canonicalize(step.tool().args()));
+                    recordNativeCall(
+                            nativeTools, nativeCalls,
+                            stepNumber, nativeProviderCall);
                     AiAssistantToolResult cachedResult = toolResultCache.get(toolCallKey);
                     if (cachedResult != null) {
                         noProgressSteps++;
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                             return AiGenerationTaskResult.failed("no_progress");
                         }
-                        recordNativeCall(
-                                nativeTools, nativeCalls,
-                                stepNumber, nativeProviderCall);
                         ToolTurn cachedTurn = new ToolTurn(
                                 stepNumber, step.tool().name(), cachedResult);
-                        toolBudgetAudit = promptAssembler.requireAdditionalToolResultCapacity(
+                        toolBudgetAudit = requireAdditionalToolCapacity(
+                                nativeTools,
                                 toolTurns,
                                 cachedTurn,
+                                nativeCalls,
                                 maskingContext,
                                 memory.budget());
                         toolTurns.add(cachedTurn);
@@ -334,6 +341,7 @@ public class AiChatAgentLoopService {
                         try {
                             requireCurrentToolExecution(turn);
                             int guardedStepNumber = stepNumber;
+                            boolean guardedNativeTools = nativeTools;
                             AiAssistantToolResult toolResult;
                             boolean replayed = false;
                             ToolBudgetAudit admittedToolBudgetAudit;
@@ -342,36 +350,30 @@ public class AiChatAgentLoopService {
                                         writeToolService.executeAuto(
                                                 turn,
                                                 toolCallId,
-                                                candidate -> promptAssembler
-                                                        .requireAdditionalToolResultCapacity(
-                                                                toolTurns,
-                                                                new ToolTurn(
-                                                                        guardedStepNumber,
-                                                                        step.tool().name(),
-                                                                        candidate),
-                                                                maskingContext,
-                                                                memory.budget()));
+                                                candidate -> requireAdditionalToolCapacity(
+                                                        guardedNativeTools,
+                                                        toolTurns,
+                                                        new ToolTurn(
+                                                                guardedStepNumber,
+                                                                step.tool().name(),
+                                                                candidate),
+                                                        nativeCalls,
+                                                        maskingContext,
+                                                        memory.budget()));
                                 toolResult = execution.toolResult();
                                 replayed = execution.replayed();
                                 if (replayed) {
-                                    List<ToolTurn> replayTurns = promptAssembler.withExecutedReplay(
-                                            toolTurns,
-                                            new ToolTurn(
-                                                    stepNumber,
-                                                    step.tool().name(),
-                                                    toolResult),
-                                            maskingContext,
-                                            memory.budget());
-                                    toolTurns.clear();
-                                    toolTurns.addAll(replayTurns);
-                                    toolResult = toolTurns.getLast().result();
-                                    admittedToolBudgetAudit = promptAssembler.toolBudgetAudit(
-                                            toolTurns,
-                                            maskingContext,
-                                            memory.budget());
-                                } else {
-                                    admittedToolBudgetAudit = promptAssembler
-                                            .requireAdditionalToolResultCapacity(
+                                    ExecutedReplay executedReplay = nativeTools
+                                            ? promptAssembler.withExecutedNativeReplay(
+                                                    toolTurns,
+                                                    new ToolTurn(
+                                                            stepNumber,
+                                                            step.tool().name(),
+                                                            toolResult),
+                                                    nativeCalls,
+                                                    maskingContext,
+                                                    memory.budget())
+                                            : promptAssembler.withExecutedReplay(
                                                     toolTurns,
                                                     new ToolTurn(
                                                             stepNumber,
@@ -379,18 +381,34 @@ public class AiChatAgentLoopService {
                                                             toolResult),
                                                     maskingContext,
                                                     memory.budget());
+                                    toolTurns.clear();
+                                    toolTurns.addAll(executedReplay.toolTurns());
+                                    toolResult = toolTurns.getLast().result();
+                                    admittedToolBudgetAudit = executedReplay.audit();
+                                } else {
+                                    admittedToolBudgetAudit = requireAdditionalToolCapacity(
+                                            nativeTools,
+                                            toolTurns,
+                                            new ToolTurn(
+                                                    stepNumber,
+                                                    step.tool().name(),
+                                                    toolResult),
+                                            nativeCalls,
+                                            maskingContext,
+                                            memory.budget());
                                 }
                             } else {
                                 toolResult = writeToolService.proposalResult(write, proposal);
-                                admittedToolBudgetAudit = promptAssembler
-                                        .requireAdditionalToolResultCapacity(
-                                                toolTurns,
-                                                new ToolTurn(
-                                                        stepNumber,
-                                                        step.tool().name(),
-                                                        toolResult),
-                                                maskingContext,
-                                                memory.budget());
+                                admittedToolBudgetAudit = requireAdditionalToolCapacity(
+                                        nativeTools,
+                                        toolTurns,
+                                        new ToolTurn(
+                                                stepNumber,
+                                                step.tool().name(),
+                                                toolResult),
+                                        nativeCalls,
+                                        maskingContext,
+                                        memory.budget());
                             }
                             toolBudgetAudit = admittedToolBudgetAudit;
                             String status = write.tier() == AiAssistantToolCatalog.ToolTier.AUTO
@@ -413,9 +431,6 @@ public class AiChatAgentLoopService {
                                 toolTurns.add(new ToolTurn(
                                         stepNumber, step.tool().name(), toolResult));
                             }
-                            recordNativeCall(
-                                    nativeTools, nativeCalls,
-                                    stepNumber, nativeProviderCall);
                             if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                                 return AiGenerationTaskResult.failed("no_progress");
                             }
@@ -450,9 +465,11 @@ public class AiChatAgentLoopService {
                                 turn.includePrivateNotes());
                         ToolTurn admittedTurn = new ToolTurn(
                                 stepNumber, step.tool().name(), toolResult);
-                        toolBudgetAudit = promptAssembler.requireAdditionalToolResultCapacity(
+                        toolBudgetAudit = requireAdditionalToolCapacity(
+                                nativeTools,
                                 toolTurns,
                                 admittedTurn,
+                                nativeCalls,
                                 maskingContext,
                                 memory.budget());
                         String resultJson = promptAssembler.durableToolResult(
@@ -473,9 +490,6 @@ public class AiChatAgentLoopService {
                         } else {
                             noProgressSteps++;
                         }
-                        recordNativeCall(
-                                nativeTools, nativeCalls,
-                                stepNumber, nativeProviderCall);
                         toolTurns.add(admittedTurn);
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                             return AiGenerationTaskResult.failed("no_progress");
@@ -720,23 +734,26 @@ public class AiChatAgentLoopService {
         return true;
     }
 
-    private static List<AiToolExchange> nativeExchanges(
+    private ToolBudgetAudit requireAdditionalToolCapacity(
+            boolean nativeTools,
             List<ToolTurn> toolTurns,
+            ToolTurn prospectiveTurn,
             Map<Integer, AiToolCall> nativeCalls,
-            List<String> maskedResults) {
-        if (toolTurns.size() != maskedResults.size()) {
-            throw new IllegalStateException("Native tool replay is inconsistent");
+            MaskingContext maskingContext,
+            AiAssistantPromptBudget budget) {
+        if (nativeTools) {
+            return promptAssembler.requireAdditionalNativeExchangeCapacity(
+                    toolTurns,
+                    prospectiveTurn,
+                    nativeCalls,
+                    maskingContext,
+                    budget);
         }
-        List<AiToolExchange> exchanges = new ArrayList<>(toolTurns.size());
-        for (int index = 0; index < toolTurns.size(); index++) {
-            ToolTurn turn = toolTurns.get(index);
-            AiToolCall call = nativeCalls.get(turn.seq());
-            if (call == null || !call.name().equals(turn.tool())) {
-                throw new IllegalStateException("Native tool call replay is unavailable");
-            }
-            exchanges.add(new AiToolExchange(call, maskedResults.get(index)));
-        }
-        return List.copyOf(exchanges);
+        return promptAssembler.requireAdditionalToolResultCapacity(
+                toolTurns,
+                prospectiveTurn,
+                maskingContext,
+                budget);
     }
 
     private static void recordNativeCall(

@@ -601,17 +601,19 @@ class AiInvocationServiceTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget);
-        String maskedResult = promptAssembler.nativeReplay(
-                turns, context, budget, null).toolResults().getFirst();
+        AiToolCall call = new AiToolCall(
+                "call_1",
+                "search_records",
+                "{\"query\":\"cooling\","
+                        + "\"kinds\":[\"person\"]}");
         AiNativeToolRequest request = new AiNativeToolRequest(
                 promptAssembler.nativeToolDefinitions(),
-                List.of(new AiToolExchange(
-                        new AiToolCall(
-                                "call_1",
-                                "search_records",
-                                "{\"query\":\"cooling\","
-                                        + "\"kinds\":[\"person\"]}"),
-                        maskedResult)));
+                promptAssembler.nativeReplay(
+                        turns,
+                        Map.of(1, call),
+                        context,
+                        budget,
+                        null).exchanges());
 
         int serializedBytes = service.serializedPromptBytes(
                 prompt,
@@ -621,7 +623,8 @@ class AiInvocationServiceTest {
 
         assertTrue(serializedBytes <= AiProviderCapabilities.conservativeInputByteCeiling(
                 capabilities.contextWindowTokens(), budget.maxOutputTokens()));
-        assertTrue(maskedResult.contains("CRM_DATA_BEGIN"));
+        assertTrue(request.exchanges().getFirst().maskedResult()
+                .contains("CRM_DATA_BEGIN"));
     }
 
     @Test
