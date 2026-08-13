@@ -20,6 +20,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 
 import org.apache.hc.client5.http.ConnectTimeoutException;
 import org.apache.hc.client5.http.config.ConnectionConfig;
@@ -41,6 +42,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import jakarta.annotation.PreDestroy;
+import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
@@ -58,6 +60,8 @@ import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 public class OpenAiCompatibleClient {
     private static final int BUFFER_BYTES = 8192;
     private static final int MAX_CONCURRENT_RESOLUTIONS = 2;
+    private static final ObjectMapper DETAIL_MAPPER = new ObjectMapper();
+    private static final Pattern OPAQUE_TOKEN = Pattern.compile("[A-Za-z0-9_-]{24,}");
 
     private final RestClient restClient;
     private final int maxResponseBytes;
@@ -147,9 +151,34 @@ public class OpenAiCompatibleClient {
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
             throw new AiProviderRequestRejectedException(
-                    "OpenAI-compatible", response.statusCode());
+                    "OpenAI-compatible", response.statusCode(),
+                    rejectionDetail(response.body()));
         }
         return new String(response.body(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Extracts the provider's structured {@code error.message} for rejection diagnostics.
+     * Only that single JSON field is retained — a non-JSON body or one without it yields
+     * {@code null} so arbitrary endpoint output never reaches audit metadata — and every
+     * long opaque token (API keys, bearer segments, any echoed credential) is replaced
+     * before the excerpt leaves this class, without this method ever touching a secret.
+     */
+    private static String rejectionDetail(byte[] responseBody) {
+        String message;
+        try {
+            message = DETAIL_MAPPER
+                    .readTree(new String(responseBody, StandardCharsets.UTF_8))
+                    .path("error")
+                    .path("message")
+                    .asString(null);
+        } catch (RuntimeException exception) {
+            return null;
+        }
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        return OPAQUE_TOKEN.matcher(message).replaceAll("[redacted]");
     }
 
     @PreDestroy

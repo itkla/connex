@@ -273,6 +273,8 @@ class AuditServiceTest {
                 "nativeToolsDegraded":true,"nativeToolsDegradedStatus":404,
                 "structuredEnforcement":"json_schema","inputTokens":80,
                 "schemaRule":"native_tool_call","outputLength":317,"objectExtracted":true,
+                "providerStatus":400,
+                "providerDetail":"Invalid JSON payload received. Unknown name \\u0007tool_call_id",
                 "prompt":"private CRM content","response":"private model output"}
                 """);
         entry.setContext("{\"error\":\"ProviderException\",\"detail\":\"secret token value\"}");
@@ -292,6 +294,9 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains("404"));
         assertTrue(result.getChanges().contains("317"));
         assertTrue(result.getChanges().contains("objectExtracted"));
+        assertTrue(result.getChanges().contains("providerStatus"));
+        assertTrue(result.getChanges().contains("Invalid JSON payload received. Unknown name  tool_call_id"));
+        assertFalse(result.getChanges().contains("\\u0007"));
         assertFalse(result.getChanges().contains("prompt"));
         assertFalse(result.getChanges().contains("response"));
         assertFalse(result.getChanges().contains("secret region value"));
