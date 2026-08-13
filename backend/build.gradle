@@ -52,6 +52,8 @@ ext['jackson-bom.version'] = '3.1.5'
 ext['logback.version'] = '1.5.35'
 ext['netty.version'] = '4.2.16.Final'
 
+ext['httpcore5.version'] = '5.4.3'
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
