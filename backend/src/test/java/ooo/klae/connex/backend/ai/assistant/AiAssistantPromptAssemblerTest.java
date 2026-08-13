@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiAssistantPromptAssemblerTest {
@@ -48,6 +49,8 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(prompt.getSystemPrompt().contains("useful, specific, and complete"));
         assertTrue(prompt.getSystemPrompt().contains(
                 "Tool-call efficiency must never make the final answer brief or incomplete"));
+        assertTrue(prompt.getSystemPrompt().contains("List-style tool results are capped"));
+        assertTrue(prompt.getSystemPrompt().contains("Prefer targeted top-N and filtered queries"));
         assertTrue(prompt.getSystemPrompt().contains("Use an empty array"));
         assertTrue(prompt.getSystemPrompt().contains("title is a short plain-text conversation title"));
         assertTrue(prompt.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
@@ -101,7 +104,7 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void nativeAndJsonReactToolResultsUseIdenticalMaskedDataBlocks() {
+    void nativeAndJsonReactToolResultsUseIdenticalMaskedDataBlocks() throws Exception {
         AiAssistantToolResult toolResult = new AiAssistantToolResult(
                 Map.of(
                         "handle", "r1",
@@ -120,16 +123,160 @@ class AiAssistantPromptAssemblerTest {
                 List.of(),
                 budget,
                 null);
+        MaskedPrompt unbounded = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                turns,
+                new MaskingContext(),
+                new AiChatResourceRegistry());
 
         String nativeResult = assembler.nativeReplay(
                 turns, new MaskingContext(), budget, null).toolResults().getFirst();
         String jsonReactResult = jsonReact.getMessages().getLast().getContent();
 
         assertEquals(jsonReactResult, nativeResult);
+        assertEquals(
+                objectMapper.writeValueAsString(unbounded.getMessages()),
+                objectMapper.writeValueAsString(jsonReact.getMessages()));
         assertFalse(nativeResult.contains("Ada Lovelace"));
         assertFalse(nativeResult.contains("ada@example.com"));
         assertTrue(nativeResult.contains("{{P1}}"));
         assertTrue(nativeResult.startsWith("CRM_DATA_BEGIN"));
+        assertTrue(assembler.fixedNativePrompt().getSystemPrompt()
+                .contains("List-style tool results are capped"));
+    }
+
+    @Test
+    void oversizedListResultTruncatesAtJsonBoundariesWithDisclosureAndAudit()
+            throws Exception {
+        List<Map<String, Object>> records = java.util.stream.IntStream.range(0, 40)
+                .mapToObj(index -> Map.<String, Object>of(
+                        "index", index,
+                        "summary", "relationship activity ".repeat(12)))
+                .toList();
+        AiAssistantToolResult result = new AiAssistantToolResult(
+                Map.of("records", records), List.of());
+        ToolTurn turn = new ToolTurn(1, "search_records", result);
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 8_000);
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(turn),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null);
+
+        String content = prompt.getMessages().getLast().getContent();
+        JsonNode payload = toolPayload(content);
+        int shown = payload.path("data").path("result").path("records").size();
+
+        assertTrue(budget.fits(content, budget.toolResultBytes()));
+        assertEquals(2_048, budget.minimumToolResultBytes());
+        assertTrue(shown < records.size());
+        assertTrue(payload.path("data").path("budgetDisclosure").asString()
+                .contains("showing " + shown + " of " + records.size()));
+        AiAssistantPromptAssembler.ToolBudgetAudit audit =
+                assembler.requireAdditionalToolResultCapacity(
+                        List.of(), turn, new MaskingContext(), budget);
+        assertEquals(1, audit.truncatedToolResults());
+        assertEquals(shown, audit.shownItems());
+        assertEquals(records.size(), audit.totalItems());
+        JsonNode durable = objectMapper.readTree(
+                assembler.durableToolResult(result, audit));
+        assertEquals(1,
+                durable.path("promptBudget").path("truncatedToolResults").asInt());
+    }
+
+    @Test
+    void currentTurnTruncationLeavesPriorCommittedTranscriptContentUntouched() {
+        AiChatMessage priorReceipt = new AiChatMessage();
+        priorReceipt.setAuthorKind("assistant");
+        priorReceipt.setContent("PRIOR_COMMITTED_RECEIPT");
+        AiAssistantToolResult result = new AiAssistantToolResult(
+                Map.of(
+                        "records",
+                        java.util.stream.IntStream.range(0, 40)
+                                .mapToObj(index -> Map.of(
+                                        "index", index,
+                                        "summary", "CURRENT_RESULT_".repeat(20)))
+                                .toList()),
+                List.of());
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 8_000);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(priorReceipt),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, "search_records", result)),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null);
+
+        assertTrue(prompt.getMessages().getFirst().getContent()
+                .contains("PRIOR_COMMITTED_RECEIPT"));
+        assertTrue(prompt.getMessages().getLast().getContent().contains("[truncated:"));
+    }
+
+    @Test
+    void oldestExchangeEvictsBeforeLatestTruncationInBothProtocols() {
+        ToolTurn oldest = new ToolTurn(
+                1,
+                "search_records",
+                new AiAssistantToolResult(
+                        Map.of("records", "OLDEST_EVICTED_".repeat(120)), List.of()));
+        ToolTurn retained = new ToolTurn(
+                2,
+                "list_activities",
+                new AiAssistantToolResult(
+                        Map.of("activities", "SECOND_RETAINED_".repeat(120)), List.of()));
+        ToolTurn latest = new ToolTurn(
+                3,
+                "list_tasks",
+                new AiAssistantToolResult(
+                        Map.of(
+                                "tasks",
+                                java.util.stream.IntStream.range(0, 40)
+                                        .mapToObj(index -> Map.of(
+                                                "index", index,
+                                                "description", "LATEST_".repeat(20)))
+                                        .toList()),
+                        List.of()));
+        List<ToolTurn> turns = List.of(oldest, retained, latest);
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 3_500, 12_000);
+        MaskingContext reactContext = new MaskingContext();
+        MaskedPrompt react = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                turns,
+                reactContext,
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null);
+        List<String> reactResults = react.getMessages().stream()
+                .map(message -> message.getContent())
+                .toList();
+        List<String> nativeResults = assembler.nativeReplay(
+                turns, new MaskingContext(), budget, null).toolResults();
+
+        assertEquals(reactResults, nativeResults);
+        assertTrue(reactResults.get(0).contains("evicted to free context"));
+        assertFalse(reactResults.get(0).contains("OLDEST_EVICTED"));
+        assertTrue(reactResults.get(1).contains("SECOND_RETAINED"));
+        assertTrue(reactResults.get(2).contains("[truncated: showing"));
+        assertFalse(reactResults.get(2).contains("evicted to free context"));
+        assertTrue(reactResults.stream().mapToInt(budget::utf8Bytes).sum()
+                <= budget.toolResultBytes());
+        AiAssistantPromptAssembler.ToolBudgetAudit audit = assembler.toolBudgetAudit(
+                turns, new MaskingContext(), budget);
+        assertEquals(1, audit.evictedToolExchanges());
+        assertEquals(1, audit.truncatedToolResults());
     }
 
     @Test
@@ -524,7 +671,7 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void toolResultOverflowFailsWithAnHonestTerminalReason() {
+    void fullOldestEvictionStillTerminalizesWhenLatestMinimumEnvelopeCannotFit() {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");
         request.setContent("Summarize the records");
@@ -532,14 +679,20 @@ class AiAssistantPromptAssemblerTest {
                 Map.of("result", "TOOL_RESULT_MUST_NOT_BE_SILENTLY_DROPPED".repeat(40)),
                 List.of());
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
-                64, 1_000, 1_000, 1_000, 200, 1_000);
+                64, 1_000, 1_000, 1_000, 100, 1_000);
 
         AiAssistantLoopException exception = assertThrows(
                 AiAssistantLoopException.class,
                 () -> assembler.assemble(
                         List.of(request),
                         new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
+                        List.of(
+                                new ToolTurn(
+                                        1,
+                                        "aggregate_metric",
+                                        new AiAssistantToolResult(
+                                                Map.of("value", 1), List.of())),
+                                new ToolTurn(2, "search_records", oversizedToolResult)),
                         new MaskingContext(),
                         new AiChatResourceRegistry(),
                         budget,
@@ -549,7 +702,7 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void repairAndPriorToolResultsShareOneFailClosedToolAllocation() {
+    void repairAndPriorToolResultsShareOneGracefullyDegradedToolAllocation() {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");
         request.setContent("Repair the response");
@@ -560,17 +713,23 @@ class AiAssistantPromptAssemblerTest {
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 1_000, 1_000, 1_000, 500, 1_000);
 
-        AiAssistantLoopException exception = assertThrows(
-                AiAssistantLoopException.class,
-                () -> assembler.assemble(
-                        List.of(request),
-                        new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
-                        new MaskingContext(),
-                        new AiChatResourceRegistry(),
-                        budget,
-                        repair));
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                budget,
+                repair);
 
-        assertEquals("tool_result_budget_exhausted", exception.terminalReason());
+        assertTrue(prompt.getMessages().stream()
+                .anyMatch(message -> message.getContent().contains("[truncated:")));
+        assertTrue(prompt.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
+    }
+
+    private JsonNode toolPayload(String content) throws Exception {
+        int firstNewline = content.indexOf('\n');
+        int lastNewline = content.lastIndexOf('\n');
+        return objectMapper.readTree(content.substring(firstNewline + 1, lastNewline));
     }
 }

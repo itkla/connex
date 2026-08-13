@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
+
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 
@@ -28,6 +31,37 @@ public record AiAssistantPromptBudget(
                 || toolResultBytes < 1 || compactionSourceBytes < 1) {
             throw new IllegalArgumentException("Assistant prompt budgets must be positive");
         }
+    }
+
+    /** @return minimum replay bytes reserved for the latest tool result */
+    public int minimumToolResultBytes() {
+        return Math.min(toolResultBytes, MIN_TOOL_RESULT_BYTES);
+    }
+
+    /** Returns the exact UTF-8 size used by assistant prompt allocations. */
+    public int utf8Bytes(String value) {
+        return Objects.requireNonNull(value, "value").getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    /** Returns whether the supplied content fits the remaining byte allocation. */
+    public boolean fits(String value, int availableBytes) {
+        return availableBytes >= 0 && utf8Bytes(value) <= availableBytes;
+    }
+
+    /** Truncates text to a valid UTF-8 prefix within the supplied byte allocation. */
+    public String truncateUtf8(String value, int availableBytes) {
+        byte[] bytes = Objects.requireNonNull(value, "value").getBytes(StandardCharsets.UTF_8);
+        if (availableBytes <= 0) {
+            return "";
+        }
+        if (bytes.length <= availableBytes) {
+            return value;
+        }
+        int end = availableBytes;
+        while (end > 0 && (bytes[end] & 0xc0) == 0x80) {
+            end--;
+        }
+        return new String(bytes, 0, end, StandardCharsets.UTF_8);
     }
 
     /**

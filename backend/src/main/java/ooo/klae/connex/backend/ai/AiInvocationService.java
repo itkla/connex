@@ -526,33 +526,48 @@ public class AiInvocationService {
         ReasoningNormalization reasoning = captured.ambiguous()
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
-        if (result.toolCalls().size() != 1
-                || captured.ambiguous()
+        if (result.toolCalls().size() != 1) {
+            return malformedNativeTool(
+                    raw, invocation, result, reasoning, "native_multiple_calls");
+        }
+        if (captured.ambiguous()
                 || !captured.answer().isBlank()
                 || CompletionNormalizer.containsReasoningTag(captured.answer())) {
-            return malformedNativeTool(raw, invocation, result, reasoning);
+            return malformedNativeTool(
+                    raw, invocation, result, reasoning, "native_call_content");
         }
         AiToolCall call = result.toolCalls().getFirst();
         if (nativeTools.exchanges().stream()
                 .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
-            return malformedNativeTool(raw, invocation, result, reasoning);
+            return malformedNativeTool(
+                    raw, invocation, result, reasoning, "native_duplicate_call_id");
         }
         JsonNode arguments;
         try {
             arguments = objectMapper.readTree(call.arguments());
         } catch (JacksonException | IllegalArgumentException exception) {
-            return malformedNativeTool(raw, invocation, result, reasoning);
+            return malformedNativeTool(
+                    raw, invocation, result, reasoning, "native_arguments_not_object");
         }
         if (arguments == null || !arguments.isObject()) {
-            return malformedNativeTool(raw, invocation, result, reasoning);
+            return malformedNativeTool(
+                    raw, invocation, result, reasoning, "native_arguments_not_object");
         }
         ObjectNode step = objectMapper.createObjectNode();
         ObjectNode tool = step.putObject("tool");
         tool.put("name", call.name());
         tool.set("args", arguments);
         step.putNull("final");
-        if (toolGuard.rejectionReason(step) != null) {
-            return malformedNativeTool(raw, invocation, result, reasoning);
+        String rejectionReason = toolGuard.rejectionReason(step);
+        if (rejectionReason != null) {
+            return malformedNativeTool(
+                    raw,
+                    invocation,
+                    result,
+                    reasoning,
+                    "tool_name".equals(rejectionReason)
+                            ? "native_unknown_tool"
+                            : "native_invalid_arguments");
         }
         int warnings = Demasker.demaskTree(arguments, invocation.context());
         raw.close();
@@ -572,7 +587,8 @@ public class AiInvocationService {
             RawInvocation raw,
             AiInvocation invocation,
             AiCompletionResult result,
-            ReasoningNormalization reasoning) {
+            ReasoningNormalization reasoning,
+            String repairRule) {
         raw.close();
         emitAudit(
                 raw, invocation, "success", result.inputTokens(), result.outputTokens(),
@@ -582,7 +598,8 @@ public class AiInvocationService {
                 result.inputTokens(),
                 result.outputTokens(),
                 result.stopReason(),
-                reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty());
+                reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty(),
+                repairRule);
     }
 
     private <T> AiStructuredRepairAttempt<T> malformed(
@@ -1000,6 +1017,12 @@ public class AiInvocationService {
         metadata.put(
                 "protocol",
                 invocation.protocol().name().toLowerCase(java.util.Locale.ROOT));
+        if (invocation.nativeToolsDegradedStatus() != null) {
+            metadata.put("nativeToolsDegraded", true);
+            metadata.put(
+                    "nativeToolsDegradedStatus",
+                    invocation.nativeToolsDegradedStatus());
+        }
         if (structured && enforcement != null) {
             metadata.put("structuredEnforcement", enforcement.name().toLowerCase(java.util.Locale.ROOT));
         }

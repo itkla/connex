@@ -97,7 +97,7 @@ public class AuditService {
             "json_object_missing", "raw_guard_rejected", "binding_failed",
             "top_level_fields", "exclusive_step", "tool_fields", "tool_name",
             "tool_arguments", "final_fields", "final_shape", "final_citations",
-            "final_suggestions");
+            "final_suggestions", "native_tool_call");
     private static final Set<String> AI_STOP_REASONS = Set.of(
             "stop", "length", "content_filter", "tool_calls", "function_call", "end_turn",
             "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal", "safety",
@@ -664,6 +664,8 @@ public class AuditService {
         copyKnownStringList(source, projected, "mediaTypes", AI_MEDIA_TYPES);
         copyBoolean(source, projected, "structured");
         copyKnownString(source, projected, "protocol", AI_PROTOCOLS);
+        copyBoolean(source, projected, "nativeToolsDegraded");
+        copyNumber(source, projected, "nativeToolsDegradedStatus");
         copyKnownString(source, projected, "structuredEnforcement", AI_STRUCTURED_ENFORCEMENTS);
         copyNumber(source, projected, "inputTokens");
         copyNumber(source, projected, "outputTokens");
