@@ -167,11 +167,11 @@ public class OpenAiCompatibleClient {
     private static String rejectionDetail(byte[] responseBody) {
         String message;
         try {
-            message = DETAIL_MAPPER
-                    .readTree(new String(responseBody, StandardCharsets.UTF_8))
-                    .path("error")
-                    .path("message")
-                    .asString(null);
+            var root = DETAIL_MAPPER.readTree(new String(responseBody, StandardCharsets.UTF_8));
+            if (root.isArray()) {
+                root = root.path(0);
+            }
+            message = root.path("error").path("message").asString(null);
         } catch (RuntimeException exception) {
             return null;
         }
