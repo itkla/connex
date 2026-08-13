@@ -17,6 +17,10 @@
     <result property="credentialLast4" column="credential_last4"/>
     <result property="noTrainingAttested" column="no_training_attested"/>
     <result property="attestedAt" column="attested_at"/>
+    <result property="zeroDataRetentionAttested" column="zero_data_retention_attested"/>
+    <result property="zdrAttestedByUserId" column="zdr_attested_by_user_id"/>
+    <result property="zdrAttestedAt" column="zdr_attested_at"/>
+    <result property="zdrAttestationVersion" column="zdr_attestation_version"/>
     <result property="enabled" column="enabled"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -25,7 +29,9 @@
   <sql id="columns">
     org_id, provider, region, endpoint, api_version, deployment, project_id,
     allow_internal_endpoint, model_id, credential_ref, credential_last4,
-    no_training_attested, attested_at, enabled, created_at, updated_at
+    no_training_attested, attested_at, zero_data_retention_attested,
+    zdr_attested_by_user_id, zdr_attested_at, zdr_attestation_version,
+    enabled, created_at, updated_at
   </sql>
 
   <select id="findByOrg" resultMap="AiProviderConfigResult">
@@ -45,11 +51,14 @@
     INSERT INTO ai_provider_config
       (org_id, provider, region, endpoint, api_version, deployment, project_id,
        allow_internal_endpoint, model_id, credential_ref, credential_last4,
-       no_training_attested, attested_at, enabled)
+       no_training_attested, attested_at, zero_data_retention_attested,
+       zdr_attested_by_user_id, zdr_attested_at, zdr_attestation_version, enabled)
     VALUES
       (#{orgId}, #{provider}, #{region}, #{endpoint}, #{apiVersion}, #{deployment}, #{projectId},
        #{allowInternalEndpoint}, #{modelId}, #{credentialRef}, #{credentialLast4},
-       #{noTrainingAttested}, #{attestedAt}, #{enabled})
+       #{noTrainingAttested}, #{attestedAt}, #{zeroDataRetentionAttested},
+       #{zdrAttestedByUserId,jdbcType=INTEGER}, #{zdrAttestedAt,jdbcType=TIMESTAMP},
+       #{zdrAttestationVersion,jdbcType=INTEGER}, #{enabled})
     ON DUPLICATE KEY UPDATE
       provider = VALUES(provider),
       region = VALUES(region),
@@ -63,6 +72,10 @@
       credential_last4 = VALUES(credential_last4),
       no_training_attested = VALUES(no_training_attested),
       attested_at = VALUES(attested_at),
+      zero_data_retention_attested = VALUES(zero_data_retention_attested),
+      zdr_attested_by_user_id = VALUES(zdr_attested_by_user_id),
+      zdr_attested_at = VALUES(zdr_attested_at),
+      zdr_attestation_version = VALUES(zdr_attestation_version),
       enabled = VALUES(enabled)
   </insert>
 

@@ -21,6 +21,8 @@ import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.openai.OpenAiSseAccumulator;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
@@ -48,6 +50,11 @@ public class AzureOpenAiAdapter implements AiProvider {
     @Override
     public String providerId() {
         return PROVIDER_AZURE_OPENAI;
+    }
+
+    @Override
+    public boolean supportsStreaming(AiProviderTarget target) {
+        return true;
     }
 
     @Override
@@ -134,6 +141,53 @@ public class AzureOpenAiAdapter implements AiProvider {
         }
     }
 
+    @Override
+    public AiCompletionResult completeStreaming(
+            AiCompletionRequest request,
+            AiProviderStreamObserver observer) {
+        if (request == null || observer == null) {
+            throw new AiProviderException("AI streaming completion request is required");
+        }
+        AiRequestDeadline deadline = request.providerAttemptExecutor()
+                .deadline(aiProperties.getRequestTimeoutMs());
+        AiProviderTarget target = request.target();
+        if (!PROVIDER_AZURE_OPENAI.equals(target.provider())) {
+            throw new AiProviderException("Unsupported AI provider");
+        }
+        try {
+            URI endpoint = buildCompletionEndpoint(target);
+            AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
+            while (true) {
+                try {
+                    String requestBody = buildRequestBody(request, enforcement, true);
+                    AiStructuredOutputEnforcement appliedEnforcement = enforcement;
+                    return request.providerAttemptExecutor().executeStream(() ->
+                            azureOpenAiClient.stream(
+                                    endpoint,
+                                    request.credentials(),
+                                    requestBody,
+                                    deadline,
+                                    new OpenAiSseAccumulator(
+                                            objectMapper,
+                                            observer,
+                                            appliedEnforcement,
+                                            request.reasoningMode()),
+                                    observer));
+                } catch (AiProviderRequestRejectedException exception) {
+                    if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
+                            || !exception.permitsStructuredOutputFallback()) {
+                        throw exception;
+                    }
+                    enforcement = enforcement.degrade();
+                }
+            }
+        } catch (AiProviderException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new AiProviderException("Azure OpenAI adapter failed");
+        }
+    }
+
     private URI buildCompletionEndpoint(AiProviderTarget target) {
         String host = requireAzureHost(target.endpoint());
         String deployment = requirePattern(target.deployment(), AZURE_DEPLOYMENT,
@@ -152,6 +206,13 @@ public class AzureOpenAiAdapter implements AiProvider {
     private String buildRequestBody(
             AiCompletionRequest request,
             AiStructuredOutputEnforcement enforcement) throws Exception {
+        return buildRequestBody(request, enforcement, false);
+    }
+
+    private String buildRequestBody(
+            AiCompletionRequest request,
+            AiStructuredOutputEnforcement enforcement,
+            boolean streamed) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode messages = root.putArray("messages");
         if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
@@ -186,6 +247,10 @@ public class AzureOpenAiAdapter implements AiProvider {
             root.put("temperature", request.temperature());
         }
         addResponseFormat(root, request, enforcement);
+        if (streamed) {
+            root.put("stream", true);
+            root.putObject("stream_options").put("include_usage", true);
+        }
         return objectMapper.writeValueAsString(root);
     }
 

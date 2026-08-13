@@ -241,6 +241,15 @@ public class AiAssistantController {
         return turnService.get(sessionId, turnId);
     }
 
+    /** Cancels one active turn for its requester or session owner. */
+    @PostMapping("/{sessionId:\\d+}/turns/{turnId:\\d+}/cancel")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void cancelTurn(
+            @PathVariable int sessionId,
+            @PathVariable int turnId) {
+        turnService.cancel(sessionId, turnId);
+    }
+
     /** Returns a bounded set of viewer-safe write-tool calls in the authorized session. */
     @GetMapping("/{sessionId:\\d+}/tool-calls")
     public List<AiAssistantToolCallReadDto> listToolCalls(

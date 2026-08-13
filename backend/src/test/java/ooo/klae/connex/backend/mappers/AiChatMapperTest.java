@@ -409,6 +409,40 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void streamedPartialResetIsOffsetGuardedAndRestartsAtZero() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Stream reset", "private");
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(session.getId());
+        turn.setRequestedByUserId(owner.getId());
+        turn.setStatus("queued");
+        turn.setPrivacyMode("unmasked");
+        turn.setStreamed(true);
+        chatMapper.insertTurn(turn);
+        assertEquals(1, chatMapper.markTurnRunning(
+                workspace.getId(), session.getId(), turn.getId()));
+        assertEquals(1, chatMapper.appendTurnPartialContent(
+                workspace.getId(), session.getId(), turn.getId(), 0, "A😀", 3));
+
+        assertEquals(0, chatMapper.resetTurnPartialContent(
+                workspace.getId(), session.getId(), turn.getId(), 2));
+        assertEquals(1, chatMapper.resetTurnPartialContent(
+                workspace.getId(), session.getId(), turn.getId(), 3));
+
+        AiChatTurn reset = chatMapper.getTurnById(
+                workspace.getId(), session.getId(), turn.getId());
+        assertNull(reset.getPartialContent());
+        assertEquals(0, reset.getPartialContentUtf16Offset());
+        assertEquals(1, chatMapper.appendTurnPartialContent(
+                workspace.getId(), session.getId(), turn.getId(), 0, "Repaired", 8));
+        AiChatTurn repaired = chatMapper.getTurnById(
+                workspace.getId(), session.getId(), turn.getId());
+        assertEquals("Repaired", repaired.getPartialContent());
+        assertEquals(8, repaired.getPartialContentUtf16Offset());
+    }
+
+    @Test
     void compositeForeignKeysRejectMismatchedWorkspaceParents() {
         User owner = newUser();
         Workspace other = newWorkspace();

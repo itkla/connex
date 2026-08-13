@@ -46,6 +46,9 @@ public class AiProperties {
      */
     private boolean allowInternalEndpoints = false;
 
+    /** Whether this deployment permits currently attested organizations to send unmasked data. */
+    private boolean unmaskedModeEnabled = false;
+
     /**
      * Comma-separated RFC 6052 network-specific prefixes used by this deployment's IPv4/IPv6
      * translators. Prefixes are validated at startup and let the egress policy classify translated
@@ -63,6 +66,9 @@ public class AiProperties {
      * AI provider outbound request timeout in milliseconds, covering response wait and body read.
      */
     private long requestTimeoutMs = 60000;
+
+    /** Maximum provider-stream inactivity before the turn fails with a distinct terminal reason. */
+    private Duration streamIdleTimeout = Duration.ofSeconds(30);
 
     /**
      * Maximum AI provider response body size in bytes. Oversized responses are rejected rather

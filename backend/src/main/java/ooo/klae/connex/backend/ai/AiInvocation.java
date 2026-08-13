@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 
 /**
  * Request to the AI invocation choke point. The prompt and context are redacted from
@@ -38,8 +39,10 @@ public record AiInvocation(
         Instant callerDeadline,
         AiInvocationProtocol protocol,
         Integer nativeToolsDegradedStatus,
-        boolean outputTokensClamped) {
+        boolean outputTokensClamped,
+        AiProviderStreamObserver streamObserver) {
 
+    /** Creates a buffered invocation using the prior canonical contract. */
     public AiInvocation(
             AiFeature feature,
             MaskingContext context,
@@ -52,7 +55,24 @@ public record AiInvocation(
             AiInvocationProtocol protocol,
             Integer nativeToolsDegradedStatus) {
         this(feature, context, prompt, images, maxTokens, temperature, reasoningRequested,
-                callerDeadline, protocol, nativeToolsDegradedStatus, false);
+                callerDeadline, protocol, nativeToolsDegradedStatus, false, null);
+    }
+
+    /** Creates a buffered invocation carrying an explicit output-clamp marker. */
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            List<AiInputImage> images,
+            int maxTokens,
+            double temperature,
+            boolean reasoningRequested,
+            Instant callerDeadline,
+            AiInvocationProtocol protocol,
+            Integer nativeToolsDegradedStatus,
+            boolean outputTokensClamped) {
+        this(feature, context, prompt, images, maxTokens, temperature, reasoningRequested,
+                callerDeadline, protocol, nativeToolsDegradedStatus, outputTokensClamped, null);
     }
 
     public AiInvocation(
@@ -66,7 +86,7 @@ public record AiInvocation(
             Instant callerDeadline,
             AiInvocationProtocol protocol) {
         this(feature, context, prompt, images, maxTokens, temperature, reasoningRequested,
-                callerDeadline, protocol, null, false);
+                callerDeadline, protocol, null, false, null);
     }
 
     public AiInvocation(
@@ -162,6 +182,13 @@ public record AiInvocation(
             throw new IllegalArgumentException(
                     "nativeToolsDegradedStatus must be a client-error status");
         }
+    }
+
+    /** Returns the same invocation with synchronous normalized provider-stream observation. */
+    public AiInvocation withStreamObserver(AiProviderStreamObserver observer) {
+        return new AiInvocation(feature, context, prompt, images, maxTokens, temperature,
+                reasoningRequested, callerDeadline, protocol, nativeToolsDegradedStatus,
+                outputTokensClamped, Objects.requireNonNull(observer, "observer"));
     }
 
     @Override

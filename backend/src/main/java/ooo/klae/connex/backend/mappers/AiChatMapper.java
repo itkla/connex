@@ -252,6 +252,32 @@ public interface AiChatMapper {
         @Param("expectedStatus") String expectedStatus,
         @Param("updatedBefore") LocalDateTime updatedBefore);
 
+    int appendTurnPartialContent(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("expectedOffset") int expectedOffset,
+        @Param("content") String content,
+        @Param("nextOffset") int nextOffset);
+
+    int resetTurnPartialContent(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("expectedOffset") int expectedOffset);
+
+    int replaceTurnPartialContent(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("content") String content,
+        @Param("offset") int offset);
+
+    int cancelTurn(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id);
+
     int insertToolCall(AiChatToolCall toolCall);
 
     AiChatToolCall getToolCallById(

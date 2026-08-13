@@ -38,9 +38,12 @@ import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
@@ -107,7 +110,10 @@ public class AiChatAgentLoopService {
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "state", null, "running", null));
             AiChatResourceRegistry resources = new AiChatResourceRegistry();
-            MaskingContext maskingContext = new MaskingContext();
+            MaskingContext maskingContext = new MaskingContext(turn.privacyMode());
+            AiChatStreamingProgress streamingProgress = turn.streamed()
+                    ? new AiChatStreamingProgress(turn, persistenceService)
+                    : null;
             AiChatMemory memory = memoryService.prepare(turn, maskingContext, deadline);
             AiChatAttachmentContext attachmentContext =
                     attachmentContextService.prepare(turn, deadline);
@@ -152,6 +158,7 @@ public class AiChatAgentLoopService {
                 AiStructuredRepairAttempt<AiAssistantStep> attempt = null;
                 AiStructuredOutcome<AiAssistantStep> outcome = null;
                 Optional<AiToolCall> nativeProviderCall = Optional.empty();
+                AiChatStreamingProgress.Observer streamingObserver = null;
                 while (outcome == null) {
                     MaskedPrompt prompt = nativeTools
                             ? promptAssembler.assembleNative(
@@ -197,6 +204,10 @@ public class AiChatAgentLoopService {
                                     : AiInvocationProtocol.JSON_REACT,
                             nativeToolsDegradedStatus,
                             memory.budget().outputTokensClamped());
+                    if (streamingProgress != null) {
+                        streamingObserver = streamingProgress.observer(nativeTools);
+                        invocation = invocation.withStreamObserver(streamingObserver);
+                    }
                     AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
                             maskingContext.tokenBindings().stream()
                                     .map(Map.Entry::getKey)
@@ -264,12 +275,14 @@ public class AiChatAgentLoopService {
                         reasoningRejected = true;
                     }
                     requireWorkspaceEnabled(turn);
+                    persistenceService.requireRunning(turn);
                     inputTokens = addTokens(inputTokens, inputTokens(outcome));
                     outputTokens = addTokens(outputTokens, outputTokens(outcome));
                     if (deadlineReached(deadline)) {
                         return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                     }
                     if (nativeMalformed) {
+                        resetMalformedStream(streamingProgress, streamingObserver);
                         if (nativeMalformedRetried) {
                             return AiGenerationTaskResult.failed("malformed_output");
                         }
@@ -279,6 +292,7 @@ public class AiChatAgentLoopService {
                     }
                 }
                 if (outcome instanceof AiStructuredOutcome.Malformed<?>) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
                     if (repair != null || attempt.repair().isEmpty()) {
                         return AiGenerationTaskResult.failed("schema_repair_failed");
                     }
@@ -290,10 +304,14 @@ public class AiChatAgentLoopService {
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
                 if (parsed.demaskWarnings() != 0) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
                 repair = null;
                 if (step.tool() != null) {
+                    if (streamingObserver != null) {
+                        streamingObserver.requireNoTerminalText();
+                    }
                     if (deadlineReached(deadline)) {
                         return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                     }
@@ -527,21 +545,41 @@ public class AiChatAgentLoopService {
                 if (finalAnswer == null || finalAnswer.text() == null
                         || finalAnswer.text().isBlank()
                         || finalAnswer.text().length() > MAX_FINAL_CHARS) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
-                resources.requireKnownCitations(finalAnswer.citations());
-                List<String> suggestions = AiAssistantStepGuard.filterSuggestions(
-                        finalAnswer.suggestions());
+                String persistedText;
+                try {
+                    persistedText = streamingObserver == null
+                            ? screenedFinalText(finalAnswer.text())
+                            : streamingObserver.finish(finalAnswer.text());
+                } catch (AiAssistantLoopException exception) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    throw exception;
+                }
+                boolean omitted = MaskingEngine.OMITTED_BY_POLICY.equals(persistedText);
+                List<String> citations = omitted ? List.of() : finalAnswer.citations();
+                try {
+                    resources.requireKnownCitations(citations);
+                } catch (AiAssistantLoopException exception) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    throw exception;
+                }
+                List<String> suggestions = omitted
+                        ? List.of()
+                        : AiAssistantStepGuard.filterSuggestions(finalAnswer.suggestions());
                 String metadata = promptAssembler.finalMetadata(
-                        turn.turnId(), finalAnswer.citations(), suggestions, resources.snapshot(),
+                        turn.turnId(), citations, suggestions, resources.snapshot(),
                         reasoningParts.isEmpty()
                                 ? Optional.empty()
                                 : Optional.of(String.join("\n\n", reasoningParts)),
                         toolBudgetAudit);
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
-                        turn, finalAnswer.text(), metadata, inputTokens, outputTokens);
-                applyGeneratedTitle(turn, finalAnswer.title());
+                        turn, persistedText, metadata, inputTokens, outputTokens);
+                if (!omitted) {
+                    applyGeneratedTitle(turn, finalAnswer.title());
+                }
                 return AiGenerationTaskResult.resolved(
                         new AiChatTurnGenerationResult(turn.turnId(), "resolved"));
             }
@@ -567,6 +605,8 @@ public class AiChatAgentLoopService {
             return AiGenerationTaskResult.failed("image_input_unsupported");
         } catch (AiProviderCallerDeadlineExceededException exception) {
             return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
+        } catch (AiProviderIdleTimeoutException exception) {
+            return AiGenerationTaskResult.timedOut("provider_idle_timeout");
         } catch (AiProviderException exception) {
             return AiGenerationTaskResult.failed("provider_error");
         } catch (ResourceNotFoundException exception) {
@@ -588,6 +628,12 @@ public class AiChatAgentLoopService {
             }
             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
         }
+    }
+
+    private static String screenedFinalText(String text) {
+        return SpecialCareTextScreen.screen(text).excluded()
+                ? MaskingEngine.OMITTED_BY_POLICY
+                : text;
     }
 
     private boolean restrictionsChanged(AiChatQueuedTurn turn) {
@@ -778,6 +824,14 @@ public class AiChatAgentLoopService {
                 () -> new IllegalStateException("Native tool call is unavailable"));
         if (nativeCalls.putIfAbsent(stepNumber, call) != null) {
             throw new IllegalStateException("Native tool call step was already recorded");
+        }
+    }
+
+    private static void resetMalformedStream(
+            AiChatStreamingProgress progress,
+            AiChatStreamingProgress.Observer observer) {
+        if (progress != null && observer != null && observer.hasProjectedText()) {
+            progress.reset();
         }
     }
 

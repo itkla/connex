@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.when;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +33,8 @@ import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
@@ -147,6 +151,70 @@ class VertexAdapterTest {
         assertEquals(3, result.outputTokens());
         assertEquals("stop", result.stopReason());
         assertFalse(result.toString().contains("Hello world"));
+    }
+
+    @Test
+    void completeStreamingUsesGeminiSseEndpointAndExistingRequestAssembly() throws Exception {
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        when(vertexClient.stream(
+                any(URI.class), eq(ACCESS_TOKEN), anyString(), any(AiRequestDeadline.class),
+                any(VertexSseAccumulator.class), any(AiProviderStreamObserver.class)))
+                .thenReturn(new AiCompletionResult("Hello", 5, 1, "stop"));
+
+        AiCompletionResult result = adapter.completeStreaming(
+                request("gemini-2.5-flash", "Use short answers"), text -> {});
+
+        ArgumentCaptor<URI> endpoint = ArgumentCaptor.forClass(URI.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(vertexClient).stream(
+                endpoint.capture(), eq(ACCESS_TOKEN), body.capture(), any(AiRequestDeadline.class),
+                any(VertexSseAccumulator.class), any(AiProviderStreamObserver.class));
+        assertEquals("https://us-central1-aiplatform.googleapis.com/v1/projects/connex-prod1/locations/"
+                + "us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+                endpoint.getValue().toString());
+        assertEquals("Use short answers",
+                objectMapper.readTree(body.getValue())
+                        .path("systemInstruction").path("parts").path(0).path("text").asString());
+        assertEquals("Hello", result.text());
+        assertTrue(adapter.supportsStreaming(target("gemini-2.5-flash")));
+        assertFalse(adapter.supportsStreaming(target("claude-sonnet-4")));
+    }
+
+    @Test
+    void completeStreamingRechecksInvocationAfterOAuthBeforeModelEgress() {
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        AiCompletionRequest base = request("gemini-2.5-flash", null);
+        AiCompletionRequest fenced = new AiCompletionRequest(
+                base.target(), base.credentials(), base.systemPrompt(), base.messages(),
+                base.images(), base.outputMode(), base.responseSchema(), base.nativeTools(),
+                base.reasoningMode(), rejectingCheckpoint(), base.maxTokens(), base.temperature());
+
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> adapter.completeStreaming(fenced, text -> {}));
+
+        assertEquals("provider snapshot changed", exception.getMessage());
+        verifyNoInteractions(vertexClient);
+    }
+
+    @Test
+    void completeBufferedRechecksInvocationAfterOAuthBeforeModelEgress() {
+        when(googleAccessTokenClient.accessToken(
+                any(AiCredentials.class), any(AiRequestDeadline.class))).thenReturn(ACCESS_TOKEN);
+        AiCompletionRequest base = request("gemini-2.5-flash", null);
+        AiCompletionRequest fenced = new AiCompletionRequest(
+                base.target(), base.credentials(), base.systemPrompt(), base.messages(),
+                base.images(), base.outputMode(), base.responseSchema(), base.nativeTools(),
+                base.reasoningMode(), rejectingCheckpoint(), base.maxTokens(), base.temperature());
+
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> adapter.complete(fenced));
+
+        assertEquals("provider snapshot changed", exception.getMessage());
+        verifyNoInteractions(vertexClient);
     }
 
     @Test
@@ -470,6 +538,20 @@ class VertexAdapterTest {
 
     private static AiCredentials credentials() {
         return AiCredentials.of(Map.of("serviceAccountJson", SERVICE_ACCOUNT_JSON + PRIVATE_KEY));
+    }
+
+    private static AiProviderAttemptExecutor rejectingCheckpoint() {
+        return new AiProviderAttemptExecutor() {
+            @Override
+            public String execute(Supplier<String> attempt) {
+                return attempt.get();
+            }
+
+            @Override
+            public void checkpoint() {
+                throw new AiProviderException("provider snapshot changed");
+            }
+        };
     }
 
     private static String geminiResponse() {

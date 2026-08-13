@@ -13,6 +13,11 @@ public class AiChatTurn {
     private Integer requestedByUserId;
     private String status;
     private String terminalReason;
+    private String privacyMode = "masked";
+    private boolean streamed;
+    private String partialContent;
+    private int partialContentUtf16Offset;
+    private String cancelRequestedAt;
     private String createdAt;
     private String updatedAt;
 }

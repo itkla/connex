@@ -4,6 +4,7 @@ import java.net.URI;
 import java.security.KeyFactory;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiProviderReadiness;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
@@ -33,6 +35,7 @@ import ooo.klae.connex.backend.dto.AiProviderConfigDto;
 import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -50,6 +53,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiProviderConfigService implements AiProviderReadiness {
+    public static final int CURRENT_ZDR_ATTESTATION_VERSION = 1;
     private static final String PROVIDER_BEDROCK = "bedrock";
     private static final String PROVIDER_AZURE_OPENAI = "azure_openai";
     private static final String PROVIDER_VERTEX = "vertex";
@@ -103,6 +107,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     private final SessionSecurityService sessionSecurityService;
     private final AiProviderRouter aiProviderRouter;
     private final ObjectMapper objectMapper;
+    private final WorkspaceService workspaceService;
 
     /**
      * Returns the AI provider settings for the acting workspace's organization.
@@ -112,7 +117,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
      */
     public AiProviderConfigDto getForWorkspace(int workspaceId, int actorId) {
         int orgId = requireAdministrableOrg(workspaceId, actorId);
-        return AiProviderConfigDto.from(aiProviderConfigMapper.findByOrg(orgId));
+        return providerDto(aiProviderConfigMapper.findByOrg(orgId));
     }
 
     /**
@@ -165,6 +170,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
         }
         config.setNoTrainingAttested(request.isNoTrainingAttested());
         config.setAttestedAt(resolveAttestedAt(existing, request.isNoTrainingAttested()));
+        preserveCurrentZdrAttestation(existing, config);
         config.setEnabled(request.isEnabled());
 
         aiProviderConfigMapper.upsert(config);
@@ -172,6 +178,30 @@ public class AiProviderConfigService implements AiProviderReadiness {
         auditService.record("org.ai_provider.save", "organization", orgId, provider,
                 "Updated AI provider configuration", null);
         return getForWorkspace(workspaceId, actorId);
+    }
+
+    /** Records the current ZDR terms for an unchanged provider destination. */
+    @Transactional
+    public AiProviderConfigDto attestZeroDataRetention(int workspaceId, int actorId) {
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        if (orgId == null || orgId != workspaceService.getCurrentOrgId()) {
+            throw new ResourceNotFoundException("AI provider configuration was not found");
+        }
+        orgMemberService.requireOrgAdmin(orgId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        AiProviderConfig config = lockCurrentConfig(orgId, actorId);
+        if (config == null) {
+            throw new ResourceNotFoundException("AI provider configuration was not found");
+        }
+        config.setZeroDataRetentionAttested(true);
+        config.setZdrAttestedByUserId(actorId);
+        config.setZdrAttestedAt(LocalDateTime.now(ZoneOffset.UTC));
+        config.setZdrAttestationVersion(CURRENT_ZDR_ATTESTATION_VERSION);
+        aiProviderConfigMapper.upsert(config);
+        auditService.record("org.ai_provider.zdr_attest", "organization", orgId,
+                config.getProvider(), "Attested current zero-data-retention terms",
+                Map.of("attestationVersion", CURRENT_ZDR_ATTESTATION_VERSION));
+        return providerDto(config);
     }
 
     /**
@@ -215,6 +245,15 @@ public class AiProviderConfigService implements AiProviderReadiness {
         return effectiveMaxTokens == null
                 ? Optional.empty()
                 : Optional.of(generationProfile(config, effectiveMaxTokens, temperature));
+    }
+
+    @Override
+    public AiPrivacyMode privacyModeForOrg(int orgId) {
+        AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
+        return isReady(config) && isCurrentZdrAttestation(config)
+                && aiProperties.isUnmaskedModeEnabled()
+                ? AiPrivacyMode.UNMASKED
+                : AiPrivacyMode.MASKED;
     }
 
     /**
@@ -285,6 +324,9 @@ public class AiProviderConfigService implements AiProviderReadiness {
                 config.getProjectId(),
                 effectiveAllowInternalEndpoint(config),
                 supportsImageInput(config),
+                isCurrentZdrAttestation(config) && aiProperties.isUnmaskedModeEnabled()
+                        ? AiPrivacyMode.UNMASKED
+                        : AiPrivacyMode.MASKED,
                 decryptCredentials(orgId, config.getCredentialRef()));
     }
 
@@ -698,6 +740,48 @@ public class AiProviderConfigService implements AiProviderReadiness {
             return existing.getAttestedAt();
         }
         return LocalDateTime.now();
+    }
+
+    private AiProviderConfigDto providerDto(AiProviderConfig config) {
+        boolean current = isCurrentZdrAttestation(config);
+        AiPrivacyMode privacyMode = config != null && isReady(config) && current
+                && aiProperties.isUnmaskedModeEnabled()
+                ? AiPrivacyMode.UNMASKED
+                : AiPrivacyMode.MASKED;
+        return AiProviderConfigDto.from(config, privacyMode, current);
+    }
+
+    private static boolean isCurrentZdrAttestation(AiProviderConfig config) {
+        return config != null
+                && config.isZeroDataRetentionAttested()
+                && config.getZdrAttestedAt() != null
+                && Objects.equals(
+                        config.getZdrAttestationVersion(), CURRENT_ZDR_ATTESTATION_VERSION);
+    }
+
+    private static void preserveCurrentZdrAttestation(
+            AiProviderConfig existing,
+            AiProviderConfig replacement) {
+        if (existing == null || !sameProviderDestination(existing, replacement)) {
+            return;
+        }
+        replacement.setZeroDataRetentionAttested(existing.isZeroDataRetentionAttested());
+        replacement.setZdrAttestedByUserId(existing.getZdrAttestedByUserId());
+        replacement.setZdrAttestedAt(existing.getZdrAttestedAt());
+        replacement.setZdrAttestationVersion(existing.getZdrAttestationVersion());
+    }
+
+    private static boolean sameProviderDestination(
+            AiProviderConfig existing,
+            AiProviderConfig replacement) {
+        return Objects.equals(existing.getProvider(), replacement.getProvider())
+                && Objects.equals(existing.getRegion(), replacement.getRegion())
+                && Objects.equals(existing.getEndpoint(), replacement.getEndpoint())
+                && Objects.equals(existing.getApiVersion(), replacement.getApiVersion())
+                && Objects.equals(existing.getDeployment(), replacement.getDeployment())
+                && Objects.equals(existing.getProjectId(), replacement.getProjectId())
+                && Objects.equals(existing.getModelId(), replacement.getModelId())
+                && existing.isAllowInternalEndpoint() == replacement.isAllowInternalEndpoint();
     }
 
     private void deleteReplacedSecretReference(AiProviderConfig existing, AiProviderConfig replacement) {

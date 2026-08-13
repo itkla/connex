@@ -151,4 +151,18 @@ class AiFeatureGateTest {
         assertFalse(gate.isAiUsable(AiFeature.DEAL_BRIEF));
         assertTrue(gate.isAiUsable(AiFeature.REPORT_NARRATIVE));
     }
+
+    @Test
+    void privacyModeFailsClosedUnlessTheCompleteGateAndReadinessPass() {
+        properties.setEnabled(true);
+        when(workspaceService.permissionsFor(7, 42)).thenReturn(EnumSet.of(Permission.AI_USE));
+        when(providerReadiness.getIfAvailable()).thenReturn(readiness);
+        when(readiness.isReadyForOrg(3)).thenReturn(false, true);
+        when(readiness.privacyModeForOrg(3)).thenReturn(AiPrivacyMode.UNMASKED);
+
+        assertEquals(AiPrivacyMode.MASKED,
+                gate.privacyModeIfUsable(AiFeature.ASSISTANT_CHAT));
+        assertEquals(AiPrivacyMode.UNMASKED,
+                gate.privacyModeIfUsable(AiFeature.ASSISTANT_CHAT));
+    }
 }

@@ -21,9 +21,13 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
+import ooo.klae.connex.backend.ai.egress.AiSseEventReader;
+import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
+import ooo.klae.connex.backend.ai.provider.openai.OpenAiSseAccumulator;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 
 /**
  * Minimal Azure OpenAI transport. Production requests use the shared pinned fixed-provider client
@@ -95,6 +99,70 @@ public class AzureOpenAiClient {
             throw new AiProviderRequestRejectedException("Azure OpenAI", response.statusCode());
         }
         return new String(response.body(), StandardCharsets.UTF_8);
+    }
+
+    /** Streams and normalizes one Azure OpenAI chat completion. */
+    public AiCompletionResult stream(
+            URI endpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            OpenAiSseAccumulator accumulator,
+            AiProviderStreamObserver observer) {
+        String host = requireAzureEndpoint(endpoint);
+        if (credentials == null) {
+            throw new AiProviderException("Azure OpenAI credentials are required");
+        }
+        requireText(requestBodyJson, "request body");
+        Objects.requireNonNull(deadline, "deadline");
+        Objects.requireNonNull(accumulator, "accumulator");
+        String apiKey = credentials.require("apiKey");
+        byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
+        if (providerClient != null) {
+            FixedAiProviderClient.StreamResponse<AiCompletionResult> response =
+                    providerClient.postStream(
+                            endpoint,
+                            Set.of(host),
+                            Map.of(
+                                    "Content-Type", ContentType.APPLICATION_JSON.getMimeType(),
+                                    "Accept", MediaType.TEXT_EVENT_STREAM_VALUE,
+                                    "api-key", apiKey),
+                            ContentType.APPLICATION_JSON,
+                            body,
+                            deadline,
+                            "Azure OpenAI invocation",
+                            observer,
+                            input -> {
+                                AiSseEventReader.read(
+                                        input, accumulator::accept,
+                                        accumulator::onTransportActivity);
+                                return accumulator.finish();
+                            });
+            if (response.statusCode() < 200 || response.statusCode() > 299) {
+                throw new AiProviderRequestRejectedException(
+                        "Azure OpenAI", response.statusCode());
+            }
+            return Objects.requireNonNull(response.value(), "Azure streaming response");
+        }
+        requireRemainingDeadline(deadline);
+        RestClient.RequestBodySpec spec = restClient.post()
+                .uri(endpoint)
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .header("api-key", apiKey);
+        AiEgressGuard.requireFetchableHost(host, false);
+        AiCompletionResult result = spec.body(body).exchange((request, response) -> {
+            if (response.getStatusCode().isError()) {
+                throw new AiProviderRequestRejectedException(
+                        "Azure OpenAI", response.getStatusCode().value());
+            }
+            AiSseEventReader.read(
+                    response.getBody(), accumulator::accept,
+                    accumulator::onTransportActivity);
+            return accumulator.finish();
+        });
+        requireRemainingDeadline(deadline);
+        return result;
     }
 
     private AzureOpenAiResponse sendOnce(

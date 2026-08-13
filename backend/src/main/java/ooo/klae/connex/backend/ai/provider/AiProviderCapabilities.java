@@ -9,7 +9,8 @@ public record AiProviderCapabilities(
         int contextWindowTokens,
         int maxOutputTokens,
         AiToolCallingMode toolCalling,
-        AiReasoningMode nativeToolReasoning) {
+        AiReasoningMode nativeToolReasoning,
+        boolean streaming) {
     private static final int ESTIMATED_UTF8_BYTES_PER_TOKEN = 4;
 
     public AiProviderCapabilities {
@@ -26,6 +27,17 @@ public record AiProviderCapabilities(
         }
     }
 
+    /** Creates capabilities with buffered provider delivery and a conservative output ceiling. */
+    public AiProviderCapabilities(
+            AiStructuredOutputEnforcement structuredOutput,
+            AiReasoningMode reasoning,
+            int contextWindowTokens,
+            AiToolCallingMode toolCalling,
+            AiReasoningMode nativeToolReasoning) {
+        this(structuredOutput, reasoning, contextWindowTokens, 4_096, toolCalling,
+                nativeToolReasoning, false);
+    }
+
     /** Creates capabilities for an adapter without native function tools. */
     public AiProviderCapabilities(
             AiStructuredOutputEnforcement structuredOutput,
@@ -38,7 +50,8 @@ public record AiProviderCapabilities(
                 contextWindowTokens,
                 maxOutputTokens,
                 AiToolCallingMode.NONE,
-                reasoning);
+                reasoning,
+                false);
     }
 
     /** Creates capabilities whose native-tool reasoning matches the regular provider mode. */
@@ -48,7 +61,20 @@ public record AiProviderCapabilities(
             int contextWindowTokens,
             int maxOutputTokens,
             AiToolCallingMode toolCalling) {
-        this(structuredOutput, reasoning, contextWindowTokens, maxOutputTokens, toolCalling, reasoning);
+        this(structuredOutput, reasoning, contextWindowTokens, maxOutputTokens,
+                toolCalling, reasoning, false);
+    }
+
+    /** Creates buffered capabilities with an explicit native-tool reasoning mode. */
+    public AiProviderCapabilities(
+            AiStructuredOutputEnforcement structuredOutput,
+            AiReasoningMode reasoning,
+            int contextWindowTokens,
+            int maxOutputTokens,
+            AiToolCallingMode toolCalling,
+            AiReasoningMode nativeToolReasoning) {
+        this(structuredOutput, reasoning, contextWindowTokens, maxOutputTokens,
+                toolCalling, nativeToolReasoning, false);
     }
 
     /**

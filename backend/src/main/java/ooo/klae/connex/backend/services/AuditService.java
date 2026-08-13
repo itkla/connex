@@ -667,6 +667,7 @@ public class AuditService {
         copyKnownStringList(source, projected, "mediaTypes", AI_MEDIA_TYPES);
         copyBoolean(source, projected, "structured");
         copyBoolean(source, projected, "outputTokensClamped");
+        copyBoolean(source, projected, "streamed");
         copyKnownString(source, projected, "protocol", AI_PROTOCOLS);
         copyBoolean(source, projected, "nativeToolsDegraded");
         copyNumber(source, projected, "nativeToolsDegradedStatus");

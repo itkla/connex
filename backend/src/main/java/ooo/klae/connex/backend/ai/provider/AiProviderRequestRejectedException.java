@@ -29,8 +29,8 @@ public class AiProviderRequestRejectedException extends AiProviderException {
 
     /**
      * Bounded, control-character-free excerpt of the provider's error body, or {@code null}.
-     * Request payloads are masked before egress, so any echo the provider includes here is
-     * masked as well; the excerpt is still capped and stripped defensively.
+     * The invocation audit boundary omits this value for unmasked requests because a provider may
+     * echo request content even after transport-level credential redaction.
      */
     public String providerDetail() {
         return providerDetail;

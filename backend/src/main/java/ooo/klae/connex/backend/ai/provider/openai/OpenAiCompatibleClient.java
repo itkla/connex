@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.provider.openai;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.FilterInputStream;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.net.URI;
@@ -47,6 +48,8 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.PinnedHostDnsResolver;
+import ooo.klae.connex.backend.ai.egress.AiSseEventReader;
+import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
@@ -68,6 +71,7 @@ public class OpenAiCompatibleClient {
     private final int maxResponseBytes;
     private final Duration connectTimeout;
     private final Duration requestTimeout;
+    private final Duration streamIdleTimeout;
     private final AiEndpointAddressValidator endpointAddressValidator;
     private final ScheduledThreadPoolExecutor deadlineExecutor = deadlineExecutor();
     private final ExecutorService resolverExecutor = resolverExecutor();
@@ -80,6 +84,8 @@ public class OpenAiCompatibleClient {
         this.restClient = null;
         this.connectTimeout = duration(aiProperties.getConnectTimeoutMs(), "connect timeout");
         this.requestTimeout = duration(aiProperties.getRequestTimeoutMs(), "request timeout");
+        this.streamIdleTimeout = positiveDuration(
+                aiProperties.getStreamIdleTimeout(), "stream idle timeout");
         this.maxResponseBytes = positiveInt(aiProperties.getMaxResponseBytes(), "max response bytes");
         this.endpointAddressValidator = Objects.requireNonNull(endpointAddressValidator, "endpointAddressValidator");
     }
@@ -96,6 +102,7 @@ public class OpenAiCompatibleClient {
         this.maxResponseBytes = positiveInt(maxResponseBytes, "max response bytes");
         this.connectTimeout = null;
         this.requestTimeout = null;
+        this.streamIdleTimeout = Duration.ofSeconds(30);
         this.endpointAddressValidator = Objects.requireNonNull(endpointAddressValidator, "endpointAddressValidator");
     }
 
@@ -139,7 +146,7 @@ public class OpenAiCompatibleClient {
             } else {
                 Objects.requireNonNull(deadline, "deadline");
                 try (PinnedRestClient pinned = pinnedRestClient(
-                        host, pinnedAddress, remainingDuration(deadline))) {
+                        host, pinnedAddress, remainingDuration(deadline), requestTimeout)) {
                     response = sendOnce(pinned, endpoint, apiKey, body, deadline);
                 }
             }
@@ -156,6 +163,55 @@ public class OpenAiCompatibleClient {
                     "OpenAI-compatible", response.statusCode(), rejectionDetail);
         }
         return new String(response.body(), StandardCharsets.UTF_8);
+    }
+
+    /** Streams and normalizes one organization-configured chat completion. */
+    public AiCompletionResult stream(
+            URI endpoint,
+            boolean allowInternalEndpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            OpenAiSseAccumulator accumulator) {
+        String host = requireEndpoint(endpoint, allowInternalEndpoint);
+        if (credentials == null) {
+            throw new AiProviderException("OpenAI-compatible credentials are required");
+        }
+        requireText(requestBodyJson, "request body");
+        Objects.requireNonNull(deadline, "deadline");
+        Objects.requireNonNull(accumulator, "accumulator");
+        String apiKey = credentials.get("apiKey");
+        if (apiKey != null && !apiKey.isBlank()) {
+            requireHeaderValue(apiKey);
+        }
+        byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
+        InetAddress pinnedAddress = resolveFetchable(host, allowInternalEndpoint, deadline);
+        if (restClient != null) {
+            RestClient.RequestBodySpec spec = restClient.post()
+                    .uri(endpoint)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.TEXT_EVENT_STREAM);
+            if (apiKey != null && !apiKey.isBlank()) {
+                spec = spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
+            }
+            return spec.body(body).exchange((request, response) -> {
+                if (response.getStatusCode().isError()) {
+                    byte[] rejection = readBounded(response.getBody());
+                    String providerDetail = rejectionDetail(rejection, apiKey);
+                    throw new AiProviderRequestRejectedException(
+                            "OpenAI-compatible", response.getStatusCode().value(),
+                            providerDetail);
+                }
+                AiSseEventReader.read(
+                        response.getBody(), accumulator::accept,
+                        accumulator::onTransportActivity);
+                return accumulator.finish();
+            });
+        }
+        try (PinnedRestClient pinned = pinnedRestClient(
+                host, pinnedAddress, remainingDuration(deadline), streamIdleTimeout)) {
+            return sendStream(pinned, endpoint, apiKey, body, deadline, accumulator);
+        }
     }
 
     /**
@@ -205,6 +261,80 @@ public class OpenAiCompatibleClient {
         return spec.body(body)
                 .exchange((request, response) -> new OpenAiCompatibleResponse(
                         response.getStatusCode().value(), readBounded(response.getBody())));
+    }
+
+    private AiCompletionResult sendStream(
+            PinnedRestClient pinned,
+            URI endpoint,
+            String apiKey,
+            byte[] body,
+            AiRequestDeadline deadline,
+            OpenAiSseAccumulator accumulator) {
+        Duration remaining = remainingDuration(deadline);
+        HttpPost request = new HttpPost(endpoint);
+        request.setHeader(HttpHeaders.CONTENT_TYPE, ContentType.APPLICATION_JSON.getMimeType());
+        request.setHeader(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE);
+        if (apiKey != null && !apiKey.isBlank()) {
+            request.setHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
+        }
+        request.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_JSON));
+        request.setConfig(RequestConfig.custom()
+                .setConnectionRequestTimeout(Timeout.of(shorter(connectTimeout, remaining)))
+                .setResponseTimeout(Timeout.of(streamIdleTimeout))
+                .setHardCancellationEnabled(true)
+                .build());
+        AtomicBoolean deadlineTriggered = new AtomicBoolean();
+        ScheduledFuture<?> deadlineTask = deadlineExecutor.schedule(() -> {
+            deadlineTriggered.set(true);
+            request.cancel();
+            pinned.httpClient().close(CloseMode.IMMEDIATE);
+        }, remainingNanos(deadline), TimeUnit.NANOSECONDS);
+        try {
+            accumulator.openTransport(() -> {
+                request.cancel();
+                pinned.httpClient().close(CloseMode.IMMEDIATE);
+            });
+            AiCompletionResult result = pinned.httpClient().execute(request, response -> {
+                HttpEntity entity = response.getEntity();
+                if (response.getCode() < 200 || response.getCode() > 299) {
+                    byte[] rejection = entity == null ? new byte[0] : readBounded(entity.getContent());
+                    String providerDetail = rejectionDetail(rejection, apiKey);
+                    throw new AiProviderRequestRejectedException(
+                            "OpenAI-compatible", response.getCode(),
+                            providerDetail);
+                }
+                if (entity == null) {
+                    throw new AiProviderException(
+                            "OpenAI-compatible streaming response was invalid");
+                }
+                AiSseEventReader.read(
+                        new ResponseBoundedInputStream(entity.getContent()), accumulator::accept,
+                        accumulator::onTransportActivity);
+                return accumulator.finish();
+            });
+            if (deadline.isExpired()) {
+                throw deadlineExceeded();
+            }
+            return result;
+        } catch (IOException exception) {
+            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                throw deadlineExceeded();
+            }
+            if (exception instanceof SocketTimeoutException) {
+                throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException(
+                        "OpenAI-compatible stream became idle");
+            }
+            throw new AiProviderException(
+                    "OpenAI-compatible invocation failed during transport");
+        } catch (AiProviderException exception) {
+            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                throw deadlineExceeded();
+            }
+            throw exception;
+        } finally {
+            accumulator.closeTransport();
+            deadlineTask.cancel(false);
+        }
     }
 
     private OpenAiCompatibleResponse sendOnce(
@@ -306,9 +436,10 @@ public class OpenAiCompatibleClient {
         }
     }
 
-    private PinnedRestClient pinnedRestClient(String host, InetAddress address, Duration remaining) {
+    private PinnedRestClient pinnedRestClient(
+            String host, InetAddress address, Duration remaining, Duration socketTimeout) {
         Timeout connect = Timeout.of(shorter(connectTimeout, remaining));
-        Timeout request = Timeout.of(requestTimeout);
+        Timeout request = Timeout.of(socketTimeout);
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
             .setConnectTimeout(connect)
             .setSocketTimeout(request)
@@ -353,6 +484,13 @@ public class OpenAiCompatibleClient {
 
     private static Duration shorter(Duration first, Duration second) {
         return first.compareTo(second) <= 0 ? first : second;
+    }
+
+    private static Duration positiveDuration(Duration value, String name) {
+        if (value == null || value.isZero() || value.isNegative()) {
+            throw new IllegalStateException("AI " + name + " must be positive");
+        }
+        return value;
     }
 
     private static AiProviderException deadlineExceeded() {
@@ -449,6 +587,40 @@ public class OpenAiCompatibleClient {
         @Override
         public void close() {
             httpClient.close(CloseMode.GRACEFUL);
+        }
+    }
+
+    private final class ResponseBoundedInputStream extends FilterInputStream {
+        private int count;
+
+        private ResponseBoundedInputStream(InputStream input) {
+            super(input);
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            if (value >= 0) {
+                add(1);
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int read = super.read(buffer, offset, length);
+            if (read > 0) {
+                add(read);
+            }
+            return read;
+        }
+
+        private void add(int amount) {
+            if (count > maxResponseBytes - amount) {
+                throw new AiProviderException(
+                        "OpenAI-compatible response exceeded the configured size limit");
+            }
+            count += amount;
         }
     }
 }

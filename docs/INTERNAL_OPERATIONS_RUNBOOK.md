@@ -567,6 +567,12 @@ Beyond those, the **organization** must have an enabled, fully configured BYOP p
 bring-your-own-provider configured per organization, not instance-wide, and it is not part of the
 `Capability` registry. Note also that flipping `CONNEX_AI_ENABLED=true` enables **all five** AI
 features unless each is individually set to `false`; an absent per-feature entry defaults on.
+Unmasked disclosure is a separate, fail-closed posture. It requires
+`CONNEX_AI_UNMASKED_MODE_ENABLED=true` plus a current org-admin ZDR attestation for the exact provider
+destination. A destination change invalidates the attestation and immediately restores masked mode;
+credential rotation and enable/no-training changes do not change the destination. If a tester expects
+streaming, confirm the provider-config response reports `privacyMode=UNMASKED` and a current
+attestation before investigating the SSE transport. Bedrock remains buffered by design.
 
 ## Feedback and incident channels
 

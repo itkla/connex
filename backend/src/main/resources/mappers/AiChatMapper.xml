@@ -52,6 +52,11 @@
     <result property="requestedByUserId" column="requested_by_user_id"/>
     <result property="status" column="status"/>
     <result property="terminalReason" column="terminal_reason"/>
+    <result property="privacyMode" column="privacy_mode"/>
+    <result property="streamed" column="streamed"/>
+    <result property="partialContent" column="partial_content"/>
+    <result property="partialContentUtf16Offset" column="partial_content_utf16_offset"/>
+    <result property="cancelRequestedAt" column="cancel_requested_at"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
@@ -540,14 +545,15 @@
 
   <insert id="insertTurn" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_turn
-      (workspace_id, session_id, requested_by_user_id, status)
+      (workspace_id, session_id, requested_by_user_id, status, privacy_mode, streamed)
     VALUES
-      (#{workspaceId}, #{sessionId}, #{requestedByUserId}, #{status})
+      (#{workspaceId}, #{sessionId}, #{requestedByUserId}, #{status}, #{privacyMode}, #{streamed})
   </insert>
 
   <select id="getTurnById" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, created_at, updated_at
+           terminal_reason, privacy_mode, streamed, partial_content,
+           partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
@@ -556,7 +562,8 @@
 
   <select id="getTurnByIdForUpdate" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, created_at, updated_at
+           terminal_reason, privacy_mode, streamed, partial_content,
+           partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
@@ -566,7 +573,8 @@
 
   <select id="listActiveTurnsBySessionForUpdate" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, created_at, updated_at
+           terminal_reason, privacy_mode, streamed, partial_content,
+           partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
@@ -577,7 +585,8 @@
 
   <select id="listTurnsByIds" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, created_at, updated_at
+           terminal_reason, privacy_mode, streamed, partial_content,
+           partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
@@ -613,6 +622,55 @@
     <if test="updatedBefore != null">
       AND updated_at &lt;= #{updatedBefore}
     </if>
+  </update>
+
+  <update id="appendTurnPartialContent">
+    UPDATE ai_chat_turn
+    SET partial_content = CONCAT(COALESCE(partial_content, ''), #{content}),
+        partial_content_utf16_offset = #{nextOffset}
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status = 'running'
+      AND streamed = TRUE
+      AND partial_content_utf16_offset = #{expectedOffset}
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="resetTurnPartialContent">
+    UPDATE ai_chat_turn
+    SET partial_content = NULL,
+        partial_content_utf16_offset = 0
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status = 'running'
+      AND streamed = TRUE
+      AND partial_content_utf16_offset = #{expectedOffset}
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="replaceTurnPartialContent">
+    UPDATE ai_chat_turn
+    SET partial_content = #{content},
+        partial_content_utf16_offset = #{offset}
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status = 'running'
+      AND streamed = TRUE
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="cancelTurn">
+    UPDATE ai_chat_turn
+    SET status = 'cancelled',
+        terminal_reason = 'cancelled',
+        cancel_requested_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status IN ('queued', 'running')
   </update>
 
   <insert id="insertToolCall" useGeneratedKeys="true" keyProperty="id">

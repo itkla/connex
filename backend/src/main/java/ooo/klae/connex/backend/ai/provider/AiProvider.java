@@ -32,5 +32,17 @@ public interface AiProvider {
         return AiToolCallingMode.NONE;
     }
 
+    /** @return whether the configured target supports normalized completion streaming */
+    default boolean supportsStreaming(AiProviderTarget target) {
+        return false;
+    }
+
     AiCompletionResult complete(AiCompletionRequest request);
+
+    /** Completes one normalized provider stream while preserving the full buffered result. */
+    default AiCompletionResult completeStreaming(
+            AiCompletionRequest request,
+            AiProviderStreamObserver observer) {
+        throw new AiProviderException("AI provider does not support streaming");
+    }
 }

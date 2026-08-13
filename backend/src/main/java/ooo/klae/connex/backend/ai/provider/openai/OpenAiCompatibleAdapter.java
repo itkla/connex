@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
@@ -217,6 +218,11 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return AiToolCallingMode.NATIVE_FUNCTIONS;
     }
 
+    @Override
+    public boolean supportsStreaming(AiProviderTarget target) {
+        return true;
+    }
+
     private static boolean isLargeGemmaThree(String modelId) {
         return modelId.matches("^gemma-3-(4b|12b|27b)(?:[-.@].*)?$");
     }
@@ -317,6 +323,53 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         }
     }
 
+    @Override
+    public AiCompletionResult completeStreaming(
+            AiCompletionRequest request,
+            AiProviderStreamObserver observer) {
+        if (request == null || observer == null) {
+            throw new AiProviderException("AI streaming completion request is required");
+        }
+        AiRequestDeadline deadline = request.providerAttemptExecutor()
+                .deadline(aiProperties.getRequestTimeoutMs());
+        AiProviderTarget target = request.target();
+        if (!PROVIDER_OPENAI_COMPATIBLE.equals(target.provider())) {
+            throw new AiProviderException("Unsupported AI provider");
+        }
+        try {
+            URI endpoint = buildCompletionEndpoint(target);
+            AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
+            while (true) {
+                try {
+                    String requestBody = buildRequestBody(request, enforcement, true);
+                    AiStructuredOutputEnforcement appliedEnforcement = enforcement;
+                    return request.providerAttemptExecutor().executeStream(() ->
+                            openAiCompatibleClient.stream(
+                                    endpoint,
+                                    target.allowInternalEndpoint(),
+                                    request.credentials(),
+                                    requestBody,
+                                    deadline,
+                                    new OpenAiSseAccumulator(
+                                            objectMapper,
+                                            observer,
+                                            appliedEnforcement,
+                                            request.reasoningMode())));
+                } catch (AiProviderRequestRejectedException exception) {
+                    if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
+                            || !exception.permitsStructuredOutputFallback()) {
+                        throw exception;
+                    }
+                    enforcement = enforcement.degrade();
+                }
+            }
+        } catch (AiProviderException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new AiProviderException("OpenAI-compatible adapter failed");
+        }
+    }
+
     private URI buildCompletionEndpoint(AiProviderTarget target) {
         String endpoint = target.endpoint();
         if (endpoint == null || endpoint.isBlank()) {
@@ -350,6 +403,13 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     private String buildRequestBody(
             AiCompletionRequest request,
             AiStructuredOutputEnforcement enforcement) throws Exception {
+        return buildRequestBody(request, enforcement, false);
+    }
+
+    private String buildRequestBody(
+            AiCompletionRequest request,
+            AiStructuredOutputEnforcement enforcement,
+            boolean streamed) throws Exception {
         String modelId = request.target().modelId();
         if (modelId == null || modelId.isBlank()) {
             throw new AiProviderException("OpenAI-compatible model id is required");
@@ -393,6 +453,10 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         }
         addResponseFormat(root, request, enforcement);
         addNativeTools(root, request.nativeTools());
+        if (streamed) {
+            root.put("stream", true);
+            root.putObject("stream_options").put("include_usage", true);
+        }
         return objectMapper.writeValueAsString(root);
     }
 

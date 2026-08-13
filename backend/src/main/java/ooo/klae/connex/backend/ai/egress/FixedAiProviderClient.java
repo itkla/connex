@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.egress;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.FilterInputStream;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.net.URI;
@@ -41,6 +42,7 @@ import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 
 /**
  * Pinned transport for fixed AI provider hosts. DNS validation and the HTTP exchange share one
@@ -54,6 +56,7 @@ public class FixedAiProviderClient {
     private final Duration connectTimeout;
     private final Duration requestTimeout;
     private final int maxResponseBytes;
+    private final Duration streamIdleTimeout;
     private final HostResolver hostResolver;
     private final ScheduledThreadPoolExecutor deadlineExecutor = deadlineExecutor();
     private final ExecutorService resolverExecutor = resolverExecutor();
@@ -69,6 +72,8 @@ public class FixedAiProviderClient {
         this.connectTimeout = duration(aiProperties.getConnectTimeoutMs(), "connect timeout");
         this.requestTimeout = duration(aiProperties.getRequestTimeoutMs(), "request timeout");
         this.maxResponseBytes = positiveInt(aiProperties.getMaxResponseBytes(), "max response bytes");
+        this.streamIdleTimeout = positiveDuration(
+                aiProperties.getStreamIdleTimeout(), "stream idle timeout");
         this.hostResolver = Objects.requireNonNull(hostResolver, "hostResolver");
     }
 
@@ -99,8 +104,37 @@ public class FixedAiProviderClient {
         Objects.requireNonNull(deadline, "deadline");
         requireHeaders(headers, operation);
         InetAddress address = resolve(host, deadline, operation);
-        try (PinnedClient pinned = pinnedClient(host, address, remainingDuration(deadline, operation))) {
+        try (PinnedClient pinned = pinnedClient(
+                host, address, remainingDuration(deadline, operation), requestTimeout)) {
             return send(pinned, endpoint, headers, contentType, body, deadline, operation);
+        }
+    }
+
+    /** Sends a pinned response whose successful body is consumed incrementally. */
+    public <T> StreamResponse<T> postStream(
+            URI endpoint,
+            Set<String> allowedHosts,
+            Map<String, String> headers,
+            ContentType contentType,
+            byte[] body,
+            AiRequestDeadline deadline,
+            String operation,
+            AiProviderStreamObserver streamObserver,
+            StreamBodyReader<T> bodyReader) {
+        String host = requireEndpoint(endpoint, allowedHosts, operation);
+        Objects.requireNonNull(headers, "headers");
+        Objects.requireNonNull(contentType, "contentType");
+        Objects.requireNonNull(body, "body");
+        Objects.requireNonNull(deadline, "deadline");
+        Objects.requireNonNull(bodyReader, "bodyReader");
+        Objects.requireNonNull(streamObserver, "streamObserver");
+        requireHeaders(headers, operation);
+        InetAddress address = resolve(host, deadline, operation);
+        try (PinnedClient pinned = pinnedClient(
+                host, address, remainingDuration(deadline, operation), streamIdleTimeout)) {
+            return sendStream(
+                    pinned, endpoint, headers, contentType, body, deadline, operation,
+                    streamObserver, bodyReader);
         }
     }
 
@@ -162,6 +196,78 @@ public class FixedAiProviderClient {
         }
     }
 
+    private <T> StreamResponse<T> sendStream(
+            PinnedClient pinned,
+            URI endpoint,
+            Map<String, String> headers,
+            ContentType contentType,
+            byte[] body,
+            AiRequestDeadline deadline,
+            String operation,
+            AiProviderStreamObserver streamObserver,
+            StreamBodyReader<T> bodyReader) {
+        HttpPost request = new HttpPost(endpoint);
+        headers.forEach(request::setHeader);
+        request.setEntity(new ByteArrayEntity(body, contentType));
+        Duration remaining = remainingDuration(deadline, operation);
+        request.setConfig(RequestConfig.custom()
+                .setConnectionRequestTimeout(Timeout.of(shorter(connectTimeout, remaining)))
+                .setResponseTimeout(Timeout.of(streamIdleTimeout))
+                .setHardCancellationEnabled(true)
+                .build());
+        AtomicBoolean deadlineTriggered = new AtomicBoolean();
+        ScheduledFuture<?> deadlineTask = deadlineExecutor.schedule(() -> {
+            deadlineTriggered.set(true);
+            request.cancel();
+            pinned.httpClient().close(CloseMode.IMMEDIATE);
+        }, remainingNanos(deadline, operation), TimeUnit.NANOSECONDS);
+        try {
+            streamObserver.onTransportOpen(() -> {
+                request.cancel();
+                pinned.httpClient().close(CloseMode.IMMEDIATE);
+            });
+            StreamResponse<T> response = pinned.httpClient().execute(request, providerResponse -> {
+                HttpEntity entity = providerResponse.getEntity();
+                int status = providerResponse.getCode();
+                if (status >= 200 && status <= 299 && entity != null) {
+                    T value = bodyReader.read(new BoundedInputStream(
+                            entity.getContent(), maxResponseBytes, operation));
+                    return new StreamResponse<>(status, value, new byte[0]);
+                }
+                byte[] responseBody = entity == null
+                        ? new byte[0]
+                        : readBounded(entity.getContent(), operation);
+                return new StreamResponse<>(status, null, responseBody);
+            });
+            if (deadline.isExpired()) {
+                throw deadlineExceeded(operation);
+            }
+            return response;
+        } catch (IOException exception) {
+            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                throw deadlineExceeded(operation);
+            }
+            if (exception instanceof SocketTimeoutException) {
+                throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException(
+                        operation + " stream became idle");
+            }
+            throw retryableTransportFailure(operation);
+        } catch (AiProviderException exception) {
+            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                throw deadlineExceeded(operation);
+            }
+            throw exception;
+        } catch (RuntimeException exception) {
+            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                throw deadlineExceeded(operation);
+            }
+            throw transportFailure(operation);
+        } finally {
+            streamObserver.onTransportClosed();
+            deadlineTask.cancel(false);
+        }
+    }
+
     private InetAddress resolve(String host, AiRequestDeadline deadline, String operation) {
         remainingNanos(deadline, operation);
         if (!resolverSlots.tryAcquire()) {
@@ -201,11 +307,12 @@ public class FixedAiProviderClient {
         }
     }
 
-    private PinnedClient pinnedClient(String host, InetAddress address, Duration remaining) {
+    private PinnedClient pinnedClient(
+            String host, InetAddress address, Duration remaining, Duration socketTimeout) {
         Timeout connect = Timeout.of(shorter(connectTimeout, remaining));
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
                 .setConnectTimeout(connect)
-                .setSocketTimeout(Timeout.of(requestTimeout))
+                .setSocketTimeout(Timeout.of(socketTimeout))
                 .build();
         var connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
                 .setDnsResolver(new PinnedHostDnsResolver(host, address))
@@ -321,6 +428,13 @@ public class FixedAiProviderClient {
         return value;
     }
 
+    private static Duration positiveDuration(Duration value, String name) {
+        if (value == null || value.isZero() || value.isNegative()) {
+            throw new IllegalStateException("AI " + name + " must be positive");
+        }
+        return value;
+    }
+
     private static ScheduledThreadPoolExecutor deadlineExecutor() {
         ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(
                 2,
@@ -357,6 +471,24 @@ public class FixedAiProviderClient {
         }
     }
 
+    /** Incrementally consumed fixed-provider response with bounded rejection bytes. */
+    public record StreamResponse<T>(int statusCode, T value, byte[] body) {
+        public StreamResponse {
+            body = body == null ? new byte[0] : body.clone();
+        }
+
+        @Override
+        public byte[] body() {
+            return body.clone();
+        }
+    }
+
+    /** Synchronous successful-response body decoder. */
+    @FunctionalInterface
+    public interface StreamBodyReader<T> {
+        T read(InputStream input) throws IOException;
+    }
+
     /** Transient fixed-provider connection failure eligible for a caller-owned bounded retry. */
     public static final class RetryableTransportException extends AiProviderException {
         public RetryableTransportException(String message) {
@@ -373,6 +505,44 @@ public class FixedAiProviderClient {
         @Override
         public void close() {
             httpClient.close(CloseMode.GRACEFUL);
+        }
+    }
+
+    private static final class BoundedInputStream extends FilterInputStream {
+        private final int maximum;
+        private final String operation;
+        private int count;
+
+        private BoundedInputStream(InputStream input, int maximum, String operation) {
+            super(input);
+            this.maximum = maximum;
+            this.operation = operation;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            if (value >= 0) {
+                add(1);
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int read = super.read(buffer, offset, length);
+            if (read > 0) {
+                add(read);
+            }
+            return read;
+        }
+
+        private void add(int amount) {
+            if (count > maximum - amount) {
+                throw new AiProviderException(
+                        operation + " response exceeded the configured size limit");
+            }
+            count += amount;
         }
     }
 }

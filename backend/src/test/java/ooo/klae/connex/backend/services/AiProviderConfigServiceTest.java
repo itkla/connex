@@ -34,6 +34,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -45,6 +46,7 @@ import ooo.klae.connex.backend.dto.AiProviderConfigDto;
 import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -69,6 +71,7 @@ class AiProviderConfigServiceTest {
     @Mock private SessionSecurityService sessionSecurityService;
     @Mock private AiProviderRouter aiProviderRouter;
     @Mock private AiProvider aiProvider;
+    @Mock private WorkspaceService workspaceService;
 
     private AiProviderConfig stored;
     private AiProviderConfigService service;
@@ -78,7 +81,7 @@ class AiProviderConfigServiceTest {
         service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, organizationMapper, userMapper,
                 workspaceMapper, orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
                 sessionSecurityService, aiProviderRouter,
-                new ObjectMapper());
+                new ObjectMapper(), workspaceService);
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(organizationMapper.lockById(ORG_ID)).thenReturn(ORG_ID);
@@ -90,6 +93,7 @@ class AiProviderConfigServiceTest {
         lenient().when(aiProviderRouter.adapterFor(anyString())).thenReturn(aiProvider);
         lenient().when(aiProvider.contextWindowTokens(any())).thenReturn(32_768);
         lenient().when(aiProvider.maxOutputTokens(any())).thenReturn(32_768);
+        lenient().when(workspaceService.getCurrentOrgId()).thenReturn(ORG_ID);
         lenient().doAnswer(invocation -> {
             stored = copy(invocation.getArgument(0));
             stored.setUpdatedAt(LocalDateTime.now());
@@ -805,6 +809,83 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
+    void attestZeroDataRetentionRecordsCurrentVersionAndUnmaskedMode() {
+        stored = readyConfig();
+        when(aiProperties.isUnmaskedModeEnabled()).thenReturn(true);
+
+        AiProviderConfigDto dto = service.attestZeroDataRetention(WORKSPACE_ID, ACTOR_ID);
+
+        assertTrue(dto.isZeroDataRetentionAttested());
+        assertTrue(dto.isZdrAttestationCurrent());
+        assertEquals(ACTOR_ID, dto.getZdrAttestedByUserId());
+        assertEquals(AiProviderConfigService.CURRENT_ZDR_ATTESTATION_VERSION,
+                dto.getZdrAttestationVersion());
+        assertEquals(AiPrivacyMode.UNMASKED, dto.getPrivacyMode());
+        verify(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+        verify(auditService).record(
+                eq("org.ai_provider.zdr_attest"), eq("organization"), eq(ORG_ID),
+                eq("bedrock"), eq("Attested current zero-data-retention terms"), any());
+    }
+
+    @Test
+    void attestZeroDataRetentionHidesForeignOrganization() {
+        when(workspaceService.getCurrentOrgId()).thenReturn(99);
+
+        assertThrows(ResourceNotFoundException.class,
+                () -> service.attestZeroDataRetention(WORKSPACE_ID, ACTOR_ID));
+
+        verify(orgMemberService, never()).requireOrgAdmin(ORG_ID, ACTOR_ID);
+        verify(sessionSecurityService, never()).requireRecentAuthentication(ACTOR_ID);
+    }
+
+    @Test
+    void attestZeroDataRetentionRequiresOrgAdminBeforeStepUpOrWrite() {
+        doThrow(new ForbiddenException("Requires an organization administrator role"))
+                .when(orgMemberService).requireOrgAdmin(ORG_ID, ACTOR_ID);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.attestZeroDataRetention(WORKSPACE_ID, ACTOR_ID));
+
+        verify(sessionSecurityService, never()).requireRecentAuthentication(ACTOR_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void attestZeroDataRetentionRequiresRecentAuthenticationBeforeLockOrWrite() {
+        doThrow(new ForbiddenException("Recent authentication required"))
+                .when(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.attestZeroDataRetention(WORKSPACE_ID, ACTOR_ID));
+
+        verify(userMapper, never()).lockByIdForShare(ACTOR_ID);
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void providerDestinationChangeInvalidatesZdrWhileCredentialRotationPreservesIt() {
+        stored = readyAzureConfig();
+        stored.setZeroDataRetentionAttested(true);
+        stored.setZdrAttestedByUserId(ACTOR_ID);
+        stored.setZdrAttestedAt(LocalDateTime.now());
+        stored.setZdrAttestationVersion(
+                AiProviderConfigService.CURRENT_ZDR_ATTESTATION_VERSION);
+        when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any()))
+                .thenReturn("secret:v1:rotated");
+
+        service.save(WORKSPACE_ID, ACTOR_ID, azureRequest());
+        assertTrue(stored.isZeroDataRetentionAttested());
+
+        AiProviderConfigRequest moved = azureRequest();
+        moved.setDeployment("contacts-next");
+        service.save(WORKSPACE_ID, ACTOR_ID, moved);
+
+        assertFalse(stored.isZeroDataRetentionAttested());
+        assertNull(stored.getZdrAttestedAt());
+        assertNull(stored.getZdrAttestationVersion());
+    }
+
+    @Test
     void save_vertexUnparseablePrivateKey_isRejected() {
         AiProviderConfigRequest request = vertexRequest();
         request.setServiceAccountJson("{\"type\":\"service_account\","
@@ -966,6 +1047,10 @@ class AiProviderConfigServiceTest {
         copy.setCredentialLast4(source.getCredentialLast4());
         copy.setNoTrainingAttested(source.isNoTrainingAttested());
         copy.setAttestedAt(source.getAttestedAt());
+        copy.setZeroDataRetentionAttested(source.isZeroDataRetentionAttested());
+        copy.setZdrAttestedByUserId(source.getZdrAttestedByUserId());
+        copy.setZdrAttestedAt(source.getZdrAttestedAt());
+        copy.setZdrAttestationVersion(source.getZdrAttestationVersion());
         copy.setEnabled(source.isEnabled());
         copy.setCreatedAt(source.getCreatedAt());
         copy.setUpdatedAt(source.getUpdatedAt());

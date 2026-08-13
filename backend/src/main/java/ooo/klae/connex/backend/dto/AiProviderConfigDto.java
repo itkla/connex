@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 
 import lombok.Data;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 
 /**
  * Per-organization AI provider settings returned to the client. The credential
@@ -22,6 +23,12 @@ public class AiProviderConfigDto {
     private boolean hasCredential;
     private String credentialLast4;
     private boolean noTrainingAttested;
+    private boolean zeroDataRetentionAttested;
+    private Integer zdrAttestedByUserId;
+    private LocalDateTime zdrAttestedAt;
+    private Integer zdrAttestationVersion;
+    private boolean zdrAttestationCurrent;
+    private AiPrivacyMode privacyMode = AiPrivacyMode.MASKED;
     private boolean enabled;
     private LocalDateTime updatedAt;
 
@@ -31,7 +38,17 @@ public class AiProviderConfigDto {
      * @return the DTO, disabled and empty when config is null
      */
     public static AiProviderConfigDto from(AiProviderConfig config) {
+        return from(config, AiPrivacyMode.MASKED, false);
+    }
+
+    /** Maps stored settings together with their operator-gated privacy posture. */
+    public static AiProviderConfigDto from(
+            AiProviderConfig config,
+            AiPrivacyMode privacyMode,
+            boolean zdrAttestationCurrent) {
         AiProviderConfigDto dto = new AiProviderConfigDto();
+        dto.setPrivacyMode(privacyMode == null ? AiPrivacyMode.MASKED : privacyMode);
+        dto.setZdrAttestationCurrent(zdrAttestationCurrent);
         if (config == null) {
             return dto;
         }
@@ -46,6 +63,10 @@ public class AiProviderConfigDto {
         dto.setHasCredential(config.getCredentialRef() != null && !config.getCredentialRef().isBlank());
         dto.setCredentialLast4(config.getCredentialLast4());
         dto.setNoTrainingAttested(config.isNoTrainingAttested());
+        dto.setZeroDataRetentionAttested(config.isZeroDataRetentionAttested());
+        dto.setZdrAttestedByUserId(config.getZdrAttestedByUserId());
+        dto.setZdrAttestedAt(config.getZdrAttestedAt());
+        dto.setZdrAttestationVersion(config.getZdrAttestationVersion());
         dto.setEnabled(config.isEnabled());
         dto.setUpdatedAt(config.getUpdatedAt());
         return dto;

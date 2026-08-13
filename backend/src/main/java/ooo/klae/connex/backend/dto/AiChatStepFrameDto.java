@@ -10,7 +10,22 @@ public record AiChatStepFrameDto(
         String tool,
         String status,
         String reason,
-        Integer toolCallId) {
+        Integer toolCallId,
+        String text) {
+
+    /** Backward-compatible frame construction for metadata-only frames. */
+    public AiChatStepFrameDto(
+            int workspaceId,
+            int sessionId,
+            int turnId,
+            int seq,
+            String kind,
+            String tool,
+            String status,
+            String reason,
+            Integer toolCallId) {
+        this(workspaceId, sessionId, turnId, seq, kind, tool, status, reason, toolCallId, null);
+    }
 
     /** Backward-compatible frame construction for states without a durable tool call. */
     public AiChatStepFrameDto(
@@ -22,6 +37,13 @@ public record AiChatStepFrameDto(
             String tool,
             String status,
             String reason) {
-        this(workspaceId, sessionId, turnId, seq, kind, tool, status, reason, null);
+        this(workspaceId, sessionId, turnId, seq, kind, tool, status, reason, null, null);
+    }
+
+    /** Creates one durably sequenced decoded answer-text delta. */
+    public static AiChatStepFrameDto delta(
+            int workspaceId, int sessionId, int turnId, int seq, String text) {
+        return new AiChatStepFrameDto(
+                workspaceId, sessionId, turnId, seq, "delta", null, null, null, null, text);
     }
 }

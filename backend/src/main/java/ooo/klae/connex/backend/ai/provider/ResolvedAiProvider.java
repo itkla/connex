@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.ai.provider;
 
 import java.util.Objects;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
+
 /**
  * Organization-scoped AI provider configuration resolved for a single model call.
  * @param provider provider id
@@ -13,6 +15,7 @@ import java.util.Objects;
  * @param projectId nullable provider project identifier
  * @param allowInternalEndpoint whether private endpoint addresses are allowed
  * @param imageInputSupported whether the exact resolved provider/model snapshot supports images
+ * @param privacyMode current operator- and attestation-gated disclosure posture
  * @param credentials decrypted credential material for provider use
  */
 public record ResolvedAiProvider(
@@ -25,12 +28,30 @@ public record ResolvedAiProvider(
         String projectId,
         boolean allowInternalEndpoint,
         boolean imageInputSupported,
+        AiPrivacyMode privacyMode,
         AiCredentials credentials) {
 
     public ResolvedAiProvider {
         Objects.requireNonNull(provider, "provider");
         Objects.requireNonNull(modelId, "modelId");
+        Objects.requireNonNull(privacyMode, "privacyMode");
         Objects.requireNonNull(credentials, "credentials");
+    }
+
+    /** Creates the legacy masked provider snapshot. */
+    public ResolvedAiProvider(
+            String provider,
+            String region,
+            String modelId,
+            String endpoint,
+            String apiVersion,
+            String deployment,
+            String projectId,
+            boolean allowInternalEndpoint,
+            boolean imageInputSupported,
+            AiCredentials credentials) {
+        this(provider, region, modelId, endpoint, apiVersion, deployment, projectId,
+                allowInternalEndpoint, imageInputSupported, AiPrivacyMode.MASKED, credentials);
     }
 
     /**
@@ -53,6 +74,7 @@ public record ResolvedAiProvider(
                 + ", projectId=" + projectId
                 + ", allowInternalEndpoint=" + allowInternalEndpoint
                 + ", imageInputSupported=" + imageInputSupported
+                + ", privacyMode=" + privacyMode
                 + ", credentials=<redacted>]";
     }
 }
