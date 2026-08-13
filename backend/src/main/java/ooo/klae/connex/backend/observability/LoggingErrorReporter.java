@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.observability;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.slf4j.spi.LoggingEventBuilder;
 
 /**
  * Structured logging fallback for application error reports.
@@ -20,16 +22,19 @@ public class LoggingErrorReporter implements ErrorReporter {
 
     @Override
     public void report(ReportedError error) {
-        log.atError()
+        LoggingEventBuilder event = log.atError()
                 .addKeyValue("source", error.source().name())
-                .addKeyValue("correlationId",
-                        sanitize(error.correlationId(), MAX_CORRELATION_ID_LENGTH, false))
                 .addKeyValue("workspaceId", error.workspaceId())
                 .addKeyValue("userId", error.userId())
                 .addKeyValue("message", sanitize(error.message(), MAX_MESSAGE_LENGTH, false))
                 .addKeyValue("detail", sanitize(error.detail(), MAX_DETAIL_LENGTH, true))
-                .addKeyValue("path", sanitize(error.path(), MAX_PATH_LENGTH, false))
-                .log("Application error reported");
+                .addKeyValue("path", sanitize(error.path(), MAX_PATH_LENGTH, false));
+        if (MDC.get(CorrelationIds.MDC_KEY) == null) {
+            event.addKeyValue(
+                    CorrelationIds.MDC_KEY,
+                    sanitize(error.correlationId(), MAX_CORRELATION_ID_LENGTH, false));
+        }
+        event.log("Application error reported");
     }
 
     private static String sanitize(String value, int maxLength, boolean multiline) {

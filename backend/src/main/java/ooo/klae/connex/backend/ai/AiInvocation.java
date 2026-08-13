@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
@@ -18,6 +19,7 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
  * @param maxTokens provider output token cap
  * @param temperature provider sampling temperature
  * @param reasoningRequested whether the feature requests display-only model reasoning
+ * @param callerDeadline absolute caller-owned deadline, or {@code null} for the provider default
  */
 public record AiInvocation(
         AiFeature feature,
@@ -26,7 +28,8 @@ public record AiInvocation(
         List<AiInputImage> images,
         int maxTokens,
         double temperature,
-        boolean reasoningRequested) {
+        boolean reasoningRequested,
+        Instant callerDeadline) {
 
     public AiInvocation(
             AiFeature feature,
@@ -34,7 +37,7 @@ public record AiInvocation(
             MaskedPrompt prompt,
             int maxTokens,
             double temperature) {
-        this(feature, context, prompt, List.of(), maxTokens, temperature, false);
+        this(feature, context, prompt, List.of(), maxTokens, temperature, false, null);
     }
 
     public AiInvocation(
@@ -44,7 +47,19 @@ public record AiInvocation(
             int maxTokens,
             double temperature,
             boolean reasoningRequested) {
-        this(feature, context, prompt, List.of(), maxTokens, temperature, reasoningRequested);
+        this(feature, context, prompt, List.of(), maxTokens, temperature, reasoningRequested, null);
+    }
+
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            int maxTokens,
+            double temperature,
+            boolean reasoningRequested,
+            Instant callerDeadline) {
+        this(feature, context, prompt, List.of(), maxTokens, temperature,
+                reasoningRequested, callerDeadline);
     }
 
     public AiInvocation(
@@ -54,7 +69,19 @@ public record AiInvocation(
             List<AiInputImage> images,
             int maxTokens,
             double temperature) {
-        this(feature, context, prompt, images, maxTokens, temperature, false);
+        this(feature, context, prompt, images, maxTokens, temperature, false, null);
+    }
+
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            List<AiInputImage> images,
+            int maxTokens,
+            double temperature,
+            boolean reasoningRequested) {
+        this(feature, context, prompt, images, maxTokens, temperature,
+                reasoningRequested, null);
     }
 
     public AiInvocation {

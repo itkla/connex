@@ -9,6 +9,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.slf4j.event.KeyValuePair;
 
 import ch.qos.logback.classic.Logger;
@@ -76,6 +77,39 @@ class LoggingErrorReporterTest {
             assertFalse(((String) keyed.get("message")).endsWith("\uD83D"));
             assertTrue(keyed.size() >= 7);
         } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void existingMdcCorrelationStillLogsTheUnderlyingException() {
+        Logger logger = (Logger) LoggerFactory.getLogger(LoggingErrorReporter.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        MDC.put(CorrelationIds.MDC_KEY, "request-correlation");
+        try {
+            new LoggingErrorReporter().report(new ReportedError(
+                    Source.SERVER,
+                    "reported-correlation",
+                    7,
+                    9,
+                    "Provider call failed",
+                    "IllegalStateException: provider transport failed",
+                    "/api/ai/assistant/sessions/{sessionId}/turns/{turnId}"));
+
+            ILoggingEvent event = appender.list.getFirst();
+            Map<String, Object> values = keyValues(event);
+
+            assertEquals("request-correlation",
+                    event.getMDCPropertyMap().get(CorrelationIds.MDC_KEY));
+            assertFalse(values.containsKey(CorrelationIds.MDC_KEY));
+            assertEquals(
+                    "IllegalStateException: provider transport failed",
+                    values.get("detail"));
+        } finally {
+            MDC.remove(CorrelationIds.MDC_KEY);
             logger.detachAppender(appender);
             appender.stop();
         }

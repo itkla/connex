@@ -6,6 +6,8 @@ import java.util.Locale;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -33,6 +35,7 @@ public class BedrockAnthropicAdapter implements AiProvider {
 
     private final BedrockClient bedrockClient;
     private final ObjectMapper objectMapper;
+    private final AiProperties aiProperties;
 
     @Override
     public String providerId() {
@@ -80,11 +83,13 @@ public class BedrockAnthropicAdapter implements AiProvider {
         }
         BedrockRegion region = BedrockRegion.fromCode(target.region());
         try {
+            AiRequestDeadline deadline = request.providerAttemptExecutor()
+                    .deadline(aiProperties.getRequestTimeoutMs());
             AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
             String requestBody = buildRequestBody(request, enforcement);
             String responseBody = request.providerAttemptExecutor().execute(() ->
                     bedrockClient.invokeModel(
-                            region, target.modelId(), request.credentials(), requestBody));
+                            region, target.modelId(), request.credentials(), requestBody, deadline));
             return parseResponse(responseBody, enforcement, request.reasoningMode());
         } catch (AiProviderException exception) {
             throw exception;

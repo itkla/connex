@@ -76,7 +76,7 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
     }
 
     @Test
-    void queuedToRunningRefreshDoesNotExtendTheCreationBasedDeadline() {
+    void queuedToRunningRefreshRestartsTheStateTransitionDeadline() {
         AiChatSession session = session(workspace, currentUser);
         AiChatTurn stale = turn(session, currentUser, "queued");
         makeStale(stale);
@@ -87,8 +87,8 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
 
         AiChatTurnDto result = turnService.get(session.getId(), stale.getId());
 
-        assertEquals("timed_out", result.status());
-        assertEquals("generation_timeout", result.terminalReason());
+        assertEquals("running", result.status());
+        assertNull(result.terminalReason());
     }
 
     @Test

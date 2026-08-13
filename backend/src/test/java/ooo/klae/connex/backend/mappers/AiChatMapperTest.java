@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -326,6 +327,37 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
         assertNull(chatMapper.getTurnById(
                 workspace.getId() + 1, session.getId(), turn.getId()));
+    }
+
+    @Test
+    void terminalCutoffUsesTheLatestTurnStateTransition() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Turn deadline", "private");
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(session.getId());
+        turn.setRequestedByUserId(owner.getId());
+        turn.setStatus("queued");
+        chatMapper.insertTurn(turn);
+        assertEquals(1, chatMapper.markTurnRunning(
+                workspace.getId(), session.getId(), turn.getId()));
+        LocalDateTime cutoff = LocalDateTime.of(2026, 8, 12, 0, 0);
+        jdbcTemplate.update(
+                "UPDATE ai_chat_turn SET created_at = ?, updated_at = ? "
+                        + "WHERE workspace_id = ? AND id = ?",
+                cutoff.minusMinutes(5), cutoff.plusSeconds(1),
+                workspace.getId(), turn.getId());
+
+        assertEquals(0, chatMapper.updateTurnTerminal(
+                workspace.getId(), session.getId(), turn.getId(),
+                "timed_out", "generation_timeout", "running", cutoff));
+        jdbcTemplate.update(
+                "UPDATE ai_chat_turn SET updated_at = ? WHERE workspace_id = ? AND id = ?",
+                cutoff, workspace.getId(), turn.getId());
+        assertEquals(1, chatMapper.updateTurnTerminal(
+                workspace.getId(), session.getId(), turn.getId(),
+                "timed_out", "generation_timeout", "running", cutoff));
+        assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
     }
 
     @Test

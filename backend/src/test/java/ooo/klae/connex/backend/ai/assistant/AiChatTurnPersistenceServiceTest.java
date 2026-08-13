@@ -15,7 +15,9 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 
 import java.time.Clock;
-import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -24,7 +26,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -47,12 +48,16 @@ import tools.jackson.databind.json.JsonMapper;
 class AiChatTurnPersistenceServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
             7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of());
+    private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
 
     private AiChatMapper chatMapper;
     private AttachmentMapper attachmentMapper;
     private WorkspaceService workspaceService;
     private AiRestrictionEpoch restrictionEpoch;
     private AiWorkspaceGovernanceService governanceService;
+    private AiAssistantIdentifierResolver identifierResolver;
+    private AiAssistantToolExecutor toolExecutor;
+    private AiChatTurn storedTurn;
     private AiChatTurnPersistenceService service;
 
     @BeforeEach
@@ -60,19 +65,19 @@ class AiChatTurnPersistenceServiceTest {
         chatMapper = mock(AiChatMapper.class);
         attachmentMapper = mock(AttachmentMapper.class);
         workspaceService = mock(WorkspaceService.class);
-        AiProperties aiProperties = mock(AiProperties.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
+        identifierResolver = mock(AiAssistantIdentifierResolver.class);
+        toolExecutor = mock(AiAssistantToolExecutor.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
                 workspaceService,
-                aiProperties,
                 restrictionEpoch,
                 governanceService,
-                mock(AiAssistantIdentifierResolver.class),
-                mock(AiAssistantToolExecutor.class),
-                Clock.systemUTC(),
+                identifierResolver,
+                toolExecutor,
+                Clock.fixed(NOW, ZoneOffset.UTC),
                 mock(AiChatRealtimeDispatcher.class),
                 JsonMapper.builder().build());
         AiChatSession session = new AiChatSession();
@@ -80,8 +85,10 @@ class AiChatTurnPersistenceServiceTest {
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
-        AiChatTurn storedTurn = new AiChatTurn();
+        storedTurn = new AiChatTurn();
         storedTurn.setId(TURN.turnId());
+        storedTurn.setWorkspaceId(TURN.workspaceId());
+        storedTurn.setSessionId(TURN.sessionId());
         storedTurn.setRequestedByUserId(TURN.userId());
         storedTurn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
@@ -95,7 +102,7 @@ class AiChatTurnPersistenceServiceTest {
         User actor = new User();
         actor.setId(TURN.userId());
         when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(actor));
-        when(aiProperties.getGenerationMaxLifetime()).thenReturn(Duration.ofMinutes(5));
+        when(identifierResolver.mentionedResources(any())).thenReturn(List.of());
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
     }
@@ -147,7 +154,6 @@ class AiChatTurnPersistenceServiceTest {
                 chatMapper,
                 attachmentMapper,
                 workspaceService,
-                new AiProperties(),
                 mock(AiRestrictionEpoch.class),
                 governanceService,
                 identifierResolver,
@@ -195,6 +201,43 @@ class AiChatTurnPersistenceServiceTest {
                         && message.getStructuredJson().contains("\"id\":31")
                         && message.getStructuredJson().contains("\"kind\":\"deal\"")
                         && message.getStructuredJson().contains("\"id\":47")));
+    }
+
+    @Test
+    void readPastDeadlineAndGraceTerminalizesTheTurnAndFreesTheSession() {
+        LocalDateTime cutoff = LocalDateTime.ofInstant(
+                NOW.minus(AiAssistantTurnBudget.DURABLE_LIFETIME), ZoneOffset.UTC);
+        AiChatTurn expired = new AiChatTurn();
+        expired.setId(TURN.turnId());
+        expired.setWorkspaceId(TURN.workspaceId());
+        expired.setSessionId(TURN.sessionId());
+        expired.setRequestedByUserId(TURN.userId());
+        expired.setStatus("timed_out");
+        expired.setTerminalReason("generation_timeout");
+        when(chatMapper.getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId()))
+                .thenReturn(storedTurn, expired);
+        when(chatMapper.updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "timed_out", "generation_timeout", "running", cutoff)).thenReturn(1);
+        when(chatMapper.listActiveTurnsBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
+        when(chatMapper.countActiveTurns(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(0);
+        when(attachmentMapper.getAssistantSessionAttachments(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
+        when(chatMapper.nextMessageSequence(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
+
+        AiChatTurn read = service.readTurn(TURN.sessionId(), TURN.turnId());
+        AiChatQueuedTurn next = service.queue(
+                TURN.sessionId(), new AiChatTurnCreateRequest("Next question", List.of()),
+                TURN.restrictionEpoch());
+
+        assertEquals("timed_out", read.getStatus());
+        assertEquals("generation_timeout", read.getTerminalReason());
+        assertEquals(TURN.sessionId(), next.sessionId());
+        verify(chatMapper).countActiveTurns(TURN.workspaceId(), TURN.sessionId());
     }
 
     @Test

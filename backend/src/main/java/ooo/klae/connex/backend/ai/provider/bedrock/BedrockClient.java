@@ -76,13 +76,24 @@ public class BedrockClient {
      * @return provider response body JSON
      */
     public String invokeModel(BedrockRegion region, String modelId, AiCredentials credentials, String requestBodyJson) {
+        return invokeModel(
+                region, modelId, credentials, requestBodyJson,
+                AiRequestDeadline.afterMillis(requestTimeoutMillis));
+    }
+
+    String invokeModel(
+            BedrockRegion region,
+            String modelId,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline) {
         Objects.requireNonNull(region, "region");
+        Objects.requireNonNull(deadline, "deadline");
         requireText(modelId, "modelId");
         requireText(requestBodyJson, "requestBodyJson");
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         String rawPath = "/model/" + modelId + "/invoke";
         String host = region.host();
-        AiRequestDeadline deadline = AiRequestDeadline.afterMillis(requestTimeoutMillis);
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             BedrockResponse response;
             try {

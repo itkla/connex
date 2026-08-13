@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -143,7 +144,8 @@ class AiAssistantPromptInjectionGoldenTest {
                 workspaceService,
                 mock(AuditService.class),
                 objectMapper,
-                budgetCoordinator);
+                budgetCoordinator,
+                Clock.systemUTC());
         AiChatMessage userRequest = new AiChatMessage();
         userRequest.setAuthorKind("user");
         userRequest.setContent("What changed for Ada Lovelace?");

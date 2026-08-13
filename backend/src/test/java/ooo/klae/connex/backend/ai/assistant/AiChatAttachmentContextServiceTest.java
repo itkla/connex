@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -86,7 +87,7 @@ class AiChatAttachmentContextServiceTest {
         assertEquals(true, context.data().get(2).get("truncated"));
         verify(managedObjectService, never()).openAttachment(TURN.workspaceId(), image);
         verify(invocationService, never()).complete(
-                any(AiInvocation.class), any(), anyLong());
+                any(AiInvocation.class), any(), anyLong(), any());
     }
 
     @Test
@@ -103,7 +104,8 @@ class AiChatAttachmentContextServiceTest {
         when(invocationService.complete(
                 any(AiInvocation.class),
                 eq(directAdmission),
-                eq(TURN.restrictionEpoch())))
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class)))
                 .thenReturn(new AiCompletionOutcome("A scanned note", 0, 12, 4, "stop"));
 
         AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70));
@@ -115,9 +117,11 @@ class AiChatAttachmentContextServiceTest {
         verify(invocationService).complete(
                 invocation.capture(),
                 eq(directAdmission),
-                eq(TURN.restrictionEpoch()));
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class));
         verify(persistenceService).requireRunning(TURN);
         assertEquals(List.of(inputImage), invocation.getValue().images());
+        assertEquals(NOW.plusSeconds(70), invocation.getValue().callerDeadline());
         assertTrue(invocation.getValue().prompt().getSystemPrompt().contains("untrusted content"));
     }
 
@@ -140,7 +144,8 @@ class AiChatAttachmentContextServiceTest {
         when(invocationService.complete(
                 any(AiInvocation.class),
                 eq(directAdmission),
-                eq(TURN.restrictionEpoch())))
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class)))
                 .thenReturn(new AiCompletionOutcome("First image", 0, 12, 4, "stop"));
 
         assertThrows(
@@ -151,8 +156,43 @@ class AiChatAttachmentContextServiceTest {
         verify(invocationService).complete(
                 any(AiInvocation.class),
                 eq(directAdmission),
-                eq(TURN.restrictionEpoch()));
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class));
         verify(managedObjectService, never()).openAttachment(TURN.workspaceId(), second);
+    }
+
+    @Test
+    void participantRemovedWhileReadingAnImageIsRejectedAtProviderEgress() {
+        Attachment image = attachment(33, "scan.jpg", "image/jpeg");
+        byte[] jpeg = { (byte) 0xff, (byte) 0xd8, (byte) 0xff, 1 };
+        AiInputImage inputImage = new AiInputImage("image/jpeg", jpeg, 1, 1);
+        when(persistenceService.loadAttachments(TURN)).thenReturn(List.of(image));
+        doNothing()
+                .doThrow(new ResourceNotFoundException("Assistant session is not accessible"))
+                .when(persistenceService)
+                .requireRunning(TURN);
+        when(managedObjectService.openAttachment(TURN.workspaceId(), image))
+                .thenReturn(content(jpeg));
+        when(attachmentPolicy.readImage(eq("scan.jpg"), any(), eq((long) jpeg.length)))
+                .thenReturn(inputImage);
+        when(invocationAdmissionService.acquireDirect()).thenReturn(directAdmission);
+        when(invocationService.complete(
+                any(AiInvocation.class),
+                eq(directAdmission),
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    invocation.getArgument(3, Runnable.class).run();
+                    return new AiCompletionOutcome("unreachable", 0, 12, 4, "stop");
+                });
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.prepare(TURN, NOW.plusSeconds(70)));
+
+        verify(attachmentPolicy).readImage(
+                eq("scan.jpg"), any(), eq((long) jpeg.length));
+        verify(persistenceService, times(2)).requireRunning(TURN);
     }
 
     @Test
@@ -163,7 +203,7 @@ class AiChatAttachmentContextServiceTest {
 
         verify(persistenceService, never()).loadAttachments(TURN);
         verify(invocationService, never()).complete(
-                any(AiInvocation.class), any(), anyLong());
+                any(AiInvocation.class), any(), anyLong(), any());
     }
 
     private static Attachment attachment(int id, String fileName, String contentType) {

@@ -133,7 +133,9 @@ public class AiChatMemoryService {
                         promptAssembler.assembleSummary(
                                 summary, source, context, summaryResources),
                         Math.min(SUMMARY_MAX_OUTPUT_TOKENS, budget.maxOutputTokens()),
-                        SUMMARY_TEMPERATURE);
+                        SUMMARY_TEMPERATURE,
+                        false,
+                        deadline);
                 AiStructuredOutcome<AiAssistantSummary> outcome;
                 try (AiInvocationAdmissionService.DirectAdmission admission =
                         invocationAdmissionService.acquireDirect()) {
