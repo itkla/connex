@@ -27,11 +27,12 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
-import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
+import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatParticipantDto;
@@ -60,6 +61,7 @@ class AiAssistantControllerTest {
 
     @Mock private AiAssistantService service;
     @Mock private AiAssistantTurnService turnService;
+    @Mock private AiAssistantToolCallReadService toolCallReadService;
     @Mock private AiAssistantWriteToolService writeToolService;
     @Mock private AiChatAttachmentService attachmentService;
     @Mock private ErrorReporter errorReporter;
@@ -70,7 +72,8 @@ class AiAssistantControllerTest {
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(
                 new AiAssistantController(
-                        service, turnService, writeToolService, attachmentService))
+                        service, turnService, toolCallReadService,
+                        writeToolService, attachmentService))
             .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
             .build();
     }
@@ -170,36 +173,50 @@ class AiAssistantControllerTest {
     }
 
     @Test
-    void proposalListAndDetailExposeOnlyResolvedHumanReviewArguments() throws Exception {
-        JsonMapper objectMapper = JsonMapper.builder().build();
-        AiAssistantToolProposalDto proposal = new AiAssistantToolProposalDto(
+    void toolCallListAndDetailExposeTheSafeReadContract() throws Exception {
+        AiAssistantToolCallReadDto toolCall = new AiAssistantToolCallReadDto(
                 29,
                 "assign_owner",
                 "confirm",
                 "proposed",
-                new AiAssistantToolProposalDto.Target("person", 31, "Ada Lovelace"),
-                objectMapper.readTree("{\"owner\":\"Grace Hopper\"}"));
-        when(writeToolService.listPendingProposals(42)).thenReturn(List.of(proposal));
-        when(writeToolService.getPendingProposal(42, 29)).thenReturn(proposal);
+                new AiAssistantToolCallReadDto.Target("person", 31, "Ada Lovelace"),
+                "Assign an owner",
+                null,
+                82,
+                19,
+                null,
+                false,
+                "2026-08-10 12:00:00.000000",
+                "2026-08-10 12:00:00.000000",
+                null);
+        when(toolCallReadService.list(42, false)).thenReturn(List.of(toolCall));
+        when(toolCallReadService.list(42, true)).thenReturn(List.of(toolCall));
+        when(toolCallReadService.get(42, 29)).thenReturn(toolCall);
 
         mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].tool").value("assign_owner"))
+            .andExpect(jsonPath("$[0].toolName").value("assign_owner"))
             .andExpect(jsonPath("$[0].tier").value("confirm"))
             .andExpect(jsonPath("$[0].status").value("proposed"))
             .andExpect(jsonPath("$[0].target.kind").value("person"))
             .andExpect(jsonPath("$[0].target.id").value(31))
-            .andExpect(jsonPath("$[0].target.name").value("Ada Lovelace"))
-            .andExpect(jsonPath("$[0].arguments.owner").value("Grace Hopper"))
-            .andExpect(jsonPath("$[0].arguments.handle").doesNotExist())
-            .andExpect(jsonPath("$[0].arguments.idempotency_key").doesNotExist());
+            .andExpect(jsonPath("$[0].target.label").value("Ada Lovelace"))
+            .andExpect(jsonPath("$[0].requestSummary").value("Assign an owner"))
+            .andExpect(jsonPath("$[0].messageId").value(82))
+            .andExpect(jsonPath("$[0].turnId").value(19))
+            .andExpect(jsonPath("$[0].arguments").doesNotExist())
+            .andExpect(jsonPath("$[0].result").doesNotExist());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls?pendingOnly=true"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].status").value("proposed"));
         mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls/29"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(29))
-            .andExpect(jsonPath("$.arguments.owner").value("Grace Hopper"));
+            .andExpect(jsonPath("$.requestSummary").value("Assign an owner"));
 
-        verify(writeToolService).listPendingProposals(42);
-        verify(writeToolService).getPendingProposal(42, 29);
+        verify(toolCallReadService).list(42, false);
+        verify(toolCallReadService).list(42, true);
+        verify(toolCallReadService).get(42, 29);
     }
 
     @Test

@@ -445,6 +445,15 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
+  <select id="listAssistantMessagesBySession" resultMap="messageResult">
+    SELECT id, workspace_id, session_id, seq, author_kind, structured_json
+    FROM ai_chat_message
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND author_kind = 'assistant'
+    ORDER BY seq ASC
+  </select>
+
   <select id="listRecentMessages" resultMap="messageResult">
     SELECT recent.id, recent.workspace_id, recent.session_id, recent.seq,
            recent.author_kind, recent.author_user_id, recent.content,
@@ -654,6 +663,22 @@
       AND m.session_id = #{sessionId}
       AND tc.status = 'proposed'
     ORDER BY tc.id ASC
+  </select>
+
+  <select id="listToolCallsBySession" resultMap="toolCallResult">
+    SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
+           m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
+           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.idempotency_key, tc.created_at, tc.updated_at
+    FROM ai_chat_tool_call tc
+    JOIN ai_chat_message m
+      ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+    WHERE tc.workspace_id = #{workspaceId}
+      AND m.session_id = #{sessionId}
+    <if test="pendingOnly">
+      AND tc.status = 'proposed'
+    </if>
+    ORDER BY m.seq ASC, tc.id ASC
   </select>
 
   <select id="getToolCallBySessionForUpdate" resultMap="toolCallResult">

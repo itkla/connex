@@ -23,10 +23,11 @@ import org.springframework.web.multipart.MultipartFile;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
-import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
+import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
@@ -56,6 +57,7 @@ public class AiAssistantController {
 
     private final AiAssistantService assistantService;
     private final AiAssistantTurnService turnService;
+    private final AiAssistantToolCallReadService toolCallReadService;
     private final AiAssistantWriteToolService writeToolService;
     private final AiChatAttachmentService attachmentService;
 
@@ -239,19 +241,20 @@ public class AiAssistantController {
         return turnService.get(sessionId, turnId);
     }
 
-    /** Returns every pending confirm-tier proposal visible in the authorized session. */
+    /** Returns every viewer-safe write-tool call in the authorized session. */
     @GetMapping("/{sessionId:\\d+}/tool-calls")
-    public List<AiAssistantToolProposalDto> listPendingToolCalls(
-            @PathVariable int sessionId) {
-        return writeToolService.listPendingProposals(sessionId);
+    public List<AiAssistantToolCallReadDto> listToolCalls(
+            @PathVariable int sessionId,
+            @RequestParam(defaultValue = "false") boolean pendingOnly) {
+        return toolCallReadService.list(sessionId, pendingOnly);
     }
 
-    /** Returns one pending confirm-tier proposal visible in the authorized session. */
+    /** Returns one viewer-safe write-tool call in the authorized session. */
     @GetMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}")
-    public AiAssistantToolProposalDto getPendingToolCall(
+    public AiAssistantToolCallReadDto getToolCall(
             @PathVariable int sessionId,
             @PathVariable int toolCallId) {
-        return writeToolService.getPendingProposal(sessionId, toolCallId);
+        return toolCallReadService.get(sessionId, toolCallId);
     }
 
     /** Explicitly approves and executes one confirm-tier tool call. */

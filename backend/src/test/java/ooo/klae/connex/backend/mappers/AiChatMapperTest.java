@@ -297,6 +297,16 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(toolCall.getId(), lockedTool.getId());
         assertTrue(chatMapper.listPendingToolCallsBySession(
                 workspace.getId(), session.getId()).isEmpty());
+        assertEquals(
+                List.of(toolCall.getId()),
+                chatMapper.listToolCallsBySession(
+                                workspace.getId(), session.getId(), false).stream()
+                        .map(AiChatToolCall::getId)
+                        .toList());
+        assertTrue(chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), true).isEmpty());
+        assertTrue(chatMapper.listToolCallsBySession(
+                workspace.getId() + 1, session.getId(), false).isEmpty());
 
         AiChatMessage answer = new AiChatMessage();
         answer.setWorkspaceId(workspace.getId());
@@ -308,6 +318,17 @@ class AiChatMapperTest extends AbstractMapperTest {
         answer.setInputTokens(21);
         answer.setOutputTokens(8);
         chatMapper.insertMessage(answer);
+        List<AiChatMessage> assistantMessages = chatMapper.listAssistantMessagesBySession(
+                workspace.getId(), session.getId());
+        assertEquals(List.of(answer.getId()), assistantMessages.stream()
+                .map(AiChatMessage::getId)
+                .toList());
+        assertEquals(
+                JsonMapper.builder().build().readTree("{\"citations\":[]}"),
+                JsonMapper.builder().build().readTree(
+                        assistantMessages.getFirst().getStructuredJson()));
+        assertTrue(chatMapper.listAssistantMessagesBySession(
+                workspace.getId() + 1, session.getId()).isEmpty());
         assertEquals(1, chatMapper.updateTurnTerminal(
                 workspace.getId(), session.getId(), turn.getId(),
                 "failed", "quota_exhausted", "running", null));
