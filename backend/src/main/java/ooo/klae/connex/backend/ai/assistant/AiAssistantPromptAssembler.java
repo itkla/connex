@@ -41,6 +41,9 @@ public class AiAssistantPromptAssembler {
     private static final String MODEL_OUTPUT_BEGIN = "MODEL_OUTPUT_BEGIN";
     private static final String MODEL_OUTPUT_END = "MODEL_OUTPUT_END";
     private static final String BUDGET_EXCEEDED = "budget_exceeded";
+    private static final String EVICTED_TOOL_RESULT =
+            "[evicted to free context — re-call if needed]";
+    private static final String TRUNCATED_BUDGET = "[truncated: budget]";
     private static final AiAssistantPromptBudget UNBOUNDED_BUDGET =
             new AiAssistantPromptBudget(
                     Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE,
@@ -55,11 +58,46 @@ public class AiAssistantPromptAssembler {
     public record ToolTurn(int seq, String tool, AiAssistantToolResult result) {
     }
 
+    /** Metadata-only honesty counters for the current model-visible tool replay. */
+    public record ToolBudgetAudit(
+            int truncatedToolResults,
+            int evictedToolExchanges,
+            int shownItems,
+            int totalItems) {
+        public static final ToolBudgetAudit NONE = new ToolBudgetAudit(0, 0, 0, 0);
+
+        public ToolBudgetAudit {
+            if (truncatedToolResults < 0 || evictedToolExchanges < 0
+                    || shownItems < 0 || totalItems < shownItems) {
+                throw new IllegalArgumentException("Tool budget audit counts are invalid");
+            }
+        }
+
+        /** @return whether the replay differs from the exact tool results */
+        public boolean degraded() {
+            return truncatedToolResults != 0 || evictedToolExchanges != 0;
+        }
+    }
+
     /** Masked native tool-role results and optional trailing structured repair request. */
     public record NativeReplay(List<String> toolResults, String repairMessage) {
         public NativeReplay {
             toolResults = List.copyOf(toolResults);
         }
+    }
+
+    private record BoundedToolResults(
+            List<String> contents,
+            ToolBudgetAudit audit) {
+        private BoundedToolResults {
+            contents = List.copyOf(contents);
+        }
+    }
+
+    private record TruncatedToolResult(
+            String content,
+            int shownItems,
+            int totalItems) {
     }
 
     /** Assembles the complete masked replay, page context, and prior tool results for one step. */
@@ -141,14 +179,14 @@ public class AiAssistantPromptAssembler {
                     "page_context", pageContext.data(), context, budget.pageContextBytes()));
         }
         String repairContent = repair == null ? null : repairRequest(repair, context);
-        if (repairContent != null && utf8Bytes(repairContent) > budget.toolResultBytes()) {
+        if (repairContent != null && !budget.fits(repairContent, budget.toolResultBytes())) {
             throw new AiAssistantLoopException(
                     "prompt_budget_exceeded", "prompt_budget_exceeded");
         }
         int remainingToolBytes = budget.toolResultBytes()
-                - (repairContent == null ? 0 : utf8Bytes(repairContent));
+                - (repairContent == null ? 0 : budget.utf8Bytes(repairContent));
         for (String toolResult : boundedToolResults(
-                toolTurns, context, remainingToolBytes)) {
+                toolTurns, context, budget, remainingToolBytes).contents()) {
             prompt.userTurn(toolResult);
         }
         if (repairContent != null) {
@@ -194,15 +232,21 @@ public class AiAssistantPromptAssembler {
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        String repairContent = repair == null ? null : nativeFinalRepairRequest(repair, context);
-        if (repairContent != null && utf8Bytes(repairContent) > budget.toolResultBytes()) {
+        String repairContent = repair == null
+                ? null
+                : repair.schemaRule().startsWith("native_")
+                        ? nativeToolRepairRequest(repair.schemaRule())
+                        : nativeFinalRepairRequest(repair, context);
+        if (repairContent != null && !budget.fits(repairContent, budget.toolResultBytes())) {
             throw new AiAssistantLoopException(
                     "prompt_budget_exceeded", "prompt_budget_exceeded");
         }
         int remainingToolBytes = budget.toolResultBytes()
-                - (repairContent == null ? 0 : utf8Bytes(repairContent));
+                - (repairContent == null ? 0 : budget.utf8Bytes(repairContent));
         return new NativeReplay(
-                boundedToolResults(toolTurns, context, remainingToolBytes), repairContent);
+                boundedToolResults(
+                        toolTurns, context, budget, remainingToolBytes).contents(),
+                repairContent);
     }
 
     /** @return static executable native function definitions in stable catalog order */
@@ -211,7 +255,7 @@ public class AiAssistantPromptAssembler {
     }
 
     /** Verifies that one prospective result can be replayed before its tool mutates tenant data. */
-    public void requireAdditionalToolResultCapacity(
+    public ToolBudgetAudit requireAdditionalToolResultCapacity(
             List<ToolTurn> toolTurns,
             ToolTurn prospectiveTurn,
             MaskingContext context,
@@ -221,7 +265,26 @@ public class AiAssistantPromptAssembler {
         for (ToolTurn turn : prospectiveTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        boundedToolResults(prospectiveTurns, context, budget.toolResultBytes());
+        return boundedToolResults(
+                prospectiveTurns,
+                context,
+                budget,
+                budget.toolResultBytes()).audit();
+    }
+
+    /** Returns honesty counters for a complete current-turn tool replay. */
+    public ToolBudgetAudit toolBudgetAudit(
+            List<ToolTurn> toolTurns,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        for (ToolTurn turn : toolTurns) {
+            seedIdentifiers(turn.result().identifiers(), context);
+        }
+        return boundedToolResults(
+                toolTurns,
+                context,
+                budget,
+                budget.toolResultBytes()).audit();
     }
 
     /** Fits an already-executed replay into the current tool-result allocation without rejection. */
@@ -231,22 +294,14 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiAssistantPromptBudget budget) {
         List<ToolTurn> exactReplay = appended(toolTurns, replay);
-        if (toolResultsFit(exactReplay, context, budget.toolResultBytes())) {
+        if (exactToolResultsFit(exactReplay, context, budget)) {
             return exactReplay;
         }
         ToolTurn boundedReplay = new ToolTurn(
-                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result(), false));
+                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result()));
         List<ToolTurn> boundedWithHistory = appended(toolTurns, boundedReplay);
-        if (toolResultsFit(boundedWithHistory, context, budget.toolResultBytes())) {
-            return boundedWithHistory;
-        }
-        ToolTurn boundedWithoutHistory = new ToolTurn(
-                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result(), true));
-        List<ToolTurn> replayOnly = List.of(boundedWithoutHistory);
-        if (toolResultsFit(replayOnly, context, budget.toolResultBytes())) {
-            return replayOnly;
-        }
-        throw new IllegalStateException("Assistant replay receipt exceeds its minimum allocation");
+        toolBudgetAudit(boundedWithHistory, context, budget);
+        return boundedWithHistory;
     }
 
     /** Returns the fixed assistant system prompt for exact serialized-envelope budgeting. */
@@ -261,34 +316,210 @@ public class AiAssistantPromptAssembler {
 
     /** Serializes the demasked tool result for its exact durable audit record. */
     public String durableToolResult(AiAssistantToolResult result) {
+        return durableToolResult(result, ToolBudgetAudit.NONE);
+    }
+
+    /** Serializes a durable tool result with additive model-replay budget audit fields. */
+    public String durableToolResult(
+            AiAssistantToolResult result,
+            ToolBudgetAudit audit) {
         try {
-            return objectMapper.writeValueAsString(result.data());
+            java.util.Objects.requireNonNull(audit, "audit");
+            if (!audit.degraded()) {
+                return objectMapper.writeValueAsString(result.data());
+            }
+            Map<String, Object> durable = new LinkedHashMap<>(result.data());
+            durable.put("promptBudget", toolBudgetAuditData(audit));
+            return objectMapper.writeValueAsString(durable);
         } catch (JacksonException exception) {
             throw new IllegalStateException("Assistant tool result could not be serialized", exception);
         }
     }
 
-    private List<String> boundedToolResults(
+    private BoundedToolResults boundedToolResults(
             List<ToolTurn> toolTurns,
             MaskingContext context,
+            AiAssistantPromptBudget budget,
             int availableBytes) {
-        List<String> contents = new ArrayList<>();
-        int remainingBytes = availableBytes;
+        if (toolTurns.isEmpty()) {
+            return new BoundedToolResults(List.of(), ToolBudgetAudit.NONE);
+        }
+        List<String> exact = new ArrayList<>(toolTurns.size());
+        int exactRemaining = availableBytes;
+        boolean exactFit = true;
         for (ToolTurn turn : toolTurns) {
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("step", turn.seq());
-            data.put("tool", turn.tool());
-            data.put("result", turn.result().data());
-            String content = crmData("tool_result", data, context);
-            int contentBytes = utf8Bytes(content);
-            if (contentBytes > remainingBytes) {
+            String content = toolResultContent(turn, context);
+            exact.add(content);
+            if (!budget.fits(content, exactRemaining)) {
+                exactFit = false;
+            } else if (exactFit) {
+                exactRemaining -= budget.utf8Bytes(content);
+            }
+        }
+        if (exactFit) {
+            return new BoundedToolResults(exact, ToolBudgetAudit.NONE);
+        }
+
+        int latestIndex = toolTurns.size() - 1;
+        boolean[] evicted = new boolean[latestIndex];
+        int evictedCount = 0;
+        while (true) {
+            List<String> contents = new ArrayList<>(toolTurns.size());
+            int remainingBytes = availableBytes;
+            boolean priorResultsFit = true;
+            for (int index = 0; index < latestIndex; index++) {
+                String content = evicted[index]
+                        ? evictedToolResult(toolTurns.get(index), context)
+                        : exact.get(index);
+                if (!budget.fits(content, remainingBytes)) {
+                    priorResultsFit = false;
+                    break;
+                }
+                contents.add(content);
+                remainingBytes -= budget.utf8Bytes(content);
+            }
+            if (priorResultsFit) {
+                String latest = exact.get(latestIndex);
+                if (budget.fits(latest, remainingBytes)) {
+                    contents.add(latest);
+                    return new BoundedToolResults(
+                            contents,
+                            new ToolBudgetAudit(0, evictedCount, 0, 0));
+                }
+                TruncatedToolResult truncated = truncatedToolResult(
+                        toolTurns.get(latestIndex), context, budget, remainingBytes);
+                if (truncated != null) {
+                    contents.add(truncated.content());
+                    return new BoundedToolResults(
+                            contents,
+                            new ToolBudgetAudit(
+                                    1,
+                                    evictedCount,
+                                    truncated.shownItems(),
+                                    truncated.totalItems()));
+                }
+            }
+            int oldestRetained = oldestRetained(evicted);
+            if (oldestRetained < 0) {
                 throw new AiAssistantLoopException(
                         "tool_result_budget_exhausted", "tool_result_budget_exhausted");
             }
-            contents.add(content);
-            remainingBytes -= contentBytes;
+            evicted[oldestRetained] = true;
+            evictedCount++;
         }
-        return List.copyOf(contents);
+    }
+
+    private String toolResultContent(ToolTurn turn, MaskingContext context) {
+        return crmDataMasked("tool_result", maskedToolResult(turn, context));
+    }
+
+    private String evictedToolResult(ToolTurn turn, MaskingContext context) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("step", turn.seq());
+        data.put("tool", turn.tool());
+        data.put("result", EVICTED_TOOL_RESULT);
+        return crmData("tool_result", data, context);
+    }
+
+    private TruncatedToolResult truncatedToolResult(
+            ToolTurn turn,
+            MaskingContext context,
+            AiAssistantPromptBudget budget,
+            int availableBytes) {
+        ObjectNode masked = maskedToolResult(turn, context);
+        ObjectNode arrayCandidate = masked.deepCopy();
+        List<ArrayNode> arrays = new ArrayList<>();
+        collectArrays(arrayCandidate.path("result"), arrays);
+        int totalItems = arrays.stream().mapToInt(ArrayNode::size).sum();
+        int shownItems = totalItems;
+        if (totalItems != 0) {
+            while (true) {
+                arrayCandidate.put(
+                        "budgetDisclosure",
+                        truncatedItemsMarker(shownItems, totalItems));
+                String content = crmDataMasked("tool_result", arrayCandidate);
+                if (budget.fits(content, availableBytes)) {
+                    return new TruncatedToolResult(content, shownItems, totalItems);
+                }
+                if (shownItems == 0 || !dropTrailingArrayItem(arrays)) {
+                    break;
+                }
+                shownItems--;
+            }
+        }
+
+        String plainText = serialize(masked.path("result"));
+        int low = 0;
+        int high = budget.utf8Bytes(plainText);
+        TruncatedToolResult best = null;
+        while (low <= high) {
+            int candidateBytes = low + (high - low) / 2;
+            ObjectNode plainCandidate = objectMapper.createObjectNode();
+            plainCandidate.set("step", masked.path("step"));
+            plainCandidate.set("tool", masked.path("tool"));
+            plainCandidate.put(
+                    "result",
+                    budget.truncateUtf8(plainText, candidateBytes));
+            plainCandidate.put(
+                    "budgetDisclosure",
+                    totalItems == 0
+                            ? TRUNCATED_BUDGET
+                            : truncatedItemsMarker(0, totalItems));
+            String content = crmDataMasked("tool_result", plainCandidate);
+            if (budget.fits(content, availableBytes)) {
+                best = new TruncatedToolResult(content, 0, totalItems);
+                low = candidateBytes + 1;
+            } else {
+                high = candidateBytes - 1;
+            }
+        }
+        return best;
+    }
+
+    private ObjectNode maskedToolResult(ToolTurn turn, MaskingContext context) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("step", turn.seq());
+        data.put("tool", turn.tool());
+        data.put("result", turn.result().data());
+        JsonNode masked = maskStrings(objectMapper.valueToTree(data), context);
+        if (!(masked instanceof ObjectNode object)) {
+            throw new IllegalStateException("Assistant tool result payload is invalid");
+        }
+        return object;
+    }
+
+    private static void collectArrays(JsonNode node, List<ArrayNode> arrays) {
+        if (node instanceof ArrayNode array) {
+            arrays.add(array);
+            return;
+        }
+        if (node instanceof ObjectNode object) {
+            object.properties().forEach(entry -> collectArrays(entry.getValue(), arrays));
+        }
+    }
+
+    private static boolean dropTrailingArrayItem(List<ArrayNode> arrays) {
+        for (int index = arrays.size() - 1; index >= 0; index--) {
+            ArrayNode array = arrays.get(index);
+            if (array.size() != 0) {
+                array.remove(array.size() - 1);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int oldestRetained(boolean[] evicted) {
+        for (int index = 0; index < evicted.length; index++) {
+            if (!evicted[index]) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static String truncatedItemsMarker(int shownItems, int totalItems) {
+        return "[truncated: showing " + shownItems + " of " + totalItems + " items — budget]";
     }
 
     private static List<ToolTurn> appended(List<ToolTurn> toolTurns, ToolTurn turn) {
@@ -297,27 +528,35 @@ public class AiAssistantPromptAssembler {
         return List.copyOf(appended);
     }
 
-    private boolean toolResultsFit(
+    private boolean exactToolResultsFit(
             List<ToolTurn> toolTurns,
             MaskingContext context,
-            int availableBytes) {
+            AiAssistantPromptBudget budget) {
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        try {
-            boundedToolResults(toolTurns, context, availableBytes);
-            return true;
-        } catch (AiAssistantLoopException exception) {
-            if (!"tool_result_budget_exhausted".equals(exception.terminalReason())) {
-                throw exception;
+        int remainingBytes = budget.toolResultBytes();
+        for (ToolTurn turn : toolTurns) {
+            String content = toolResultContent(turn, context);
+            if (!budget.fits(content, remainingBytes)) {
+                return false;
             }
-            return false;
+            remainingBytes -= budget.utf8Bytes(content);
         }
+        return true;
+    }
+
+    private static Map<String, Object> toolBudgetAuditData(ToolBudgetAudit audit) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("truncatedToolResults", audit.truncatedToolResults());
+        data.put("evictedToolExchanges", audit.evictedToolExchanges());
+        data.put("shownItems", audit.shownItems());
+        data.put("totalItems", audit.totalItems());
+        return Map.copyOf(data);
     }
 
     private static AiAssistantToolResult truncatedExecutedReplay(
-            AiAssistantToolResult stored,
-            boolean priorToolContextOmitted) {
+            AiAssistantToolResult stored) {
         Map<String, Object> result = new LinkedHashMap<>();
         copyPresent(stored.data(), result, "toolCallId");
         copyPresent(stored.data(), result, "tool");
@@ -329,9 +568,6 @@ public class AiAssistantPromptAssembler {
         outcome.put(
                 "disclosure",
                 "The write executed, but its stored outcome was truncated for the current model budget.");
-        if (priorToolContextOmitted) {
-            outcome.put("priorToolContextOmitted", true);
-        }
         result.put("outcome", Map.copyOf(outcome));
         return new AiAssistantToolResult(result, List.of());
     }
@@ -353,7 +589,12 @@ public class AiAssistantPromptAssembler {
             List<String> suggestions,
             Map<String, AiChatResourceRegistry.ResourceRef> resources) {
         return finalMetadata(
-                turnId, citations, suggestions, resources, Optional.empty());
+                turnId,
+                citations,
+                suggestions,
+                resources,
+                Optional.empty(),
+                ToolBudgetAudit.NONE);
     }
 
     /** Serializes final viewer metadata with optional display-only reasoning. */
@@ -363,6 +604,24 @@ public class AiAssistantPromptAssembler {
             List<String> suggestions,
             Map<String, AiChatResourceRegistry.ResourceRef> resources,
             Optional<String> reasoning) {
+        return finalMetadata(
+                turnId,
+                citations,
+                suggestions,
+                resources,
+                reasoning,
+                ToolBudgetAudit.NONE);
+    }
+
+    /** Serializes final viewer metadata with reasoning and additive tool-budget audit counters. */
+    public String finalMetadata(
+            int turnId,
+            List<String> citations,
+            List<String> suggestions,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            Optional<String> reasoning,
+            ToolBudgetAudit toolBudgetAudit) {
+        java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
         List<Map<String, Object>> resolved = new ArrayList<>();
         for (String handle : citations) {
             AiChatResourceRegistry.ResourceRef resource = resources.get(handle);
@@ -387,6 +646,9 @@ public class AiAssistantPromptAssembler {
             metadata.put("suggestions", suggestions);
             metadata.put("resources", replayResources);
             reasoning.ifPresent(value -> metadata.put("reasoning", value));
+            if (toolBudgetAudit.degraded()) {
+                metadata.put("toolResultBudget", toolBudgetAuditData(toolBudgetAudit));
+            }
             return objectMapper.writeValueAsString(metadata);
         } catch (JacksonException exception) {
             throw new IllegalStateException("Assistant citation metadata could not be serialized", exception);
@@ -491,6 +753,8 @@ public class AiAssistantPromptAssembler {
 
                 Use only catalog tools. Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
 
+                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call.
+
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 
                 Make the final answer useful, specific, and complete. Ground every factual claim in CRM data actually retrieved during this turn. Quantify counts, dates, amounts, changes, and relationship signals when the data supports them. For a longer answer, use short paragraphs or plain-text bullets. State plainly when requested data is missing, unavailable, or too sparse for a conclusion. Do not pad an answer, invent facts, or present unsupported inference as fact.
@@ -516,6 +780,8 @@ public class AiAssistantPromptAssembler {
                 You are Ask Connex, a thorough relationship-intelligence assistant. Use only the supplied native function tools. When you have enough evidence, return exactly one JSON object matching the final-answer schema. Do not describe or encode a tool call in ordinary content.
 
                 Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
+
+                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call.
 
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 
@@ -550,6 +816,20 @@ public class AiAssistantPromptAssembler {
                 context,
                 "Your previous output violated the named schema rule. "
                         + "Return one corrected JSON final answer matching the final-answer schema only.\n");
+    }
+
+    private static String nativeToolRepairRequest(String schemaRule) {
+        String rule = switch (schemaRule) {
+            case "native_multiple_calls" -> "multiple-calls";
+            case "native_call_content" -> "tool-call-with-content";
+            case "native_duplicate_call_id" -> "duplicate-call-id";
+            case "native_arguments_not_object" -> "arguments-not-object";
+            case "native_unknown_tool" -> "unknown-tool";
+            case "native_invalid_arguments" -> "invalid-arguments";
+            default -> "native-tool-call";
+        };
+        return "Your previous native tool call violated the " + rule
+                + " rule. Return exactly one valid native tool call or one valid JSON final answer.";
     }
 
     private String repairRequest(
@@ -756,6 +1036,10 @@ public class AiAssistantPromptAssembler {
 
     private String crmData(String type, Map<String, Object> rawData, MaskingContext context) {
         JsonNode masked = maskStrings(objectMapper.valueToTree(rawData), context);
+        return crmDataMasked(type, masked);
+    }
+
+    private String crmDataMasked(String type, JsonNode masked) {
         return CRM_DATA_BEGIN + "\n"
                 + serialize(Map.of("type", type, "data", masked))
                 + "\n" + CRM_DATA_END;

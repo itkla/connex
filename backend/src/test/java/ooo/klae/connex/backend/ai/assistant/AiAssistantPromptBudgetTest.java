@@ -68,4 +68,17 @@ class AiAssistantPromptBudgetTest {
         assertTrue(budget.pageContextBytes() >= 256);
         assertTrue(budget.attachmentContextBytes() >= 256);
     }
+
+    @Test
+    void toolFloorAndUtf8TruncationStayInsideTheBudgetBoundary() {
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 8_000);
+
+        String truncated = budget.truncateUtf8("A😀B", 4);
+
+        assertEquals(2_048, budget.minimumToolResultBytes());
+        assertEquals("A", truncated);
+        assertTrue(budget.fits(truncated, 4));
+        assertEquals(1, budget.utf8Bytes(truncated));
+    }
 }

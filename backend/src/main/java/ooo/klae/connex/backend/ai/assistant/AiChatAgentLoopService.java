@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolBudgetAudit;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -36,6 +37,7 @@ import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
@@ -122,7 +124,8 @@ public class AiChatAgentLoopService {
                     promptContext, resources);
             List<ToolTurn> toolTurns = new ArrayList<>();
             Map<Integer, AiToolCall> nativeCalls = new HashMap<>();
-            List<AiToolDefinition> nativeDefinitions = memory.nativeTools()
+            boolean nativeTools = memory.nativeTools();
+            List<AiToolDefinition> nativeDefinitions = nativeTools
                     ? promptAssembler.nativeToolDefinitions()
                     : List.of();
             Map<String, AiAssistantToolResult> toolResultCache = new HashMap<>();
@@ -130,6 +133,9 @@ public class AiChatAgentLoopService {
             List<String> reasoningParts = new ArrayList<>();
             boolean reasoningRejected = false;
             AiStructuredRepair repair = null;
+            Integer nativeToolsDegradedStatus = null;
+            ToolBudgetAudit toolBudgetAudit = ToolBudgetAudit.NONE;
+            int nativeProviderAttempts = 0;
             int noProgressSteps = 0;
             int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
             int outputTokens = addTokens(memory.outputTokens(), attachmentContext.outputTokens());
@@ -141,101 +147,130 @@ public class AiChatAgentLoopService {
                 if (deadlineReached(deadline)) {
                     return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                 }
-                MaskedPrompt prompt = memory.nativeTools()
-                        ? promptAssembler.assembleNative(
-                                history,
-                                pageContext,
-                                toolTurns,
-                                maskingContext,
-                                resources,
-                                attachmentContext.data(),
-                                memory.budget())
-                        : promptAssembler.assemble(
-                                history,
-                                pageContext,
-                                toolTurns,
-                                maskingContext,
-                                resources,
-                                attachmentContext.data(),
-                                memory.budget(),
-                                repair);
-                AiAssistantPromptAssembler.NativeReplay nativeReplay = memory.nativeTools()
-                        ? promptAssembler.nativeReplay(
-                                toolTurns, maskingContext, memory.budget(), repair)
-                        : new AiAssistantPromptAssembler.NativeReplay(List.of(), null);
-                AiInvocation invocation = new AiInvocation(
-                        AiFeature.ASSISTANT_CHAT,
-                        maskingContext,
-                        prompt,
-                        List.of(),
-                        memory.budget().maxOutputTokens(),
-                        TEMPERATURE,
-                        aiProperties.isAssistantThinkingEnabled(),
-                        deadline,
-                        memory.nativeTools()
-                                ? AiInvocationProtocol.NATIVE_TOOLS
-                                : AiInvocationProtocol.JSON_REACT);
-                AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
-                        maskingContext.tokenBindings().stream()
-                                .map(Map.Entry::getKey)
-                                .collect(Collectors.toUnmodifiableSet()));
-                AiStructuredRepairAttempt<AiAssistantStep> attempt;
+                AiStructuredRepair stepRepair = repair;
+                boolean nativeMalformedRetried = false;
+                AiStructuredRepairAttempt<AiAssistantStep> attempt = null;
+                AiStructuredOutcome<AiAssistantStep> outcome = null;
                 Optional<AiToolCall> nativeProviderCall = Optional.empty();
-                try (AiInvocationAdmissionService.DirectAdmission admission =
-                        invocationAdmissionService.acquireDirect()) {
-                    Runnable providerGuard = () -> {
-                        requireWorkspaceEnabled(turn);
-                        persistenceService.requireRunning(turn);
-                    };
-                    if (memory.nativeTools()) {
-                        AiNativeToolRequest nativeRequest = new AiNativeToolRequest(
-                                nativeDefinitions,
-                                nativeExchanges(
-                                        toolTurns,
-                                        nativeCalls,
-                                        nativeReplay.toolResults()),
-                                nativeReplay.repairMessage());
-                        NativeStepAttempt nativeAttempt = nativeStepAttempt(
-                                invocationService.completeNativeToolsRepairable(
-                                        invocation,
-                                        AiAssistantStep.FinalAnswer.class,
-                                        outputGuard,
-                                        stepGuard.finalAnswerForIssuedPlaceholders(
-                                                maskingContext.tokenBindings().stream()
-                                                        .map(Map.Entry::getKey)
-                                                        .collect(Collectors.toUnmodifiableSet())),
-                                        stepSchema.finalResponseSchema(),
-                                        nativeRequest,
-                                        admission,
-                                        providerGuard));
-                        if (nativeAttempt.malformed()) {
+                while (outcome == null) {
+                    MaskedPrompt prompt = nativeTools
+                            ? promptAssembler.assembleNative(
+                                    history,
+                                    pageContext,
+                                    toolTurns,
+                                    maskingContext,
+                                    resources,
+                                    attachmentContext.data(),
+                                    memory.budget())
+                            : promptAssembler.assemble(
+                                    history,
+                                    pageContext,
+                                    toolTurns,
+                                    maskingContext,
+                                    resources,
+                                    attachmentContext.data(),
+                                    memory.budget(),
+                                    stepRepair);
+                    AiAssistantPromptAssembler.NativeReplay nativeReplay = nativeTools
+                            ? promptAssembler.nativeReplay(
+                                    toolTurns, maskingContext, memory.budget(), stepRepair)
+                            : new AiAssistantPromptAssembler.NativeReplay(List.of(), null);
+                    AiInvocation invocation = new AiInvocation(
+                            AiFeature.ASSISTANT_CHAT,
+                            maskingContext,
+                            prompt,
+                            List.of(),
+                            memory.budget().maxOutputTokens(),
+                            TEMPERATURE,
+                            aiProperties.isAssistantThinkingEnabled(),
+                            deadline,
+                            nativeTools
+                                    ? AiInvocationProtocol.NATIVE_TOOLS
+                                    : AiInvocationProtocol.JSON_REACT,
+                            nativeToolsDegradedStatus);
+                    AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
+                            maskingContext.tokenBindings().stream()
+                                    .map(Map.Entry::getKey)
+                                    .collect(Collectors.toUnmodifiableSet()));
+                    boolean degradationEligible = nativeTools
+                            && nativeProviderAttempts == 0
+                            && toolTurns.isEmpty()
+                            && nativeCalls.isEmpty();
+                    boolean nativeMalformed = false;
+                    try (AiInvocationAdmissionService.DirectAdmission admission =
+                            invocationAdmissionService.acquireDirect()) {
+                        Runnable providerGuard = () -> {
+                            requireWorkspaceEnabled(turn);
+                            persistenceService.requireRunning(turn);
+                        };
+                        if (nativeTools) {
+                            AiNativeToolRequest nativeRequest = new AiNativeToolRequest(
+                                    nativeDefinitions,
+                                    nativeExchanges(
+                                            toolTurns,
+                                            nativeCalls,
+                                            nativeReplay.toolResults()),
+                                    nativeReplay.repairMessage());
+                            nativeProviderAttempts++;
+                            NativeStepAttempt nativeAttempt = nativeStepAttempt(
+                                    invocationService.completeNativeToolsRepairable(
+                                            invocation,
+                                            AiAssistantStep.FinalAnswer.class,
+                                            outputGuard,
+                                            stepGuard.finalAnswerForIssuedPlaceholders(
+                                                    maskingContext.tokenBindings().stream()
+                                                            .map(Map.Entry::getKey)
+                                                            .collect(Collectors.toUnmodifiableSet())),
+                                            stepSchema.finalResponseSchema(),
+                                            nativeRequest,
+                                            admission,
+                                            providerGuard));
+                            attempt = nativeAttempt.attempt();
+                            nativeProviderCall = nativeAttempt.providerCall();
+                            nativeMalformed = nativeAttempt.malformed();
+                        } else {
+                            attempt = invocationService.completeStructuredRepairable(
+                                    invocation,
+                                    AiAssistantStep.class,
+                                    outputGuard,
+                                    stepSchema.responseSchema(),
+                                    admission,
+                                    providerGuard);
+                        }
+                    } catch (AiProviderRequestRejectedException exception) {
+                        if (!degradationEligible || !exception.isClientError()) {
+                            throw exception;
+                        }
+                        nativeTools = false;
+                        nativeToolsDegradedStatus = exception.statusCode();
+                        nativeCalls.clear();
+                        toolTurns.clear();
+                        stepRepair = null;
+                        repair = null;
+                        continue;
+                    }
+                    outcome = java.util.Objects.requireNonNull(attempt, "attempt").outcome();
+                    if (aiProperties.isAssistantThinkingEnabled() && !reasoningRejected
+                            && attempt.reasoning().isPresent()
+                            && !appendReasoning(
+                                    reasoningParts, attempt.reasoning().orElseThrow())) {
+                        reasoningParts.clear();
+                        reasoningRejected = true;
+                    }
+                    requireWorkspaceEnabled(turn);
+                    inputTokens = addTokens(inputTokens, inputTokens(outcome));
+                    outputTokens = addTokens(outputTokens, outputTokens(outcome));
+                    if (deadlineReached(deadline)) {
+                        return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
+                    }
+                    if (nativeMalformed) {
+                        if (nativeMalformedRetried) {
                             return AiGenerationTaskResult.failed("malformed_output");
                         }
-                        attempt = nativeAttempt.attempt().orElseThrow();
-                        nativeProviderCall = nativeAttempt.providerCall();
-                    } else {
-                        attempt = invocationService.completeStructuredRepairable(
-                                invocation,
-                                AiAssistantStep.class,
-                                outputGuard,
-                                stepSchema.responseSchema(),
-                                admission,
-                                providerGuard);
+                        nativeMalformedRetried = true;
+                        stepRepair = attempt.repair().orElseThrow();
+                        outcome = null;
                     }
-                }
-                AiStructuredOutcome<AiAssistantStep> outcome = attempt.outcome();
-                if (aiProperties.isAssistantThinkingEnabled() && !reasoningRejected
-                        && attempt.reasoning().isPresent()
-                        && !appendReasoning(
-                                reasoningParts, attempt.reasoning().orElseThrow())) {
-                    reasoningParts.clear();
-                    reasoningRejected = true;
-                }
-                requireWorkspaceEnabled(turn);
-                inputTokens = addTokens(inputTokens, inputTokens(outcome));
-                outputTokens = addTokens(outputTokens, outputTokens(outcome));
-                if (deadlineReached(deadline)) {
-                    return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                 }
                 if (outcome instanceof AiStructuredOutcome.Malformed<?>) {
                     if (repair != null || attempt.repair().isEmpty()) {
@@ -269,10 +304,16 @@ public class AiChatAgentLoopService {
                             return AiGenerationTaskResult.failed("no_progress");
                         }
                         recordNativeCall(
-                                memory.nativeTools(), nativeCalls,
+                                nativeTools, nativeCalls,
                                 stepNumber, nativeProviderCall);
-                        toolTurns.add(new ToolTurn(
-                                stepNumber, step.tool().name(), cachedResult));
+                        ToolTurn cachedTurn = new ToolTurn(
+                                stepNumber, step.tool().name(), cachedResult);
+                        toolBudgetAudit = promptAssembler.requireAdditionalToolResultCapacity(
+                                toolTurns,
+                                cachedTurn,
+                                maskingContext,
+                                memory.budget());
+                        toolTurns.add(cachedTurn);
                         continue;
                     }
                     if (toolCatalog.isWrite(step.tool().name())) {
@@ -295,6 +336,7 @@ public class AiChatAgentLoopService {
                             int guardedStepNumber = stepNumber;
                             AiAssistantToolResult toolResult;
                             boolean replayed = false;
+                            ToolBudgetAudit admittedToolBudgetAudit;
                             if (write.tier() == AiAssistantToolCatalog.ToolTier.AUTO) {
                                 AiAssistantWriteToolService.WriteExecution execution =
                                         writeToolService.executeAuto(
@@ -323,16 +365,34 @@ public class AiChatAgentLoopService {
                                     toolTurns.clear();
                                     toolTurns.addAll(replayTurns);
                                     toolResult = toolTurns.getLast().result();
+                                    admittedToolBudgetAudit = promptAssembler.toolBudgetAudit(
+                                            toolTurns,
+                                            maskingContext,
+                                            memory.budget());
+                                } else {
+                                    admittedToolBudgetAudit = promptAssembler
+                                            .requireAdditionalToolResultCapacity(
+                                                    toolTurns,
+                                                    new ToolTurn(
+                                                            stepNumber,
+                                                            step.tool().name(),
+                                                            toolResult),
+                                                    maskingContext,
+                                                    memory.budget());
                                 }
                             } else {
                                 toolResult = writeToolService.proposalResult(write, proposal);
-                                promptAssembler.requireAdditionalToolResultCapacity(
-                                        toolTurns,
-                                        new ToolTurn(
-                                                stepNumber, step.tool().name(), toolResult),
-                                        maskingContext,
-                                        memory.budget());
+                                admittedToolBudgetAudit = promptAssembler
+                                        .requireAdditionalToolResultCapacity(
+                                                toolTurns,
+                                                new ToolTurn(
+                                                        stepNumber,
+                                                        step.tool().name(),
+                                                        toolResult),
+                                                maskingContext,
+                                                memory.budget());
                             }
+                            toolBudgetAudit = admittedToolBudgetAudit;
                             String status = write.tier() == AiAssistantToolCatalog.ToolTier.AUTO
                                     ? "executed"
                                     : ("executed".equals(proposal.status())
@@ -354,7 +414,7 @@ public class AiChatAgentLoopService {
                                         stepNumber, step.tool().name(), toolResult));
                             }
                             recordNativeCall(
-                                    memory.nativeTools(), nativeCalls,
+                                    nativeTools, nativeCalls,
                                     stepNumber, nativeProviderCall);
                             if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                                 return AiGenerationTaskResult.failed("no_progress");
@@ -388,7 +448,16 @@ public class AiChatAgentLoopService {
                         AiAssistantToolResult toolResult = toolExecutor.execute(
                                 step.tool().name(), step.tool().args(), resources,
                                 turn.includePrivateNotes());
-                        String resultJson = promptAssembler.durableToolResult(toolResult);
+                        ToolTurn admittedTurn = new ToolTurn(
+                                stepNumber, step.tool().name(), toolResult);
+                        toolBudgetAudit = promptAssembler.requireAdditionalToolResultCapacity(
+                                toolTurns,
+                                admittedTurn,
+                                maskingContext,
+                                memory.budget());
+                        String resultJson = promptAssembler.durableToolResult(
+                                toolResult, toolBudgetAudit);
+                        String progressResultJson = promptAssembler.durableToolResult(toolResult);
                         if (!persistenceService.finishTool(
                                 turn, toolCallId, "executed", resultJson)) {
                             failTool(turn, toolCallId, "turn_not_active");
@@ -399,15 +468,15 @@ public class AiChatAgentLoopService {
                                 stepNumber, "step", step.tool().name(),
                                 "executed", null));
                         toolResultCache.put(toolCallKey, toolResult);
-                        if (seenToolResults.add(resultJson)) {
+                        if (seenToolResults.add(progressResultJson)) {
                             noProgressSteps = 0;
                         } else {
                             noProgressSteps++;
                         }
                         recordNativeCall(
-                                memory.nativeTools(), nativeCalls,
+                                nativeTools, nativeCalls,
                                 stepNumber, nativeProviderCall);
-                        toolTurns.add(new ToolTurn(stepNumber, step.tool().name(), toolResult));
+                        toolTurns.add(admittedTurn);
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                             return AiGenerationTaskResult.failed("no_progress");
                         }
@@ -443,7 +512,8 @@ public class AiChatAgentLoopService {
                         turn.turnId(), finalAnswer.citations(), suggestions, resources.snapshot(),
                         reasoningParts.isEmpty()
                                 ? Optional.empty()
-                                : Optional.of(String.join("\n\n", reasoningParts)));
+                                : Optional.of(String.join("\n\n", reasoningParts)),
+                        toolBudgetAudit);
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, finalAnswer.text(), metadata, inputTokens, outputTokens);
@@ -700,8 +770,8 @@ public class AiChatAgentLoopService {
                                 tool.outputTokens(),
                                 tool.stopReason());
                 yield new NativeStepAttempt(
-                        Optional.of(new AiStructuredRepairAttempt<>(
-                                outcome, Optional.empty(), tool.reasoning())),
+                        new AiStructuredRepairAttempt<>(
+                                outcome, Optional.empty(), tool.reasoning()),
                         Optional.of(tool.providerCall()),
                         false);
             }
@@ -723,23 +793,37 @@ public class AiChatAgentLoopService {
                                     malformed.stopReason());
                 };
                 yield new NativeStepAttempt(
-                        Optional.of(new AiStructuredRepairAttempt<>(
-                                outcome, source.repair(), source.reasoning())),
+                        new AiStructuredRepairAttempt<>(
+                                outcome, source.repair(), source.reasoning()),
                         Optional.empty(),
                         false);
             }
-            case AiNativeToolCompletion.Malformed<AiAssistantStep.FinalAnswer> malformed ->
-                    new NativeStepAttempt(Optional.empty(), Optional.empty(), true);
+            case AiNativeToolCompletion.Malformed<AiAssistantStep.FinalAnswer> malformed -> {
+                AiStructuredOutcome<AiAssistantStep> outcome =
+                        new AiStructuredOutcome.Malformed<>(
+                                AiStructuredOutcome.REASON_MALFORMED,
+                                malformed.inputTokens(),
+                                malformed.outputTokens(),
+                                malformed.stopReason());
+                yield new NativeStepAttempt(
+                        new AiStructuredRepairAttempt<>(
+                                outcome,
+                                Optional.of(AiStructuredRepair.from(
+                                        malformed.repairRule(), "")),
+                                malformed.reasoning()),
+                        Optional.empty(),
+                        true);
+            }
         };
     }
 
     private record NativeStepAttempt(
-            Optional<AiStructuredRepairAttempt<AiAssistantStep>> attempt,
+            AiStructuredRepairAttempt<AiAssistantStep> attempt,
             Optional<AiToolCall> providerCall,
             boolean malformed) {
 
         private NativeStepAttempt {
-            attempt = java.util.Objects.requireNonNull(attempt, "attempt");
+            java.util.Objects.requireNonNull(attempt, "attempt");
             providerCall = java.util.Objects.requireNonNull(providerCall, "providerCall");
         }
     }

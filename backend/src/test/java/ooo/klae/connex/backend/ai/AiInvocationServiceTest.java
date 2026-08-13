@@ -234,6 +234,79 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void degradedNativeRetryAuditsSanitizedStatus() {
+        AiInvocation base = invocation("Find the relationship");
+        AiInvocation degraded = new AiInvocation(
+                base.feature(),
+                base.context(),
+                base.prompt(),
+                base.images(),
+                base.maxTokens(),
+                base.temperature(),
+                base.reasoningRequested(),
+                base.callerDeadline(),
+                AiInvocationProtocol.JSON_REACT,
+                404);
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"Ready for follow-up.\"}",
+                12,
+                7,
+                "end_turn"));
+
+        AiStructuredOutcome<IntroRationaleContent> outcome =
+                service.completeStructured(degraded, IntroRationaleContent.class);
+
+        assertInstanceOf(AiStructuredOutcome.Parsed.class, outcome);
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals(true, terminal.get("nativeToolsDegraded"));
+        assertEquals(404, terminal.get("nativeToolsDegradedStatus"));
+        assertNoContent(terminal);
+    }
+
+    @Test
+    void nativeCompletionToStringsRedactDemaskedPayloadsAndReasoning() throws Exception {
+        String tenantData = "Mina Patel private relationship details";
+        AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool =
+                new AiNativeToolCompletion.Tool<>(
+                        new AiToolCall(
+                                "call_1", "search_records", "{\"query\":\"{{P1}}\"}"),
+                        new ObjectMapper().readTree("{\"query\":\"" + tenantData + "\"}"),
+                        0,
+                        12,
+                        7,
+                        "tool_calls",
+                        Optional.of(tenantData));
+        AiNativeToolCompletion.Content<AiAssistantStep.FinalAnswer> content =
+                new AiNativeToolCompletion.Content<>(
+                        new AiStructuredRepairAttempt<>(
+                                new AiStructuredOutcome.Parsed<>(
+                                        new AiAssistantStep.FinalAnswer(tenantData, List.of()),
+                                        0,
+                                        12,
+                                        7,
+                                        "stop"),
+                                Optional.empty(),
+                                Optional.of(tenantData)),
+                        12,
+                        7,
+                        "stop",
+                        Optional.of(tenantData));
+        AiNativeToolCompletion.Malformed<AiAssistantStep.FinalAnswer> malformed =
+                new AiNativeToolCompletion.Malformed<>(
+                        12,
+                        7,
+                        "tool_calls",
+                        Optional.of(tenantData),
+                        "native_tool_call");
+
+        assertFalse(tool.toString().contains(tenantData));
+        assertTrue(tool.toString().contains("arguments=<redacted>"));
+        assertFalse(content.toString().contains(tenantData));
+        assertTrue(content.toString().contains("reasoning=<redacted>"));
+        assertFalse(malformed.toString().contains(tenantData));
+    }
+
+    @Test
     void malformedNativeArgumentsFailClosedWithoutContentOrRepair() throws Exception {
         when(aiProvider.toolCallingCapability(resolved.target()))
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);

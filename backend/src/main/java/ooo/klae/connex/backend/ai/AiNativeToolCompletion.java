@@ -38,6 +38,17 @@ public sealed interface AiNativeToolCompletion<T> {
         public JsonNode arguments() {
             return arguments.deepCopy();
         }
+
+        @Override
+        public String toString() {
+            return "Tool[providerCall=" + providerCall
+                    + ", arguments=<redacted>"
+                    + ", demaskWarnings=" + demaskWarnings
+                    + ", inputTokens=" + inputTokens
+                    + ", outputTokens=" + outputTokens
+                    + ", stopReason=" + stopReason
+                    + ", reasoning=<redacted>]";
+        }
     }
 
     /** Structured final-content attempt retaining the existing bounded repair contract. */
@@ -53,18 +64,46 @@ public sealed interface AiNativeToolCompletion<T> {
             Objects.requireNonNull(stopReason, "stopReason");
             reasoning = Objects.requireNonNull(reasoning, "reasoning");
         }
+
+        @Override
+        public String toString() {
+            return "Content[attempt=" + attempt
+                    + ", inputTokens=" + inputTokens
+                    + ", outputTokens=" + outputTokens
+                    + ", stopReason=" + stopReason
+                    + ", reasoning=<redacted>]";
+        }
     }
 
-    /** Honest terminal rejection for a malformed native function-call envelope. */
+    /** Repairable rejection for a malformed native function-call envelope. */
     record Malformed<T>(
             int inputTokens,
             int outputTokens,
             String stopReason,
-            Optional<String> reasoning) implements AiNativeToolCompletion<T> {
+            Optional<String> reasoning,
+            String repairRule) implements AiNativeToolCompletion<T> {
+
+        public Malformed(
+                int inputTokens,
+                int outputTokens,
+                String stopReason,
+                Optional<String> reasoning) {
+            this(inputTokens, outputTokens, stopReason, reasoning, "native_tool_call");
+        }
 
         public Malformed {
             Objects.requireNonNull(stopReason, "stopReason");
             reasoning = Objects.requireNonNull(reasoning, "reasoning");
+            Objects.requireNonNull(repairRule, "repairRule");
+        }
+
+        @Override
+        public String toString() {
+            return "Malformed[inputTokens=" + inputTokens
+                    + ", outputTokens=" + outputTokens
+                    + ", stopReason=" + stopReason
+                    + ", reasoning=<redacted>"
+                    + ", repairRule=" + repairRule + "]";
         }
     }
 }

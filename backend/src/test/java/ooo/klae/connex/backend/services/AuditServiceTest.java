@@ -270,8 +270,9 @@ class AuditServiceTest {
                 {"provider":"vertex","region":"secret region value","model":"claude-sonnet-4@20250514",
                 "feature":"assistant.chat","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
                 "structured":true,"protocol":"native_tools",
+                "nativeToolsDegraded":true,"nativeToolsDegradedStatus":404,
                 "structuredEnforcement":"json_schema","inputTokens":80,
-                "schemaRule":"final_suggestions","outputLength":317,"objectExtracted":true,
+                "schemaRule":"native_tool_call","outputLength":317,"objectExtracted":true,
                 "prompt":"private CRM content","response":"private model output"}
                 """);
         entry.setContext("{\"error\":\"ProviderException\",\"detail\":\"secret token value\"}");
@@ -286,7 +287,9 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains(AiFeature.ASSISTANT_CHAT.wireKey()));
         assertTrue(result.getChanges().contains("json_schema"));
         assertTrue(result.getChanges().contains("native_tools"));
-        assertTrue(result.getChanges().contains("final_suggestions"));
+        assertTrue(result.getChanges().contains("native_tool_call"));
+        assertTrue(result.getChanges().contains("nativeToolsDegraded"));
+        assertTrue(result.getChanges().contains("404"));
         assertTrue(result.getChanges().contains("317"));
         assertTrue(result.getChanges().contains("objectExtracted"));
         assertFalse(result.getChanges().contains("prompt"));

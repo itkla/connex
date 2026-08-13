@@ -22,6 +22,8 @@ import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
  * @param reasoningRequested whether the feature requests display-only model reasoning
  * @param callerDeadline absolute caller-owned deadline, or {@code null} for the provider default
  * @param protocol metadata-only provider protocol diagnostic
+ * @param nativeToolsDegradedStatus sanitized native-tool rejection status when this invocation is
+ *                                  a turn-local JSON-ReAct degradation retry
  */
 public record AiInvocation(
         AiFeature feature,
@@ -32,7 +34,22 @@ public record AiInvocation(
         double temperature,
         boolean reasoningRequested,
         Instant callerDeadline,
-        AiInvocationProtocol protocol) {
+        AiInvocationProtocol protocol,
+        Integer nativeToolsDegradedStatus) {
+
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            List<AiInputImage> images,
+            int maxTokens,
+            double temperature,
+            boolean reasoningRequested,
+            Instant callerDeadline,
+            AiInvocationProtocol protocol) {
+        this(feature, context, prompt, images, maxTokens, temperature, reasoningRequested,
+                callerDeadline, protocol, null);
+    }
 
     public AiInvocation(
             AiFeature feature,
@@ -122,6 +139,11 @@ public record AiInvocation(
         if (!Double.isFinite(temperature) || temperature < 0) {
             throw new IllegalArgumentException("temperature must be a finite non-negative number");
         }
+        if (nativeToolsDegradedStatus != null
+                && (nativeToolsDegradedStatus < 400 || nativeToolsDegradedStatus > 499)) {
+            throw new IllegalArgumentException(
+                    "nativeToolsDegradedStatus must be a client-error status");
+        }
     }
 
     @Override
@@ -133,6 +155,8 @@ public record AiInvocation(
                 + ", maxTokens=" + maxTokens
                 + ", temperature=" + temperature
                 + ", reasoningRequested=" + reasoningRequested
-                + ", protocol=" + protocol + "]";
+                + ", protocol=" + protocol
+                + ", nativeToolsDegraded=" + (nativeToolsDegradedStatus != null)
+                + ", nativeToolsDegradedStatus=" + nativeToolsDegradedStatus + "]";
     }
 }
