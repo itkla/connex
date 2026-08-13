@@ -23,6 +23,7 @@ import {
     ApiError,
     approveAiAssistantToolCall,
     archiveAiChatSession,
+    cancelAiChatTurn,
     createAiChatSession,
     deleteAiChatAttachment,
     getActiveWorkspaceMembers,
@@ -76,12 +77,24 @@ import {
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
+import {
+    applyAskConnexStreamDelta,
+    createAskConnexFrameCoalescer,
+    createAskConnexStream,
+    createAskConnexStreamStore,
+    failAskConnexStreamHydration,
+    requestAskConnexTurnCancel,
+    settleAskConnexStreamHydration,
+    type AskConnexFrameCoalescer,
+    type AskConnexStreamState,
+} from '@/app/lib/askConnexStream';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     AiChatCitation,
     AiChatAttachment,
+    AiChatDeltaFrame,
     AiChatMessage,
     AiChatParticipant,
     AiChatPresence,
@@ -227,6 +240,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
+    const [streaming, setStreaming] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
+    const [streamStore] = useState(createAskConnexStreamStore);
     const [turn, dispatchTurn] = useReducer(reduceAskConnexTurn, EMPTY_ASK_CONNEX_TURN);
     const [toolCalls, dispatchToolCalls] = useReducer(
         reduceAskConnexToolCards,
@@ -246,6 +262,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const realtimeRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
     const submittingRef = useRef(false);
     const toolActionsRef = useRef<Set<number>>(new Set());
+    const streamRef = useRef<AskConnexStreamState | null>(null);
+    const streamCoalescerRef = useRef<AskConnexFrameCoalescer | null>(null);
+    const streamingRef = useRef(false);
+    const cancellingRef = useRef(false);
+    const activeTurnRef = useRef<{ sessionId: number; turnId: number } | null>(null);
 
     const contextResult = useMemo(
         () => mergeAskConnexContext(context.record, composer),
@@ -284,6 +305,107 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     useEffect(() => {
         typingRef.current = composer.trim().length > 0;
     }, [composer]);
+
+    useEffect(() => {
+        activeTurnRef.current = (turn.phase === 'accepted' || turn.phase === 'running')
+            && turn.sessionId !== null
+            && turn.turnId !== null
+            ? { sessionId: turn.sessionId, turnId: turn.turnId }
+            : null;
+        if (turn.phase !== 'accepted' && turn.phase !== 'running') {
+            cancellingRef.current = false;
+            setCancelling(false);
+        }
+    }, [turn]);
+
+    const publishStream = useCallback(() => {
+        const stream = streamRef.current;
+        if (stream === null || stream.text.length === 0) {
+            streamStore.publish(null);
+            return;
+        }
+        streamStore.publish({ turnId: stream.turnId, text: stream.text });
+        if (!streamingRef.current) {
+            streamingRef.current = true;
+            setStreaming(true);
+        }
+    }, [streamStore]);
+
+    const invalidateStream = useCallback(() => {
+        if (typeof window === 'undefined') return;
+        streamCoalescerRef.current ??= createAskConnexFrameCoalescer(
+            publishStream,
+            (callback) => window.requestAnimationFrame(callback),
+            (handle) => window.cancelAnimationFrame(handle),
+        );
+        streamCoalescerRef.current.invalidate();
+    }, [publishStream]);
+
+    useEffect(() => () => streamCoalescerRef.current?.dispose(), []);
+
+    const resetStream = useCallback(() => {
+        streamRef.current = null;
+        streamingRef.current = false;
+        setStreaming(false);
+        streamStore.publish(null);
+    }, [streamStore]);
+
+    const hydrateStream = useCallback(async (sessionId: number, turnId: number): Promise<void> => {
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
+        for (let attempt = 0; ; attempt++) {
+            if (attempt > 0) {
+                try {
+                    await delay(500, signal);
+                } catch {
+                    return;
+                }
+            }
+            let partial: string;
+            try {
+                const durable = await getAiChatTurn(sessionId, turnId, { signal });
+                partial = durable.partialContent ?? '';
+            } catch {
+                const current = streamRef.current;
+                if (!signal.aborted && current?.turnId === turnId) {
+                    streamRef.current = failAskConnexStreamHydration(current);
+                }
+                return;
+            }
+            if (signal.aborted) return;
+            const current = streamRef.current;
+            if (current?.turnId !== turnId) return;
+            const settled = settleAskConnexStreamHydration(current, partial);
+            streamRef.current = settled.state;
+            invalidateStream();
+            if (!settled.hydrate) return;
+        }
+    }, [invalidateStream]);
+
+    const handleStreamDelta = useCallback((frame: AiChatDeltaFrame) => {
+        const active = activeTurnRef.current;
+        if (active === null || frame.turnId !== active.turnId) return;
+        const current = streamRef.current?.turnId === frame.turnId
+            ? streamRef.current
+            : createAskConnexStream(frame.turnId);
+        const transition = applyAskConnexStreamDelta(current, frame);
+        streamRef.current = transition.state;
+        invalidateStream();
+        if (transition.hydrate) void hydrateStream(active.sessionId, frame.turnId);
+    }, [hydrateStream, invalidateStream]);
+
+    const absorbTurnPartial = useCallback((durable: AiChatTurn) => {
+        if (!isActiveTurnStatus(durable.status)) return;
+        const partial = durable.partialContent ?? '';
+        if (partial.length === 0) return;
+        const current = streamRef.current?.turnId === durable.turnId
+            ? streamRef.current
+            : createAskConnexStream(durable.turnId);
+        const settled = settleAskConnexStreamHydration(current, partial);
+        streamRef.current = settled.state;
+        invalidateStream();
+        if (settled.hydrate) void hydrateStream(durable.sessionId, durable.turnId);
+    }, [hydrateStream, invalidateStream]);
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
         if (open) return;
@@ -410,11 +532,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setUnavailableReason(null);
         submittingRef.current = false;
         setSubmitting(false);
+        resetStream();
         dispatchTurn({ type: 'reset' });
         dispatchToolCalls({ type: 'reset' });
         setLoadState('ready');
         setLoadError(null);
-    }, [sessionKey, turnKey]);
+    }, [resetStream, sessionKey, turnKey]);
 
     const pollDurableTurn = useCallback(async (
         sessionId: number,
@@ -425,11 +548,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         let current = initial ?? await getAiChatTurn(sessionId, turnId, { signal });
         while (isActiveTurnStatus(current.status)) {
             dispatchTurn({ type: 'status', status: current.status, reason: current.terminalReason });
+            absorbTurnPartial(current);
             await delay(1_000, signal);
             current = await getAiChatTurn(sessionId, turnId, { signal });
         }
         return current;
-    }, []);
+    }, [absorbTurnPartial]);
 
     const followTurn = useCallback(async (
         stored: StoredAskConnexTurn,
@@ -439,6 +563,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             let durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
             if (signal.aborted) return;
             dispatchTurn({ type: 'status', status: durable.status, reason: durable.terminalReason });
+            absorbTurnPartial(durable);
 
             try {
                 const initial = await getAiGenerationStatus<AiChatTurnGenerationResult>(
@@ -469,6 +594,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             safeStorageRemove(turnKey);
             setSubmissionBlocked(false);
             await refreshTranscript(stored.sessionId, signal, true);
+            resetStream();
             await refreshSessions(signal);
             if (durable.status === 'failed') {
                 deferredErrorToast(
@@ -492,7 +618,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
             deferredErrorToast(error instanceof ApiError ? error.message : t('toast.requestFailed'));
         }
-    }, [clearActiveSession, pollDurableTurn, refreshSessions, refreshTranscript, t, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, turnKey]);
 
     useEffect(() => {
         sessionEpochRef.current++;
@@ -525,6 +651,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             setSubmissionBlocked(false);
             submittingRef.current = false;
             setSubmitting(false);
+            resetStream();
             dispatchTurn({ type: 'reset' });
             dispatchToolCalls({ type: 'reset' });
             setLoadState('loading');
@@ -537,6 +664,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
             try {
                 await refreshSessions(controller.signal);
+                if (controller.signal.aborted) return;
                 if (sharePermission === 'granted') {
                     const workspaceMembers = await getActiveWorkspaceMembers({ signal: controller.signal });
                     if (!controller.signal.aborted) {
@@ -549,6 +677,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 selectionLoadStarted = true;
                 await refreshTranscript(storedSessionId, controller.signal, false);
+                if (controller.signal.aborted) return;
                 if (storedTurn?.sessionId === storedSessionId) {
                     dispatchTurn({
                         type: 'accepted',
@@ -583,7 +712,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         void initialize();
         return () => controller.abort();
-    }, [activeWorkspaceId, clearActiveSession, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, sessionKey, sharePermission, switching, t, turnKey, userId]);
+    }, [activeWorkspaceId, clearActiveSession, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
@@ -607,6 +736,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setSubmissionBlocked(false);
         submittingRef.current = false;
         setSubmitting(false);
+        resetStream();
         dispatchTurn({ type: 'reset' });
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
@@ -622,7 +752,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 deferredErrorToast(error instanceof ApiError ? error.message : t('toast.requestFailed'));
             }
         }
-    }, [clearActiveSession, refreshTranscript, sessionKey, t, turnKey, working]);
+    }, [clearActiveSession, refreshTranscript, resetStream, sessionKey, t, turnKey, working]);
 
     const newChat = useCallback(() => {
         if (working) return;
@@ -668,10 +798,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 enqueueRealtimeRefresh(frame.sessionId, signal);
             },
+            onDelta: handleStreamDelta,
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, switching, userId]);
 
     useEffect(() => {
         const session = activeSession;
@@ -1102,6 +1233,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 generationHandle: accepted.generationHandle,
             };
             safeStorageSet(turnKey, serializeStoredAskConnexTurn(stored));
+            resetStream();
             dispatchTurn({
                 type: 'accepted',
                 sessionId: accepted.sessionId,
@@ -1148,7 +1280,27 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, sessionKey, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userDisplayName, userId]);
+    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, sessionKey, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userDisplayName, userId]);
+
+    const cancelTurn = useCallback(async () => {
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted || cancellingRef.current) return;
+        cancellingRef.current = true;
+        setCancelling(true);
+        const outcome = await requestAskConnexTurnCancel(
+            turn,
+            false,
+            (sessionId, turnId) => cancelAiChatTurn(sessionId, turnId, { signal }),
+            (error) => (error instanceof ApiError ? error.status : null),
+        );
+        if (signal.aborted) return;
+        if (outcome === 'requested' || outcome === 'already_settled') return;
+        cancellingRef.current = false;
+        setCancelling(false);
+        if (outcome === 'forbidden' || outcome === 'failed') {
+            toastError(t('toast.cancelFailed'));
+        }
+    }, [t, turn]);
 
     const removeAttachment = useCallback((attachment: AskConnexAttachment) => {
         setComposer((current) => removeAskConnexAttachment(current, attachment));
@@ -1249,9 +1401,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         tooLong: t('tooLong'),
         typing: (names: string) => t('typing', { names }),
         unshare: t('unshare'),
+        stop: t('stop'),
+        stopping: t('stopping'),
         turnAccepted: t('turnAccepted'),
+        turnCancelled: t('turnCancelled'),
         turnFailed: t('turnFailed'),
         turnResolved: t('turnResolved'),
+        turnStreaming: t('turnStreaming'),
         turnTimedOut: t('turnTimedOut'),
         turnWorking: t('turnWorking'),
         toolCard: {
@@ -1348,6 +1504,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 contentTooLong={scoped && contentTooLong}
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
+                streamStore={streamStore}
+                streaming={scoped && streaming}
+                cancelling={scoped && cancelling}
                 toolCalls={scoped ? toolCalls : EMPTY_ASK_CONNEX_TOOL_CARDS}
                 actionableToolCallIds={scoped
                     ? actionableToolCallIds
@@ -1373,6 +1532,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onAttachFiles={(files) => void attachFiles(files)}
                 onRemoveFileAttachment={(attachment) => void removeFileAttachment(attachment)}
                 onSend={(content) => void send(content)}
+                onCancelTurn={() => void cancelTurn()}
                 onToolAction={(toolCallId, action) => void performToolAction(toolCallId, action)}
             />
         </AskConnexContext.Provider>

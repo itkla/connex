@@ -129,7 +129,7 @@ export type StoredAskConnexTurn = {
 
 /** Provider-owned visual phase for one assistant turn. */
 export type AskConnexTurnState = {
-    phase: 'idle' | 'accepted' | 'running' | 'resolved' | 'failed' | 'timed_out';
+    phase: 'idle' | 'accepted' | 'running' | 'resolved' | 'failed' | 'timed_out' | 'cancelled';
     sessionId: number | null;
     turnId: number | null;
     generationHandle: string | null;
@@ -613,7 +613,9 @@ export function reduceAskConnexTurn(
             ? 'resolved'
             : event.status === 'timed_out'
               ? 'timed_out'
-              : 'failed';
+              : event.status === 'cancelled'
+                ? 'cancelled'
+                : 'failed';
     return { ...state, phase, reason: event.reason ?? null };
 }
 
