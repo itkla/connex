@@ -65,6 +65,7 @@
     <result property="toolName" column="tool_name"/>
     <result property="status" column="status"/>
     <result property="argumentsJson" column="arguments_json"/>
+    <result property="thoughtSignature" column="thought_signature"/>
     <result property="resultJson" column="result_json"/>
     <result property="executedByUserId" column="executed_by_user_id"/>
     <result property="executedAt" column="executed_at"/>
@@ -616,14 +617,17 @@
 
   <insert id="insertToolCall" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_tool_call
-      (workspace_id, message_id, tool_name, status, arguments_json, idempotency_key)
+      (workspace_id, message_id, tool_name, status, arguments_json,
+       thought_signature, idempotency_key)
     VALUES
       (#{workspaceId}, #{messageId}, #{toolName}, #{status},
-       #{argumentsJson,jdbcType=VARCHAR}, #{idempotencyKey,jdbcType=VARCHAR})
+       #{argumentsJson,jdbcType=VARCHAR}, #{thoughtSignature,jdbcType=LONGVARCHAR},
+       #{idempotencyKey,jdbcType=VARCHAR})
   </insert>
 
   <select id="getToolCallById" resultMap="toolCallResult">
     SELECT id, workspace_id, message_id, tool_name, status, arguments_json,
+           thought_signature,
            result_json, executed_by_user_id, executed_at, idempotency_key,
            created_at, updated_at
     FROM ai_chat_tool_call
@@ -635,7 +639,8 @@
   <select id="getToolCallByIdempotencyKey" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.arguments_json, tc.thought_signature, tc.result_json,
+           tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -647,7 +652,8 @@
   <select id="getToolCallBySession" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.arguments_json, tc.thought_signature, tc.result_json,
+           tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -660,7 +666,8 @@
   <select id="listPendingToolCallsBySession" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.arguments_json, tc.thought_signature, tc.result_json,
+           tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -674,7 +681,8 @@
   <select id="listToolCallsBySession" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.arguments_json, tc.thought_signature, tc.result_json,
+           tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -691,7 +699,8 @@
   <select id="getToolCallBySessionForUpdate" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.result_json, tc.executed_by_user_id, tc.executed_at,
+           tc.arguments_json, tc.thought_signature, tc.result_json,
+           tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m

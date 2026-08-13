@@ -23,6 +23,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -372,6 +373,30 @@ class AiChatTurnPersistenceServiceTest {
         assertTrue(second.created());
         verify(chatMapper).insertToolCall(argThat(toolCall ->
                 "turn-18-step-1".equals(toolCall.getIdempotencyKey())));
+    }
+
+    @Test
+    void nativeThoughtSignatureSurvivesReadAndWriteProposalPersistence() {
+        String thoughtSignature = "opaque /+==\nline two";
+
+        service.proposeTool(
+                TURN, 1, "search_records", "{\"query\":\"pipeline\"}",
+                thoughtSignature);
+        AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
+                "create_note",
+                AiAssistantToolCatalog.ToolTier.AUTO,
+                "person",
+                31,
+                "{\"tool\":\"create_note\",\"target\":{\"kind\":\"person\",\"id\":31}}");
+        service.proposeWriteTool(TURN, 2, write, thoughtSignature);
+
+        ArgumentCaptor<AiChatToolCall> persisted =
+                ArgumentCaptor.forClass(AiChatToolCall.class);
+        verify(chatMapper, times(2)).insertToolCall(persisted.capture());
+        assertEquals(thoughtSignature,
+                persisted.getAllValues().getFirst().getThoughtSignature());
+        assertEquals(thoughtSignature,
+                persisted.getAllValues().getLast().getThoughtSignature());
     }
 
     @Test

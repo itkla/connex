@@ -306,6 +306,9 @@ public class AiChatAgentLoopService {
                     recordNativeCall(
                             nativeTools, nativeCalls,
                             stepNumber, nativeProviderCall);
+                    String thoughtSignature = nativeProviderCall
+                            .map(AiToolCall::thoughtSignature)
+                            .orElse(null);
                     AiAssistantToolResult cachedResult = toolResultCache.get(toolCallKey);
                     if (cachedResult != null) {
                         noProgressSteps++;
@@ -332,8 +335,10 @@ public class AiChatAgentLoopService {
                                 && write.tier() == AiAssistantToolCatalog.ToolTier.AUTO) {
                             return AiGenerationTaskResult.failed("attachment_auto_write_blocked");
                         }
-                        AiAssistantToolProposal proposal =
-                                persistenceService.proposeWriteTool(turn, stepNumber, write);
+                        AiAssistantToolProposal proposal = thoughtSignature == null
+                                ? persistenceService.proposeWriteTool(turn, stepNumber, write)
+                                : persistenceService.proposeWriteTool(
+                                        turn, stepNumber, write, thoughtSignature);
                         int toolCallId = proposal.id();
                         publish(turn.userId(), new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
@@ -453,8 +458,12 @@ public class AiChatAgentLoopService {
                         }
                         continue;
                     }
-                    int toolCallId = persistenceService.proposeTool(
-                            turn, stepNumber, step.tool().name(), argumentsJson);
+                    int toolCallId = thoughtSignature == null
+                            ? persistenceService.proposeTool(
+                                    turn, stepNumber, step.tool().name(), argumentsJson)
+                            : persistenceService.proposeTool(
+                                    turn, stepNumber, step.tool().name(), argumentsJson,
+                                    thoughtSignature);
                     publish(turn, new AiChatStepFrameDto(
                             turn.workspaceId(), turn.sessionId(), turn.turnId(),
                             stepNumber, "step", step.tool().name(),

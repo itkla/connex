@@ -965,9 +965,11 @@ class AiChatAgentLoopServiceTest {
                 eq("create_note"), any(JsonNode.class), any(),
                 eq(TURN.restrictionEpoch())))
                 .thenReturn(autoWrite);
-        when(persistenceService.proposeWriteTool(TURN, 1, autoWrite)).thenReturn(
+        when(persistenceService.proposeWriteTool(
+                TURN, 1, autoWrite, "signature-one /+==")).thenReturn(
                 new AiAssistantToolProposal(29, "proposed", null, true));
-        when(persistenceService.proposeWriteTool(TURN, 2, autoWrite)).thenReturn(
+        when(persistenceService.proposeWriteTool(
+                TURN, 2, autoWrite, "signature-two /+==")).thenReturn(
                 new AiAssistantToolProposal(30, "proposed", null, true));
         when(writeToolService.executeAuto(eq(TURN), anyInt(), any())).thenAnswer(invocation -> {
             int toolCallId = invocation.getArgument(1);
@@ -986,13 +988,19 @@ class AiChatAgentLoopServiceTest {
                 any(AiResponseSchema.class), any(AiNativeToolRequest.class),
                 eq(directAdmission), any(Runnable.class)))
                 .thenAnswer(invocation -> switch (providerCalls.getAndIncrement()) {
-                    case 0 -> nativeTool("call_1", "create_note", firstArguments);
-                    case 1 -> nativeTool("call_2", "create_note", secondArguments);
+                    case 0 -> nativeTool(
+                            "call_1", "create_note", firstArguments,
+                            "signature-one /+==");
+                    case 1 -> nativeTool(
+                            "call_2", "create_note", secondArguments,
+                            "signature-two /+==");
                     default -> {
                         AiNativeToolRequest request = invocation.getArgument(5);
                         long replayBytes = request.exchanges().stream()
                                 .mapToLong(exchange -> budget.utf8Bytes(
                                                 exchange.call().arguments())
+                                        + budget.utf8Bytes(
+                                                exchange.call().thoughtSignature())
                                         + budget.utf8Bytes(exchange.maskedResult()))
                                 .sum();
                         assertTrue(replayBytes <= budget.toolResultBytes());
@@ -1016,6 +1024,8 @@ class AiChatAgentLoopServiceTest {
         AiNativeToolRequest finalRequest = requests.getAllValues().getLast();
         assertEquals("{\"evicted\":true}",
                 finalRequest.exchanges().getFirst().call().arguments());
+        assertEquals("signature-one /+==",
+                finalRequest.exchanges().getFirst().call().thoughtSignature());
         assertTrue(finalRequest.exchanges().getFirst().maskedResult()
                 .contains("\"status\":\"executed\""));
         assertEquals(secondArguments,
@@ -1961,8 +1971,16 @@ class AiChatAgentLoopServiceTest {
             String id,
             String name,
             String arguments) throws JacksonException {
+        return nativeTool(id, name, arguments, null);
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeTool(
+            String id,
+            String name,
+            String arguments,
+            String thoughtSignature) throws JacksonException {
         return new AiNativeToolCompletion.Tool<>(
-                new AiToolCall(id, name, arguments),
+                new AiToolCall(id, name, arguments, thoughtSignature),
                 objectMapper.readTree(arguments),
                 0,
                 3,

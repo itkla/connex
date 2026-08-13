@@ -325,6 +325,17 @@ public class AiChatTurnPersistenceService {
             int stepNumber,
             String toolName,
             String argumentsJson) {
+        return proposeTool(turn, stepNumber, toolName, argumentsJson, null);
+    }
+
+    /** Persists a demasked read-tool proposal with optional provider reasoning state. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public int proposeTool(
+            AiChatQueuedTurn turn,
+            int stepNumber,
+            String toolName,
+            String argumentsJson,
+            String thoughtSignature) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
         AiChatToolCall toolCall = new AiChatToolCall();
@@ -333,6 +344,7 @@ public class AiChatTurnPersistenceService {
         toolCall.setToolName(toolName);
         toolCall.setStatus(PROPOSED);
         toolCall.setArgumentsJson(argumentsJson);
+        toolCall.setThoughtSignature(thoughtSignature);
         toolCall.setIdempotencyKey("turn-" + turn.turnId() + "-step-" + stepNumber);
         chatMapper.insertToolCall(toolCall);
         return toolCall.getId();
@@ -344,6 +356,16 @@ public class AiChatTurnPersistenceService {
             AiChatQueuedTurn turn,
             int stepNumber,
             AiAssistantPreparedWrite write) {
+        return proposeWriteTool(turn, stepNumber, write, null);
+    }
+
+    /** Persists or replays a validated write proposal with optional provider reasoning state. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public AiAssistantToolProposal proposeWriteTool(
+            AiChatQueuedTurn turn,
+            int stepNumber,
+            AiAssistantPreparedWrite write,
+            String thoughtSignature) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
         String idempotencyKey = turnStepKey(turn.turnId(), stepNumber);
@@ -365,6 +387,7 @@ public class AiChatTurnPersistenceService {
         toolCall.setToolName(write.toolName());
         toolCall.setStatus(PROPOSED);
         toolCall.setArgumentsJson(write.argumentsJson());
+        toolCall.setThoughtSignature(thoughtSignature);
         toolCall.setIdempotencyKey(idempotencyKey);
         chatMapper.insertToolCall(toolCall);
         return new AiAssistantToolProposal(toolCall.getId(), PROPOSED, null, true);

@@ -610,7 +610,8 @@ class AiInvocationServiceTest {
                 "call_1",
                 "search_records",
                 "{\"query\":\"cooling\","
-                        + "\"kinds\":[\"person\"]}");
+                        + "\"kinds\":[\"person\"]}",
+                "opaque-signature /+==");
         AiNativeToolRequest request = new AiNativeToolRequest(
                 promptAssembler.nativeToolDefinitions(),
                 promptAssembler.nativeReplay(
@@ -625,11 +626,69 @@ class AiInvocationServiceTest {
                 stepSchema.finalResponseSchema(),
                 AiReasoningMode.NATIVE,
                 request);
+        AiNativeToolRequest unsignedRequest = new AiNativeToolRequest(
+                request.definitions(),
+                List.of(new AiToolExchange(
+                        new AiToolCall(call.id(), call.name(), call.arguments()),
+                        request.exchanges().getFirst().maskedResult())));
+        int unsignedBytes = service.serializedPromptBytes(
+                prompt,
+                stepSchema.finalResponseSchema(),
+                AiReasoningMode.NATIVE,
+                unsignedRequest);
 
         assertTrue(serializedBytes <= AiProviderCapabilities.conservativeInputByteCeiling(
                 capabilities.contextWindowTokens(), budget.maxOutputTokens()));
+        assertTrue(serializedBytes > unsignedBytes);
         assertTrue(request.exchanges().getFirst().maskedResult()
                 .contains("CRM_DATA_BEGIN"));
+    }
+
+    @Test
+    void completeNativeTools_googleNamedIdentifierDoesNotTripLeakScanOnSignedReplay() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Google", context);
+        MaskedPrompt prompt = PromptAssembly.builder()
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), base.reasoningRequested(), base.callerDeadline(),
+                AiInvocationProtocol.NATIVE_TOOLS);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                catalog.nativeDefinitions(new ObjectMapper()),
+                List.of(new AiToolExchange(
+                        new AiToolCall(
+                                "call_1", "search_records",
+                                "{\"query\":\"" + placeholder + "\"}",
+                                "sig-opaque-bytes"),
+                        "{\"records\":[]}")));
+        providerReturns(new AiCompletionResult(
+                "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall(
+                        "call_2", "search_records", "{\"query\":\"" + placeholder + "\"}"))));
+
+        AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion =
+                service.completeNativeToolsRepairable(
+                        invocation,
+                        AiAssistantStep.FinalAnswer.class,
+                        guard.forIssuedPlaceholders(Set.of(placeholder)),
+                        guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
+                        schema.finalResponseSchema(),
+                        nativeTools,
+                        directAdmission,
+                        providerAttemptGuard);
+
+        assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
     }
 
     @Test

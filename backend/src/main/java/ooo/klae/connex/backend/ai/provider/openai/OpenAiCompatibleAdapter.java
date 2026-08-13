@@ -243,6 +243,11 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             ObjectNode call = assistant.putArray("tool_calls").addObject();
             call.put("id", exchange.call().id());
             call.put("type", "function");
+            if (exchange.call().thoughtSignature() != null) {
+                call.putObject("extra_content")
+                        .putObject("google")
+                        .put("thought_signature", exchange.call().thoughtSignature());
+            }
             ObjectNode function = call.putObject("function");
             function.put("name", exchange.call().name());
             function.put("arguments", exchange.call().arguments());
@@ -391,12 +396,25 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 calls.add(new AiToolCall(
                         readRequiredText(item.path("id")),
                         readRequiredText(function.path("name")),
-                        readRequiredText(function.path("arguments"))));
+                        readRequiredText(function.path("arguments")),
+                        readThoughtSignature(item)));
             } catch (IllegalArgumentException exception) {
                 throw invalidResponse();
             }
         }
         return List.copyOf(calls);
+    }
+
+    private static String readThoughtSignature(JsonNode toolCall) {
+        JsonNode google = toolCall.path("extra_content").path("google");
+        JsonNode thoughtSignature = google.get("thought_signature");
+        if (thoughtSignature == null || thoughtSignature.isNull()) {
+            return null;
+        }
+        if (!thoughtSignature.isString()) {
+            throw invalidResponse();
+        }
+        return thoughtSignature.asString();
     }
 
     private static String readContent(JsonNode node, boolean toolCallPresent) {

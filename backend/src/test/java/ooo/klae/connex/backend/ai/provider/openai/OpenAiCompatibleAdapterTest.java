@@ -193,6 +193,9 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_translatesNativeToolsExchangesAndToolCalls() throws Exception {
+        String firstSignature = "signed replay token /+==\nline two";
+        String secondSignature = "response token one /+==";
+        String thirdSignature = "response token two \u65e5\u672c\u8a9e";
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
                 any(AiRequestDeadline.class)))
@@ -202,14 +205,34 @@ class OpenAiCompatibleAdapterTest {
                             "message": {
                               "content": null,
                               "reasoning_content": "Use the retrieved record.",
-                              "tool_calls": [{
-                                "id": "call_2",
-                                "type": "function",
-                                "function": {
-                                  "name": "get_record",
-                                  "arguments": "{\\\"handle\\\":\\\"r1\\\"}"
+                              "tool_calls": [
+                                {
+                                  "id": "call_2",
+                                  "type": "function",
+                                  "extra_content": {
+                                    "google": {
+                                      "thought_signature": "response token one /+=="
+                                    }
+                                  },
+                                  "function": {
+                                    "name": "get_record",
+                                    "arguments": "{\\\"handle\\\":\\\"r1\\\"}"
+                                  }
+                                },
+                                {
+                                  "id": "call_3",
+                                  "type": "function",
+                                  "extra_content": {
+                                    "google": {
+                                      "thought_signature": "response token two \u65e5\u672c\u8a9e"
+                                    }
+                                  },
+                                  "function": {
+                                    "name": "get_record",
+                                    "arguments": "{\\\"handle\\\":\\\"r2\\\"}"
+                                  }
                                 }
-                              }]
+                              ]
                             },
                             "finish_reason": "tool_calls"
                           }],
@@ -223,12 +246,18 @@ class OpenAiCompatibleAdapterTest {
         AiToolDefinition definition = new AiToolDefinition(
                 "get_record", "Load one visible CRM record.", parameters);
         AiToolCall firstCall = new AiToolCall(
-                "call_1", "get_record", "{\"handle\":\"r1\"}");
+                "call_1", "get_record", "{\"handle\":\"r1\"}", firstSignature);
+        AiToolCall unsignedCall = new AiToolCall(
+                "call_0", "get_record", "{\"handle\":\"r0\"}");
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
                 List.of(definition),
-                List.of(new AiToolExchange(
-                        firstCall,
-                        "CRM_DATA_BEGIN\n{\"kind\":\"tool_result\"}\nCRM_DATA_END")),
+                List.of(
+                        new AiToolExchange(
+                                firstCall,
+                                "CRM_DATA_BEGIN\n{\"kind\":\"tool_result\"}\nCRM_DATA_END"),
+                        new AiToolExchange(
+                                unsignedCall,
+                                "CRM_DATA_BEGIN\n{\"kind\":\"tool_result\"}\nCRM_DATA_END")),
                 "Return one corrected JSON final answer only.");
         AiCompletionRequest base = schemaRequest();
         AiCompletionRequest request = new AiCompletionRequest(
@@ -264,16 +293,55 @@ class OpenAiCompatibleAdapterTest {
         assertEquals("assistant", assistant.path("role").asString());
         assertTrue(assistant.path("content").isNull());
         assertEquals("call_1", assistant.path("tool_calls").path(0).path("id").asString());
+        assertEquals(firstSignature, assistant.path("tool_calls").path(0)
+                .path("extra_content").path("google")
+                .path("thought_signature").asString());
         JsonNode toolResult = body.path("messages").path(3);
         assertEquals("tool", toolResult.path("role").asString());
         assertEquals("call_1", toolResult.path("tool_call_id").asString());
         assertTrue(toolResult.path("content").asString().contains("CRM_DATA_BEGIN"));
-        assertEquals("user", body.path("messages").path(4).path("role").asString());
-        assertEquals(List.of(new AiToolCall(
-                "call_2", "get_record", "{\"handle\":\"r1\"}")), result.toolCalls());
+        JsonNode unsignedAssistant = body.path("messages").path(4);
+        assertFalse(unsignedAssistant.path("tool_calls").path(0).has("extra_content"));
+        assertEquals("user", body.path("messages").path(6).path("role").asString());
+        assertEquals(List.of(
+                new AiToolCall(
+                        "call_2", "get_record", "{\"handle\":\"r1\"}",
+                        secondSignature),
+                new AiToolCall(
+                        "call_3", "get_record", "{\"handle\":\"r2\"}",
+                        thirdSignature)), result.toolCalls());
         assertEquals("Use the retrieved record.", result.reasoning());
         assertEquals("", result.text());
         assertEquals("tool_calls", result.stopReason());
+    }
+
+    @Test
+    void complete_leavesAbsentThoughtSignatureNull() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "choices": [{
+                            "message": {
+                              "content": null,
+                              "tool_calls": [{
+                                "id": "call_unsigned",
+                                "type": "function",
+                                "function": {
+                                  "name": "get_record",
+                                  "arguments": "{\\\"handle\\\":\\\"r1\\\"}"
+                                }
+                              }]
+                            },
+                            "finish_reason": "tool_calls"
+                          }]
+                        }
+                        """);
+
+        AiCompletionResult result = adapter.complete(schemaRequest());
+
+        assertNull(result.toolCalls().getFirst().thoughtSignature());
     }
 
     @Test

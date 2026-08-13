@@ -15,6 +15,7 @@ public class AiChatToolCall {
     private String toolName;
     private String status;
     private String argumentsJson;
+    private String thoughtSignature;
     private String resultJson;
     private Integer executedByUserId;
     private String executedAt;
