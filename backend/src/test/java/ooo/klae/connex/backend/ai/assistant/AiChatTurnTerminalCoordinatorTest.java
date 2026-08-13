@@ -87,6 +87,7 @@ class AiChatTurnTerminalCoordinatorTest {
                 "provider_error",
                 "quota_exhausted",
                 "budget_exhausted",
+                "tool_result_budget_exhausted",
                 "org_invocation_quota_exhausted",
                 "invocation_capacity_exhausted",
                 "malformed_output",

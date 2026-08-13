@@ -381,6 +381,7 @@
     "turnFailed": "The assistant could not complete this turn.",
     "turnImageUnsupported": "This assistant model can’t read images. Remove the image or choose an image-capable model.",
     "budgetExhausted": "The organization daily AI token budget is exhausted.",
+    "toolResultBudgetExhausted": "This turn ran out of context space while gathering relationship data. Try a more focused record set or date range.",
     "turnTimedOut": "This turn timed out before it could finish.",
     "upload": {
       "progress": "Uploading {progress}%",

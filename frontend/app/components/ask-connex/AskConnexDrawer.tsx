@@ -126,6 +126,7 @@ type AskConnexDrawerLabels = {
     archive: string;
     attachFile: string;
     budgetExhausted: string;
+    toolResultBudgetExhausted: string;
     citations: string;
     disclosureCreation: string;
     disclosureList: string;
@@ -483,9 +484,11 @@ function TurnActivity({ turn, labels }: { turn: AskConnexTurnState; labels: AskC
                 <ExclamationCircleIcon className="size-3.5" />
                 <span>{turn.reason === 'image_input_unsupported'
                     ? labels.turnImageUnsupported
-                    : turn.reason === 'budget_exhausted'
-                        ? labels.budgetExhausted
-                        : labels.turnFailed}</span>
+                    : turn.reason === 'tool_result_budget_exhausted'
+                        ? labels.toolResultBudgetExhausted
+                        : turn.reason === 'budget_exhausted'
+                            ? labels.budgetExhausted
+                            : labels.turnFailed}</span>
             </div>
         );
     }

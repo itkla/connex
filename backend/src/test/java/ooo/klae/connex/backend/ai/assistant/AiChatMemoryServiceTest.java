@@ -87,7 +87,7 @@ class AiChatMemoryServiceTest {
                         + "EARLY_FACT_END");
         AiChatMessage recent = message(
                 103, 3, "assistant",
-                "RECENT_ANSWER_BEGIN " + "grounded relationship update ".repeat(200)
+                "RECENT_ANSWER_BEGIN " + "grounded relationship update ".repeat(1_100)
                         + "RECENT_ANSWER_END");
         AiChatMessage middle = message(
                 102, 2, "user",
@@ -269,7 +269,7 @@ class AiChatMemoryServiceTest {
                 clock);
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
-        AiChatMessage early = message(101, 1, "user", "history ".repeat(900));
+        AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
@@ -348,7 +348,7 @@ class AiChatMemoryServiceTest {
                 Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
-        String oversizedContent = "OVERSIZED_PRIVATE_HISTORY_" + "x".repeat(5_000);
+        String oversizedContent = "OVERSIZED_PRIVATE_HISTORY_" + "x".repeat(15_000);
         AiChatMessage oversized = message(101, 1, "user", oversizedContent);
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         AiChatMessage storedSummary = message(
@@ -383,7 +383,7 @@ class AiChatMemoryServiceTest {
                 .thenReturn(
                         new AiStructuredRepairAttempt<>(
                                 new AiStructuredOutcome.Parsed<>(
-                                        new AiAssistantSummary("界".repeat(1_000)),
+                                new AiAssistantSummary("界".repeat(3_000)),
                                         0, 7, 3, "end_turn"),
                                 Optional.empty()),
                         new AiStructuredRepairAttempt<>(

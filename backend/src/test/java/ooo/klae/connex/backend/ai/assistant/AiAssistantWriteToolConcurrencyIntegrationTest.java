@@ -200,6 +200,33 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     }
 
     @Test
+    void autoResultGuardFailureRollsBackTheTenantMutation() throws Exception {
+        authenticate(firstActor);
+        ToolFixture proposal = autoTagProposal(firstActor, person.getId());
+        clearAuthentication();
+
+        authenticate(firstActor);
+        try {
+            assertThrows(
+                    AiAssistantLoopException.class,
+                    () -> writeToolService.executeAuto(
+                            proposal.turn(),
+                            proposal.toolCallId(),
+                            result -> {
+                                throw new AiAssistantLoopException(
+                                        "tool_result_budget_exhausted",
+                                        "tool_result_budget_exhausted");
+                            }));
+        } finally {
+            clearAuthentication();
+        }
+
+        assertEquals(
+                List.of(),
+                tagMapper.getTagsByPersonId(workspace.getId(), person.getId()));
+    }
+
+    @Test
     void reciprocalConcurrentOwnerAssignmentsDoNotDeadlock() throws Exception {
         Company firstCompany = company("First owner target");
         Company secondCompany = company("Second owner target");
@@ -475,7 +502,8 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             User actor, ToolFixture fixture) {
         authenticate(actor);
         try {
-            return writeToolService.executeAuto(fixture.turn(), fixture.toolCallId());
+            return writeToolService.executeAuto(
+                    fixture.turn(), fixture.toolCallId(), result -> { });
         } finally {
             clearAuthentication();
         }

@@ -138,6 +138,19 @@ public class ActivityService {
             activityMapper.getActivitiesByPersonId(workspaceId, personId));
     }
 
+    /** Returns a bounded, hydrated activity window for one workspace-scoped person. */
+    public List<Activity> getActivitiesByPersonIdInWindow(
+            int personId, LocalDateTime startUtc, LocalDateTime endUtc, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("Activity window limit must be positive");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateActivities(
+            workspaceId,
+            activityMapper.getActivitiesByPersonIdInWindow(
+                workspaceId, personId, startUtc, endUtc, limit));
+    }
+
     private static int activityBucketCount(int days) {
         return switch (days) {
             case 30 -> 6;

@@ -139,29 +139,53 @@ public class AiAssistantPromptAssembler {
         }
         int remainingToolBytes = budget.toolResultBytes()
                 - (repairContent == null ? 0 : utf8Bytes(repairContent));
-        for (ToolTurn turn : toolTurns) {
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("step", turn.seq());
-            data.put("tool", turn.tool());
-            data.put("result", turn.result().data());
-            String toolResult = crmData("tool_result", data, context);
-            if (utf8Bytes(toolResult) > remainingToolBytes) {
-                String exceeded = crmData(
-                        "tool_result_budget", Map.of("status", BUDGET_EXCEEDED), context);
-                if (utf8Bytes(exceeded) > remainingToolBytes) {
-                    throw new AiAssistantLoopException(
-                            "prompt_budget_exceeded", "prompt_budget_exceeded");
-                }
-                prompt.userTurn(exceeded);
-                break;
-            }
+        for (String toolResult : boundedToolResults(
+                toolTurns, context, remainingToolBytes)) {
             prompt.userTurn(toolResult);
-            remainingToolBytes -= utf8Bytes(toolResult);
         }
         if (repairContent != null) {
             prompt.userTurn(repairContent);
         }
         return prompt.build();
+    }
+
+    /** Verifies that one prospective result can be replayed before its tool mutates tenant data. */
+    public void requireAdditionalToolResultCapacity(
+            List<ToolTurn> toolTurns,
+            ToolTurn prospectiveTurn,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        List<ToolTurn> prospectiveTurns = new ArrayList<>(toolTurns);
+        prospectiveTurns.add(prospectiveTurn);
+        for (ToolTurn turn : prospectiveTurns) {
+            seedIdentifiers(turn.result().identifiers(), context);
+        }
+        boundedToolResults(prospectiveTurns, context, budget.toolResultBytes());
+    }
+
+    /** Fits an already-executed replay into the current tool-result allocation without rejection. */
+    public List<ToolTurn> withExecutedReplay(
+            List<ToolTurn> toolTurns,
+            ToolTurn replay,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        List<ToolTurn> exactReplay = appended(toolTurns, replay);
+        if (toolResultsFit(exactReplay, context, budget.toolResultBytes())) {
+            return exactReplay;
+        }
+        ToolTurn boundedReplay = new ToolTurn(
+                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result(), false));
+        List<ToolTurn> boundedWithHistory = appended(toolTurns, boundedReplay);
+        if (toolResultsFit(boundedWithHistory, context, budget.toolResultBytes())) {
+            return boundedWithHistory;
+        }
+        ToolTurn boundedWithoutHistory = new ToolTurn(
+                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result(), true));
+        List<ToolTurn> replayOnly = List.of(boundedWithoutHistory);
+        if (toolResultsFit(replayOnly, context, budget.toolResultBytes())) {
+            return replayOnly;
+        }
+        throw new IllegalStateException("Assistant replay receipt exceeds its minimum allocation");
     }
 
     /** Returns the fixed assistant system prompt for exact serialized-envelope budgeting. */
@@ -175,6 +199,84 @@ public class AiAssistantPromptAssembler {
             return objectMapper.writeValueAsString(result.data());
         } catch (JacksonException exception) {
             throw new IllegalStateException("Assistant tool result could not be serialized", exception);
+        }
+    }
+
+    private List<String> boundedToolResults(
+            List<ToolTurn> toolTurns,
+            MaskingContext context,
+            int availableBytes) {
+        List<String> contents = new ArrayList<>();
+        int remainingBytes = availableBytes;
+        for (ToolTurn turn : toolTurns) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("step", turn.seq());
+            data.put("tool", turn.tool());
+            data.put("result", turn.result().data());
+            String content = crmData("tool_result", data, context);
+            int contentBytes = utf8Bytes(content);
+            if (contentBytes > remainingBytes) {
+                throw new AiAssistantLoopException(
+                        "tool_result_budget_exhausted", "tool_result_budget_exhausted");
+            }
+            contents.add(content);
+            remainingBytes -= contentBytes;
+        }
+        return List.copyOf(contents);
+    }
+
+    private static List<ToolTurn> appended(List<ToolTurn> toolTurns, ToolTurn turn) {
+        List<ToolTurn> appended = new ArrayList<>(toolTurns);
+        appended.add(turn);
+        return List.copyOf(appended);
+    }
+
+    private boolean toolResultsFit(
+            List<ToolTurn> toolTurns,
+            MaskingContext context,
+            int availableBytes) {
+        for (ToolTurn turn : toolTurns) {
+            seedIdentifiers(turn.result().identifiers(), context);
+        }
+        try {
+            boundedToolResults(toolTurns, context, availableBytes);
+            return true;
+        } catch (AiAssistantLoopException exception) {
+            if (!"tool_result_budget_exhausted".equals(exception.terminalReason())) {
+                throw exception;
+            }
+            return false;
+        }
+    }
+
+    private static AiAssistantToolResult truncatedExecutedReplay(
+            AiAssistantToolResult stored,
+            boolean priorToolContextOmitted) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        copyPresent(stored.data(), result, "toolCallId");
+        copyPresent(stored.data(), result, "tool");
+        copyPresent(stored.data(), result, "tier");
+        result.put("status", "executed");
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("status", "executed");
+        outcome.put("detailsTruncated", true);
+        outcome.put(
+                "disclosure",
+                "The write executed, but its stored outcome was truncated for the current model budget.");
+        if (priorToolContextOmitted) {
+            outcome.put("priorToolContextOmitted", true);
+        }
+        result.put("outcome", Map.copyOf(outcome));
+        return new AiAssistantToolResult(result, List.of());
+    }
+
+    private static void copyPresent(
+            Map<String, Object> source,
+            Map<String, Object> target,
+            String key) {
+        Object value = source.get(key);
+        if (value != null) {
+            target.put(key, value);
         }
     }
 

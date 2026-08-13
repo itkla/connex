@@ -381,6 +381,7 @@
     "turnFailed": "このターンを完了できませんでした。",
     "turnImageUnsupported": "現在のアシスタントモデルは画像を読み取れません。画像を外すか、画像対応モデルを選択してください。",
     "budgetExhausted": "組織の日次AIトークン予算が上限に達しました。",
+    "toolResultBudgetExhausted": "関係データの取得中に、このターンのコンテキスト容量が上限に達しました。対象レコードや期間を絞って、もう一度お試しください。",
     "turnTimedOut": "完了前にこのターンがタイムアウトしました。",
     "upload": {
       "progress": "アップロード中 {progress}%",

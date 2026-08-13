@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -140,16 +141,12 @@ public class AiAssistantWriteToolService {
             toolCall.setToolName(write.toolName());
             toolCall.setStatus(proposal.status());
             toolCall.setResultJson(proposal.resultJson());
-            return execution(toolCall).toolResult();
+            return execution(toolCall, true).toolResult();
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("toolCallId", proposal.id());
-        result.put("tool", write.toolName());
-        result.put("tier", write.tier().name().toLowerCase());
-        result.put("status", write.tier() == ToolTier.CONFIRM
-                ? "approval_required"
-                : proposal.status());
-        return new AiAssistantToolResult(result, List.of());
+        return modelResult(
+                proposal.id(), write.toolName(), write.tier().name().toLowerCase(),
+                write.tier() == ToolTier.CONFIRM ? "approval_required" : proposal.status(),
+                null);
     }
 
     /** Returns every pending confirm-tier proposal visible in one authorized session. */
@@ -183,7 +180,10 @@ public class AiAssistantWriteToolService {
 
     /** Executes or replays one auto-tier proposal while the originating turn remains active. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public WriteExecution executeAuto(AiChatQueuedTurn turn, int toolCallId) {
+    public WriteExecution executeAuto(
+            AiChatQueuedTurn turn,
+            int toolCallId,
+            Consumer<AiAssistantToolResult> resultGuard) {
         requireMutationAllowed(turn.workspaceId(), turn.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
                 turn.workspaceId(), turn.userId(), turn.sessionId(), toolCallId, null);
@@ -195,7 +195,7 @@ public class AiAssistantWriteToolService {
             throw new ConflictException("Assistant turn is no longer active");
         }
         if (EXECUTED.equals(toolCall.getStatus())) {
-            return execution(toolCall);
+            return execution(toolCall, true);
         }
         if (toolCall.getMessageId() != turn.userMessageId()) {
             throw new ConflictException("Assistant tool replay is not executable");
@@ -222,14 +222,16 @@ public class AiAssistantWriteToolService {
         }
         ExecutionOutcome outcome = execute(write, null, mutation);
         String resultJson = resultEnvelope(write, outcome, null);
+        toolCall.setStatus(EXECUTED);
+        toolCall.setResultJson(resultJson);
+        WriteExecution execution = execution(toolCall, false);
+        resultGuard.accept(execution.toolResult());
         if (chatMapper.updateToolCall(
                 turn.workspaceId(), toolCall.getMessageId(), toolCall.getId(),
                 EXECUTED, resultJson, turn.userId()) != 1) {
             throw new ConflictException("Assistant tool was already decided");
         }
-        toolCall.setStatus(EXECUTED);
-        toolCall.setResultJson(resultJson);
-        return execution(toolCall);
+        return execution;
     }
 
     /** Explicitly approves and executes one confirm-tier proposal. */
@@ -373,10 +375,14 @@ public class AiAssistantWriteToolService {
                 : request.durationMinutes();
         LocalDateTime endUtc = start.utc().plusMinutes(durationMinutes);
         List<?> conflicts = List.of();
+        boolean conflictsTruncated = false;
         if ("meeting".equalsIgnoreCase(request.type()) && "person".equals(write.targetKind())) {
-            Object conflictData = readToolExecutor.findScheduleConflicts(
-                    write.targetId(), start.utc(), endUtc).data().get("conflicts");
+            AiAssistantToolResult conflictResult = readToolExecutor.findScheduleConflicts(
+                    write.targetId(), start.utc(), endUtc);
+            Object conflictData = conflictResult.data().get("conflicts");
             conflicts = conflictData instanceof List<?> list ? list : List.of();
+            conflictsTruncated = Boolean.TRUE.equals(
+                    conflictResult.data().get("conflictsTruncated"));
         }
         Activity activity = new Activity();
         activity.setType(request.type());
@@ -393,6 +399,7 @@ public class AiAssistantWriteToolService {
         outcome.put("start", created.getTimestamp());
         outcome.put("timezone", start.timezone().getId());
         outcome.put("conflicts", conflicts);
+        outcome.put("conflictsTruncated", conflictsTruncated);
         return new ExecutionOutcome(outcome, undoData(
                 "activity", created.getId(), fingerprint(activityState(created)), true));
     }
@@ -701,16 +708,67 @@ public class AiAssistantWriteToolService {
         return undo;
     }
 
-    private WriteExecution execution(AiChatToolCall toolCall) {
+    private WriteExecution execution(AiChatToolCall toolCall, boolean replayed) {
         AiAssistantToolCallDto dto = dto(toolCall);
-        Map<String, Object> result = objectMapper.convertValue(
-                dto.result(), new tools.jackson.core.type.TypeReference<Map<String, Object>>() { });
-        result.put("toolCallId", dto.id());
-        result.put("tier", dto.tier());
-        result.put("status", dto.status());
-        result.put("undoAvailable", dto.undoAvailable());
-        put(result, "undoExpiresAt", dto.undoExpiresAt());
-        return new WriteExecution(dto, new AiAssistantToolResult(result, List.of()));
+        return new WriteExecution(dto, modelResult(
+                dto.id(), toolCall.getToolName(), dto.tier(), dto.status(), dto.result()), replayed);
+    }
+
+    private static AiAssistantToolResult modelResult(
+            int toolCallId, String tool, String tier, String status, JsonNode outcome) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("toolCallId", toolCallId);
+        result.put("tool", tool);
+        result.put("tier", tier);
+        result.put("status", status);
+        result.put("outcome", modelOutcome(tool, outcome));
+        return new AiAssistantToolResult(result, List.of());
+    }
+
+    private static Map<String, Object> modelOutcome(String tool, JsonNode outcome) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (outcome == null || !outcome.isObject()) {
+            return result;
+        }
+        switch (tool) {
+            case "create_activity" -> {
+                copyText(outcome, result, "recordType");
+                copyText(outcome, result, "type");
+                copyText(outcome, result, "subject");
+                copyText(outcome, result, "start");
+                copyText(outcome, result, "timezone");
+                result.put("conflictCount", outcome.path("conflicts").size());
+                result.put("conflictsTruncated", outcome.path("conflictsTruncated").asBoolean());
+            }
+            case "create_task" -> {
+                copyText(outcome, result, "recordType");
+                copyText(outcome, result, "description");
+                copyText(outcome, result, "dueDate");
+            }
+            case "create_note" -> {
+                copyText(outcome, result, "recordType");
+                copyText(outcome, result, "title");
+                copyText(outcome, result, "visibility");
+            }
+            case "add_tag" -> {
+                copyText(outcome, result, "recordType");
+                copyText(outcome, result, "tag");
+                result.put("changed", outcome.path("changed").asBoolean());
+            }
+            default -> {
+                copyText(outcome, result, "recordType");
+                copyText(outcome, result, "stage");
+                copyText(outcome, result, "owner");
+            }
+        }
+        return result;
+    }
+
+    private static void copyText(JsonNode source, Map<String, Object> target, String field) {
+        JsonNode value = source.get(field);
+        if (value != null && value.isString() && !value.asString().isBlank()) {
+            target.put(field, value.asString());
+        }
     }
 
     private AiAssistantToolCallDto dto(AiChatToolCall toolCall) {
@@ -1030,7 +1088,8 @@ public class AiAssistantWriteToolService {
     /** Auto-tier execution result for the next model step and API clients. */
     public record WriteExecution(
             AiAssistantToolCallDto toolCall,
-            AiAssistantToolResult toolResult) {
+            AiAssistantToolResult toolResult,
+            boolean replayed) {
     }
 
     private record Actor(int workspaceId, int userId) {

@@ -433,9 +433,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 deferredErrorToast(
                     durable.terminalReason === 'image_input_unsupported'
                         ? t('turnImageUnsupported')
-                        : durable.terminalReason === 'budget_exhausted'
-                            ? t('budgetExhausted')
-                            : t('toast.turnFailed'),
+                        : durable.terminalReason === 'tool_result_budget_exhausted'
+                            ? t('toolResultBudgetExhausted')
+                            : durable.terminalReason === 'budget_exhausted'
+                                ? t('budgetExhausted')
+                                : t('toast.turnFailed'),
                 );
             }
             if (durable.status === 'timed_out') deferredErrorToast(t('toast.turnTimedOut'));
@@ -1066,6 +1068,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
         budgetExhausted: t('budgetExhausted'),
+        toolResultBudgetExhausted: t('toolResultBudgetExhausted'),
         citations: t('citations'),
         disclosureCreation: tDisclosure('sessionCreation'),
         disclosureList: tDisclosure('sessionList'),

@@ -23,16 +23,21 @@ class AiAssistantPromptBudgetTest {
                 8_192);
 
         assertEquals(8_192, budget.maxOutputTokens());
-        assertTrue(budget.historyBytes() > 0);
-        assertTrue(budget.attachmentContextBytes() > 0);
-        assertTrue(budget.pageContextBytes() > 0);
-        assertTrue(budget.toolResultBytes() > 0);
+        assertTrue(budget.historyBytes() >= 4_096);
+        assertTrue(budget.attachmentContextBytes() >= 256);
+        assertTrue(budget.pageContextBytes() >= 256);
+        assertTrue(budget.toolResultBytes() >= 2_048);
         assertEquals(
                 budget.compactionSourceBytes(),
                 budget.historyBytes() + budget.attachmentContextBytes()
                         + budget.pageContextBytes() + budget.toolResultBytes());
+        assertEquals(98_304, AiProviderCapabilities.estimatedInputByteCeiling(
+                32_768, budget.maxOutputTokens()));
+        assertEquals(24_576, AiProviderCapabilities.conservativeInputByteCeiling(
+                32_768, budget.maxOutputTokens()));
         assertTrue(budget.compactionSourceBytes() * 12 + 8_192
-                <= 32_768 - budget.maxOutputTokens());
+                <= AiProviderCapabilities.estimatedInputByteCeiling(
+                        32_768, budget.maxOutputTokens()));
     }
 
     @Test
@@ -45,5 +50,22 @@ class AiAssistantPromptBudgetTest {
                                 AiReasoningMode.TAGGED,
                                 4_096),
                         1_024));
+    }
+
+    @Test
+    void fixedEnvelopePressureReducesOutputBeforeItCanConsumeInputFloors() {
+        AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.PROMPT_ONLY,
+                        AiReasoningMode.TAGGED,
+                        32_768),
+                16_384,
+                30_000);
+
+        assertTrue(budget.maxOutputTokens() < 8_192);
+        assertTrue(budget.historyBytes() >= 4_096);
+        assertTrue(budget.toolResultBytes() >= 2_048);
+        assertTrue(budget.pageContextBytes() >= 256);
+        assertTrue(budget.attachmentContextBytes() >= 256);
     }
 }

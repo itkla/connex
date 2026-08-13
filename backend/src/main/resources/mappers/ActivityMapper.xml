@@ -223,6 +223,16 @@
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC
   </select>
 
+  <select id="getActivitiesByPersonIdInWindow" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+      AND person_id = #{personId}
+      AND timestamp &gt;= #{startUtc}
+      AND timestamp &lt; #{endUtc}
+    ORDER BY timestamp, id
+    LIMIT #{limit}
+  </select>
+
   <select id="getActivitiesByPersonIds" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId}

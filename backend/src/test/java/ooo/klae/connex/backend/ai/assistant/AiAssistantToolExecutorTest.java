@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -298,5 +300,42 @@ class AiAssistantToolExecutorTest {
             totalCharacters += content.length();
         }
         assertEquals(16_000, totalCharacters);
+    }
+
+    @Test
+    void scheduleConflictResultsBoundCountAndTextBeforePromptSerialization() {
+        Person person = new Person();
+        person.setId(17);
+        when(personService.getPersonById(17)).thenReturn(person);
+        List<Activity> activities = IntStream.range(0, 25)
+                .mapToObj(index -> {
+                    Activity activity = new Activity();
+                    activity.setSubject("S".repeat(2_000));
+                    activity.setNotes("N".repeat(2_000));
+                    activity.setTimestamp("2026-08-11 10:00:00");
+                    return activity;
+                })
+                .toList();
+        when(activityService.getActivitiesByPersonIdInWindow(
+                eq(17), any(), any(), eq(101))).thenReturn(activities);
+
+        AiAssistantToolResult result = executor.findScheduleConflicts(
+                17,
+                LocalDateTime.parse("2026-08-11T09:00:00"),
+                LocalDateTime.parse("2026-08-11T11:00:00"));
+
+        List<?> conflicts = (List<?>) result.data().get("conflicts");
+        assertEquals(20, conflicts.size());
+        assertEquals(true, result.data().get("conflictsTruncated"));
+        Map<?, ?> conflict = (Map<?, ?>) conflicts.getFirst();
+        assertEquals(512, ((String) conflict.get("subject")).length());
+        assertEquals(512, ((String) conflict.get("notes")).length());
+        assertEquals(true, conflict.get("subjectTruncated"));
+        assertEquals(true, conflict.get("notesTruncated"));
+        verify(activityService).getActivitiesByPersonIdInWindow(
+                17,
+                LocalDateTime.parse("2026-08-11T09:00:00"),
+                LocalDateTime.parse("2026-08-11T11:00:00"),
+                101);
     }
 }
