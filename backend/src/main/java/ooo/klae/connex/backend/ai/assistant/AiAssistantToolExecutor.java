@@ -51,6 +51,9 @@ public class AiAssistantToolExecutor {
     private static final int MAX_NOTES = 10;
     private static final int MAX_NOTE_FIELD_CHARS = 4_000;
     private static final int MAX_NOTE_RESULT_TEXT_CHARS = 16_000;
+    private static final int MAX_SCHEDULE_CONFLICTS = 20;
+    private static final int MAX_SCHEDULE_CONFLICT_CANDIDATES = 101;
+    private static final int MAX_SCHEDULE_CONFLICT_FIELD_CHARS = 512;
     private static final DateTimeFormatter MYSQL_TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -320,18 +323,30 @@ public class AiAssistantToolExecutor {
     public AiAssistantToolResult findScheduleConflicts(
             int personId, LocalDateTime startUtc, LocalDateTime endUtc) {
         requireProcessable(personService.getPersonById(personId));
-        List<Map<String, Object>> conflicts = filterRestrictedLinkedPeople(
-                    activityService.getActivitiesByPersonId(personId),
+        List<Activity> candidates = activityService.getActivitiesByPersonIdInWindow(
+                personId,
+                startUtc,
+                endUtc,
+                MAX_SCHEDULE_CONFLICT_CANDIDATES);
+        List<Activity> matchingActivities = filterRestrictedLinkedPeople(
+                    candidates,
                     Activity::getPerson,
                     Activity::getReferences)
                 .stream()
-                .filter(activity -> isWithin(activity.getTimestamp(), startUtc, endUtc))
-                .map(AiAssistantToolExecutor::activityData)
+                .limit(MAX_SCHEDULE_CONFLICTS + 1L)
+                .toList();
+        List<Map<String, Object>> conflicts = matchingActivities.stream()
+                .limit(MAX_SCHEDULE_CONFLICTS)
+                .map(AiAssistantToolExecutor::scheduleConflictData)
                 .toList();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("start", MYSQL_TIMESTAMP.format(startUtc));
         data.put("end", MYSQL_TIMESTAMP.format(endUtc));
         data.put("conflicts", conflicts);
+        data.put(
+                "conflictsTruncated",
+                candidates.size() == MAX_SCHEDULE_CONFLICT_CANDIDATES
+                        || matchingActivities.size() > MAX_SCHEDULE_CONFLICTS);
         return result(data, List.of());
     }
 
@@ -506,6 +521,15 @@ public class AiAssistantToolExecutor {
         return data;
     }
 
+    private static Map<String, Object> scheduleConflictData(Activity activity) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        putBounded(data, "type", activity.getType(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
+        putBounded(data, "subject", activity.getSubject(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
+        putBounded(data, "notes", activity.getNotes(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
+        putBounded(data, "timestamp", activity.getTimestamp(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
+        return data;
+    }
+
     private static Map<String, Object> taskData(Task task) {
         Map<String, Object> data = new LinkedHashMap<>();
         putIfPresent(data, "description", task.getDescription());
@@ -605,6 +629,18 @@ public class AiAssistantToolExecutor {
         return retained == value.length();
     }
 
+    private static void putBounded(
+            Map<String, Object> data, String key, String value, int maxCharacters) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        int retained = Math.min(value.length(), maxCharacters);
+        data.put(key, value.substring(0, retained));
+        if (retained < value.length()) {
+            data.put(key + "Truncated", true);
+        }
+    }
+
     private static void requireProcessable(Person person) {
         if (!isProcessable(person)) {
             throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
@@ -665,19 +701,6 @@ public class AiAssistantToolExecutor {
         }
         if (value != null) {
             data.put(key, value);
-        }
-    }
-
-    private static boolean isWithin(
-            String timestamp, LocalDateTime startUtc, LocalDateTime endUtc) {
-        if (timestamp == null || timestamp.isBlank()) {
-            return false;
-        }
-        try {
-            LocalDateTime value = LocalDateTime.parse(timestamp, MYSQL_TIMESTAMP);
-            return !value.isBefore(startUtc) && value.isBefore(endUtc);
-        } catch (java.time.format.DateTimeParseException exception) {
-            return false;
         }
     }
 

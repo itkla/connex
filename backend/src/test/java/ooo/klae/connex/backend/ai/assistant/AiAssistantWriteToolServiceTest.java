@@ -19,6 +19,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -192,8 +196,14 @@ class AiAssistantWriteToolServiceTest {
     void meetingExecutesImmediatelyReportsConflictAndUndoesWhileUnchanged() throws Exception {
         Person person = person(31);
         when(personService.getPersonById(31)).thenReturn(person);
-        Activity conflict = activity(88, "Existing meeting", "2026-03-12 13:30:00");
-        when(activityService.getActivitiesByPersonId(31)).thenReturn(List.of(conflict));
+        List<Activity> conflicts = IntStream.range(0, 25)
+                .mapToObj(index -> activity(
+                        88 + index,
+                        "Existing meeting " + index,
+                        "2026-03-12 13:30:00"))
+                .toList();
+        when(activityService.getActivitiesByPersonIdInWindow(
+                eq(31), any(), any(), eq(101))).thenReturn(conflicts);
         doAnswer(invocation -> {
             Activity created = invocation.getArgument(0);
             created.setId(73);
@@ -208,13 +218,27 @@ class AiAssistantWriteToolServiceTest {
                 31);
         stored(write, 29);
 
-        AiAssistantWriteToolService.WriteExecution execution = service.executeAuto(TURN, 29);
+        AtomicReference<AiAssistantToolResult> guardedResult = new AtomicReference<>();
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, guardedResult::set);
 
-        assertEquals("2026-03-12 13:00:00", execution.toolResult().data().get("start"));
-        assertEquals("America/New_York", execution.toolResult().data().get("timezone"));
-        assertEquals(1, ((List<?>) execution.toolResult().data().get("conflicts")).size());
+        assertEquals(
+                "2026-03-12 13:00:00",
+                execution.toolCall().result().path("start").asString());
+        assertEquals(
+                "America/New_York",
+                execution.toolCall().result().path("timezone").asString());
+        assertEquals(20, execution.toolCall().result().path("conflicts").size());
+        assertTrue(execution.toolCall().result().path("conflictsTruncated").asBoolean());
+        assertEquals(
+                20,
+                ((Map<?, ?>) execution.toolResult().data().get("outcome"))
+                        .get("conflictCount"));
+        assertEquals(execution.toolResult(), guardedResult.get());
+        assertEquals("executed", execution.toolResult().data().get("status"));
         assertTrue(execution.toolCall().undoAvailable());
-        verify(activityService).getActivitiesByPersonId(31);
+        verify(activityService).getActivitiesByPersonIdInWindow(
+                eq(31), any(), any(), eq(101));
         verify(activityService).create(any(Activity.class));
 
         doAnswer(invocation -> {
@@ -235,7 +259,8 @@ class AiAssistantWriteToolServiceTest {
     void undoRefusesAfterThirdPartyModification() throws Exception {
         Person person = person(31);
         when(personService.getPersonById(31)).thenReturn(person);
-        when(activityService.getActivitiesByPersonId(31)).thenReturn(List.of());
+        when(activityService.getActivitiesByPersonIdInWindow(
+                eq(31), any(), any(), eq(101))).thenReturn(List.of());
         doAnswer(invocation -> {
             Activity created = invocation.getArgument(0);
             created.setId(73);
@@ -248,7 +273,7 @@ class AiAssistantWriteToolServiceTest {
                 "person",
                 31);
         stored(write, 29);
-        service.executeAuto(TURN, 29);
+        service.executeAuto(TURN, 29, result -> { });
         storedToolCall.setResultJson(capturedResultJson());
         doAnswer(invocation -> {
             java.util.function.Predicate<Activity> guard = invocation.getArgument(1);
@@ -281,8 +306,8 @@ class AiAssistantWriteToolServiceTest {
                 44);
         stored(write, 29);
 
-        assertEquals("task", service.executeAuto(TURN, 29)
-                .toolResult().data().get("recordType"));
+        assertEquals("task", service.executeAuto(TURN, 29, result -> { })
+                .toolCall().result().path("recordType").asString());
         verify(taskService).create(any(Task.class));
     }
 
@@ -302,8 +327,8 @@ class AiAssistantWriteToolServiceTest {
                 31);
         stored(write, 29);
 
-        assertEquals("note", service.executeAuto(TURN, 29)
-                .toolResult().data().get("recordType"));
+        assertEquals("note", service.executeAuto(TURN, 29, result -> { })
+                .toolCall().result().path("recordType").asString());
         verify(noteService).create(any(Note.class));
     }
 
@@ -321,7 +346,8 @@ class AiAssistantWriteToolServiceTest {
                 31);
         stored(write, 29);
 
-        AiAssistantWriteToolService.WriteExecution execution = service.executeAuto(TURN, 29);
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, result -> { });
 
         assertFalse(execution.toolCall().undoAvailable());
         verify(personService).addTag(31, 9);
@@ -341,7 +367,8 @@ class AiAssistantWriteToolServiceTest {
                 31);
         stored(write, 29);
 
-        AiAssistantWriteToolService.WriteExecution execution = service.executeAuto(TURN, 29);
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, result -> { });
         storedToolCall.setResultJson(capturedResultJson());
 
         assertFalse(execution.toolCall().undoAvailable());
@@ -367,7 +394,7 @@ class AiAssistantWriteToolServiceTest {
                 31);
         stored(write, 29);
 
-        service.executeAuto(TURN, 29);
+        service.executeAuto(TURN, 29, result -> { });
 
         InOrder order = inOrder(personService, restrictionEpoch);
         order.verify(personService).lockProcessablePersonForUpdate(31);
@@ -532,7 +559,7 @@ class AiAssistantWriteToolServiceTest {
                 "person",
                 31);
         stored(write, 29);
-        service.executeAuto(TURN, 29);
+        service.executeAuto(TURN, 29, result -> { });
 
         AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
@@ -561,9 +588,44 @@ class AiAssistantWriteToolServiceTest {
                 eq(secondTurn.workspaceId()), eq(secondTurn.userMessageId()), eq(30),
                 eq("executed"), any(), eq(secondTurn.userId()))).thenReturn(1);
 
-        service.executeAuto(secondTurn, 30);
+        service.executeAuto(secondTurn, 30, result -> { });
 
         verify(noteService, times(2)).create(any(Note.class));
+    }
+
+    @Test
+    void executedReplayGuardsTheExactResultWithoutRepeatingTheMutation() throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "create_note",
+                "{\"handle\":\"r1\",\"content\":\"Same request\","
+                        + "\"visibility\":\"workspace\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson("{\"tier\":\"auto\",\"outcome\":{"
+                + "\"status\":\"executed\",\"recordType\":\"note\","
+                + "\"visibility\":\"workspace\"}} ");
+        AtomicBoolean guarded = new AtomicBoolean();
+
+        AiAssistantWriteToolService.WriteExecution replay = service.executeAuto(
+                TURN,
+                29,
+                result -> {
+                    assertEquals("executed", result.data().get("status"));
+                    guarded.set(true);
+                });
+
+        assertTrue(guarded.get());
+        assertEquals("executed", replay.toolResult().data().get("status"));
+        verify(noteService, never()).create(any(Note.class));
+        verify(chatMapper, never()).updateToolCall(
+                eq(TURN.workspaceId()),
+                eq(TURN.userMessageId()),
+                eq(29),
+                eq("executed"),
+                any(),
+                eq(TURN.userId()));
     }
 
     @Test
@@ -632,7 +694,9 @@ class AiAssistantWriteToolServiceTest {
     void lifecycleTeardownBeforeToolDecisionBlocksEveryToolDecision() {
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(false);
 
-        assertThrows(ResourceNotFoundException.class, () -> service.executeAuto(TURN, 29));
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
         assertThrows(ResourceNotFoundException.class, () -> service.approve(TURN.sessionId(), 29));
         assertThrows(ResourceNotFoundException.class, () -> service.reject(TURN.sessionId(), 29));
         assertThrows(ResourceNotFoundException.class, () -> service.undo(TURN.sessionId(), 29));
@@ -645,7 +709,9 @@ class AiAssistantWriteToolServiceTest {
     void governanceDisableBeforeToolDecisionBlocksToolMutations() {
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
 
-        assertThrows(ForbiddenException.class, () -> service.executeAuto(TURN, 29));
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
         assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
 
         verify(chatMapper, never()).getToolCallBySessionForUpdate(

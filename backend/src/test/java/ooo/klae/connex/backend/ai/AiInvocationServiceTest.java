@@ -33,6 +33,14 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptBudget;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantStep;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantStepGuard;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantStepSchema;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult;
+import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -55,6 +63,7 @@ import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
+import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -165,6 +174,107 @@ class AiInvocationServiceTest {
         assertEquals("context_window", singleAuditMetadata().get("reason"));
         verify(aiProvider, never()).complete(any());
         verify(budgetCoordinator, never()).reserve(eq(ORG_ID), any(AiInvocation.class));
+    }
+
+    @Test
+    void completeUsesTheSharedTokenToUtf8ByteBoundary() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        int serializedBytes = service.serializedPromptBytes(
+                invocation.prompt(), null, AiReasoningMode.NONE);
+        int exactEstimatedContext = invocation.maxTokens()
+                + AiProviderCapabilities.estimatedTokensForBytes(serializedBytes);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(exactEstimatedContext);
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+
+        AiCompletionOutcome outcome = service.complete(invocation);
+
+        assertEquals("Mina Patel is ready for follow-up.", outcome.text());
+        verify(aiProvider).complete(any());
+    }
+
+    @Test
+    void unknownOpenAiCompatible32kContextAcceptsTheRealFirstToolResultPrompt() {
+        ResolvedAiProvider openAiCompatible = new ResolvedAiProvider(
+                "openai_compatible",
+                null,
+                "unknown-modern-model",
+                "https://api.example.test/v1",
+                null,
+                null,
+                null,
+                false,
+                false,
+                AiCredentials.of(Map.of()));
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
+                .thenReturn(openAiCompatible);
+        when(aiProviderRouter.adapterFor("openai_compatible")).thenReturn(aiProvider);
+        when(aiProvider.contextWindowTokens(openAiCompatible.target())).thenReturn(32_768);
+        var catalog = new AiAssistantToolCatalog();
+        var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
+        var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        int fixedEnvelopeBytes = service.serializedPromptBytes(
+                promptAssembler.fixedPrompt(),
+                stepSchema.responseSchema(),
+                AiReasoningMode.TAGGED);
+        AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        32_768),
+                16_384,
+                fixedEnvelopeBytes);
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Which relationships are cooling?");
+        MaskingContext context = new MaskingContext();
+        MaskedPrompt prompt = promptAssembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of("records", List.of()), List.of()),
+                List.of(new AiAssistantPromptAssembler.ToolTurn(
+                        1,
+                        "search_records",
+                        new AiAssistantToolResult(
+                                Map.of("records", List.of(Map.of(
+                                        "handle", "r1",
+                                        "kind", "person",
+                                        "warmth", "cooling"))),
+                                List.of()))),
+                context,
+                new AiChatResourceRegistry(),
+                budget,
+                null);
+        providerReturns(new AiCompletionResult(
+                "{\"tool\":null,\"final\":{\"text\":\"One relationship is cooling.\","
+                        + "\"citations\":[],\"suggestions\":[],\"title\":null}}",
+                20,
+                8,
+                "stop",
+                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                "",
+                AiReasoningMode.TAGGED));
+        AiInvocation invocation = new AiInvocation(
+                AiFeature.ASSISTANT_CHAT,
+                context,
+                prompt,
+                budget.maxOutputTokens(),
+                0.1,
+                true);
+
+        AiStructuredRepairAttempt<AiAssistantStep> attempt =
+                service.completeStructuredRepairable(
+                        invocation,
+                        AiAssistantStep.class,
+                        new AiAssistantStepGuard(catalog),
+                        stepSchema.responseSchema(),
+                        directAdmission);
+
+        assertInstanceOf(AiStructuredOutcome.Parsed.class, attempt.outcome());
+        assertTrue(service.serializedPromptBytes(
+                prompt, stepSchema.responseSchema(), AiReasoningMode.TAGGED)
+                <= AiProviderCapabilities.estimatedInputByteCeiling(
+                        32_768, budget.maxOutputTokens()));
+        verify(aiProvider).complete(any());
     }
 
     @Test

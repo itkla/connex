@@ -421,7 +421,7 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void independentBudgetsKeepHistoryAndPageContextWhenToolResultsOverflow() {
+    void independentBudgetsKeepHistoryAndPageContextWhenToolResultsFit() {
         AiChatMessage earlyRequest = new AiChatMessage();
         earlyRequest.setAuthorKind("user");
         earlyRequest.setContent("EARLY_FACT_MUST_SURVIVE");
@@ -434,15 +434,15 @@ class AiAssistantPromptAssemblerTest {
                 """);
         AiAssistantToolResult pageContext = new AiAssistantToolResult(
                 Map.of("context", "PAGE_CONTEXT_MUST_SURVIVE"), List.of());
-        AiAssistantToolResult oversizedToolResult = new AiAssistantToolResult(
-                Map.of("result", "TOOL_RESULT_MUST_BE_DROPPED".repeat(40)), List.of());
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("result", "TOOL_RESULT_MUST_SURVIVE"), List.of());
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
-                64, 1_000, 1_000, 1_000, 200, 1_000);
+                64, 1_000, 1_000, 1_000, 1_000, 1_000);
 
         MaskedPrompt prompt = assembler.assemble(
                 List.of(earlyRequest, priorAnswer),
                 pageContext,
-                List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
+                List.of(new ToolTurn(1, "search_records", toolResult)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
@@ -454,13 +454,38 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(replay.contains("EARLY_FACT_MUST_SURVIVE"));
         assertTrue(replay.contains("Prior grounded answer"));
         assertTrue(replay.contains("PAGE_CONTEXT_MUST_SURVIVE"));
-        assertTrue(replay.contains("budget_exceeded"));
-        assertFalse(replay.contains("TOOL_RESULT_MUST_BE_DROPPED"));
+        assertTrue(replay.contains("TOOL_RESULT_MUST_SURVIVE"));
+        assertFalse(replay.contains("budget_exceeded"));
         assertFalse(replay.contains("PRIVATE_REASONING_MUST_NOT_REPLAY"));
     }
 
     @Test
-    void repairAndPriorToolResultsShareOneBoundedToolAllocation() {
+    void toolResultOverflowFailsWithAnHonestTerminalReason() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Summarize the records");
+        AiAssistantToolResult oversizedToolResult = new AiAssistantToolResult(
+                Map.of("result", "TOOL_RESULT_MUST_NOT_BE_SILENTLY_DROPPED".repeat(40)),
+                List.of());
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 1_000, 1_000, 1_000, 200, 1_000);
+
+        AiAssistantLoopException exception = assertThrows(
+                AiAssistantLoopException.class,
+                () -> assembler.assemble(
+                        List.of(request),
+                        new AiAssistantToolResult(Map.of(), List.of()),
+                        List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
+                        new MaskingContext(),
+                        new AiChatResourceRegistry(),
+                        budget,
+                        null));
+
+        assertEquals("tool_result_budget_exhausted", exception.terminalReason());
+    }
+
+    @Test
+    void repairAndPriorToolResultsShareOneFailClosedToolAllocation() {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");
         request.setContent("Repair the response");
@@ -471,23 +496,17 @@ class AiAssistantPromptAssemblerTest {
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 1_000, 1_000, 1_000, 500, 1_000);
 
-        MaskedPrompt prompt = assembler.assemble(
-                List.of(request),
-                new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
-                new MaskingContext(),
-                new AiChatResourceRegistry(),
-                budget,
-                repair);
-        List<String> boundedToolMessages = prompt.getMessages().stream()
-                .map(message -> message.getContent())
-                .filter(content -> content.contains("tool_result_budget")
-                        || content.contains("MODEL_OUTPUT_BEGIN"))
-                .toList();
+        AiAssistantLoopException exception = assertThrows(
+                AiAssistantLoopException.class,
+                () -> assembler.assemble(
+                        List.of(request),
+                        new AiAssistantToolResult(Map.of(), List.of()),
+                        List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
+                        new MaskingContext(),
+                        new AiChatResourceRegistry(),
+                        budget,
+                        repair));
 
-        assertEquals(2, boundedToolMessages.size());
-        assertTrue(boundedToolMessages.stream().mapToInt(String::length).sum() <= 500);
-        assertTrue(boundedToolMessages.getFirst().contains("budget_exceeded"));
-        assertTrue(boundedToolMessages.getLast().contains("exclusive_step"));
+        assertEquals("tool_result_budget_exhausted", exception.terminalReason());
     }
 }

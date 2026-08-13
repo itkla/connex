@@ -12,8 +12,14 @@ public record AiAssistantPromptBudget(
         int toolResultBytes,
         int compactionSourceBytes) {
 
-    private static final int BYTES_PER_TOKEN = 1;
     private static final int MIN_CONTEXT_TOKENS = 32_768;
+    private static final int MIN_HISTORY_BYTES = 4_096;
+    private static final int MIN_ATTACHMENT_CONTEXT_BYTES = 256;
+    private static final int MIN_PAGE_CONTEXT_BYTES = 256;
+    private static final int MIN_TOOL_RESULT_BYTES = 2_048;
+    private static final int MIN_VARIABLE_INPUT_BYTES = MIN_HISTORY_BYTES
+            + MIN_ATTACHMENT_CONTEXT_BYTES + MIN_PAGE_CONTEXT_BYTES
+            + MIN_TOOL_RESULT_BYTES;
     private static final int MAX_MASKED_SERIALIZATION_EXPANSION = 12;
 
     public AiAssistantPromptBudget {
@@ -63,22 +69,36 @@ public record AiAssistantPromptBudget(
         }
         int providerOutputCeiling = Math.max(1_024, contextTokens / 4);
         int maxOutputTokens = Math.min(configuredMaxOutputTokens, providerOutputCeiling);
-        int providerInputBytes = saturatedMultiply(
-                contextTokens - maxOutputTokens, BYTES_PER_TOKEN);
+        int minimumSerializedInputBytes = saturatedAdd(
+                fixedEnvelopeBytes,
+                saturatedMultiply(
+                        MIN_VARIABLE_INPUT_BYTES, MAX_MASKED_SERIALIZATION_EXPANSION));
+        int floorPreservingOutputTokens = contextTokens
+                - AiProviderCapabilities.estimatedTokensForBytes(minimumSerializedInputBytes);
+        if (floorPreservingOutputTokens < 1) {
+            throw new AiProviderException(
+                    "Ask Connex fixed prompt leaves no usable model input budget");
+        }
+        maxOutputTokens = Math.min(maxOutputTokens, floorPreservingOutputTokens);
+        int providerInputBytes = AiProviderCapabilities.estimatedInputByteCeiling(
+                contextTokens, maxOutputTokens);
         int variableEnvelopeBytes = providerInputBytes - fixedEnvelopeBytes;
-        if (variableEnvelopeBytes < 4) {
+        if (variableEnvelopeBytes < MIN_VARIABLE_INPUT_BYTES) {
             throw new AiProviderException(
                     "Ask Connex fixed prompt exceeds the configured model context window");
         }
-        int inputBytes = Math.max(
-                3,
-                variableEnvelopeBytes / MAX_MASKED_SERIALIZATION_EXPANSION);
-        int historyBytes = Math.max(1, inputBytes / 2);
-        int attachmentContextBytes = Math.max(1, inputBytes / 5);
-        int pageContextBytes = Math.max(1, inputBytes / 10);
-        int toolResultBytes = Math.max(
-                1,
-                inputBytes - historyBytes - attachmentContextBytes - pageContextBytes);
+        int inputBytes = variableEnvelopeBytes / MAX_MASKED_SERIALIZATION_EXPANSION;
+        if (inputBytes < MIN_VARIABLE_INPUT_BYTES) {
+            throw new AiProviderException(
+                    "Ask Connex fixed prompt leaves no usable variable input budget");
+        }
+        int distributableBytes = inputBytes - MIN_VARIABLE_INPUT_BYTES;
+        int historyBytes = MIN_HISTORY_BYTES + distributableBytes / 2;
+        int attachmentContextBytes = MIN_ATTACHMENT_CONTEXT_BYTES
+                + distributableBytes / 5;
+        int pageContextBytes = MIN_PAGE_CONTEXT_BYTES + distributableBytes / 10;
+        int toolResultBytes = inputBytes
+                - historyBytes - attachmentContextBytes - pageContextBytes;
         return new AiAssistantPromptBudget(
                 maxOutputTokens,
                 historyBytes,
@@ -92,5 +112,9 @@ public record AiAssistantPromptBudget(
         return value > Integer.MAX_VALUE / multiplier
                 ? Integer.MAX_VALUE
                 : value * multiplier;
+    }
+
+    private static int saturatedAdd(int left, int right) {
+        return right > Integer.MAX_VALUE - left ? Integer.MAX_VALUE : left + right;
     }
 }

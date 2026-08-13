@@ -227,6 +227,38 @@ class ActivityMapperTest extends AbstractMapperTest {
         assertTrue(matched.stream().noneMatch(x -> x.getId() == activity2.getId()));
     }
 
+    @Test
+    void getActivitiesByPersonIdInWindowBoundsTimeWorkspaceAndRows() {
+        User user = newUser();
+        Person person = newPerson(newCompany());
+        Activity before = build("before", "before", person, null, user);
+        before.setTimestamp("2026-08-11 08:59:59");
+        Activity first = build("meeting", "first", person, null, user);
+        first.setTimestamp("2026-08-11 09:30:00");
+        Activity second = build("meeting", "second", person, null, user);
+        second.setTimestamp("2026-08-11 10:00:00");
+        Activity atEnd = build("meeting", "at-end", person, null, user);
+        atEnd.setTimestamp("2026-08-11 11:00:00");
+        activityMapper.insert(before);
+        activityMapper.insert(first);
+        activityMapper.insert(second);
+        activityMapper.insert(atEnd);
+        Workspace foreignWorkspace = newWorkspace();
+        Activity foreign = build("meeting", "foreign", person, null, user);
+        foreign.setWorkspaceId(foreignWorkspace.getId());
+        foreign.setTimestamp("2026-08-11 09:15:00");
+        activityMapper.insert(foreign);
+
+        List<Activity> matched = activityMapper.getActivitiesByPersonIdInWindow(
+                workspace.getId(),
+                person.getId(),
+                LocalDateTime.parse("2026-08-11T09:00:00"),
+                LocalDateTime.parse("2026-08-11T11:00:00"),
+                1);
+
+        assertEquals(List.of(first.getId()), matched.stream().map(Activity::getId).toList());
+    }
+
     /**
      * Gets activities by deal ID and checks if the returned list includes the inserted activity.
      */

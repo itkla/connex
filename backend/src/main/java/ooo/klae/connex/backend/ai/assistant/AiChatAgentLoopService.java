@@ -230,10 +230,31 @@ public class AiChatAgentLoopService {
                                 "proposed", null, toolCallId));
                         try {
                             requireCurrentToolExecution(turn);
+                            int guardedStepNumber = stepNumber;
                             AiAssistantToolResult toolResult = write.tier()
                                     == AiAssistantToolCatalog.ToolTier.AUTO
-                                    ? writeToolService.executeAuto(turn, toolCallId).toolResult()
+                                    ? writeToolService.executeAuto(
+                                            turn,
+                                            toolCallId,
+                                            candidate -> promptAssembler
+                                                    .requireAdditionalToolResultCapacity(
+                                                            toolTurns,
+                                                            new ToolTurn(
+                                                                    guardedStepNumber,
+                                                                    step.tool().name(),
+                                                                    candidate),
+                                                            maskingContext,
+                                                            memory.budget()))
+                                            .toolResult()
                                     : writeToolService.proposalResult(write, proposal);
+                            if (write.tier() != AiAssistantToolCatalog.ToolTier.AUTO) {
+                                promptAssembler.requireAdditionalToolResultCapacity(
+                                        toolTurns,
+                                        new ToolTurn(
+                                                stepNumber, step.tool().name(), toolResult),
+                                        maskingContext,
+                                        memory.budget());
+                            }
                             String status = write.tier() == AiAssistantToolCatalog.ToolTier.AUTO
                                     ? "executed"
                                     : ("executed".equals(proposal.status())

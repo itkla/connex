@@ -615,7 +615,8 @@ public class AiInvocationService {
     }
 
     private static int providerInputByteCeiling(int contextTokens, int outputTokens) {
-        return Math.max(1, contextTokens - Math.min(contextTokens - 1, outputTokens));
+        return AiProviderCapabilities.estimatedInputByteCeiling(
+                contextTokens, outputTokens);
     }
 
     private AiCompletionRequest request(
