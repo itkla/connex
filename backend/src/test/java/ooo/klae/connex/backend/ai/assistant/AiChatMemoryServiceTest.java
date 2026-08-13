@@ -178,6 +178,12 @@ class AiChatMemoryServiceTest {
                 summaryInvocation.getAllValues().getFirst().prompt());
         String secondCompactionPrompt = promptText(
                 summaryInvocation.getAllValues().getLast().prompt());
+        assertEquals(
+                now.plusSeconds(70),
+                summaryInvocation.getAllValues().getFirst().callerDeadline());
+        assertEquals(
+                summaryInvocation.getAllValues().getFirst().callerDeadline(),
+                summaryInvocation.getAllValues().getLast().callerDeadline());
         assertTrue(firstCompactionPrompt.contains("EARLY_FACT_BEGIN"));
         assertTrue(firstCompactionPrompt.contains("EARLY_FACT_END"));
         assertFalse(firstCompactionPrompt.contains("MIDDLE_FACT_BEGIN"));

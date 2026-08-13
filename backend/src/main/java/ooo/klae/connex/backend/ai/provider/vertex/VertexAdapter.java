@@ -100,7 +100,8 @@ public class VertexAdapter implements AiProvider {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");
         }
-        AiRequestDeadline deadline = AiRequestDeadline.afterMillis(aiProperties.getRequestTimeoutMs());
+        AiRequestDeadline deadline = request.providerAttemptExecutor()
+                .deadline(aiProperties.getRequestTimeoutMs());
         AiProviderTarget target = request.target();
         if (!PROVIDER_VERTEX.equals(target.provider())) {
             throw new AiProviderException("Unsupported AI provider");

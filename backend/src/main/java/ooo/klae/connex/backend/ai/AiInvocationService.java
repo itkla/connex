@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.ai;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +13,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
@@ -23,6 +27,7 @@ import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -31,6 +36,7 @@ import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptBlockedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
+import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
@@ -82,6 +88,7 @@ public class AiInvocationService {
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
     private final AiOrganizationBudgetCoordinator budgetCoordinator;
+    private final Clock clock;
 
     /**
      * Resolves adapter-declared capabilities for the current organization provider configuration.
@@ -149,9 +156,17 @@ public class AiInvocationService {
             AiInvocation invocation,
             AiInvocationAdmissionService.DirectAdmission admission) {
         Objects.requireNonNull(admission, "admission");
+        return complete(invocation, admission, NO_INVOCATION_COMMITMENT);
+    }
+
+    private AiCompletionOutcome complete(
+            AiInvocation invocation,
+            AiInvocationAdmissionService.DirectAdmission admission,
+            Runnable providerAttemptGuard) {
         try (RawInvocation raw = invokeRaw(
                 invocation, AiOutputMode.TEXT, null,
-                admission::commitInvocation, NO_INVOCATION_COMMITMENT)) {
+                admission::commitInvocation,
+                Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard"))) {
             AiCompletionResult result = raw.result();
             Demasker.DemaskResult demasked = Demasker.demask(
                     CompletionNormalizer.stripReasoning(result.text()), invocation.context());
@@ -175,11 +190,33 @@ public class AiInvocationService {
             AiInvocation invocation,
             AiInvocationAdmissionService.DirectAdmission admission,
             long expectedRestrictionEpoch) {
+        return complete(
+                invocation, admission, expectedRestrictionEpoch,
+                NO_INVOCATION_COMMITMENT);
+    }
+
+    /**
+     * Completes a masked direct invocation under its restriction epoch and a caller-owned access
+     * check immediately before every provider send.
+     * @param invocation masked invocation request
+     * @param admission active direct invocation admission
+     * @param expectedRestrictionEpoch restriction epoch captured before input assembly
+     * @param providerAttemptGuard access check run immediately before each provider attempt
+     * @return demasked completion outcome
+     */
+    public AiCompletionOutcome complete(
+            AiInvocation invocation,
+            AiInvocationAdmissionService.DirectAdmission admission,
+            long expectedRestrictionEpoch,
+            Runnable providerAttemptGuard) {
+        Objects.requireNonNull(admission, "admission");
+        Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard");
         AtomicReference<AiCompletionOutcome> outcomeReference = new AtomicReference<>();
         aiRestrictionEpoch.runWithExpectedEgressEpoch(
                 workspaceService.getCurrentWorkspaceId(),
                 expectedRestrictionEpoch,
-                () -> outcomeReference.set(complete(invocation, admission)));
+                () -> outcomeReference.set(complete(
+                        invocation, admission, providerAttemptGuard)));
         return Objects.requireNonNull(outcomeReference.get(), "completion outcome");
     }
 
@@ -808,6 +845,7 @@ public class AiInvocationService {
         private final Runnable providerAttemptGuard;
         private final String serializedPrompt;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
+        private AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
         private boolean failureAudited;
 
@@ -835,6 +873,27 @@ public class AiInvocationService {
             this.serializedPrompt = Objects.requireNonNull(
                     serializedPrompt, "serializedPrompt");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
+        }
+
+        @Override
+        public synchronized AiRequestDeadline deadline(long requestTimeoutMillis) {
+            if (providerDeadline != null) {
+                return providerDeadline;
+            }
+            long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(requestTimeoutMillis);
+            if (timeoutNanos <= 0) {
+                throw new IllegalStateException("AI request timeout must be positive");
+            }
+            Instant callerDeadline = invocation.callerDeadline();
+            if (callerDeadline != null) {
+                Duration remaining = Duration.between(clock.instant(), callerDeadline);
+                if (remaining.isZero() || remaining.isNegative()) {
+                    throw new AiProviderCallerDeadlineExceededException();
+                }
+                timeoutNanos = Math.min(timeoutNanos, remaining.toNanos());
+            }
+            providerDeadline = AiRequestDeadline.afterNanos(timeoutNanos);
+            return providerDeadline;
         }
 
         @Override
@@ -895,6 +954,9 @@ public class AiInvocationService {
                         : "invocation_exception";
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
                         null, null, null, null, reason, structured, null);
+                if (callerDeadlineReached()) {
+                    throw new AiProviderCallerDeadlineExceededException();
+                }
                 throw exception;
             } finally {
                 if (fallbackAdmission != null) {
@@ -952,6 +1014,11 @@ public class AiInvocationService {
 
         private boolean failureAudited() {
             return failureAudited;
+        }
+
+        private boolean callerDeadlineReached() {
+            Instant callerDeadline = invocation.callerDeadline();
+            return callerDeadline != null && !clock.instant().isBefore(callerDeadline);
         }
     }
 

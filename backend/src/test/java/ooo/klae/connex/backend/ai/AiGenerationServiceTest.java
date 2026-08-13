@@ -177,6 +177,7 @@ class AiGenerationServiceTest {
                 Clock.systemUTC());
         CountDownLatch running = new CountDownLatch(1);
         CountDownLatch neverReleased = new CountDownLatch(1);
+        CountDownLatch callbackReceived = new CountDownLatch(1);
         AtomicInteger callbacks = new AtomicInteger();
         AtomicReference<AiGenerationTaskResult.Outcome> terminal = new AtomicReference<>();
         AtomicReference<String> reason = new AtomicReference<>();
@@ -195,11 +196,13 @@ class AiGenerationServiceTest {
                     callbacks.incrementAndGet();
                     terminal.set(outcome);
                     reason.set(stableReason);
+                    callbackReceived.countDown();
                     return true;
                 });
 
         assertTrue(running.await(2, TimeUnit.SECONDS));
         awaitStatus(accepted.handle(), "timed_out");
+        assertTrue(callbackReceived.await(2, TimeUnit.SECONDS));
 
         assertEquals(1, callbacks.get());
         assertEquals(AiGenerationTaskResult.Outcome.TIMED_OUT, terminal.get());
@@ -207,7 +210,109 @@ class AiGenerationServiceTest {
     }
 
     @Test
-    void rejectedTimeoutClaimLeavesTheHandleActiveForTheDurablyResolvedWinner() throws Exception {
+    void hardTimeoutReleasesTheHandleWhenTheDurableListenerFails() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "turn-listener-failure",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    running.countDown();
+                    try {
+                        neverReleased.await();
+                    } catch (InterruptedException exception) {
+                        interrupted.countDown();
+                        Thread.currentThread().interrupt();
+                    }
+                    return AiGenerationTaskResult.resolved("late");
+                },
+                restrictionEpoch.get(),
+                (outcome, stableReason) -> {
+                    throw new IllegalStateException("durable terminal unavailable");
+                });
+
+        assertTrue(running.await(2, TimeUnit.SECONDS));
+        AiGenerationStatusDto timedOut = awaitStatus(accepted.handle(), "timed_out");
+        assertTrue(interrupted.await(2, TimeUnit.SECONDS));
+        AiGenerationStatusDto replacement = service.start(
+                AiFeature.ASSISTANT_CHAT,
+                "turn-listener-failure",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> AiGenerationTaskResult.resolved("replacement"));
+
+        assertEquals("generation_timeout", timedOut.reason());
+        assertTrue(!accepted.handle().equals(replacement.handle()));
+    }
+
+    @Test
+    void blockingDurableTimeoutListenerDoesNotBlockTheRegistryOrLaterTimeouts() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch firstRunning = new CountDownLatch(1);
+        CountDownLatch secondRunning = new CountDownLatch(1);
+        CountDownLatch callbackStarted = new CountDownLatch(1);
+        CountDownLatch releaseCallback = new CountDownLatch(1);
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        AiGenerationStatusDto first = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "blocking-terminal-listener",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    firstRunning.countDown();
+                    await(neverReleased);
+                    return AiGenerationTaskResult.resolved("late");
+                },
+                restrictionEpoch.get(),
+                (outcome, stableReason) -> {
+                    callbackStarted.countDown();
+                    await(releaseCallback);
+                    return true;
+                });
+
+        assertTrue(firstRunning.await(2, TimeUnit.SECONDS));
+        assertTrue(callbackStarted.await(2, TimeUnit.SECONDS));
+        assertEquals("timed_out", service.status(first.handle()).status());
+        AiGenerationStatusDto second = service.start(
+                AiFeature.ASSISTANT_CHAT,
+                "later-timeout",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    secondRunning.countDown();
+                    await(neverReleased);
+                    return AiGenerationTaskResult.resolved("late");
+                });
+
+        assertTrue(secondRunning.await(2, TimeUnit.SECONDS));
+        AiGenerationStatusDto timedOut = awaitStatus(second.handle(), "timed_out");
+        releaseCallback.countDown();
+
+        assertEquals("generation_timeout", timedOut.reason());
+    }
+
+    @Test
+    void durableTerminalWinnerClosesTheSupersededInMemoryHandle() throws Exception {
         service.shutdown();
         service = new AiGenerationService(
                 properties(Duration.ofMillis(100)),
@@ -220,6 +325,7 @@ class AiGenerationServiceTest {
         CountDownLatch timeoutAttempted = new CountDownLatch(1);
         AtomicInteger timeoutClaims = new AtomicInteger();
         AtomicInteger resolvedClaims = new AtomicInteger();
+        AtomicReference<String> durableOutcome = new AtomicReference<>("resolved");
         AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
                 AiFeature.ASSISTANT_CHAT,
                 "turn-20-race",
@@ -240,11 +346,12 @@ class AiGenerationServiceTest {
                     return true;
                 });
 
-        AiGenerationStatusDto resolved = awaitStatus(accepted.handle(), "resolved");
+        assertTrue(timeoutAttempted.await(2, TimeUnit.SECONDS));
+        awaitUnavailable(accepted.handle());
 
-        assertEquals("durably-resolved", resolved.result().asString());
+        assertEquals("resolved", durableOutcome.get());
         assertEquals(1, timeoutClaims.get());
-        assertEquals(1, resolvedClaims.get());
+        assertEquals(0, resolvedClaims.get());
     }
 
     @Test
@@ -709,6 +816,19 @@ class AiGenerationServiceTest {
         }
         assertEquals(expected, current.status());
         return current;
+    }
+
+    private void awaitUnavailable(String handle) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            try {
+                service.status(handle);
+            } catch (ResourceNotFoundException exception) {
+                return;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("Generation handle remained available");
     }
 
     private ThreadPoolExecutor workerExecutor() throws ReflectiveOperationException {

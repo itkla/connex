@@ -594,8 +594,8 @@
         AND status IN ('queued', 'running')
       </otherwise>
     </choose>
-    <if test="createdBefore != null">
-      AND created_at &lt;= #{createdBefore}
+    <if test="updatedBefore != null">
+      AND updated_at &lt;= #{updatedBefore}
     </if>
   </update>
 

@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,6 +30,7 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
+import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
@@ -54,7 +54,6 @@ import tools.jackson.databind.node.ObjectNode;
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
     static final int HARD_MAX_STEPS = 64;
-    private static final Duration TURN_DEADLINE = Duration.ofSeconds(70);
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     private static final String INTERNAL_ERROR = "internal_error";
     private static final int MAX_FINAL_CHARS = 16_000;
@@ -94,7 +93,7 @@ public class AiChatAgentLoopService {
             if (!running) {
                 return AiGenerationTaskResult.failed(INTERNAL_ERROR);
             }
-            Instant deadline = clock.instant().plus(TURN_DEADLINE);
+            Instant deadline = clock.instant().plus(AiAssistantTurnBudget.TURN);
             publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "state", null, "running", null));
@@ -145,7 +144,8 @@ public class AiChatAgentLoopService {
                                 repair),
                         memory.budget().maxOutputTokens(),
                         TEMPERATURE,
-                        aiProperties.isAssistantThinkingEnabled());
+                        aiProperties.isAssistantThinkingEnabled(),
+                        deadline);
                 AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
                         maskingContext.tokenBindings().stream()
                                 .map(Map.Entry::getKey)
@@ -364,6 +364,8 @@ public class AiChatAgentLoopService {
             return AiGenerationTaskResult.failed("quota_exhausted");
         } catch (AiImageInputUnsupportedException exception) {
             return AiGenerationTaskResult.failed("image_input_unsupported");
+        } catch (AiProviderCallerDeadlineExceededException exception) {
+            return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
         } catch (AiProviderException exception) {
             return AiGenerationTaskResult.failed("provider_error");
         } catch (ResourceNotFoundException exception) {

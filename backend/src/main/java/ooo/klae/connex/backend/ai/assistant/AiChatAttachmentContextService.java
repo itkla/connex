@@ -65,7 +65,7 @@ public class AiChatAttachmentContextService {
                 continue;
             }
             if ("image/jpeg".equals(attachment.getContentType())) {
-                ImageDescription described = describeImage(turn, attachment);
+                ImageDescription described = describeImage(turn, attachment, deadline);
                 requireBeforeDeadline(deadline);
                 BoundedContent bounded = boundContent(
                         described.description(), remainingContextCharacters);
@@ -94,7 +94,8 @@ public class AiChatAttachmentContextService {
         }
     }
 
-    private ImageDescription describeImage(AiChatQueuedTurn turn, Attachment attachment) {
+    private ImageDescription describeImage(
+            AiChatQueuedTurn turn, Attachment attachment, Instant deadline) {
         persistenceService.requireRunning(turn);
         AiInputImage image;
         try (ManagedContent managed = managedObjectService.openAttachment(
@@ -114,11 +115,16 @@ public class AiChatAttachmentContextService {
                         .build(),
                 List.of(image),
                 MAX_IMAGE_DESCRIPTION_TOKENS,
-                IMAGE_TEMPERATURE);
+                IMAGE_TEMPERATURE,
+                false,
+                deadline);
         try (AiInvocationAdmissionService.DirectAdmission admission =
                 invocationAdmissionService.acquireDirect()) {
             AiCompletionOutcome outcome = invocationService.complete(
-                    invocation, admission, turn.restrictionEpoch());
+                    invocation,
+                    admission,
+                    turn.restrictionEpoch(),
+                    () -> persistenceService.requireRunning(turn));
             if (outcome.demaskWarnings() != 0
                     || outcome.text().isBlank()
                     || outcome.text().length() > MAX_IMAGE_DESCRIPTION_CHARS) {

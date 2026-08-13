@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -21,9 +22,15 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +46,7 @@ import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.introrationale.IntroRationaleContent;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -48,6 +56,7 @@ import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
+import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
@@ -69,6 +78,7 @@ class AiInvocationServiceTest {
     private static final int ORG_ID = 22;
     private static final int ACTOR_ID = 33;
     private static final AiFeature FEATURE = AiFeature.DEAL_BRIEF;
+    private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
 
     @Mock private AiFeatureGate aiFeatureGate;
     @Mock private AiInvocationAdmissionService aiInvocationAdmissionService;
@@ -98,7 +108,8 @@ class AiInvocationServiceTest {
         service = new AiInvocationService(
                 aiFeatureGate, aiInvocationAdmissionService, aiMediaAdmissionService,
                 aiProviderConfigService, aiProviderRouter, restrictionEpoch,
-                workspaceService, auditService, new ObjectMapper(), budgetCoordinator);
+                workspaceService, auditService, new ObjectMapper(), budgetCoordinator,
+                Clock.fixed(NOW, java.time.ZoneOffset.UTC));
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
                 null, null, null, null, false, true,
                 AiCredentials.of(Map.of(
@@ -772,6 +783,59 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void providerDeadlineIsBoundedByCallerBudgetAndSharedAcrossFallbacks() {
+        AiInvocation invocation = invocation(
+                "Summarize relationship state", NOW.plusMillis(250));
+        AtomicReference<AiRequestDeadline> firstDeadline = new AtomicReference<>();
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            AiRequestDeadline first = request.providerAttemptExecutor().deadline(60_000);
+            AiRequestDeadline fallback = request.providerAttemptExecutor().deadline(60_000);
+            firstDeadline.set(first);
+            assertSame(first, fallback);
+            request.providerAttemptExecutor().execute(() -> "provider response");
+            return new AiCompletionResult("Done", 20, 8, "end_turn");
+        });
+
+        service.complete(invocation);
+
+        long remainingNanos = firstDeadline.get().remainingNanos();
+        assertTrue(remainingNanos > 0);
+        assertTrue(remainingNanos <= TimeUnit.MILLISECONDS.toNanos(250));
+    }
+
+    @Test
+    void hungProviderAttemptCannotExceedTheCallerWindow() {
+        service = new AiInvocationService(
+                aiFeatureGate, aiInvocationAdmissionService, aiMediaAdmissionService,
+                aiProviderConfigService, aiProviderRouter, restrictionEpoch,
+                workspaceService, auditService, new ObjectMapper(), budgetCoordinator,
+                Clock.systemUTC());
+        AiInvocation invocation = invocation(
+                "Summarize relationship state", Instant.now().plusMillis(100));
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            AiRequestDeadline deadline = request.providerAttemptExecutor().deadline(60_000);
+            request.providerAttemptExecutor().execute(() -> {
+                while (!deadline.isExpired()) {
+                    LockSupport.parkNanos(Math.min(
+                            deadline.remainingNanos(), TimeUnit.MILLISECONDS.toNanos(5)));
+                }
+                throw new AiProviderException("Provider transport exceeded its deadline");
+            });
+            throw new IllegalStateException("Provider deadline failure was not propagated");
+        });
+        long started = System.nanoTime();
+
+        assertThrows(
+                AiProviderCallerDeadlineExceededException.class,
+                () -> service.complete(invocation));
+
+        long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+        assertTrue(elapsedMillis < 1_000, () -> "elapsed milliseconds: " + elapsedMillis);
+    }
+
+    @Test
     void providerConfigurationChangeRefusesStaleResolvedCredentialsAtEgress() {
         ResolvedAiProvider changed = new ResolvedAiProvider(
                 "openai_compatible", null, "gemma-4-31b-it",
@@ -1002,6 +1066,14 @@ class AiInvocationServiceTest {
                 .userTurn(maskedPromptText + " for " + person)
                 .build();
         return new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+    }
+
+    private AiInvocation invocation(String maskedPromptText, Instant callerDeadline) {
+        AiInvocation invocation = invocation(maskedPromptText);
+        return new AiInvocation(
+                invocation.feature(), invocation.context(), invocation.prompt(),
+                invocation.images(), invocation.maxTokens(), invocation.temperature(),
+                invocation.reasoningRequested(), callerDeadline);
     }
 
     private AiInvocation reasoningInvocation(String maskedPromptText) {

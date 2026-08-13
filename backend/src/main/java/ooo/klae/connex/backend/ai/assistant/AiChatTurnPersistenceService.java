@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -58,7 +57,6 @@ public class AiChatTurnPersistenceService {
     private final AiChatMapper chatMapper;
     private final AttachmentMapper attachmentMapper;
     private final WorkspaceService workspaceService;
-    private final AiProperties aiProperties;
     private final AiRestrictionEpoch restrictionEpoch;
     private final AiWorkspaceGovernanceService governanceService;
     private final AiAssistantIdentifierResolver identifierResolver;
@@ -507,7 +505,10 @@ public class AiChatTurnPersistenceService {
     }
 
     /** Applies a generation-owned terminal transition without requiring request-thread state. */
-    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    @Transactional(
+        isolation = Isolation.READ_COMMITTED,
+        propagation = Propagation.REQUIRES_NEW,
+        timeout = RESOLVE_TIMEOUT_SECONDS)
     public boolean markTerminal(
             AiChatQueuedTurn turn,
             String status,
@@ -638,7 +639,7 @@ public class AiChatTurnPersistenceService {
 
     private LocalDateTime expiryCutoff() {
         return LocalDateTime.ofInstant(
-                clock.instant().minus(aiProperties.getGenerationMaxLifetime()), ZoneOffset.UTC);
+                clock.instant().minus(AiAssistantTurnBudget.DURABLE_LIFETIME), ZoneOffset.UTC);
     }
 
     private boolean sameJson(String left, String right) {

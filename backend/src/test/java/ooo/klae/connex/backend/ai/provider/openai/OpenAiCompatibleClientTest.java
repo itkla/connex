@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
@@ -39,6 +40,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -283,6 +285,33 @@ class OpenAiCompatibleClientTest {
             assertTrue(java.time.Duration.ofNanos(System.nanoTime() - started).toMillis() < 5000);
         } finally {
             releaseResolver.countDown();
+            client.shutdown();
+        }
+    }
+
+    @Test
+    void expiredDeadlineDoesNotStartFinalDnsResolution() {
+        OpenAiCompatibleClient client = new OpenAiCompatibleClient(
+                new AiProperties(), endpointAddressValidator);
+        AiRequestDeadline deadline = AiRequestDeadline.afterNanos(1);
+        while (!deadline.isExpired()) {
+            Thread.onSpinWait();
+        }
+        try {
+            AiProviderException exception = assertThrows(
+                    AiProviderException.class,
+                    () -> client.complete(
+                            PUBLIC_ENDPOINT,
+                            false,
+                            emptyCredentials(),
+                            REQUEST_BODY,
+                            deadline));
+
+            assertEquals(
+                    "OpenAI-compatible invocation exceeded its deadline",
+                    exception.getMessage());
+            verify(endpointAddressValidator, never()).resolveFetchable(anyString(), anyBoolean());
+        } finally {
             client.shutdown();
         }
     }

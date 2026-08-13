@@ -233,8 +233,15 @@ public class OpenAiCompatibleClient {
         if (deadline == null) {
             return endpointAddressValidator.resolveFetchable(host, allowInternalEndpoint);
         }
+        remainingNanos(deadline);
         if (!resolverSlots.tryAcquire()) {
             throw new AiProviderException("OpenAI-compatible invocation failed during transport");
+        }
+        try {
+            remainingNanos(deadline);
+        } catch (AiProviderException exception) {
+            resolverSlots.release();
+            throw exception;
         }
         Future<InetAddress> resolution;
         try {

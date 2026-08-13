@@ -20,6 +20,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -43,14 +45,15 @@ class BedrockAnthropicAdapterTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        adapter = new BedrockAnthropicAdapter(bedrockClient, objectMapper);
+        adapter = new BedrockAnthropicAdapter(
+                bedrockClient, objectMapper, new AiProperties());
     }
 
     @Test
     void complete_buildsAnthropicRequestAndParsesResponse() throws Exception {
         assertEquals("bedrock", adapter.providerId());
         when(bedrockClient.invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
-                any(AiCredentials.class), anyString()))
+                any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "content": [
@@ -66,7 +69,7 @@ class BedrockAnthropicAdapterTest {
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(bedrockClient).invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
-                any(AiCredentials.class), bodyCaptor.capture());
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         assertEquals("bedrock-2023-05-31", body.path("anthropic_version").asString());
         assertEquals(64, body.path("max_tokens").asInt());
@@ -97,7 +100,7 @@ class BedrockAnthropicAdapterTest {
     @Test
     void complete_omitsBlankSystemPrompt() throws Exception {
         when(bedrockClient.invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
-                any(AiCredentials.class), anyString()))
+                any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "content": [{ "type": "text", "text": "Done" }],
@@ -110,7 +113,7 @@ class BedrockAnthropicAdapterTest {
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(bedrockClient).invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
-                any(AiCredentials.class), bodyCaptor.capture());
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
         assertFalse(objectMapper.readTree(bodyCaptor.getValue()).has("system"));
     }
 
@@ -119,7 +122,7 @@ class BedrockAnthropicAdapterTest {
         String modelId = "anthropic.claude-sonnet-4-5-20250929-v1:0";
         when(bedrockClient.invokeModel(
                 eq(BedrockRegion.US_EAST_1), eq(modelId),
-                any(AiCredentials.class), anyString()))
+                any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "content": [{ "type": "text", "text": "{}" }],
@@ -145,7 +148,7 @@ class BedrockAnthropicAdapterTest {
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(bedrockClient).invokeModel(
                 eq(BedrockRegion.US_EAST_1), eq(modelId),
-                any(AiCredentials.class), bodyCaptor.capture());
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
         JsonNode format = objectMapper.readTree(bodyCaptor.getValue())
                 .path("output_config").path("format");
         assertEquals("json_schema", format.path("type").asString());
@@ -159,7 +162,7 @@ class BedrockAnthropicAdapterTest {
         String modelId = "anthropic.claude-sonnet-4-5-20250929-v1:0";
         when(bedrockClient.invokeModel(
                 eq(BedrockRegion.US_EAST_1), eq(modelId),
-                any(AiCredentials.class), anyString()))
+                any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""
                         {
                           "content": [
@@ -190,7 +193,7 @@ class BedrockAnthropicAdapterTest {
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(bedrockClient).invokeModel(
                 eq(BedrockRegion.US_EAST_1), eq(modelId),
-                any(AiCredentials.class), bodyCaptor.capture());
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         assertEquals("enabled", body.path("thinking").path("type").asString());
         assertEquals(1_024, body.path("thinking").path("budget_tokens").asInt());
@@ -222,7 +225,7 @@ class BedrockAnthropicAdapterTest {
     @Test
     void complete_malformedResponseRaisesProviderException() {
         when(bedrockClient.invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
-                any(AiCredentials.class), anyString()))
+                any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("{}");
 
         assertThrows(AiProviderException.class, () -> adapter.complete(validRequest(null)));
