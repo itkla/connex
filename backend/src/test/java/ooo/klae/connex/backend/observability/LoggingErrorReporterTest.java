@@ -42,7 +42,7 @@ class LoggingErrorReporterTest {
             assertEquals("corridx", values.get("correlationId"));
             assertEquals(7, values.get("workspaceId"));
             assertEquals(9, values.get("userId"));
-            assertEquals("messageend", values.get("message"));
+            assertEquals("messageend", values.get("errorMessage"));
             assertEquals("line1\nline2\tline3", values.get("detail"));
             assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, values.get("path"));
         } finally {
@@ -71,10 +71,10 @@ class LoggingErrorReporterTest {
             Map<String, Object> keyed = keyValues(appender.list.getFirst());
 
             assertEquals(64, ((String) keyed.get("correlationId")).length());
-            assertEquals(1_000, ((String) keyed.get("message")).length());
+            assertEquals(1_000, ((String) keyed.get("errorMessage")).length());
             assertEquals(8_192, ((String) keyed.get("detail")).length());
             assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, keyed.get("path"));
-            assertFalse(((String) keyed.get("message")).endsWith("\uD83D"));
+            assertFalse(((String) keyed.get("errorMessage")).endsWith("\uD83D"));
             assertTrue(keyed.size() >= 7);
         } finally {
             logger.detachAppender(appender);

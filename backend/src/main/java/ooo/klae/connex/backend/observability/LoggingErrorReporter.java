@@ -12,6 +12,10 @@ import org.slf4j.spi.LoggingEventBuilder;
  * which is injection-safe only while the production encoder is structured JSON
  * ({@code logging.structured.format.console}) that escapes key-value payloads. Any replacement
  * reporter or plain-text pattern that renders these key-values must escape newlines itself.
+ *
+ * <p>Key-value names must avoid the reserved ECS top-level fields ({@code message},
+ * {@code @timestamp}, {@code log}, …): the structured JSON encoder writes those itself and
+ * throws on duplicates, which silently discards the whole error report.
  */
 public class LoggingErrorReporter implements ErrorReporter {
     private static final int MAX_CORRELATION_ID_LENGTH = 64;
@@ -26,7 +30,7 @@ public class LoggingErrorReporter implements ErrorReporter {
                 .addKeyValue("source", error.source().name())
                 .addKeyValue("workspaceId", error.workspaceId())
                 .addKeyValue("userId", error.userId())
-                .addKeyValue("message", sanitize(error.message(), MAX_MESSAGE_LENGTH, false))
+                .addKeyValue("errorMessage", sanitize(error.message(), MAX_MESSAGE_LENGTH, false))
                 .addKeyValue("detail", sanitize(error.detail(), MAX_DETAIL_LENGTH, true))
                 .addKeyValue("path", sanitize(error.path(), MAX_PATH_LENGTH, false));
         if (MDC.get(CorrelationIds.MDC_KEY) == null) {
