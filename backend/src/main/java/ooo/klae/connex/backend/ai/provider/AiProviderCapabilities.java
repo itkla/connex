@@ -6,15 +6,41 @@ import java.util.Objects;
 public record AiProviderCapabilities(
         AiStructuredOutputEnforcement structuredOutput,
         AiReasoningMode reasoning,
-        int contextWindowTokens) {
+        int contextWindowTokens,
+        AiToolCallingMode toolCalling,
+        AiReasoningMode nativeToolReasoning) {
     private static final int ESTIMATED_UTF8_BYTES_PER_TOKEN = 4;
 
     public AiProviderCapabilities {
         Objects.requireNonNull(structuredOutput, "structuredOutput");
         Objects.requireNonNull(reasoning, "reasoning");
+        Objects.requireNonNull(toolCalling, "toolCalling");
+        Objects.requireNonNull(nativeToolReasoning, "nativeToolReasoning");
         if (contextWindowTokens < 4_096) {
             throw new IllegalArgumentException("AI context window must contain at least 4096 tokens");
         }
+    }
+
+    /** Creates capabilities for an adapter without native function tools. */
+    public AiProviderCapabilities(
+            AiStructuredOutputEnforcement structuredOutput,
+            AiReasoningMode reasoning,
+            int contextWindowTokens) {
+        this(
+                structuredOutput,
+                reasoning,
+                contextWindowTokens,
+                AiToolCallingMode.NONE,
+                reasoning);
+    }
+
+    /** Creates capabilities whose native-tool reasoning matches the regular provider mode. */
+    public AiProviderCapabilities(
+            AiStructuredOutputEnforcement structuredOutput,
+            AiReasoningMode reasoning,
+            int contextWindowTokens,
+            AiToolCallingMode toolCalling) {
+        this(structuredOutput, reasoning, contextWindowTokens, toolCalling, reasoning);
     }
 
     /**

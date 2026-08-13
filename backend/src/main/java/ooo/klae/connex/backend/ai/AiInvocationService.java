@@ -32,7 +32,9 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
+import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptBlockedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
@@ -44,6 +46,10 @@ import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCall;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
@@ -52,6 +58,7 @@ import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -59,8 +66,9 @@ import tools.jackson.databind.node.ObjectNode;
  * Single outbound LLM invocation path for AI features. This service enforces feature gating,
  * provider credential resolution, final leak scanning, provider invocation, demasking, and
  * metadata-only append-only audit for every attempted or blocked call. Features may request either
- * a demasked text completion ({@link #complete}) or a demasked, type-bound structured completion
- * ({@link #completeStructured}); both route through the same audited core.
+ * a demasked text completion ({@link #complete}), a demasked type-bound structured completion
+ * ({@link #completeStructured}), or one native assistant-tool step; all route through the same
+ * audited core.
  */
 @Service
 @RequiredArgsConstructor
@@ -105,7 +113,9 @@ public class AiInvocationService {
         return new AiProviderCapabilities(
                 adapter.structuredOutputCapability(resolved.target()),
                 adapter.reasoningCapability(resolved.target()),
-                adapter.contextWindowTokens(resolved.target()));
+                adapter.contextWindowTokens(resolved.target()),
+                adapter.toolCallingCapability(resolved.target()),
+                adapter.nativeToolReasoningCapability(resolved.target()));
     }
 
     /**
@@ -119,9 +129,25 @@ public class AiInvocationService {
             MaskedPrompt prompt,
             AiResponseSchema responseSchema,
             AiReasoningMode reasoningMode) {
+        return serializedPromptBytes(prompt, responseSchema, reasoningMode, null);
+    }
+
+    /**
+     * Measures the provider-neutral envelope including native definitions and completed exchanges.
+     * @param prompt masked prompt whose fixed envelope is measured
+     * @param responseSchema structured response schema included in the envelope
+     * @param reasoningMode provider reasoning protocol included in the system prompt
+     * @param nativeTools optional native tool protocol state
+     * @return exact serialized UTF-8 byte count
+     */
+    public int serializedPromptBytes(
+            MaskedPrompt prompt,
+            AiResponseSchema responseSchema,
+            AiReasoningMode reasoningMode,
+            AiNativeToolRequest nativeTools) {
         Objects.requireNonNull(prompt, "prompt");
         Objects.requireNonNull(reasoningMode, "reasoningMode");
-        return serializeProviderInput(prompt, responseSchema, reasoningMode)
+        return serializeProviderInput(prompt, responseSchema, reasoningMode, nativeTools)
                 .getBytes(StandardCharsets.UTF_8).length;
     }
 
@@ -360,6 +386,55 @@ public class AiInvocationService {
                 Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard"), true);
     }
 
+    /**
+     * Completes one native function-tool step or one structured terminal answer through the same
+     * gate, masking, admission, budget, deadline, and audit boundary as every other model call.
+     * Malformed native calls fail honestly without executing or replaying provider content.
+     * @param invocation masked invocation request
+     * @param type terminal content type
+     * @param toolGuard raw synthetic tool-step guard
+     * @param contentGuard raw terminal-content guard
+     * @param responseSchema terminal-content response schema
+     * @param nativeTools static definitions and ephemeral completed exchanges
+     * @param admission active direct invocation admission
+     * @param providerAttemptGuard access check run immediately before each provider attempt
+     * @param <T> terminal content type
+     * @return validated native tool call, structured content attempt, or malformed call
+     */
+    public <T> AiNativeToolCompletion<T> completeNativeToolsRepairable(
+            AiInvocation invocation,
+            Class<T> type,
+            AiRawOutputGuard toolGuard,
+            AiRawOutputGuard contentGuard,
+            AiResponseSchema responseSchema,
+            AiNativeToolRequest nativeTools,
+            AiInvocationAdmissionService.DirectAdmission admission,
+            Runnable providerAttemptGuard) {
+        Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(toolGuard, "toolGuard");
+        Objects.requireNonNull(contentGuard, "contentGuard");
+        Objects.requireNonNull(responseSchema, "responseSchema");
+        Objects.requireNonNull(nativeTools, "nativeTools");
+        Objects.requireNonNull(admission, "admission");
+        Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard");
+        try (RawInvocation raw = invokeRaw(
+                invocation, AiOutputMode.JSON, responseSchema, nativeTools,
+                admission::commitInvocation, providerAttemptGuard)) {
+            AiCompletionResult result = raw.result();
+            if (result.toolCalls().isEmpty()) {
+                AiStructuredRepairAttempt<T> attempt = parseStructuredAttempt(
+                        raw, invocation, type, contentGuard, true);
+                return new AiNativeToolCompletion.Content<>(
+                        attempt,
+                        result.inputTokens(),
+                        result.outputTokens(),
+                        result.stopReason(),
+                        attempt.reasoning());
+            }
+            return parseNativeToolCall(raw, invocation, toolGuard, nativeTools);
+        }
+    }
+
     private <T> AiStructuredRepairAttempt<T> completeStructuredAttemptWithCommitment(
             AiInvocation invocation,
             Class<T> type,
@@ -375,55 +450,139 @@ public class AiInvocationService {
         try (RawInvocation raw = invokeRaw(
                 invocation, AiOutputMode.JSON, responseSchema,
                 invocationCommitment, providerAttemptGuard)) {
-            AiCompletionResult result = raw.result();
-            CompletionNormalizer.CapturedCompletion captured =
-                    CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
-            if ((captured.ambiguous() && captured.answer().isBlank())
-                    || CompletionNormalizer.containsReasoningTag(captured.answer())) {
-                return malformed(
-                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
-                        "reasoning_boundary", "", false, false);
-            }
-            String stripped = captured.answer();
-            ReasoningNormalization reasoning = captured.ambiguous()
-                    ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
-                    : normalizeReasoning(captured.reasoning(), invocation);
-            ObjectNode object = AiJson.extractObject(stripped, objectMapper);
-            if (object == null) {
-                return malformed(
-                        raw, invocation, result, truncationReason(result.stopReason()),
-                        "json_object_missing", stripped, false, captureRepair);
-            }
-            String rejectionReason = guard.rejectionReason(object);
-            if (rejectionReason != null) {
-                return malformed(
-                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
-                        rejectionReason, stripped, true, captureRepair);
-            }
-            int warnings = Demasker.demaskTree(object, invocation.context());
-            T value;
-            try {
-                value = objectMapper.treeToValue(object, type);
-            } catch (JacksonException | IllegalArgumentException exception) {
-                return malformed(
-                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
-                        "binding_failed", stripped, true, captureRepair);
-            }
-            if (value == null) {
-                return malformed(
-                        raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
-                        "binding_failed", stripped, true, captureRepair);
-            }
-            raw.close();
-            emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
-                    result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
-            return new AiStructuredRepairAttempt<>(
-                    new AiStructuredOutcome.Parsed<>(value, warnings,
-                            result.inputTokens(), result.outputTokens(), result.stopReason()),
-                    Optional.empty(), reasoning.rejectionReason() == null
-                            ? reasoning.content()
-                            : Optional.empty());
+            return parseStructuredAttempt(raw, invocation, type, guard, captureRepair);
         }
+    }
+
+    private <T> AiStructuredRepairAttempt<T> parseStructuredAttempt(
+            RawInvocation raw,
+            AiInvocation invocation,
+            Class<T> type,
+            AiRawOutputGuard guard,
+            boolean captureRepair) {
+        AiCompletionResult result = raw.result();
+        if (!result.toolCalls().isEmpty()) {
+            return malformed(
+                    raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                    "unexpected_tool_call", "", false, false);
+        }
+        CompletionNormalizer.CapturedCompletion captured =
+                CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
+        if ((captured.ambiguous() && captured.answer().isBlank())
+                || CompletionNormalizer.containsReasoningTag(captured.answer())) {
+            return malformed(
+                    raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                    "reasoning_boundary", "", false, false);
+        }
+        String stripped = captured.answer();
+        ReasoningNormalization reasoning = captured.ambiguous()
+                ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
+                : normalizeReasoning(captured.reasoning(), invocation);
+        ObjectNode object = AiJson.extractObject(stripped, objectMapper);
+        if (object == null) {
+            return malformed(
+                    raw, invocation, result, truncationReason(result.stopReason()),
+                    "json_object_missing", stripped, false, captureRepair);
+        }
+        String rejectionReason = guard.rejectionReason(object);
+        if (rejectionReason != null) {
+            return malformed(
+                    raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                    rejectionReason, stripped, true, captureRepair);
+        }
+        int warnings = Demasker.demaskTree(object, invocation.context());
+        T value;
+        try {
+            value = objectMapper.treeToValue(object, type);
+        } catch (JacksonException | IllegalArgumentException exception) {
+            return malformed(
+                    raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                    "binding_failed", stripped, true, captureRepair);
+        }
+        if (value == null) {
+            return malformed(
+                    raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
+                    "binding_failed", stripped, true, captureRepair);
+        }
+        raw.close();
+        emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
+                result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
+        return new AiStructuredRepairAttempt<>(
+                new AiStructuredOutcome.Parsed<>(value, warnings,
+                        result.inputTokens(), result.outputTokens(), result.stopReason()),
+                Optional.empty(), reasoning.rejectionReason() == null
+                        ? reasoning.content()
+                        : Optional.empty());
+    }
+
+    private <T> AiNativeToolCompletion<T> parseNativeToolCall(
+            RawInvocation raw,
+            AiInvocation invocation,
+            AiRawOutputGuard toolGuard,
+            AiNativeToolRequest nativeTools) {
+        AiCompletionResult result = raw.result();
+        CompletionNormalizer.CapturedCompletion captured =
+                CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
+        ReasoningNormalization reasoning = captured.ambiguous()
+                ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
+                : normalizeReasoning(captured.reasoning(), invocation);
+        if (result.toolCalls().size() != 1
+                || captured.ambiguous()
+                || !captured.answer().isBlank()
+                || CompletionNormalizer.containsReasoningTag(captured.answer())) {
+            return malformedNativeTool(raw, invocation, result, reasoning);
+        }
+        AiToolCall call = result.toolCalls().getFirst();
+        if (nativeTools.exchanges().stream()
+                .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
+            return malformedNativeTool(raw, invocation, result, reasoning);
+        }
+        JsonNode arguments;
+        try {
+            arguments = objectMapper.readTree(call.arguments());
+        } catch (JacksonException | IllegalArgumentException exception) {
+            return malformedNativeTool(raw, invocation, result, reasoning);
+        }
+        if (arguments == null || !arguments.isObject()) {
+            return malformedNativeTool(raw, invocation, result, reasoning);
+        }
+        ObjectNode step = objectMapper.createObjectNode();
+        ObjectNode tool = step.putObject("tool");
+        tool.put("name", call.name());
+        tool.set("args", arguments);
+        step.putNull("final");
+        if (toolGuard.rejectionReason(step) != null) {
+            return malformedNativeTool(raw, invocation, result, reasoning);
+        }
+        int warnings = Demasker.demaskTree(arguments, invocation.context());
+        raw.close();
+        emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
+                result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
+        return new AiNativeToolCompletion.Tool<>(
+                call,
+                arguments,
+                warnings,
+                result.inputTokens(),
+                result.outputTokens(),
+                result.stopReason(),
+                reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty());
+    }
+
+    private <T> AiNativeToolCompletion<T> malformedNativeTool(
+            RawInvocation raw,
+            AiInvocation invocation,
+            AiCompletionResult result,
+            ReasoningNormalization reasoning) {
+        raw.close();
+        emitAudit(
+                raw, invocation, "success", result.inputTokens(), result.outputTokens(),
+                result.stopReason(), null, null, true, AiStructuredOutcome.REASON_MALFORMED,
+                new MalformedDiagnostic("native_tool_call", result.text().length(), false));
+        return new AiNativeToolCompletion.Malformed<>(
+                result.inputTokens(),
+                result.outputTokens(),
+                result.stopReason(),
+                reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty());
     }
 
     private <T> AiStructuredRepairAttempt<T> malformed(
@@ -455,6 +614,18 @@ public class AiInvocationService {
             AiResponseSchema responseSchema,
             Runnable invocationCommitment,
             Runnable providerAttemptGuard) {
+        return invokeRaw(
+                invocation, outputMode, responseSchema, null,
+                invocationCommitment, providerAttemptGuard);
+    }
+
+    private RawInvocation invokeRaw(
+            AiInvocation invocation,
+            AiOutputMode outputMode,
+            AiResponseSchema responseSchema,
+            AiNativeToolRequest nativeTools,
+            Runnable invocationCommitment,
+            Runnable providerAttemptGuard) {
         Objects.requireNonNull(invocation, "invocation");
         Objects.requireNonNull(outputMode, "outputMode");
         Objects.requireNonNull(invocationCommitment, "invocationCommitment");
@@ -474,7 +645,7 @@ public class AiInvocationService {
         }
 
         return invokeAdmitted(
-                invocation, outputMode, responseSchema,
+                invocation, outputMode, responseSchema, nativeTools,
                 workspaceId, orgId, userId, correlationId,
                 invocationCommitment, providerAttemptGuard);
     }
@@ -498,6 +669,7 @@ public class AiInvocationService {
             AiInvocation invocation,
             AiOutputMode outputMode,
             AiResponseSchema responseSchema,
+            AiNativeToolRequest nativeTools,
             int workspaceId,
             int orgId,
             int userId,
@@ -522,14 +694,23 @@ public class AiInvocationService {
         }
 
         AiProvider adapter = aiProviderRouter.adapterFor(resolved.provider());
+        if (nativeTools != null
+                && adapter.toolCallingCapability(resolved.target())
+                        != AiToolCallingMode.NATIVE_FUNCTIONS) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "provider_capability", structured, null);
+            throw new AiProviderException("AI provider does not support native function tools");
+        }
         AiReasoningMode reasoningMode = invocation.reasoningRequested()
-                ? adapter.reasoningCapability(resolved.target())
+                ? nativeTools == null
+                        ? adapter.reasoningCapability(resolved.target())
+                        : adapter.nativeToolReasoningCapability(resolved.target())
                 : AiReasoningMode.NONE;
 
         String serializedPrompt;
         try {
             serializedPrompt = serializeProviderInput(
-                    invocation.prompt(), responseSchema, reasoningMode);
+                    invocation.prompt(), responseSchema, reasoningMode, nativeTools);
         } catch (AiProviderException exception) {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null);
@@ -579,7 +760,7 @@ public class AiInvocationService {
                         workspaceId, orgId, correlationId, invocation, structured));
             }
             AiCompletionResult result = withConservativeUsage(adapter.complete(request(
-                    resolved, invocation, outputMode, responseSchema,
+                    resolved, invocation, outputMode, responseSchema, nativeTools,
                     reasoningMode, attemptTracker)), invocation, serializedPrompt);
             attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());
             return new RawInvocation(
@@ -642,7 +823,8 @@ public class AiInvocationService {
                 result.stopReason(),
                 result.structuredOutputEnforcement(),
                 result.reasoning(),
-                result.reasoningMode());
+                result.reasoningMode(),
+                result.toolCalls());
     }
 
     private static String truncationReason(String stopReason) {
@@ -661,6 +843,7 @@ public class AiInvocationService {
             AiInvocation invocation,
             AiOutputMode outputMode,
             AiResponseSchema responseSchema,
+            AiNativeToolRequest nativeTools,
             AiReasoningMode reasoningMode,
             AiProviderAttemptExecutor providerAttemptExecutor) {
         List<AiMessage> messages = invocation.prompt().getMessages().stream()
@@ -668,7 +851,7 @@ public class AiInvocationService {
                 .toList();
         return new AiCompletionRequest(
                 resolved.target(), resolved.credentials(), systemPrompt(invocation.prompt(), reasoningMode),
-                messages, invocation.images(), outputMode, responseSchema, reasoningMode,
+                messages, invocation.images(), outputMode, responseSchema, nativeTools, reasoningMode,
                 providerAttemptExecutor, invocation.maxTokens(), invocation.temperature());
     }
 
@@ -706,7 +889,8 @@ public class AiInvocationService {
     private String serializeProviderInput(
             MaskedPrompt prompt,
             AiResponseSchema responseSchema,
-            AiReasoningMode reasoningMode) {
+            AiReasoningMode reasoningMode,
+            AiNativeToolRequest nativeTools) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("system", systemPrompt(prompt, reasoningMode));
         payload.put("messages", prompt.getMessages().stream()
@@ -714,6 +898,17 @@ public class AiInvocationService {
                 .toList());
         if (responseSchema != null) {
             payload.put("responseSchema", responseSchema.schema());
+        }
+        if (nativeTools != null) {
+            payload.put("tools", nativeTools.definitions().stream()
+                    .map(AiInvocationService::toolDefinitionPayload)
+                    .toList());
+            payload.put("toolExchanges", nativeTools.exchanges().stream()
+                    .map(AiInvocationService::toolExchangePayload)
+                    .toList());
+            if (nativeTools.repairMessage() != null) {
+                payload.put("repairMessage", nativeTools.repairMessage());
+            }
         }
         try {
             return objectMapper.writeValueAsString(payload);
@@ -732,6 +927,25 @@ public class AiInvocationService {
         Map<String, String> payload = new LinkedHashMap<>();
         payload.put("role", message.getRole());
         payload.put("content", message.getContent());
+        return payload;
+    }
+
+    private static Map<String, Object> toolDefinitionPayload(AiToolDefinition definition) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("name", definition.name());
+        payload.put("description", definition.description());
+        payload.put("parameters", definition.parametersSchema());
+        return payload;
+    }
+
+    private static Map<String, Object> toolExchangePayload(AiToolExchange exchange) {
+        Map<String, Object> call = new LinkedHashMap<>();
+        call.put("id", exchange.call().id());
+        call.put("name", exchange.call().name());
+        call.put("arguments", exchange.call().arguments());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("call", call);
+        payload.put("result", exchange.maskedResult());
         return payload;
     }
 
@@ -783,6 +997,9 @@ public class AiInvocationService {
         }
         metadata.put("structured", structured);
         metadata.put("reasoningRequested", invocation.reasoningRequested());
+        metadata.put(
+                "protocol",
+                invocation.protocol().name().toLowerCase(java.util.Locale.ROOT));
         if (structured && enforcement != null) {
             metadata.put("structuredEnforcement", enforcement.name().toLowerCase(java.util.Locale.ROOT));
         }
@@ -971,6 +1188,13 @@ public class AiInvocationService {
             if (!resolved.equals(current)) {
                 throw new AiProviderException(
                         "AI provider configuration changed before egress");
+            }
+            if (invocation.protocol() == AiInvocationProtocol.NATIVE_TOOLS
+                    && aiProviderRouter.adapterFor(current.provider())
+                            .toolCallingCapability(current.target())
+                            != AiToolCallingMode.NATIVE_FUNCTIONS) {
+                throw new AiProviderException(
+                        "AI provider native function capability changed before egress");
             }
         }
 

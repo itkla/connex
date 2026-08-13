@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.ai.provider.openai;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
 
@@ -12,6 +14,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -19,6 +22,10 @@ import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCall;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -56,6 +63,11 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     }
 
     @Override
+    public AiReasoningMode nativeToolReasoningCapability(AiProviderTarget target) {
+        return AiReasoningMode.NATIVE;
+    }
+
+    @Override
     public int contextWindowTokens(AiProviderTarget target) {
         if (target != null && target.modelId() != null) {
             String modelId = unqualifiedModelId(
@@ -68,6 +80,11 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             }
         }
         return 32_768;
+    }
+
+    @Override
+    public AiToolCallingMode toolCallingCapability(AiProviderTarget target) {
+        return AiToolCallingMode.NATIVE_FUNCTIONS;
     }
 
     private static boolean isLargeGemmaThree(String modelId) {
@@ -180,6 +197,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 node.put("content", message.content());
             }
         }
+        addNativeHistory(messages, request.nativeTools());
         if (imagesPending) {
             throw new AiProviderException("AI images require a user message");
         }
@@ -190,12 +208,61 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             root.put("temperature", request.temperature());
         }
         addResponseFormat(root, request, enforcement);
+        addNativeTools(root, request.nativeTools());
         return objectMapper.writeValueAsString(root);
+    }
+
+    private static void addNativeHistory(
+            ArrayNode messages,
+            AiNativeToolRequest nativeTools) {
+        if (nativeTools == null) {
+            return;
+        }
+        for (AiToolExchange exchange : nativeTools.exchanges()) {
+            ObjectNode assistant = messages.addObject();
+            assistant.put("role", "assistant");
+            assistant.putNull("content");
+            ObjectNode call = assistant.putArray("tool_calls").addObject();
+            call.put("id", exchange.call().id());
+            call.put("type", "function");
+            ObjectNode function = call.putObject("function");
+            function.put("name", exchange.call().name());
+            function.put("arguments", exchange.call().arguments());
+            ObjectNode tool = messages.addObject();
+            tool.put("role", "tool");
+            tool.put("tool_call_id", exchange.call().id());
+            tool.put("content", exchange.maskedResult());
+        }
+        if (nativeTools.repairMessage() != null) {
+            ObjectNode repair = messages.addObject();
+            repair.put("role", "user");
+            repair.put("content", nativeTools.repairMessage());
+        }
+    }
+
+    private static void addNativeTools(
+            ObjectNode root,
+            AiNativeToolRequest nativeTools) {
+        if (nativeTools == null) {
+            return;
+        }
+        ArrayNode tools = root.putArray("tools");
+        for (AiToolDefinition definition : nativeTools.definitions()) {
+            ObjectNode tool = tools.addObject();
+            tool.put("type", "function");
+            ObjectNode function = tool.putObject("function");
+            function.put("name", definition.name());
+            function.put("description", definition.description());
+            function.put("strict", true);
+            function.set("parameters", definition.parametersSchema());
+        }
+        root.put("tool_choice", "auto");
+        root.put("parallel_tool_calls", false);
     }
 
     private static AiStructuredOutputEnforcement requestedEnforcement(
             AiCompletionRequest request) {
-        if (request.reasoningMode() != AiReasoningMode.NONE) {
+        if (request.reasoningMode() == AiReasoningMode.TAGGED) {
             return AiStructuredOutputEnforcement.PROMPT_ONLY;
         }
         if (request.outputMode() != AiOutputMode.JSON) {
@@ -252,7 +319,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             if (!message.isObject()) {
                 throw invalidResponse();
             }
-            String text = readRequiredText(message.path("content"));
+            List<AiToolCall> toolCalls = readToolCalls(message.get("tool_calls"));
+            String text = readContent(message.get("content"), !toolCalls.isEmpty());
             int inputTokens = 0;
             int outputTokens = 0;
             JsonNode usage = root.path("usage");
@@ -268,14 +336,80 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 }
             }
             String stopReason = readRequiredText(choice.path("finish_reason"));
+            if ((!toolCalls.isEmpty() && !"tool_calls".equals(stopReason))
+                    || (toolCalls.isEmpty() && "tool_calls".equals(stopReason))) {
+                throw invalidResponse();
+            }
             return new AiCompletionResult(
                     text, inputTokens, outputTokens, stopReason, enforcement,
-                    "", reasoningMode);
+                    readReasoning(message), reasoningMode, toolCalls);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
             throw invalidResponse();
         }
+    }
+
+    private static List<AiToolCall> readToolCalls(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            throw invalidResponse();
+        }
+        if (node.isEmpty()) {
+            return List.of();
+        }
+        List<AiToolCall> calls = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (!item.isObject() || !"function".equals(readRequiredText(item.path("type")))) {
+                throw invalidResponse();
+            }
+            JsonNode function = item.path("function");
+            if (!function.isObject()) {
+                throw invalidResponse();
+            }
+            try {
+                calls.add(new AiToolCall(
+                        readRequiredText(item.path("id")),
+                        readRequiredText(function.path("name")),
+                        readRequiredText(function.path("arguments"))));
+            } catch (IllegalArgumentException exception) {
+                throw invalidResponse();
+            }
+        }
+        return List.copyOf(calls);
+    }
+
+    private static String readContent(JsonNode node, boolean toolCallPresent) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            if (toolCallPresent) {
+                return "";
+            }
+            throw invalidResponse();
+        }
+        if (!node.isString()) {
+            throw invalidResponse();
+        }
+        String content = node.asString();
+        if (content.isEmpty() && !toolCallPresent) {
+            throw invalidResponse();
+        }
+        return content;
+    }
+
+    private static String readReasoning(JsonNode message) {
+        JsonNode reasoningContent = message.get("reasoning_content");
+        JsonNode reasoning = reasoningContent == null || reasoningContent.isNull()
+                ? message.get("reasoning")
+                : reasoningContent;
+        if (reasoning == null || reasoning.isMissingNode() || reasoning.isNull()) {
+            return "";
+        }
+        if (!reasoning.isString()) {
+            throw invalidResponse();
+        }
+        return reasoning.asString();
     }
 
     private static void requireBaseEndpoint(URI endpoint, boolean allowInternalEndpoint) {

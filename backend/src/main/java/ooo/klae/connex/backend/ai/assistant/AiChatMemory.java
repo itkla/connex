@@ -10,7 +10,17 @@ public record AiChatMemory(
         List<AiChatMessage> history,
         AiAssistantPromptBudget budget,
         int inputTokens,
-        int outputTokens) {
+        int outputTokens,
+        boolean nativeTools) {
+
+    /** Creates memory for the unchanged JSON-ReAct provider path. */
+    public AiChatMemory(
+            List<AiChatMessage> history,
+            AiAssistantPromptBudget budget,
+            int inputTokens,
+            int outputTokens) {
+        this(history, budget, inputTokens, outputTokens, false);
+    }
 
     public AiChatMemory {
         history = List.copyOf(Objects.requireNonNull(history, "history"));

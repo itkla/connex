@@ -101,6 +101,70 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
+    void nativeAndJsonReactToolResultsUseIdenticalMaskedDataBlocks() {
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of(
+                        "handle", "r1",
+                        "name", "Ada Lovelace",
+                        "email", "ada@example.com"),
+                List.of(new Identifier("person", "Ada Lovelace")));
+        List<ToolTurn> turns = List.of(new ToolTurn(1, "get_record", toolResult));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 4_096, 12_000);
+        MaskedPrompt jsonReact = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                turns,
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null);
+
+        String nativeResult = assembler.nativeReplay(
+                turns, new MaskingContext(), budget, null).toolResults().getFirst();
+        String jsonReactResult = jsonReact.getMessages().getLast().getContent();
+
+        assertEquals(jsonReactResult, nativeResult);
+        assertFalse(nativeResult.contains("Ada Lovelace"));
+        assertFalse(nativeResult.contains("ada@example.com"));
+        assertTrue(nativeResult.contains("{{P1}}"));
+        assertTrue(nativeResult.startsWith("CRM_DATA_BEGIN"));
+    }
+
+    @Test
+    void nativeReplayMasksShortPageIdentifiersRepeatedOnlyInToolFreeText() {
+        AiAssistantToolResult pageContext = new AiAssistantToolResult(
+                Map.of("records", List.of(Map.of(
+                        "handle", "r1", "kind", "person", "name", "Li"))),
+                List.of(new Identifier("person", "Li")));
+        List<ToolTurn> turns = List.of(new ToolTurn(
+                1,
+                "list_activities",
+                new AiAssistantToolResult(
+                        Map.of("activities", List.of(Map.of(
+                                "subject", "Call Li tomorrow"))),
+                        List.of())));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 4_096, 12_000);
+        MaskingContext context = new MaskingContext();
+
+        assembler.assembleNative(
+                List.of(),
+                pageContext,
+                turns,
+                context,
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget);
+        String nativeResult = assembler.nativeReplay(
+                turns, context, budget, null).toolResults().getFirst();
+
+        assertFalse(nativeResult.contains("Li"));
+        assertTrue(nativeResult.contains("Call {{P1}} tomorrow"));
+    }
+
+    @Test
     void attachmentTextIsDelimitedMaskedAndScreenedBeforeProviderUse() throws Exception {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");

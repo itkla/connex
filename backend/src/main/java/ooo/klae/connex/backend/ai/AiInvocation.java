@@ -7,6 +7,7 @@ import java.util.Objects;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
+import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 
 /**
  * Request to the AI invocation choke point. The prompt and context are redacted from
@@ -20,6 +21,7 @@ import ooo.klae.connex.backend.ai.provider.AiInputImage;
  * @param temperature provider sampling temperature
  * @param reasoningRequested whether the feature requests display-only model reasoning
  * @param callerDeadline absolute caller-owned deadline, or {@code null} for the provider default
+ * @param protocol metadata-only provider protocol diagnostic
  */
 public record AiInvocation(
         AiFeature feature,
@@ -29,7 +31,8 @@ public record AiInvocation(
         int maxTokens,
         double temperature,
         boolean reasoningRequested,
-        Instant callerDeadline) {
+        Instant callerDeadline,
+        AiInvocationProtocol protocol) {
 
     public AiInvocation(
             AiFeature feature,
@@ -37,7 +40,8 @@ public record AiInvocation(
             MaskedPrompt prompt,
             int maxTokens,
             double temperature) {
-        this(feature, context, prompt, List.of(), maxTokens, temperature, false, null);
+        this(feature, context, prompt, List.of(), maxTokens, temperature, false, null,
+                AiInvocationProtocol.STANDARD);
     }
 
     public AiInvocation(
@@ -47,7 +51,8 @@ public record AiInvocation(
             int maxTokens,
             double temperature,
             boolean reasoningRequested) {
-        this(feature, context, prompt, List.of(), maxTokens, temperature, reasoningRequested, null);
+        this(feature, context, prompt, List.of(), maxTokens, temperature, reasoningRequested, null,
+                AiInvocationProtocol.STANDARD);
     }
 
     public AiInvocation(
@@ -59,7 +64,7 @@ public record AiInvocation(
             boolean reasoningRequested,
             Instant callerDeadline) {
         this(feature, context, prompt, List.of(), maxTokens, temperature,
-                reasoningRequested, callerDeadline);
+                reasoningRequested, callerDeadline, AiInvocationProtocol.STANDARD);
     }
 
     public AiInvocation(
@@ -69,7 +74,8 @@ public record AiInvocation(
             List<AiInputImage> images,
             int maxTokens,
             double temperature) {
-        this(feature, context, prompt, images, maxTokens, temperature, false, null);
+        this(feature, context, prompt, images, maxTokens, temperature, false, null,
+                AiInvocationProtocol.STANDARD);
     }
 
     public AiInvocation(
@@ -81,13 +87,27 @@ public record AiInvocation(
             double temperature,
             boolean reasoningRequested) {
         this(feature, context, prompt, images, maxTokens, temperature,
-                reasoningRequested, null);
+                reasoningRequested, null, AiInvocationProtocol.STANDARD);
+    }
+
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            List<AiInputImage> images,
+            int maxTokens,
+            double temperature,
+            boolean reasoningRequested,
+            Instant callerDeadline) {
+        this(feature, context, prompt, images, maxTokens, temperature,
+                reasoningRequested, callerDeadline, AiInvocationProtocol.STANDARD);
     }
 
     public AiInvocation {
         Objects.requireNonNull(feature, "feature");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(prompt, "prompt");
+        Objects.requireNonNull(protocol, "protocol");
         images = List.copyOf(Objects.requireNonNull(images, "images"));
         if (images.size() > 1) {
             throw new IllegalArgumentException("AI invocation accepts at most one image");
@@ -112,6 +132,7 @@ public record AiInvocation(
                 + ", images=<redacted>"
                 + ", maxTokens=" + maxTokens
                 + ", temperature=" + temperature
-                + ", reasoningRequested=" + reasoningRequested + "]";
+                + ", reasoningRequested=" + reasoningRequested
+                + ", protocol=" + protocol + "]";
     }
 }

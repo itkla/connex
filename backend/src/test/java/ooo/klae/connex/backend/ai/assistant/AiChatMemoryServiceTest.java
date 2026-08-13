@@ -38,9 +38,11 @@ import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import tools.jackson.databind.json.JsonMapper;
@@ -194,6 +196,7 @@ class AiChatMemoryServiceTest {
         assertEquals(List.of(storedSummary, recent, initiating), memory.history());
         assertEquals(42, memory.inputTokens());
         assertEquals(16, memory.outputTokens());
+        assertFalse(memory.nativeTools());
         ArgumentCaptor<String> persistedMetadata = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).upsertHistorySummary(
                 same(turn), isNull(), eq(0), anyString(), persistedMetadata.capture(), eq(19), eq(7));
@@ -212,6 +215,68 @@ class AiChatMemoryServiceTest {
                 null);
         assertFalse(promptText(replay).contains("quarterly planning"));
         assertTrue(promptText(replay).contains("{{P1}}"));
+    }
+
+    @Test
+    void nativeProviderCapabilitySelectsTheNativeFixedEnvelope() {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiAssistantIdentifierResolver identifierResolver = mock(AiAssistantIdentifierResolver.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(8_192);
+        var objectMapper = JsonMapper.builder().build();
+        var catalog = new AiAssistantToolCatalog();
+        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService,
+                mock(AiInvocationAdmissionService.class),
+                properties,
+                identifierResolver,
+                assembler,
+                mock(AiAssistantToolExecutor.class),
+                new AiAssistantSummaryGuard(),
+                new AiAssistantSummarySchema(objectMapper),
+                stepSchema,
+                persistenceService,
+                mock(AiWorkspaceGovernanceService.class),
+                objectMapper,
+                Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+        AiChatMessage initiating = message(104, 4, "user", "Summarize the pipeline");
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        32_768,
+                        AiToolCallingMode.NATIVE_FUNCTIONS,
+                        AiReasoningMode.NATIVE));
+        when(invocationService.serializedPromptBytes(
+                any(MaskedPrompt.class),
+                same(stepSchema.finalResponseSchema()),
+                eq(AiReasoningMode.NATIVE),
+                any(AiNativeToolRequest.class)))
+                .thenReturn(8_192);
+        when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+
+        AiChatMemory memory = service.prepare(
+                turn, new MaskingContext(), now.plusSeconds(70));
+
+        assertTrue(memory.nativeTools());
+        ArgumentCaptor<AiNativeToolRequest> nativeTools =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService).serializedPromptBytes(
+                any(MaskedPrompt.class),
+                same(stepSchema.finalResponseSchema()),
+                eq(AiReasoningMode.NATIVE),
+                nativeTools.capture());
+        assertEquals(12, nativeTools.getValue().definitions().size());
+        verify(invocationService, never()).serializedPromptBytes(
+                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                eq(AiReasoningMode.TAGGED));
     }
 
     @Test

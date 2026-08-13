@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -59,6 +60,7 @@ class AzureOpenAiAdapterTest {
     @Test
     void providerId_registersAzureOpenAiAdapter() {
         assertEquals("azure_openai", adapter.providerId());
+        assertEquals(AiToolCallingMode.NONE, adapter.toolCallingCapability(null));
     }
 
     @Test

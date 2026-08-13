@@ -13,8 +13,10 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 public class AiAssistantStepSchema {
     private static final String SCHEMA_NAME = "ask_connex_step";
+    private static final String FINAL_SCHEMA_NAME = "ask_connex_final";
 
     private final AiResponseSchema responseSchema;
+    private final AiResponseSchema finalResponseSchema;
 
     public AiAssistantStepSchema(
             ObjectMapper objectMapper,
@@ -27,11 +29,18 @@ public class AiAssistantStepSchema {
         root.putArray("required").add("tool").add("final");
         root.put("additionalProperties", false);
         responseSchema = new AiResponseSchema(SCHEMA_NAME, root);
+        finalResponseSchema = new AiResponseSchema(
+                FINAL_SCHEMA_NAME, finalAnswerObjectSchema(objectMapper));
     }
 
     /** @return immutable provider-neutral assistant step schema */
     public AiResponseSchema responseSchema() {
         return responseSchema;
+    }
+
+    /** @return strict terminal-answer schema used alongside native provider tools */
+    public AiResponseSchema finalResponseSchema() {
+        return finalResponseSchema;
     }
 
     private static ObjectNode toolSchema(

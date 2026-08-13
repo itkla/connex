@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
@@ -61,6 +62,8 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
+import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
+import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
@@ -71,6 +74,10 @@ import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCall;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -162,6 +169,10 @@ class AiInvocationServiceTest {
         when(aiProvider.reasoningCapability(resolved.target()))
                 .thenReturn(AiReasoningMode.NATIVE);
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(200_000);
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.nativeToolReasoningCapability(resolved.target()))
+                .thenReturn(AiReasoningMode.NATIVE);
 
         AiProviderCapabilities capabilities =
                 service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT);
@@ -169,6 +180,175 @@ class AiInvocationServiceTest {
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY, capabilities.structuredOutput());
         assertEquals(AiReasoningMode.NATIVE, capabilities.reasoning());
         assertEquals(200_000, capabilities.contextWindowTokens());
+        assertEquals(AiToolCallingMode.NATIVE_FUNCTIONS, capabilities.toolCalling());
+        assertEquals(AiReasoningMode.NATIVE, capabilities.nativeToolReasoning());
+        verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void completeNativeToolsValidatesMaskedArgumentsAndRecordsProtocol() throws Exception {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        AiInvocation invocation = nativeInvocation("Find the relationship");
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                catalog.nativeDefinitions(new ObjectMapper()), List.of());
+        providerReturns(new AiCompletionResult(
+                "",
+                12,
+                7,
+                "tool_calls",
+                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall(
+                        "call_1",
+                        "search_records",
+                        "{\"query\":\"{{P1}}\",\"kinds\":[\"person\"]}"))));
+
+        AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion =
+                service.completeNativeToolsRepairable(
+                        invocation,
+                        AiAssistantStep.FinalAnswer.class,
+                        guard.forIssuedPlaceholders(Set.of("{{P1}}")),
+                        guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
+                        schema.finalResponseSchema(),
+                        nativeTools,
+                        directAdmission,
+                        providerAttemptGuard);
+
+        AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool =
+                assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
+        assertEquals("Mina Patel", tool.arguments().path("query").asString());
+        assertEquals("{{P1}}", new ObjectMapper().readTree(
+                tool.providerCall().arguments()).path("query").asString());
+        assertEquals(0, tool.demaskWarnings());
+        ArgumentCaptor<AiCompletionRequest> request =
+                ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(request.capture());
+        assertSame(nativeTools, request.getValue().nativeTools());
+        assertEquals("native_tools", auditMetadata().get(1).get("protocol"));
+    }
+
+    @Test
+    void malformedNativeArgumentsFailClosedWithoutContentOrRepair() throws Exception {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        AiInvocation invocation = nativeInvocation("Find the relationship");
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        providerReturns(new AiCompletionResult(
+                "",
+                12,
+                7,
+                "tool_calls",
+                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall(
+                        "call_1", "search_records", "{\"query\":7}"))));
+
+        AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion =
+                service.completeNativeToolsRepairable(
+                        invocation,
+                        AiAssistantStep.FinalAnswer.class,
+                        guard.forIssuedPlaceholders(Set.of("{{P1}}")),
+                        guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
+                        schema.finalResponseSchema(),
+                        new AiNativeToolRequest(
+                                catalog.nativeDefinitions(new ObjectMapper()), List.of()),
+                        directAdmission,
+                        providerAttemptGuard);
+
+        assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals("native_tool_call", terminal.get("schemaRule"));
+        assertEquals("malformed_output", terminal.get("parseOutcome"));
+        assertNoContent(terminal);
+    }
+
+    @Test
+    void nativeToolCapabilityIsEnforcedBeforeEgress() throws Exception {
+        AiInvocation invocation = nativeInvocation("Find the relationship");
+        AiToolDefinition definition = new AiToolDefinition(
+                "get_record",
+                "Load one visible record.",
+                new ObjectMapper().readTree(
+                        "{\"type\":\"object\",\"properties\":{},"
+                                + "\"required\":[],\"additionalProperties\":false}"));
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                List.of(definition),
+                List.of(new AiToolExchange(
+                        new AiToolCall("call_1", "get_record", "{}"),
+                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END")));
+        AiResponseSchema schema = new AiResponseSchema(
+                "answer", new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        AiProviderException unsupported = assertThrows(
+                AiProviderException.class,
+                () -> service.completeNativeToolsRepairable(
+                        invocation,
+                        AiAssistantStep.FinalAnswer.class,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        schema,
+                        nativeTools,
+                        directAdmission,
+                        providerAttemptGuard));
+
+        assertEquals("AI provider does not support native function tools",
+                unsupported.getMessage());
+        assertEquals("provider_capability", singleAuditMetadata().get("reason"));
+        verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void nativeFullEnvelopeCountsAgainstOrganizationBudgetBeforeEgress() throws Exception {
+        AiInvocation invocation = nativeInvocation("Find the relationship");
+        AiToolDefinition definition = new AiToolDefinition(
+                "get_record",
+                "Load one visible record.",
+                new ObjectMapper().readTree(
+                        "{\"type\":\"object\",\"properties\":{},"
+                                + "\"required\":[],\"additionalProperties\":false}"));
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                List.of(definition),
+                List.of(new AiToolExchange(
+                        new AiToolCall("call_1", "get_record", "{}"),
+                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END")));
+        AiResponseSchema schema = new AiResponseSchema(
+                "answer", new ObjectMapper().readTree("{\"type\":\"object\"}"));
+
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(budgetCoordinator.reserve(
+                eq(ORG_ID), any(AiInvocation.class), anyString()))
+                .thenThrow(new AiBudgetExhaustedException());
+
+        assertThrows(
+                AiBudgetExhaustedException.class,
+                () -> service.completeNativeToolsRepairable(
+                        invocation,
+                        AiAssistantStep.FinalAnswer.class,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        AiRawOutputGuard.PERMIT_ALL,
+                        schema,
+                        nativeTools,
+                        directAdmission,
+                        providerAttemptGuard));
+
+        ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+        verify(budgetCoordinator).reserve(
+                eq(ORG_ID), same(invocation), serialized.capture());
+        assertTrue(serialized.getValue().contains("\"tools\""));
+        assertTrue(serialized.getValue().contains("get_record"));
+        assertTrue(serialized.getValue().contains("MASKED_NATIVE_TOOL_RESULT"));
+        assertEquals("budget_exhausted", singleAuditMetadata().get("reason"));
         verify(aiProvider, never()).complete(any());
     }
 
@@ -302,6 +482,73 @@ class AiInvocationServiceTest {
                 <= AiProviderCapabilities.estimatedInputByteCeiling(
                         32_768, budget.maxOutputTokens()));
         verify(aiProvider).complete(any());
+    }
+
+    @Test
+    void nativeDefinitionsAndFirstToolResultFitTheConservative32kBudget() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantPromptAssembler promptAssembler =
+                new AiAssistantPromptAssembler(objectMapper, catalog);
+        AiAssistantStepSchema stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
+        AiProviderCapabilities capabilities = new AiProviderCapabilities(
+                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                AiReasoningMode.TAGGED,
+                32_768,
+                AiToolCallingMode.NATIVE_FUNCTIONS,
+                AiReasoningMode.NATIVE);
+        AiNativeToolRequest fixedTools = new AiNativeToolRequest(
+                promptAssembler.nativeToolDefinitions(), List.of());
+        int fixedEnvelopeBytes = service.serializedPromptBytes(
+                promptAssembler.fixedNativePrompt(),
+                stepSchema.finalResponseSchema(),
+                AiReasoningMode.NATIVE,
+                fixedTools);
+        AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                capabilities, 16_384, fixedEnvelopeBytes);
+        AiChatMessage userMessage = new AiChatMessage();
+        userMessage.setAuthorKind("user");
+        userMessage.setContent("Which relationships are cooling?");
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("records", List.of(Map.of(
+                        "handle", "r1",
+                        "kind", "person",
+                        "name", "{{P1}}",
+                        "warmth", "cooling"))),
+                List.of());
+        List<AiAssistantPromptAssembler.ToolTurn> turns = List.of(
+                new AiAssistantPromptAssembler.ToolTurn(
+                        1, "search_records", toolResult));
+        MaskingContext context = new MaskingContext();
+        MaskedPrompt prompt = promptAssembler.assembleNative(
+                List.of(userMessage),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                turns,
+                context,
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget);
+        String maskedResult = promptAssembler.nativeReplay(
+                turns, context, budget, null).toolResults().getFirst();
+        AiNativeToolRequest request = new AiNativeToolRequest(
+                promptAssembler.nativeToolDefinitions(),
+                List.of(new AiToolExchange(
+                        new AiToolCall(
+                                "call_1",
+                                "search_records",
+                                "{\"query\":\"cooling\","
+                                        + "\"kinds\":[\"person\"]}"),
+                        maskedResult)));
+
+        int serializedBytes = service.serializedPromptBytes(
+                prompt,
+                stepSchema.finalResponseSchema(),
+                AiReasoningMode.NATIVE,
+                request);
+
+        assertTrue(serializedBytes <= AiProviderCapabilities.conservativeInputByteCeiling(
+                capabilities.contextWindowTokens(), budget.maxOutputTokens()));
+        assertTrue(maskedResult.contains("CRM_DATA_BEGIN"));
     }
 
     @Test
@@ -1200,6 +1447,20 @@ class AiInvocationServiceTest {
                 invocation.feature(), invocation.context(), invocation.prompt(),
                 invocation.images(), invocation.maxTokens(), invocation.temperature(),
                 invocation.reasoningRequested(), callerDeadline);
+    }
+
+    private AiInvocation nativeInvocation(String maskedPromptText) {
+        AiInvocation invocation = invocation(maskedPromptText);
+        return new AiInvocation(
+                invocation.feature(),
+                invocation.context(),
+                invocation.prompt(),
+                invocation.images(),
+                invocation.maxTokens(),
+                invocation.temperature(),
+                invocation.reasoningRequested(),
+                invocation.callerDeadline(),
+                AiInvocationProtocol.NATIVE_TOOLS);
     }
 
     private AiInvocation reasoningInvocation(String maskedPromptText) {
