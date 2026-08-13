@@ -20,6 +20,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 
 import org.apache.hc.client5.http.ConnectTimeoutException;
 import org.apache.hc.client5.http.config.ConnectionConfig;
@@ -60,6 +61,7 @@ public class OpenAiCompatibleClient {
     private static final int BUFFER_BYTES = 8192;
     private static final int MAX_CONCURRENT_RESOLUTIONS = 2;
     private static final ObjectMapper DETAIL_MAPPER = new ObjectMapper();
+    private static final Pattern OPAQUE_TOKEN = Pattern.compile("[A-Za-z0-9_-]{24,}");
 
     private final RestClient restClient;
     private final int maxResponseBytes;
@@ -150,7 +152,7 @@ public class OpenAiCompatibleClient {
         if (response.statusCode() < 200 || response.statusCode() > 299) {
             throw new AiProviderRequestRejectedException(
                     "OpenAI-compatible", response.statusCode(),
-                    rejectionDetail(response.body(), apiKey));
+                    rejectionDetail(response.body()));
         }
         return new String(response.body(), StandardCharsets.UTF_8);
     }
@@ -158,10 +160,11 @@ public class OpenAiCompatibleClient {
     /**
      * Extracts the provider's structured {@code error.message} for rejection diagnostics.
      * Only that single JSON field is retained — a non-JSON body or one without it yields
-     * {@code null} so arbitrary endpoint output never reaches audit metadata — and any
-     * occurrence of the API key is removed defensively before the excerpt leaves this class.
+     * {@code null} so arbitrary endpoint output never reaches audit metadata — and every
+     * long opaque token (API keys, bearer segments, any echoed credential) is replaced
+     * before the excerpt leaves this class, without this method ever touching a secret.
      */
-    private static String rejectionDetail(byte[] responseBody, String apiKey) {
+    private static String rejectionDetail(byte[] responseBody) {
         String message;
         try {
             message = DETAIL_MAPPER
@@ -175,9 +178,7 @@ public class OpenAiCompatibleClient {
         if (message == null || message.isBlank()) {
             return null;
         }
-        return apiKey == null || apiKey.isBlank()
-                ? message
-                : message.replace(apiKey, "[redacted]");
+        return OPAQUE_TOKEN.matcher(message).replaceAll("[redacted]");
     }
 
     @PreDestroy
