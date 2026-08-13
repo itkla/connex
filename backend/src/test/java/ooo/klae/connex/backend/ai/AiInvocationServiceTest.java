@@ -138,6 +138,7 @@ class AiInvocationServiceTest {
         lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
         lenient().when(aiProvider.reasoningCapability(any())).thenReturn(AiReasoningMode.TAGGED);
         lenient().when(aiProvider.contextWindowTokens(any())).thenReturn(4096);
+        lenient().when(aiProvider.maxOutputTokens(any())).thenReturn(4_096);
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
         lenient().when(budgetCoordinator.reserve(
                 eq(ORG_ID), any(AiInvocation.class), anyString()))
@@ -169,6 +170,7 @@ class AiInvocationServiceTest {
         when(aiProvider.reasoningCapability(resolved.target()))
                 .thenReturn(AiReasoningMode.NATIVE);
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(200_000);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(65_536);
         when(aiProvider.toolCallingCapability(resolved.target()))
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
         when(aiProvider.nativeToolReasoningCapability(resolved.target()))
@@ -180,6 +182,7 @@ class AiInvocationServiceTest {
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY, capabilities.structuredOutput());
         assertEquals(AiReasoningMode.NATIVE, capabilities.reasoning());
         assertEquals(200_000, capabilities.contextWindowTokens());
+        assertEquals(65_536, capabilities.maxOutputTokens());
         assertEquals(AiToolCallingMode.NATIVE_FUNCTIONS, capabilities.toolCalling());
         assertEquals(AiReasoningMode.NATIVE, capabilities.nativeToolReasoning());
         verify(aiProvider, never()).complete(any());
@@ -501,7 +504,8 @@ class AiInvocationServiceTest {
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768),
+                        32_768,
+                        8_192),
                 16_384,
                 fixedEnvelopeBytes);
         AiChatMessage request = new AiChatMessage();
@@ -568,6 +572,7 @@ class AiInvocationServiceTest {
                 AiStructuredOutputEnforcement.JSON_SCHEMA,
                 AiReasoningMode.TAGGED,
                 32_768,
+                8_192,
                 AiToolCallingMode.NATIVE_FUNCTIONS,
                 AiReasoningMode.NATIVE);
         AiNativeToolRequest fixedTools = new AiNativeToolRequest(
@@ -631,9 +636,10 @@ class AiInvocationServiceTest {
     void complete_leakDetected_auditsBlockedAndDoesNotCallAdapter() {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
+        MaskingEngine.maskField(EntityKind.COMPANY, "Acme Holdings", context);
         MaskedPrompt prompt = PromptAssembly.builder()
                 .system("Use concise analysis")
-                .userTurn("Summarize Mina Patel")
+                .userTurn("Summarize Mina Patel at Acme Holdings")
                 .build();
         AiInvocation invocation = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
 
@@ -643,6 +649,9 @@ class AiInvocationServiceTest {
         assertEquals("blocked", metadata.get("outcome"));
         assertEquals("leak", metadata.get("reason"));
         assertEquals("bedrock", metadata.get("provider"));
+        assertEquals(List.of("company", "person"), metadata.get("leakKinds"));
+        assertEquals(2, metadata.get("leakCount"));
+        assertFalse(metadata.toString().contains("Acme Holdings"));
         assertNoContent(metadata);
         verify(aiProvider, never()).complete(any());
     }
@@ -669,9 +678,65 @@ class AiInvocationServiceTest {
         assertEquals(7, audits.get(1).get("outputTokens"));
         assertEquals("end_turn", audits.get(1).get("stopReason"));
         assertEquals(0, audits.get(1).get("demaskWarnings"));
+        assertFalse(audits.get(0).containsKey("outputTokensClamped"));
+        assertFalse(audits.get(1).containsKey("outputTokensClamped"));
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
         verify(budgetLease).settle(12, 7);
+    }
+
+    @Test
+    void completeClampsOutputToProviderLimitAndAuditsTheEffectiveRequest() {
+        AiInvocation base = invocation("Summarize relationship state");
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(),
+                8_192, base.temperature(), base.reasoningRequested(),
+                base.callerDeadline(), base.protocol(), base.nativeToolsDegradedStatus());
+        int serializedBytes = service.serializedPromptBytes(
+                invocation.prompt(), null, AiReasoningMode.NONE);
+        when(aiProvider.contextWindowTokens(resolved.target()))
+                .thenReturn(serializedBytes + 4_096);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(4_096);
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+
+        AiCompletionOutcome outcome = service.complete(invocation);
+
+        assertEquals("Mina Patel is ready for follow-up.", outcome.text());
+        ArgumentCaptor<AiCompletionRequest> providerRequest =
+                ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(providerRequest.capture());
+        assertEquals(4_096, providerRequest.getValue().maxTokens());
+        ArgumentCaptor<AiInvocation> budgetInvocation =
+                ArgumentCaptor.forClass(AiInvocation.class);
+        verify(budgetCoordinator).reserve(
+                eq(ORG_ID), budgetInvocation.capture(), anyString());
+        assertEquals(4_096, budgetInvocation.getValue().maxTokens());
+        List<Map<?, ?>> audits = auditMetadata();
+        assertEquals(true, audits.get(0).get("outputTokensClamped"));
+        assertEquals(true, audits.get(1).get("outputTokensClamped"));
+    }
+
+    @Test
+    void completeAuditsAnUpstreamProviderOutputClamp() {
+        AiInvocation base = invocation("Summarize relationship state");
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(),
+                4_096, base.temperature(), base.reasoningRequested(),
+                base.callerDeadline(), base.protocol(), base.nativeToolsDegradedStatus(), true);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+
+        service.complete(invocation);
+
+        ArgumentCaptor<AiCompletionRequest> providerRequest =
+                ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(providerRequest.capture());
+        assertEquals(4_096, providerRequest.getValue().maxTokens());
+        List<Map<?, ?>> audits = auditMetadata();
+        assertEquals(true, audits.get(0).get("outputTokensClamped"));
+        assertEquals(true, audits.get(1).get("outputTokensClamped"));
     }
 
     @Test
@@ -810,7 +875,9 @@ class AiInvocationServiceTest {
         AiInputImage image = new AiInputImage(
                 "image/jpeg", new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1}, 100, 50);
         AiInvocation invocation = new AiInvocation(
-                AiFeature.BUSINESS_CARD_EXTRACTION, base.context(), base.prompt(), List.of(image), 64, 0.2);
+                AiFeature.BUSINESS_CARD_EXTRACTION, base.context(), base.prompt(), List.of(image),
+                8_192, 0.2);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
         when(aiMediaAdmissionService.acquire(anyInt(), anyList()))
                 .thenThrow(new TooManyRequestsException("AI image processing is busy"));
 
@@ -820,7 +887,10 @@ class AiInvocationServiceTest {
         assertEquals("attempt", audits.get(0).get("outcome"));
         assertEquals("blocked", audits.get(1).get("outcome"));
         assertEquals("media_admission", audits.get(1).get("reason"));
+        assertEquals("bedrock", audits.get(1).get("provider"));
         assertEquals(1, audits.get(1).get("mediaCount"));
+        assertEquals(true, audits.get(0).get("outputTokensClamped"));
+        assertEquals(true, audits.get(1).get("outputTokensClamped"));
         assertNoContent(audits.get(0));
         assertNoContent(audits.get(1));
         verify(aiProvider, never()).complete(any());

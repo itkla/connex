@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -64,9 +65,18 @@ class MaskingEngineTest {
     void leakScanThrowsWhenSerializedPayloadContainsRawIdentifier() throws Exception {
         MaskingContext ctx = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Ann Smith", ctx);
-        String serialized = objectMapper.writeValueAsString(Map.of("message", "Please contact Ann Smith."));
+        MaskingEngine.maskField(EntityKind.COMPANY, "Acme Holdings", ctx);
+        String serialized = objectMapper.writeValueAsString(Map.of(
+                "message", "Please contact Ann Smith at Acme Holdings. Ann Smith owns the account."));
 
-        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(serialized, ctx, objectMapper));
+        MaskingLeakException exception = assertThrows(
+                MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeak(serialized, ctx, objectMapper));
+
+        assertEquals(Set.of(EntityKind.PERSON, EntityKind.COMPANY), exception.leakedKinds());
+        assertEquals(2, exception.leakedCount());
+        assertFalse(exception.getMessage().contains("Ann Smith"));
+        assertFalse(exception.getMessage().contains("Acme Holdings"));
     }
 
     @Test

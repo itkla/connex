@@ -22,6 +22,11 @@ public interface AiProvider {
         return 4_096;
     }
 
+    /** @return conservative configured-target maximum generated output in tokens */
+    default int maxOutputTokens(AiProviderTarget target) {
+        return 4_096;
+    }
+
     /** @return provider function-tool protocol for the configured target */
     default AiToolCallingMode toolCallingCapability(AiProviderTarget target) {
         return AiToolCallingMode.NONE;

@@ -82,6 +82,24 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return 32_768;
     }
 
+    /**
+     * Uses the shared context budget only for recognized open-weight Gemma families and otherwise
+     * retains the conservative adapter default for customer-defined compatible endpoints.
+     * @see <a href="https://ai.google.dev/gemma/docs/core/model_card_3">Gemma 3 model limits</a>
+     * @see <a href="https://ai.google.dev/gemma/docs/core/model_card_4">Gemma 4 model limits</a>
+     */
+    @Override
+    public int maxOutputTokens(AiProviderTarget target) {
+        if (target == null || target.modelId() == null) {
+            return 4_096;
+        }
+        String modelId = unqualifiedModelId(
+                target.modelId().toLowerCase(java.util.Locale.ROOT));
+        return modelId.startsWith("gemma-3") || modelId.startsWith("gemma-4")
+                ? contextWindowTokens(target)
+                : 4_096;
+    }
+
     @Override
     public AiToolCallingMode toolCallingCapability(AiProviderTarget target) {
         return AiToolCallingMode.NATIVE_FUNCTIONS;

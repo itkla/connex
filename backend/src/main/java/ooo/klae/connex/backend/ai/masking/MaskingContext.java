@@ -25,6 +25,7 @@ public final class MaskingContext {
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
+    private final Map<String, EntityKind> tokenToKind = new LinkedHashMap<>();
     private final Map<String, String> canonicalValueToToken = new LinkedHashMap<>();
     private final Map<String, String> rawIdentifierToToken = new LinkedHashMap<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
@@ -46,6 +47,7 @@ public final class MaskingContext {
             token = nextToken(kind);
             canonicalValueToToken.put(canonicalKey, token);
             tokenToOriginalValue.put(token, normalizedRawValue);
+            tokenToKind.put(token, kind);
         }
         identifierDictionary.add(normalizedRawValue);
         rawIdentifierToToken.putIfAbsent(normalizedRawValue, token);
@@ -88,7 +90,9 @@ public final class MaskingContext {
             if (entry.getKey().isBlank()) {
                 continue;
             }
-            entries.add(new IdentifierEntry(entry.getKey(), entry.getValue()));
+            EntityKind kind = Objects.requireNonNull(
+                    tokenToKind.get(entry.getValue()), "Identifier token kind is unavailable");
+            entries.add(new IdentifierEntry(entry.getKey(), entry.getValue(), kind));
         }
         entries.sort(Comparator.comparingInt((IdentifierEntry entry) -> entry.rawValue().length()).reversed());
         return entries;
@@ -112,6 +116,6 @@ public final class MaskingContext {
         return "{{" + kind.tokenPrefix() + next + "}}";
     }
 
-    record IdentifierEntry(String rawValue, String token) {
+    record IdentifierEntry(String rawValue, String token, EntityKind kind) {
     }
 }

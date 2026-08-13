@@ -7,6 +7,7 @@ public record AiProviderCapabilities(
         AiStructuredOutputEnforcement structuredOutput,
         AiReasoningMode reasoning,
         int contextWindowTokens,
+        int maxOutputTokens,
         AiToolCallingMode toolCalling,
         AiReasoningMode nativeToolReasoning) {
     private static final int ESTIMATED_UTF8_BYTES_PER_TOKEN = 4;
@@ -19,17 +20,23 @@ public record AiProviderCapabilities(
         if (contextWindowTokens < 4_096) {
             throw new IllegalArgumentException("AI context window must contain at least 4096 tokens");
         }
+        if (maxOutputTokens < 1 || maxOutputTokens > contextWindowTokens) {
+            throw new IllegalArgumentException(
+                    "AI maximum output tokens must fit within the context window");
+        }
     }
 
     /** Creates capabilities for an adapter without native function tools. */
     public AiProviderCapabilities(
             AiStructuredOutputEnforcement structuredOutput,
             AiReasoningMode reasoning,
-            int contextWindowTokens) {
+            int contextWindowTokens,
+            int maxOutputTokens) {
         this(
                 structuredOutput,
                 reasoning,
                 contextWindowTokens,
+                maxOutputTokens,
                 AiToolCallingMode.NONE,
                 reasoning);
     }
@@ -39,8 +46,9 @@ public record AiProviderCapabilities(
             AiStructuredOutputEnforcement structuredOutput,
             AiReasoningMode reasoning,
             int contextWindowTokens,
+            int maxOutputTokens,
             AiToolCallingMode toolCalling) {
-        this(structuredOutput, reasoning, contextWindowTokens, toolCalling, reasoning);
+        this(structuredOutput, reasoning, contextWindowTokens, maxOutputTokens, toolCalling, reasoning);
     }
 
     /**

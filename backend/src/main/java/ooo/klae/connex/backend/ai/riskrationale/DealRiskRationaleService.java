@@ -36,7 +36,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class DealRiskRationaleService {
-    static final int MAX_TOKENS = 1536;
+    static final int MAX_TOKENS = 4096;
     static final int MAX_ACTIONS = 3;
     static final int MAX_NARRATIVE_CHARS = 1200;
     static final int MAX_ACTION_CHARS = 280;

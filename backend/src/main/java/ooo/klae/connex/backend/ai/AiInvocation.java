@@ -24,6 +24,8 @@ import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
  * @param protocol metadata-only provider protocol diagnostic
  * @param nativeToolsDegradedStatus sanitized native-tool rejection status when this invocation is
  *                                  a turn-local JSON-ReAct degradation retry
+ * @param outputTokensClamped whether an upstream provider-capability budget already reduced the
+ *                            requested output-token cap
  */
 public record AiInvocation(
         AiFeature feature,
@@ -35,7 +37,23 @@ public record AiInvocation(
         boolean reasoningRequested,
         Instant callerDeadline,
         AiInvocationProtocol protocol,
-        Integer nativeToolsDegradedStatus) {
+        Integer nativeToolsDegradedStatus,
+        boolean outputTokensClamped) {
+
+    public AiInvocation(
+            AiFeature feature,
+            MaskingContext context,
+            MaskedPrompt prompt,
+            List<AiInputImage> images,
+            int maxTokens,
+            double temperature,
+            boolean reasoningRequested,
+            Instant callerDeadline,
+            AiInvocationProtocol protocol,
+            Integer nativeToolsDegradedStatus) {
+        this(feature, context, prompt, images, maxTokens, temperature, reasoningRequested,
+                callerDeadline, protocol, nativeToolsDegradedStatus, false);
+    }
 
     public AiInvocation(
             AiFeature feature,
@@ -48,7 +66,7 @@ public record AiInvocation(
             Instant callerDeadline,
             AiInvocationProtocol protocol) {
         this(feature, context, prompt, images, maxTokens, temperature, reasoningRequested,
-                callerDeadline, protocol, null);
+                callerDeadline, protocol, null, false);
     }
 
     public AiInvocation(
@@ -58,7 +76,7 @@ public record AiInvocation(
             int maxTokens,
             double temperature) {
         this(feature, context, prompt, List.of(), maxTokens, temperature, false, null,
-                AiInvocationProtocol.STANDARD);
+                AiInvocationProtocol.STANDARD, null, false);
     }
 
     public AiInvocation(
@@ -69,7 +87,7 @@ public record AiInvocation(
             double temperature,
             boolean reasoningRequested) {
         this(feature, context, prompt, List.of(), maxTokens, temperature, reasoningRequested, null,
-                AiInvocationProtocol.STANDARD);
+                AiInvocationProtocol.STANDARD, null, false);
     }
 
     public AiInvocation(
@@ -81,7 +99,7 @@ public record AiInvocation(
             boolean reasoningRequested,
             Instant callerDeadline) {
         this(feature, context, prompt, List.of(), maxTokens, temperature,
-                reasoningRequested, callerDeadline, AiInvocationProtocol.STANDARD);
+                reasoningRequested, callerDeadline, AiInvocationProtocol.STANDARD, null, false);
     }
 
     public AiInvocation(
@@ -92,7 +110,7 @@ public record AiInvocation(
             int maxTokens,
             double temperature) {
         this(feature, context, prompt, images, maxTokens, temperature, false, null,
-                AiInvocationProtocol.STANDARD);
+                AiInvocationProtocol.STANDARD, null, false);
     }
 
     public AiInvocation(
@@ -104,7 +122,7 @@ public record AiInvocation(
             double temperature,
             boolean reasoningRequested) {
         this(feature, context, prompt, images, maxTokens, temperature,
-                reasoningRequested, null, AiInvocationProtocol.STANDARD);
+                reasoningRequested, null, AiInvocationProtocol.STANDARD, null, false);
     }
 
     public AiInvocation(
@@ -117,7 +135,7 @@ public record AiInvocation(
             boolean reasoningRequested,
             Instant callerDeadline) {
         this(feature, context, prompt, images, maxTokens, temperature,
-                reasoningRequested, callerDeadline, AiInvocationProtocol.STANDARD);
+                reasoningRequested, callerDeadline, AiInvocationProtocol.STANDARD, null, false);
     }
 
     public AiInvocation {
@@ -157,6 +175,7 @@ public record AiInvocation(
                 + ", reasoningRequested=" + reasoningRequested
                 + ", protocol=" + protocol
                 + ", nativeToolsDegraded=" + (nativeToolsDegradedStatus != null)
-                + ", nativeToolsDegradedStatus=" + nativeToolsDegradedStatus + "]";
+                + ", nativeToolsDegradedStatus=" + nativeToolsDegradedStatus
+                + ", outputTokensClamped=" + outputTokensClamped + "]";
     }
 }

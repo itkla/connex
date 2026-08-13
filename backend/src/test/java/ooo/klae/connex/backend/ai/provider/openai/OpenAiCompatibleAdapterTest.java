@@ -94,6 +94,10 @@ class OpenAiCompatibleAdapterTest {
                 target("https://api.example.test/v1", false, "gemma-3-270m-it")));
         assertEquals(32_768, adapter.contextWindowTokens(
                 target("https://api.example.test/v1", false, "gemma-3n-e4b-it")));
+        assertEquals(128_000, adapter.maxOutputTokens(
+                target("https://api.example.test/v1", false, "google/gemma-4-31b-it")));
+        assertEquals(4_096, adapter.maxOutputTokens(
+                target("https://api.example.test/v1", false, "unknown-modern-model")));
     }
 
     @Test

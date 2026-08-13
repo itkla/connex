@@ -13,7 +13,8 @@ public record AiAssistantPromptBudget(
         int attachmentContextBytes,
         int pageContextBytes,
         int toolResultBytes,
-        int compactionSourceBytes) {
+        int compactionSourceBytes,
+        boolean outputTokensClamped) {
 
     private static final int MIN_CONTEXT_TOKENS = 32_768;
     private static final int MIN_HISTORY_BYTES = 4_096;
@@ -24,6 +25,17 @@ public record AiAssistantPromptBudget(
             + MIN_ATTACHMENT_CONTEXT_BYTES + MIN_PAGE_CONTEXT_BYTES
             + MIN_TOOL_RESULT_BYTES;
     private static final int MAX_MASKED_SERIALIZATION_EXPANSION = 12;
+
+    public AiAssistantPromptBudget(
+            int maxOutputTokens,
+            int historyBytes,
+            int attachmentContextBytes,
+            int pageContextBytes,
+            int toolResultBytes,
+            int compactionSourceBytes) {
+        this(maxOutputTokens, historyBytes, attachmentContextBytes, pageContextBytes,
+                toolResultBytes, compactionSourceBytes, false);
+    }
 
     public AiAssistantPromptBudget {
         if (maxOutputTokens < 1 || historyBytes < 1 || attachmentContextBytes < 1
@@ -101,8 +113,9 @@ public record AiAssistantPromptBudget(
             throw new AiProviderException(
                     "Ask Connex requires a model context window of at least 32768 tokens");
         }
-        int providerOutputCeiling = Math.max(1_024, contextTokens / 4);
-        int maxOutputTokens = Math.min(configuredMaxOutputTokens, providerOutputCeiling);
+        int maxOutputTokens = Math.min(
+                configuredMaxOutputTokens, capabilities.maxOutputTokens());
+        boolean outputTokensClamped = configuredMaxOutputTokens > capabilities.maxOutputTokens();
         int minimumSerializedInputBytes = saturatedAdd(
                 fixedEnvelopeBytes,
                 saturatedMultiply(
@@ -139,7 +152,8 @@ public record AiAssistantPromptBudget(
                 attachmentContextBytes,
                 pageContextBytes,
                 toolResultBytes,
-                inputBytes);
+                inputBytes,
+                outputTokensClamped);
     }
 
     private static int saturatedMultiply(int value, int multiplier) {

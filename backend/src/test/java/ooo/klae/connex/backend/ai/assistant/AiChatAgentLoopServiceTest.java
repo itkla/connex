@@ -1457,7 +1457,7 @@ class AiChatAgentLoopServiceTest {
         when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(new AiChatMemory(
                 List.of(userMessage),
                 new AiAssistantPromptBudget(
-                        7777, 64_000, 16_000, 16_000, 16_000, 112_000),
+                        7777, 64_000, 16_000, 16_000, 16_000, 112_000, true),
                 0,
                 0));
         when(invocationService.completeStructuredRepairable(
@@ -1476,6 +1476,7 @@ class AiChatAgentLoopServiceTest {
                 invocation.capture(), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
         assertEquals(7777, invocation.getValue().maxTokens());
+        assertTrue(invocation.getValue().outputTokensClamped());
     }
 
     @Test
@@ -1684,7 +1685,8 @@ class AiChatAgentLoopServiceTest {
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768),
+                        32_768,
+                        8_192),
                 16_384,
                 8_192);
         AiChatMessage userMessage = message(

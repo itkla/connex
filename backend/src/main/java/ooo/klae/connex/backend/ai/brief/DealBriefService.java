@@ -35,7 +35,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class DealBriefService {
-    static final int MAX_TOKENS = 2048;
+    static final int MAX_TOKENS = 8192;
     static final int MIN_SECTIONS = 3;
     static final int MAX_SECTIONS = 4;
     static final int MAX_TITLE_CHARS = 160;

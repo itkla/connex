@@ -117,14 +117,13 @@ final class AiReportFacts {
         return Set.copyOf(titles());
     }
 
-    /**
-     * The localized measure name for a source, derived from the report widget's measure enum (never
-     * tenant data), safe to send to the provider in the clear as prose context.
-     */
     static String measureLabel(ReportAppendixRowDto source) {
         String measure = measure(source);
-        Map<String, String> labels = japanese() ? JAPANESE_LABELS : ENGLISH_LABELS;
-        return labels.getOrDefault(measure, measure);
+        return labels().getOrDefault(measure, measure);
+    }
+
+    static boolean hasStaticMeasureLabel(ReportAppendixRowDto source) {
+        return labels().containsKey(measure(source));
     }
 
     /** Whether a source is grouped by a distinct value rather than a whole-metric total. */
@@ -139,8 +138,7 @@ final class AiReportFacts {
         if (group == null) {
             return null;
         }
-        Map<String, String> labels = japanese() ? JAPANESE_LABELS : ENGLISH_LABELS;
-        return labels.getOrDefault(group.toLowerCase(Locale.ROOT), group);
+        return labels().getOrDefault(group.toLowerCase(Locale.ROOT), group);
     }
 
     private static String rawGroup(ReportAppendixRowDto source) {
@@ -150,6 +148,10 @@ final class AiReportFacts {
 
     private static String measure(ReportAppendixRowDto source) {
         return source.label().split(" · ", 2)[0].toLowerCase(Locale.ROOT);
+    }
+
+    private static Map<String, String> labels() {
+        return japanese() ? JAPANESE_LABELS : ENGLISH_LABELS;
     }
 
     private static boolean japanese() {

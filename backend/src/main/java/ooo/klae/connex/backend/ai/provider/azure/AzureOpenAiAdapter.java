@@ -74,6 +74,30 @@ public class AzureOpenAiAdapter implements AiProvider {
                 : 4_096;
     }
 
+    /**
+     * Resolves documented Azure OpenAI output ceilings for recognized model families.
+     * @see <a href="https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning">Azure reasoning-model limits</a>
+     * @see <a href="https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models">Azure OpenAI model limits</a>
+     */
+    @Override
+    public int maxOutputTokens(AiProviderTarget target) {
+        String modelId = target == null ? null : target.modelId();
+        if (modelId == null) {
+            return 4_096;
+        }
+        String normalized = modelId.toLowerCase(Locale.ROOT);
+        if (normalized.contains("gpt-5")) {
+            return 128_000;
+        }
+        if (normalized.contains("o3") || normalized.contains("o4")) {
+            return 100_000;
+        }
+        if (normalized.contains("gpt-4.1")) {
+            return 32_768;
+        }
+        return normalized.contains("gpt-4o") ? 16_384 : 4_096;
+    }
+
     @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
