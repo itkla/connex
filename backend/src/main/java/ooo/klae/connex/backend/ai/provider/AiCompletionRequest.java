@@ -12,6 +12,7 @@ import java.util.Objects;
  * @param images bounded embedded images attached to the first user message
  * @param outputMode requested provider response shape
  * @param responseSchema optional provider-neutral JSON Schema for structured enforcement
+ * @param nativeTools optional native function definitions and completed exchanges
  * @param reasoningMode provider reasoning protocol selected for this request
  * @param providerAttemptExecutor provider-send egress boundary
  * @param maxTokens provider output token cap
@@ -25,6 +26,7 @@ public record AiCompletionRequest(
         List<AiInputImage> images,
         AiOutputMode outputMode,
         AiResponseSchema responseSchema,
+        AiNativeToolRequest nativeTools,
         AiReasoningMode reasoningMode,
         AiProviderAttemptExecutor providerAttemptExecutor,
         int maxTokens,
@@ -40,6 +42,11 @@ public record AiCompletionRequest(
         Objects.requireNonNull(providerAttemptExecutor, "providerAttemptExecutor");
         if (outputMode == AiOutputMode.TEXT && responseSchema != null) {
             throw new IllegalArgumentException("AI text completion cannot declare a response schema");
+        }
+        if (nativeTools != null
+                && (outputMode != AiOutputMode.JSON || responseSchema == null)) {
+            throw new IllegalArgumentException(
+                    "AI native tools require a structured terminal response schema");
         }
         if (images.size() > 1) {
             throw new IllegalArgumentException("AI completion accepts at most one image");
@@ -57,8 +64,24 @@ public record AiCompletionRequest(
             AiProviderAttemptExecutor providerAttemptExecutor,
             int maxTokens,
             double temperature) {
-        this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema,
+        this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema, null,
                 AiReasoningMode.NONE, providerAttemptExecutor, maxTokens, temperature);
+    }
+
+    public AiCompletionRequest(
+            AiProviderTarget target,
+            AiCredentials credentials,
+            String systemPrompt,
+            List<AiMessage> messages,
+            List<AiInputImage> images,
+            AiOutputMode outputMode,
+            AiResponseSchema responseSchema,
+            AiReasoningMode reasoningMode,
+            AiProviderAttemptExecutor providerAttemptExecutor,
+            int maxTokens,
+            double temperature) {
+        this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema, null,
+                reasoningMode, providerAttemptExecutor, maxTokens, temperature);
     }
 
     public AiCompletionRequest(
@@ -71,7 +94,7 @@ public record AiCompletionRequest(
             AiResponseSchema responseSchema,
             int maxTokens,
             double temperature) {
-        this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema,
+        this(target, credentials, systemPrompt, messages, images, outputMode, responseSchema, null,
                 AiReasoningMode.NONE, AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
     }
 
@@ -84,7 +107,7 @@ public record AiCompletionRequest(
             AiOutputMode outputMode,
             int maxTokens,
             double temperature) {
-        this(target, credentials, systemPrompt, messages, images, outputMode, null,
+        this(target, credentials, systemPrompt, messages, images, outputMode, null, null,
                 AiReasoningMode.NONE, AiProviderAttemptExecutor.DIRECT, maxTokens, temperature);
     }
 
@@ -94,6 +117,7 @@ public record AiCompletionRequest(
                 + ", credentials=<redacted>, systemPrompt=<redacted>, messages=<redacted>, maxTokens="
                 + maxTokens + ", images=<redacted>, outputMode=" + outputMode
                 + ", responseSchema=" + (responseSchema == null ? "none" : responseSchema.name())
+                + ", nativeTools=" + (nativeTools == null ? "none" : "<redacted>")
                 + ", reasoningMode=" + reasoningMode
                 + ", temperature=" + temperature + "]";
     }

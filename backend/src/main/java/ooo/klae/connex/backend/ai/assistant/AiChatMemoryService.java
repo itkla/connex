@@ -18,7 +18,9 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.AiGeneratedContentScreen;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import tools.jackson.core.JacksonException;
@@ -64,11 +66,23 @@ public class AiChatMemoryService {
         requireBeforeDeadline(deadline);
         var capabilities = invocationService.currentProviderCapabilities(
                 AiFeature.ASSISTANT_CHAT);
+        boolean nativeTools = capabilities.toolCalling() == AiToolCallingMode.NATIVE_FUNCTIONS;
         AiReasoningMode reasoningMode = aiProperties.isAssistantThinkingEnabled()
-                ? capabilities.reasoning()
+                ? nativeTools
+                        ? capabilities.nativeToolReasoning()
+                        : capabilities.reasoning()
                 : AiReasoningMode.NONE;
-        int fixedEnvelopeBytes = invocationService.serializedPromptBytes(
-                promptAssembler.fixedPrompt(), stepSchema.responseSchema(), reasoningMode);
+        int fixedEnvelopeBytes = nativeTools
+                ? invocationService.serializedPromptBytes(
+                        promptAssembler.fixedNativePrompt(),
+                        stepSchema.finalResponseSchema(),
+                        reasoningMode,
+                        new AiNativeToolRequest(
+                                promptAssembler.nativeToolDefinitions(), List.of()))
+                : invocationService.serializedPromptBytes(
+                        promptAssembler.fixedPrompt(),
+                        stepSchema.responseSchema(),
+                        reasoningMode);
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 capabilities,
                 aiProperties.getAssistantMaxOutputTokens(),
@@ -214,7 +228,8 @@ public class AiChatMemoryService {
                 bounded,
                 budget,
                 inputTokens,
-                outputTokens);
+                outputTokens,
+                nativeTools);
     }
 
     static List<AiChatMessage> boundedHistory(

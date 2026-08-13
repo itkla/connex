@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
@@ -47,6 +48,10 @@ import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCall;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -72,6 +77,10 @@ class OpenAiCompatibleAdapterTest {
     void providerId_registersOpenAiCompatibleAdapter() {
         assertEquals("openai_compatible", adapter.providerId());
         assertEquals(AiReasoningMode.TAGGED, adapter.reasoningCapability(null));
+        assertEquals(AiReasoningMode.NATIVE,
+                adapter.nativeToolReasoningCapability(null));
+        assertEquals(AiToolCallingMode.NATIVE_FUNCTIONS,
+                adapter.toolCallingCapability(null));
         assertEquals(32_768, adapter.contextWindowTokens(null));
         assertEquals(128_000, adapter.contextWindowTokens(
                 target("https://api.example.test/v1", false, "gemma-4-31b-it")));
@@ -149,6 +158,14 @@ class OpenAiCompatibleAdapterTest {
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(any(URI.class), anyBoolean(),
                 any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
+        assertEquals(
+                "{\"model\":\"llama3.3:70b\",\"messages\":["
+                        + "{\"role\":\"system\",\"content\":\"Use short answers\"},"
+                        + "{\"role\":\"user\",\"content\":\"Hello?\"},"
+                        + "{\"role\":\"assistant\",\"content\":\"Hello.\"}],"
+                        + "\"max_tokens\":64,\"temperature\":0.25,"
+                        + "\"response_format\":{\"type\":\"json_object\"}}",
+                bodyCaptor.getValue());
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         assertEquals("llama3.3:70b", body.path("model").asString());
         assertEquals("system", body.path("messages").path(0).path("role").asString());
@@ -168,6 +185,91 @@ class OpenAiCompatibleAdapterTest {
         assertEquals(AiStructuredOutputEnforcement.JSON_OBJECT,
                 result.structuredOutputEnforcement());
         assertFalse(result.toString().contains("Hello world"));
+    }
+
+    @Test
+    void complete_translatesNativeToolsExchangesAndToolCalls() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "choices": [{
+                            "message": {
+                              "content": null,
+                              "reasoning_content": "Use the retrieved record.",
+                              "tool_calls": [{
+                                "id": "call_2",
+                                "type": "function",
+                                "function": {
+                                  "name": "get_record",
+                                  "arguments": "{\\\"handle\\\":\\\"r1\\\"}"
+                                }
+                              }]
+                            },
+                            "finish_reason": "tool_calls"
+                          }],
+                          "usage": {"prompt_tokens": 12, "completion_tokens": 3}
+                        }
+                        """);
+        JsonNode parameters = objectMapper.readTree("""
+                {"type":"object","properties":{"handle":{"type":"string"}},
+                 "required":["handle"],"additionalProperties":false}
+                """);
+        AiToolDefinition definition = new AiToolDefinition(
+                "get_record", "Load one visible CRM record.", parameters);
+        AiToolCall firstCall = new AiToolCall(
+                "call_1", "get_record", "{\"handle\":\"r1\"}");
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                List.of(definition),
+                List.of(new AiToolExchange(
+                        firstCall,
+                        "CRM_DATA_BEGIN\n{\"kind\":\"tool_result\"}\nCRM_DATA_END")),
+                "Return one corrected JSON final answer only.");
+        AiCompletionRequest base = schemaRequest();
+        AiCompletionRequest request = new AiCompletionRequest(
+                base.target(),
+                base.credentials(),
+                base.systemPrompt(),
+                base.messages(),
+                base.images(),
+                base.outputMode(),
+                base.responseSchema(),
+                nativeTools,
+                AiReasoningMode.NATIVE,
+                base.providerAttemptExecutor(),
+                base.maxTokens(),
+                base.temperature());
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient).complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class));
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        JsonNode tool = body.path("tools").path(0).path("function");
+        assertEquals("get_record", tool.path("name").asString());
+        assertTrue(tool.path("strict").asBoolean());
+        assertEquals(parameters, tool.path("parameters"));
+        assertEquals("auto", body.path("tool_choice").asString());
+        assertEquals("json_schema", body.path("response_format").path("type").asString());
+        assertTrue(body.has("parallel_tool_calls"));
+        assertFalse(body.path("parallel_tool_calls").asBoolean());
+        JsonNode assistant = body.path("messages").path(2);
+        assertEquals("assistant", assistant.path("role").asString());
+        assertTrue(assistant.path("content").isNull());
+        assertEquals("call_1", assistant.path("tool_calls").path(0).path("id").asString());
+        JsonNode toolResult = body.path("messages").path(3);
+        assertEquals("tool", toolResult.path("role").asString());
+        assertEquals("call_1", toolResult.path("tool_call_id").asString());
+        assertTrue(toolResult.path("content").asString().contains("CRM_DATA_BEGIN"));
+        assertEquals("user", body.path("messages").path(4).path("role").asString());
+        assertEquals(List.of(new AiToolCall(
+                "call_2", "get_record", "{\"handle\":\"r1\"}")), result.toolCalls());
+        assertEquals("Use the retrieved record.", result.reasoning());
+        assertEquals("", result.text());
+        assertEquals("tool_calls", result.stopReason());
     }
 
     @Test
@@ -199,6 +301,57 @@ class OpenAiCompatibleAdapterTest {
         assertSame(deadlines.getAllValues().get(0), deadlines.getAllValues().get(1));
         assertSame(deadlines.getAllValues().get(0), deadlines.getAllValues().get(2));
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
+                result.structuredOutputEnforcement());
+    }
+
+    @Test
+    void complete_nativeStructuredFallbackKeepsToolsAndOneDeadline() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 400))
+                .thenReturn(validResponse());
+        AiCompletionRequest base = schemaRequest();
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                List.of(new AiToolDefinition(
+                        "get_record",
+                        "Load one visible CRM record.",
+                        objectMapper.readTree(
+                                "{\"type\":\"object\",\"properties\":{},"
+                                        + "\"required\":[],"
+                                        + "\"additionalProperties\":false}"))),
+                List.of());
+        AiCompletionRequest request = new AiCompletionRequest(
+                base.target(),
+                base.credentials(),
+                base.systemPrompt(),
+                base.messages(),
+                base.images(),
+                base.outputMode(),
+                base.responseSchema(),
+                nativeTools,
+                AiReasoningMode.NATIVE,
+                base.providerAttemptExecutor(),
+                base.maxTokens(),
+                base.temperature());
+
+        AiCompletionResult result = adapter.complete(request);
+
+        ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiRequestDeadline> deadlines =
+                ArgumentCaptor.forClass(AiRequestDeadline.class);
+        verify(openAiCompatibleClient, times(2)).complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture(),
+                deadlines.capture());
+        JsonNode strict = objectMapper.readTree(bodies.getAllValues().getFirst());
+        JsonNode fallback = objectMapper.readTree(bodies.getAllValues().getLast());
+        assertEquals("json_schema", strict.path("response_format").path("type").asString());
+        assertEquals("json_object", fallback.path("response_format").path("type").asString());
+        assertEquals("get_record", strict.path("tools").path(0)
+                .path("function").path("name").asString());
+        assertEquals(strict.path("tools"), fallback.path("tools"));
+        assertSame(deadlines.getAllValues().getFirst(), deadlines.getAllValues().getLast());
+        assertEquals(AiStructuredOutputEnforcement.JSON_OBJECT,
                 result.structuredOutputEnforcement());
     }
 

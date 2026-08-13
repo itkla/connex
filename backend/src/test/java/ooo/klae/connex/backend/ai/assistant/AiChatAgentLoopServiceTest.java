@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiNativeToolCompletion;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
@@ -45,11 +46,14 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
+import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
+import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -533,6 +537,327 @@ class AiChatAgentLoopServiceTest {
         verify(toolExecutor, times(2)).execute(any(), any(), any(), eq(true));
         verify(persistenceService).resolve(
                 eq(TURN), eq("Pipeline is healthy."), any(), eq(9), eq(15));
+    }
+
+    @Test
+    void nativeToolResultToolResultFinalCompletesWithStructuredSuggestionsAndTitle()
+            throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"))
+                .thenReturn(nativeTool(
+                        "call_2", "aggregate_metric",
+                        "{\"metric\":\"deal_metrics\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Pipeline is healthy.",
+                        List.of(),
+                        List.of("Show the active deals"),
+                        "Pipeline health")));
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class)))
+                .thenReturn(
+                        new AiAssistantToolResult(Map.of("records", List.of("r1")), List.of()),
+                        new AiAssistantToolResult(Map.of("count", 1), List.of()));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                invocations.capture(), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertTrue(invocations.getAllValues().stream()
+                .allMatch(invocation -> invocation.protocol()
+                        == AiInvocationProtocol.NATIVE_TOOLS));
+        assertEquals(0, requests.getAllValues().get(0).exchanges().size());
+        assertEquals(1, requests.getAllValues().get(1).exchanges().size());
+        assertEquals("call_1", requests.getAllValues().get(1)
+                .exchanges().getFirst().call().id());
+        assertEquals(2, requests.getAllValues().get(2).exchanges().size());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Pipeline is healthy."), metadata.capture(), eq(9), eq(15));
+        assertEquals("Show the active deals",
+                objectMapper.readTree(metadata.getValue()).path("suggestions").path(0).asString());
+        verify(persistenceService).applyGeneratedTitle(TURN, "Pipeline health");
+    }
+
+    @Test
+    void malformedNativeToolCallFailsBeforeAnyToolExecution() {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(new AiNativeToolCompletion.Malformed<>(
+                        3, 5, "tool_calls", Optional.empty()));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class));
+        verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), any(), any());
+    }
+
+    @Test
+    void malformedNativeFinalGetsOneFinalSchemaRepairThenResolves() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        AiStructuredRepair repair = AiStructuredRepair.from(
+                "final_shape", "{\"text\":null}");
+        AiStructuredRepairAttempt<AiAssistantStep.FinalAnswer> malformed =
+                new AiStructuredRepairAttempt<>(
+                        new AiStructuredOutcome.Malformed<>(
+                                "malformed_output", 3, 5, "stop"),
+                        Optional.of(repair));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(new AiNativeToolCompletion.Content<>(
+                        malformed, 3, 5, "stop", Optional.empty()))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Pipeline is healthy.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(2)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        String repairMessage = requests.getAllValues().getLast().repairMessage();
+        assertTrue(repairMessage.contains("corrected JSON final answer"));
+        assertTrue(repairMessage.contains("final-answer schema"));
+        assertFalse(repairMessage.contains("JSON step"));
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Pipeline is healthy."), any(), eq(6), eq(10));
+    }
+
+    @Test
+    void capabilityOffKeepsTheJsonReactPromptByteIdentical() throws Exception {
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService).completeStructuredRepairable(
+                invocation.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(AiInvocationProtocol.JSON_REACT, invocation.getValue().protocol());
+        AiChatMessage userMessage = message(
+                TURN.userMessageId(), "Summarize my pipeline");
+        AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(
+                objectMapper, new AiAssistantToolCatalog());
+        var expected = assembler.assemble(
+                List.of(userMessage),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new ooo.klae.connex.backend.ai.masking.MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                new AiAssistantPromptBudget(
+                        64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                null);
+        assertEquals(expected.getSystemPrompt(),
+                invocation.getValue().prompt().getSystemPrompt());
+        assertEquals(
+                objectMapper.writeValueAsString(expected.getMessages()),
+                objectMapper.writeValueAsString(
+                        invocation.getValue().prompt().getMessages()));
+        verify(invocationService, never()).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class));
+    }
+
+    @Test
+    void repeatedIdenticalNativeCallsUseTheCacheThenStopForNoProgress()
+            throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(
+                        nativeTool("call_1", "search_records",
+                                "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"),
+                        nativeTool("call_2", "search_records",
+                                "{\"kinds\":[\"deal\"],\"query\":\"pipeline\"}"),
+                        nativeTool("call_3", "search_records",
+                                "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("no_progress", result.reason());
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class));
+        verify(toolExecutor).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true));
+    }
+
+    @Test
+    void nativeConfirmWriteRequiresApprovalAndNativeAutoWritePreservesUndoReceipt()
+            throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        JsonNode confirmArgs = objectMapper.readTree(
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}");
+        AiAssistantPreparedWrite confirmWrite = new AiAssistantPreparedWrite(
+                "assign_owner", AiAssistantToolCatalog.ToolTier.CONFIRM,
+                "deal", 41, "{\"resolved\":true}");
+        AiAssistantToolProposal confirmProposal =
+                new AiAssistantToolProposal(29, "proposed", null, true);
+        when(writeToolService.prepare(
+                eq("assign_owner"), eq(confirmArgs), any(), eq(TURN.restrictionEpoch())))
+                .thenReturn(confirmWrite);
+        when(persistenceService.proposeWriteTool(TURN, 1, confirmWrite))
+                .thenReturn(confirmProposal);
+        when(writeToolService.proposalResult(confirmWrite, confirmProposal)).thenReturn(
+                new AiAssistantToolResult(
+                        Map.of("toolCallId", 29, "status", "approval_required"), List.of()));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "confirm_1", "assign_owner",
+                        "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Approval is required.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> confirmResult = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, confirmResult.outcome());
+        verify(writeToolService, never()).executeAuto(eq(TURN), eq(29), any());
+
+        setUp();
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        JsonNode autoArgs = objectMapper.readTree(
+                "{\"handle\":\"r1\",\"content\":\"Follow up\"}");
+        AiAssistantPreparedWrite autoWrite = new AiAssistantPreparedWrite(
+                "create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        AiAssistantToolProposal autoProposal =
+                new AiAssistantToolProposal(29, "proposed", null, true);
+        AiAssistantToolResult autoResult = new AiAssistantToolResult(
+                Map.of(
+                        "toolCallId", 29,
+                        "status", "executed",
+                        "undo", Map.of("status", "available")),
+                List.of());
+        when(writeToolService.prepare(
+                eq("create_note"), eq(autoArgs), any(), eq(TURN.restrictionEpoch())))
+                .thenReturn(autoWrite);
+        when(persistenceService.proposeWriteTool(TURN, 1, autoWrite)).thenReturn(autoProposal);
+        when(writeToolService.executeAuto(eq(TURN), eq(29), any())).thenAnswer(invocation -> {
+            Consumer<AiAssistantToolResult> guard = invocation.getArgument(2);
+            guard.accept(autoResult);
+            return new AiAssistantWriteToolService.WriteExecution(null, autoResult, false);
+        });
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "auto_1", "create_note",
+                        "{\"handle\":\"r1\",\"content\":\"Follow up\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "The note was created.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> autoOutcome = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, autoOutcome.outcome());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(2)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertTrue(requests.getAllValues().getLast().exchanges().getFirst()
+                .maskedResult().contains("\"undo\":{\"status\":\"available\"}"));
+        verify(writeToolService).executeAuto(eq(TURN), eq(29), any());
+    }
+
+    @Test
+    void nativeToolResultBudgetAndDeadlineKeepTheirHonestTerminalReasons()
+            throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 200, 4_808));
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class))).thenReturn(
+                new AiAssistantToolResult(
+                        Map.of("records", "OVERSIZED_TOOL_RESULT".repeat(100)), List.of()));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"records\",\"kinds\":[\"person\"]}"));
+
+        assertTerminal("tool_result_budget_exhausted");
+
+        setUp();
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(clock.instant()).thenReturn(NOW, NOW.plusSeconds(70));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> deadlineResult = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.TIMED_OUT, deadlineResult.outcome());
+        assertEquals("turn_deadline_exceeded", deadlineResult.reason());
+        verify(invocationService, never()).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class));
     }
 
     @Test
@@ -1213,6 +1538,42 @@ class AiChatAgentLoopServiceTest {
         return new AiAssistantStep(
                 new AiAssistantStep.Tool(name, objectMapper.readTree(arguments)),
                 null);
+    }
+
+    private void useNativeMemory(AiAssistantPromptBudget budget) {
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+                new AiChatMemory(
+                        List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
+                        budget,
+                        0,
+                        0,
+                        true));
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeTool(
+            String id,
+            String name,
+            String arguments) throws JacksonException {
+        return new AiNativeToolCompletion.Tool<>(
+                new AiToolCall(id, name, arguments),
+                objectMapper.readTree(arguments),
+                0,
+                3,
+                5,
+                "tool_calls",
+                Optional.empty());
+    }
+
+    private static AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeFinal(
+            AiAssistantStep.FinalAnswer answer) {
+        return new AiNativeToolCompletion.Content<>(
+                new AiStructuredRepairAttempt<>(
+                        new AiStructuredOutcome.Parsed<>(answer, 0, 3, 5, "stop"),
+                        Optional.empty()),
+                3,
+                5,
+                "stop",
+                Optional.empty());
     }
 
     private static AiStructuredRepairAttempt<AiAssistantStep> parsed(AiAssistantStep step) {

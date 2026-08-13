@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -52,6 +53,7 @@ class BedrockAnthropicAdapterTest {
     @Test
     void complete_buildsAnthropicRequestAndParsesResponse() throws Exception {
         assertEquals("bedrock", adapter.providerId());
+        assertEquals(AiToolCallingMode.NONE, adapter.toolCallingCapability(null));
         when(bedrockClient.invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
                 any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenReturn("""

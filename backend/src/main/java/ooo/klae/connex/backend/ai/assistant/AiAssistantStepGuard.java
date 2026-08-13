@@ -86,6 +86,32 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
         };
     }
 
+    /**
+     * Creates the terminal-answer-only guard used when tools travel through the native protocol.
+     * @param issuedPlaceholders canonical issued placeholders such as {@code {{P1}}}
+     * @return final-answer schema and issued-placeholder guard
+     */
+    public AiRawOutputGuard finalAnswerForIssuedPlaceholders(Set<String> issuedPlaceholders) {
+        Set<String> placeholderBodies = issuedPlaceholderBodies(issuedPlaceholders);
+        return new AiRawOutputGuard() {
+            @Override
+            public boolean permits(JsonNode output) {
+                return rejectionReason(output) == null;
+            }
+
+            @Override
+            public String rejectionReason(JsonNode output) {
+                String schemaRejection = finalRejection(output);
+                if (schemaRejection != null) {
+                    return schemaRejection;
+                }
+                return containsBareIssuedPlaceholder(output, placeholderBodies)
+                        ? "bare_placeholder"
+                        : null;
+            }
+        };
+    }
+
     private String toolRejection(JsonNode tool) {
         if (!tool.isObject() || !exactFields(tool, TOOL_FIELDS)) {
             return "tool_fields";

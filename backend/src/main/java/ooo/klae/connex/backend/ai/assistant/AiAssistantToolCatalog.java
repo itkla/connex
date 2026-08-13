@@ -9,7 +9,11 @@ import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Additive source of truth for the assistant's tiered tool vocabulary and argument schemas. */
 @Component
@@ -54,6 +58,15 @@ public class AiAssistantToolCatalog {
     /** @return every declared tool in stable catalog order */
     public List<ToolSpec> tools() {
         return List.copyOf(TOOLS.values());
+    }
+
+    /** @return executable static tool definitions for native provider function calling */
+    public List<AiToolDefinition> nativeDefinitions(ObjectMapper objectMapper) {
+        return TOOLS.values().stream()
+                .filter(ToolSpec::executable)
+                .map(spec -> new AiToolDefinition(
+                        spec.name(), description(spec.name()), parametersSchema(objectMapper, spec)))
+                .toList();
     }
 
     /** @return whether the key is declared, including reserved replay-stable keys */
@@ -199,6 +212,95 @@ public class AiAssistantToolCatalog {
                 handle(),
                 string("owner", true, 1, 255, Set.of())));
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
+    }
+
+    private static String description(String name) {
+        return switch (name) {
+            case "search_records" -> "Search visible people, companies, and deals and return reusable handles.";
+            case "get_record" -> "Load the visible details for one record handle.";
+            case "list_activities" -> "List recent visible activities for one record handle.";
+            case "list_tasks" -> "List visible tasks for one record handle.";
+            case "aggregate_metric" -> "Calculate a supported workspace relationship or pipeline metric.";
+            case "find_schedule_conflicts" -> "Find visible scheduling conflicts for one record and time range.";
+            case "create_activity" -> "Create an immediately executed, undoable activity for one record.";
+            case "create_task" -> "Create an immediately executed, undoable task for one record.";
+            case "create_note" -> "Create an immediately executed, undoable note for one record.";
+            case "add_tag" -> "Add a tag immediately to one record.";
+            case "change_deal_stage" -> "Propose a deal-stage change that requires human confirmation.";
+            case "assign_owner" -> "Propose an owner assignment that requires human confirmation.";
+            default -> throw new IllegalStateException("Assistant native tool description is missing");
+        };
+    }
+
+    private static ObjectNode parametersSchema(ObjectMapper objectMapper, ToolSpec tool) {
+        ObjectNode args = objectMapper.createObjectNode();
+        args.put("type", "object");
+        ObjectNode properties = args.putObject("properties");
+        ArrayNode required = args.putArray("required");
+        for (ArgumentSpec argument : tool.arguments()) {
+            properties.set(argument.name(), argumentSchema(objectMapper, argument));
+            required.add(argument.name());
+        }
+        args.put("additionalProperties", false);
+        return args;
+    }
+
+    private static ObjectNode argumentSchema(
+            ObjectMapper objectMapper,
+            ArgumentSpec argument) {
+        ObjectNode value = valueSchema(objectMapper, argument);
+        if (argument.required()) {
+            return value;
+        }
+        ObjectNode optional = objectMapper.createObjectNode();
+        optional.putArray("anyOf")
+                .add(value)
+                .addObject()
+                .put("type", "null");
+        return optional;
+    }
+
+    private static ObjectNode valueSchema(
+            ObjectMapper objectMapper,
+            ArgumentSpec argument) {
+        ObjectNode value = objectMapper.createObjectNode();
+        switch (argument.kind()) {
+            case STRING -> {
+                value.put("type", "string");
+                value.put("minLength", argument.minimum());
+                value.put("maxLength", argument.maximum());
+                addEnum(value, argument);
+            }
+            case INTEGER -> {
+                value.put("type", "integer");
+                value.put("minimum", argument.minimum());
+                value.put("maximum", argument.maximum());
+                if (!argument.values().isEmpty()) {
+                    ArrayNode allowed = value.putArray("enum");
+                    argument.values().stream()
+                            .mapToInt(Integer::parseInt)
+                            .sorted()
+                            .forEach(allowed::add);
+                }
+            }
+            case STRING_LIST -> {
+                value.put("type", "array");
+                value.put("minItems", argument.minimum());
+                value.put("maxItems", argument.maximum());
+                ObjectNode items = value.putObject("items");
+                items.put("type", "string");
+                addEnum(items, argument);
+            }
+        }
+        return value;
+    }
+
+    private static void addEnum(ObjectNode node, ArgumentSpec argument) {
+        if (argument.values().isEmpty()) {
+            return;
+        }
+        ArrayNode allowed = node.putArray("enum");
+        argument.values().stream().sorted().forEach(allowed::add);
     }
 
     /**

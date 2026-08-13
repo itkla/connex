@@ -84,6 +84,8 @@ public class AuditService {
             "deal.brief", "deal.risk_rationale", "intro.rationale", "report.narrative",
             AiFeature.ASSISTANT_CHAT.wireKey(), "business_card.scan");
     private static final Set<String> AI_OUTCOMES = Set.of("attempt", "success", "failure", "blocked");
+    private static final Set<String> AI_PROTOCOLS = Set.of(
+            "standard", "json_react", "native_tools");
     private static final Set<String> AI_REASONS = Set.of(
             "gate", "media_admission", "provider", "provider_capability", "serialization", "leak",
             "provider_exception", "restriction_epoch", "invocation_exception",
@@ -661,6 +663,7 @@ public class AuditService {
         copyNumber(source, projected, "mediaBytes");
         copyKnownStringList(source, projected, "mediaTypes", AI_MEDIA_TYPES);
         copyBoolean(source, projected, "structured");
+        copyKnownString(source, projected, "protocol", AI_PROTOCOLS);
         copyKnownString(source, projected, "structuredEnforcement", AI_STRUCTURED_ENFORCEMENTS);
         copyNumber(source, projected, "inputTokens");
         copyNumber(source, projected, "outputTokens");

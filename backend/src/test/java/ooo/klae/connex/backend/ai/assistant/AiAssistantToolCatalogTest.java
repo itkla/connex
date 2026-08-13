@@ -53,4 +53,29 @@ class AiAssistantToolCatalogTest {
                         "{\"handle\":\"r1\",\"content\":\"Follow up\","
                                 + "\"idempotency_key\":\"model-controlled\"}")));
     }
+
+    @Test
+    void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
+        var definitions = catalog.nativeDefinitions(objectMapper);
+
+        assertEquals(12, definitions.size());
+        assertEquals(
+                catalog.tools().stream()
+                        .filter(AiAssistantToolCatalog.ToolSpec::executable)
+                        .map(AiAssistantToolCatalog.ToolSpec::name)
+                        .toList(),
+                definitions.stream().map(definition -> definition.name()).toList());
+        assertFalse(definitions.stream()
+                .anyMatch(definition -> "get_deal_brief".equals(definition.name())));
+        var search = definitions.stream()
+                .filter(definition -> "search_records".equals(definition.name()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("object", search.parametersSchema().path("type").asString());
+        assertFalse(search.parametersSchema().path("additionalProperties").asBoolean());
+        assertEquals(2, search.parametersSchema().path("required").size());
+        assertEquals("null", search.parametersSchema()
+                .path("properties").path("kinds").path("anyOf").path(1).path("type")
+                .asString());
+    }
 }
