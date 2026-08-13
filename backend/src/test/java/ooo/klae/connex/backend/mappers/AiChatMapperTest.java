@@ -297,16 +297,24 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(toolCall.getId(), lockedTool.getId());
         assertTrue(chatMapper.listPendingToolCallsBySession(
                 workspace.getId(), session.getId()).isEmpty());
+        AiChatToolCall secondToolCall = new AiChatToolCall();
+        secondToolCall.setWorkspaceId(workspace.getId());
+        secondToolCall.setMessageId(userMessage.getId());
+        secondToolCall.setToolName("get_record");
+        secondToolCall.setStatus("executed");
+        secondToolCall.setArgumentsJson("{\"handle\":\"r2\"}");
+        secondToolCall.setIdempotencyKey("turn-" + turn.getId() + "-step-2");
+        chatMapper.insertToolCall(secondToolCall);
         assertEquals(
                 List.of(toolCall.getId()),
                 chatMapper.listToolCallsBySession(
-                                workspace.getId(), session.getId(), false).stream()
+                                workspace.getId(), session.getId(), false, 1).stream()
                         .map(AiChatToolCall::getId)
                         .toList());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId(), session.getId(), true).isEmpty());
+                workspace.getId(), session.getId(), true, 1).isEmpty());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId() + 1, session.getId(), false).isEmpty());
+                workspace.getId() + 1, session.getId(), false, 1).isEmpty());
 
         AiChatMessage answer = new AiChatMessage();
         answer.setWorkspaceId(workspace.getId());
@@ -314,21 +322,31 @@ class AiChatMapperTest extends AbstractMapperTest {
         answer.setSeq(2);
         answer.setAuthorKind("assistant");
         answer.setContent("Resolved");
-        answer.setStructuredJson("{\"citations\":[]}");
+        answer.setStructuredJson("{\"turnId\":" + turn.getId() + ",\"citations\":[]}");
         answer.setInputTokens(21);
         answer.setOutputTokens(8);
         chatMapper.insertMessage(answer);
-        List<AiChatMessage> assistantMessages = chatMapper.listAssistantMessagesBySession(
-                workspace.getId(), session.getId());
+        AiChatMessage unrelatedAnswer = new AiChatMessage();
+        unrelatedAnswer.setWorkspaceId(workspace.getId());
+        unrelatedAnswer.setSessionId(session.getId());
+        unrelatedAnswer.setSeq(3);
+        unrelatedAnswer.setAuthorKind("assistant");
+        unrelatedAnswer.setContent("Unrelated");
+        unrelatedAnswer.setStructuredJson("{\"turnId\":999,\"citations\":[]}");
+        chatMapper.insertMessage(unrelatedAnswer);
+        List<AiChatMessage> assistantMessages =
+                chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                        workspace.getId(), session.getId(), List.of(turn.getId()), 100);
         assertEquals(List.of(answer.getId()), assistantMessages.stream()
                 .map(AiChatMessage::getId)
                 .toList());
         assertEquals(
-                JsonMapper.builder().build().readTree("{\"citations\":[]}"),
+                JsonMapper.builder().build().readTree(
+                        "{\"turnId\":" + turn.getId() + ",\"citations\":[]}"),
                 JsonMapper.builder().build().readTree(
                         assistantMessages.getFirst().getStructuredJson()));
-        assertTrue(chatMapper.listAssistantMessagesBySession(
-                workspace.getId() + 1, session.getId()).isEmpty());
+        assertTrue(chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                workspace.getId() + 1, session.getId(), List.of(turn.getId()), 100).isEmpty());
         assertEquals(1, chatMapper.updateTurnTerminal(
                 workspace.getId(), session.getId(), turn.getId(),
                 "failed", "quota_exhausted", "running", null));
@@ -338,7 +356,8 @@ class AiChatMapperTest extends AbstractMapperTest {
         AiChatTurn storedTurn = chatMapper.getTurnById(
                 workspace.getId(), session.getId(), turn.getId());
         assertEquals(
-                JsonMapper.builder().build().readTree("{\"citations\":[]}"),
+                JsonMapper.builder().build().readTree(
+                        "{\"turnId\":" + turn.getId() + ",\"citations\":[]}"),
                 JsonMapper.builder().build().readTree(storedAnswer.getStructuredJson()));
         assertEquals(21, storedAnswer.getInputTokens());
         assertEquals(8, storedAnswer.getOutputTokens());

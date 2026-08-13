@@ -445,13 +445,19 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
-  <select id="listAssistantMessagesBySession" resultMap="messageResult">
+  <select id="listAssistantMessagesBySessionAndTurnIds" resultMap="messageResult">
     SELECT id, workspace_id, session_id, seq, author_kind, structured_json
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
       AND author_kind = 'assistant'
+      AND JSON_TYPE(JSON_EXTRACT(structured_json, '$.turnId')) = 'INTEGER'
+      AND CAST(JSON_UNQUOTE(JSON_EXTRACT(structured_json, '$.turnId')) AS UNSIGNED) IN
+      <foreach collection="turnIds" item="turnId" open="(" separator="," close=")">
+        #{turnId}
+      </foreach>
     ORDER BY seq ASC
+    LIMIT #{limit}
   </select>
 
   <select id="listRecentMessages" resultMap="messageResult">
@@ -679,6 +685,7 @@
       AND tc.status = 'proposed'
     </if>
     ORDER BY m.seq ASC, tc.id ASC
+    LIMIT #{limit}
   </select>
 
   <select id="getToolCallBySessionForUpdate" resultMap="toolCallResult">

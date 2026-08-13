@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -43,6 +45,8 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiAssistantToolCallReadService {
+    private static final int MAX_TOOL_CALLS = 100;
+    private static final String ACTIVE = "active";
     private static final Pattern TURN_STEP_KEY = Pattern.compile(
             "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)$");
 
@@ -53,36 +57,77 @@ public class AiAssistantToolCallReadService {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final AiAssistantSessionReadAudit sessionReadAudit;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
-    /** Returns every safe write-tool card in one authorized session. */
+    /** Returns up to 100 safe write-tool cards in one authorized session. */
     @Transactional(readOnly = true)
     public List<AiAssistantToolCallReadDto> list(int sessionId, boolean pendingOnly) {
         Viewer viewer = currentViewer();
-        requireReadableSession(viewer, sessionId);
-        List<StoredToolCall> stored = chatMapper.listToolCallsBySession(
-                viewer.workspaceId(), sessionId, pendingOnly).stream()
-                .map(this::readStored)
-                .filter(Objects::nonNull)
-                .filter(call -> !pendingOnly || call.tier() == ToolTier.CONFIRM)
-                .toList();
-        return project(viewer, sessionId, stored);
+        AiChatSession session = requireReadableSession(viewer, sessionId);
+        return list(viewer, session, pendingOnly, true);
+    }
+
+    /** Returns up to 100 safe write-tool cards for one retained administrative read. */
+    @Transactional
+    @RequirePermission(Permission.AI_SESSION_ADMIN)
+    public List<AiAssistantToolCallReadDto> listRetained(
+            int sessionId, boolean pendingOnly) {
+        Viewer viewer = currentViewer();
+        AiChatSession session = requireRetainedSession(viewer, sessionId);
+        List<AiAssistantToolCallReadDto> projected = list(
+                viewer, session, pendingOnly, false);
+        sessionReadAudit.record(sessionId, "retained");
+        return projected;
     }
 
     /** Returns one safe write-tool card in an authorized session. */
     @Transactional(readOnly = true)
     public AiAssistantToolCallReadDto get(int sessionId, int toolCallId) {
         Viewer viewer = currentViewer();
-        requireReadableSession(viewer, sessionId);
+        AiChatSession session = requireReadableSession(viewer, sessionId);
+        return get(viewer, session, toolCallId, true);
+    }
+
+    /** Returns one safe write-tool card for a retained administrative read. */
+    @Transactional
+    @RequirePermission(Permission.AI_SESSION_ADMIN)
+    public AiAssistantToolCallReadDto getRetained(int sessionId, int toolCallId) {
+        Viewer viewer = currentViewer();
+        AiChatSession session = requireRetainedSession(viewer, sessionId);
+        AiAssistantToolCallReadDto projected = get(viewer, session, toolCallId, false);
+        sessionReadAudit.record(sessionId, "retained");
+        return projected;
+    }
+
+    private List<AiAssistantToolCallReadDto> list(
+            Viewer viewer,
+            AiChatSession session,
+            boolean pendingOnly,
+            boolean mutationsAvailable) {
+        List<StoredToolCall> stored = chatMapper.listToolCallsBySession(
+                viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS).stream()
+                .map(this::readStored)
+                .filter(Objects::nonNull)
+                .filter(call -> !pendingOnly || call.tier() == ToolTier.CONFIRM)
+                .toList();
+        return project(viewer, session, stored, mutationsAvailable);
+    }
+
+    private AiAssistantToolCallReadDto get(
+            Viewer viewer,
+            AiChatSession session,
+            int toolCallId,
+            boolean mutationsAvailable) {
         AiChatToolCall toolCall = chatMapper.getToolCallBySession(
-                viewer.workspaceId(), sessionId, toolCallId);
+                viewer.workspaceId(), session.getId(), toolCallId);
         StoredToolCall stored = toolCall == null ? null : readStored(toolCall);
         if (stored == null) {
             throw inaccessible();
         }
         List<AiAssistantToolCallReadDto> projected = project(
-                viewer, sessionId, List.of(stored));
+                viewer, session, List.of(stored), mutationsAvailable);
         if (projected.isEmpty()) {
             throw inaccessible();
         }
@@ -90,7 +135,10 @@ public class AiAssistantToolCallReadService {
     }
 
     private List<AiAssistantToolCallReadDto> project(
-            Viewer viewer, int sessionId, List<StoredToolCall> stored) {
+            Viewer viewer,
+            AiChatSession session,
+            List<StoredToolCall> stored,
+            boolean mutationsAvailable) {
         Set<Permission> viewerPermissions = workspaceService.permissionsFor(
                 viewer.workspaceId(), viewer.userId());
         Map<RecordKey, VisibleTarget> visibleTargets = visibleTargets(
@@ -108,7 +156,8 @@ public class AiAssistantToolCallReadService {
                 ? pipelineMapper.getAllStages(viewer.workspaceId())
                 : List.of();
         Map<Integer, Integer> assistantMessages = assistantMessages(
-                viewer.workspaceId(), sessionId);
+                viewer.workspaceId(), session.getId(), stored);
+        boolean undoAvailable = mutationsAvailable && ACTIVE.equals(session.getStatus());
         List<AiAssistantToolCallReadDto> projected = new ArrayList<>();
         for (StoredToolCall call : stored) {
             String status = publicStatus(call.toolCall());
@@ -116,7 +165,7 @@ public class AiAssistantToolCallReadService {
                 continue;
             }
             UndoProjection undo = undoProjection(
-                    call, status, viewer.userId(), viewerPermissions);
+                    call, status, viewer.userId(), viewerPermissions, undoAvailable);
             if (undo.undone()) {
                 status = "undone";
             }
@@ -135,7 +184,7 @@ public class AiAssistantToolCallReadService {
                     target,
                     requestSummary(
                             call, viewer, visibleTarget, assignableOwners, stages),
-                    outcomeSummary(call.toolCall(), status),
+                    outcomeSummary(call, status),
                     messageId,
                     call.turnId(),
                     undo.expiresAt(),
@@ -213,10 +262,18 @@ public class AiAssistantToolCallReadService {
         return Map.copyOf(visible);
     }
 
-    private Map<Integer, Integer> assistantMessages(int workspaceId, int sessionId) {
+    private Map<Integer, Integer> assistantMessages(
+            int workspaceId, int sessionId, List<StoredToolCall> stored) {
+        List<Integer> turnIds = stored.stream()
+                .map(StoredToolCall::turnId)
+                .distinct()
+                .toList();
+        if (turnIds.isEmpty()) {
+            return Map.of();
+        }
         Map<Integer, Integer> messages = new LinkedHashMap<>();
-        for (AiChatMessage message : chatMapper.listAssistantMessagesBySession(
-                workspaceId, sessionId)) {
+        for (AiChatMessage message : chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                workspaceId, sessionId, turnIds, MAX_TOOL_CALLS)) {
             Integer turnId = assistantTurnId(message.getStructuredJson());
             if (turnId != null) {
                 messages.putIfAbsent(turnId, message.getId());
@@ -246,7 +303,8 @@ public class AiAssistantToolCallReadService {
             StoredToolCall call,
             String status,
             int viewerUserId,
-            Set<Permission> viewerPermissions) {
+            Set<Permission> viewerPermissions,
+            boolean mutationsAvailable) {
         if (call.tier() != ToolTier.AUTO
                 || !"executed".equals(status)
                 || call.toolCall().getResultJson() == null) {
@@ -269,7 +327,8 @@ public class AiAssistantToolCallReadService {
                 return new UndoProjection(false, canonicalInstant(undo.get("expiresAt")), false);
             }
             String expiresAt = canonicalInstant(undo.get("expiresAt"));
-            boolean available = expiresAt != null
+            boolean available = mutationsAvailable
+                    && expiresAt != null
                     && Objects.equals(call.toolCall().getRequestedByUserId(), viewerUserId)
                     && hasUndoPermissions(call.toolCall().getToolName(), viewerPermissions)
                     && !clock.instant().isAfter(Instant.parse(expiresAt));
@@ -377,7 +436,8 @@ public class AiAssistantToolCallReadService {
                 : null;
     }
 
-    private String outcomeSummary(AiChatToolCall toolCall, String status) {
+    private String outcomeSummary(StoredToolCall call, String status) {
+        AiChatToolCall toolCall = call.toolCall();
         return switch (status) {
             case "proposed" -> null;
             case "rejected" -> "Request rejected";
@@ -389,7 +449,9 @@ public class AiAssistantToolCallReadService {
                 case "create_note" -> "Note created";
                 case "add_tag" -> addTagOutcomeSummary(toolCall.getResultJson());
                 case "change_deal_stage" -> "Deal stage changed";
-                case "assign_owner" -> "Owner assigned";
+                case "assign_owner" -> "unassigned".equalsIgnoreCase(call.requestValue().trim())
+                        ? "Owner removed"
+                        : "Owner assigned";
                 default -> "Request completed";
             };
             default -> null;
@@ -484,13 +546,42 @@ public class AiAssistantToolCallReadService {
                 workspaceService.getCurrentWorkspaceId(), workspaceService.getCurrentUserId());
     }
 
-    private void requireReadableSession(Viewer viewer, int sessionId) {
+    private AiChatSession requireReadableSession(Viewer viewer, int sessionId) {
         workspaceService.requirePermission(
                 viewer.workspaceId(), viewer.userId(), Permission.AI_USE);
-        if (chatMapper.getAccessibleSessionById(
-                viewer.workspaceId(), viewer.userId(), sessionId) == null) {
+        AiChatSession session = chatMapper.getAccessibleSessionById(
+                viewer.workspaceId(), viewer.userId(), sessionId);
+        if (session == null) {
             throw inaccessible();
         }
+        return session;
+    }
+
+    private AiChatSession requireRetainedSession(Viewer viewer, int sessionId) {
+        workspaceService.requirePermission(
+                viewer.workspaceId(), viewer.userId(), Permission.AI_SESSION_ADMIN);
+        List<Integer> activeMemberIds = activeMemberIds(viewer);
+        AiChatSession session = chatMapper.getRetainedSessionById(
+                viewer.workspaceId(), viewer.userId(), sessionId, activeMemberIds);
+        if (session == null) {
+            throw inaccessible();
+        }
+        List<Integer> revalidatedMemberIds = activeMemberIds(viewer);
+        if (session.getCreatedByUserId() != null
+                && revalidatedMemberIds.contains(session.getCreatedByUserId())) {
+            throw inaccessible();
+        }
+        return session;
+    }
+
+    private List<Integer> activeMemberIds(Viewer viewer) {
+        List<Integer> activeMemberIds = workspaceService.getMembers(viewer.workspaceId()).stream()
+                .map(User::getId)
+                .toList();
+        if (!activeMemberIds.contains(viewer.userId())) {
+            throw inaccessible();
+        }
+        return activeMemberIds;
     }
 
     private static ResourceNotFoundException inaccessible() {

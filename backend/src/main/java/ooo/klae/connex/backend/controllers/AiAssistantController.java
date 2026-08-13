@@ -241,20 +241,34 @@ public class AiAssistantController {
         return turnService.get(sessionId, turnId);
     }
 
-    /** Returns every viewer-safe write-tool call in the authorized session. */
+    /** Returns a bounded set of viewer-safe write-tool calls in the authorized session. */
     @GetMapping("/{sessionId:\\d+}/tool-calls")
     public List<AiAssistantToolCallReadDto> listToolCalls(
             @PathVariable int sessionId,
-            @RequestParam(defaultValue = "false") boolean pendingOnly) {
-        return toolCallReadService.list(sessionId, pendingOnly);
+            @RequestParam(defaultValue = "false") boolean pendingOnly,
+            @RequestParam(required = false) String scope) {
+        if (scope == null) {
+            return toolCallReadService.list(sessionId, pendingOnly);
+        }
+        if (RETAINED_SCOPE.equals(scope)) {
+            return toolCallReadService.listRetained(sessionId, pendingOnly);
+        }
+        throw unsupportedScope();
     }
 
     /** Returns one viewer-safe write-tool call in the authorized session. */
     @GetMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}")
     public AiAssistantToolCallReadDto getToolCall(
             @PathVariable int sessionId,
-            @PathVariable int toolCallId) {
-        return toolCallReadService.get(sessionId, toolCallId);
+            @PathVariable int toolCallId,
+            @RequestParam(required = false) String scope) {
+        if (scope == null) {
+            return toolCallReadService.get(sessionId, toolCallId);
+        }
+        if (RETAINED_SCOPE.equals(scope)) {
+            return toolCallReadService.getRetained(sessionId, toolCallId);
+        }
+        throw unsupportedScope();
     }
 
     /** Explicitly approves and executes one confirm-tier tool call. */

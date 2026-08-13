@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit;
 import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
 import ooo.klae.connex.backend.ai.assistant.AiChatPresenceRegistry;
 import ooo.klae.connex.backend.beans.AiChatMessage;
@@ -62,6 +63,7 @@ public class AiAssistantService {
     private final AuthService authService;
     private final AiChatCitationProjector citationProjector;
     private final AuditService auditService;
+    private final AiAssistantSessionReadAudit sessionReadAudit;
     private final UserMapper userMapper;
     private final AiChatPresenceRegistry presenceRegistry;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
@@ -615,13 +617,7 @@ public class AiAssistantService {
     }
 
     private void auditSessionRead(AiChatSession session, String scope) {
-        auditService.recordStrict(
-            "ai.assistant.session.read",
-            "ai_chat_session",
-            session.getId(),
-            "Assistant session " + session.getId(),
-            "Administrative assistant session read",
-            Map.of("scope", scope));
+        sessionReadAudit.record(session.getId(), scope);
     }
 
     private void auditAdministrativeReads(

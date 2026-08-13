@@ -23,9 +23,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
@@ -43,6 +45,7 @@ import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
@@ -55,6 +58,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     private static final String INACCESSIBLE = "AI assistant session is not accessible";
 
     @Autowired private AiAssistantService service;
+    @Autowired private AiAssistantToolCallReadService toolCallReadService;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private RoleMapper roleMapper;
     @Autowired private AuditLogMapper auditLogMapper;
@@ -187,6 +191,9 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         ForbiddenException detail = assertThrows(
             ForbiddenException.class,
             () -> service.getRetained(session.getId(), 1, 50));
+        assertThrows(
+            ResourceNotFoundException.class,
+            () -> toolCallReadService.listRetained(session.getId(), false));
 
         assertEquals(INACCESSIBLE, ordinaryDetail.getMessage());
         assertEquals(INACCESSIBLE, detail.getMessage());
@@ -223,6 +230,49 @@ class AiAssistantServiceTest extends AbstractServiceTest {
             workspace.getId(), erased.getId());
 
         assertEquals(erased.getId(), service.getRetained(erased.getId(), 1, 50).session().getId());
+    }
+
+    @Test
+    void retainedToolCardsAreReadOnlyAndShareTheMetadataOnlyAuditPath() {
+        String privateResult = "tool-result-secret-" + unique();
+        User departedAuthor = newUser();
+        AiChatSession retained = privateSession(departedAuthor, "Retained tool evidence");
+        Person target = newPerson(newCompany());
+        AiChatMessage request = new AiChatMessage();
+        request.setWorkspaceId(workspace.getId());
+        request.setSessionId(retained.getId());
+        request.setSeq(1);
+        request.setAuthorKind("user");
+        request.setAuthorUserId(departedAuthor.getId());
+        request.setContent("Create a note");
+        chatMapper.insertMessage(request);
+        AiChatToolCall toolCall = new AiChatToolCall();
+        toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setMessageId(request.getId());
+        toolCall.setToolName("create_note");
+        toolCall.setStatus("executed");
+        toolCall.setArgumentsJson("{\"tool\":\"create_note\",\"tier\":\"auto\","
+                + "\"restrictionEpoch\":1,\"target\":{\"kind\":\"person\",\"id\":"
+                + target.getId() + "},\"request\":{\"handle\":\"r1\"}}");
+        toolCall.setResultJson("{\"private\":\"" + privateResult + "\",\"undo\":{"
+                + "\"status\":\"available\",\"expiresAt\":\"2099-01-01T00:00:00Z\"}}");
+        toolCall.setIdempotencyKey("turn-19-step-1");
+        chatMapper.insertToolCall(toolCall);
+        assistantMessage(retained.getId(), 2, "Completed", "{\"turnId\":19}");
+        workspaceMapper.removeMember(workspace.getId(), departedAuthor.getId());
+
+        var card = toolCallReadService.listRetained(retained.getId(), false).getFirst();
+        AuditLog audit = auditLogMapper.findByEntity(
+                workspace.getId(), "ai_chat_session", retained.getId(), 10, 0).getFirst();
+
+        assertEquals("Note created", card.outcomeSummary());
+        assertFalse(card.undoAvailable());
+        assertEquals("ai.assistant.session.read", audit.getAction());
+        assertEquals("{\"scope\": \"retained\"}", audit.getChanges());
+        String auditPayload = String.join(" ",
+                audit.getTargetLabel(), audit.getSummary(), audit.getChanges());
+        assertFalse(auditPayload.contains(privateResult));
+        assertFalse(auditPayload.contains(retained.getTitle()));
     }
 
     @Test

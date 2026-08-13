@@ -192,6 +192,8 @@ class AiAssistantControllerTest {
         when(toolCallReadService.list(42, false)).thenReturn(List.of(toolCall));
         when(toolCallReadService.list(42, true)).thenReturn(List.of(toolCall));
         when(toolCallReadService.get(42, 29)).thenReturn(toolCall);
+        when(toolCallReadService.listRetained(42, false)).thenReturn(List.of(toolCall));
+        when(toolCallReadService.getRetained(42, 29)).thenReturn(toolCall);
 
         mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls"))
             .andExpect(status().isOk())
@@ -213,10 +215,23 @@ class AiAssistantControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(29))
             .andExpect(jsonPath("$.requestSummary").value("Assign an owner"));
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls?scope=retained"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value(29));
+        mockMvc.perform(get(
+                "/api/ai/assistant/sessions/42/tool-calls/29?scope=retained"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(29));
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls?scope=all"))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls/29?scope=all"))
+            .andExpect(status().isBadRequest());
 
         verify(toolCallReadService).list(42, false);
         verify(toolCallReadService).list(42, true);
         verify(toolCallReadService).get(42, 29);
+        verify(toolCallReadService).listRetained(42, false);
+        verify(toolCallReadService).getRetained(42, 29);
     }
 
     @Test
