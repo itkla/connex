@@ -178,6 +178,15 @@ class AzureOpenAiAdapterTest {
     }
 
     @Test
+    void outputCapacityUsesDocumentedAzureModelFamilyLimits() {
+        assertEquals(128_000, adapter.maxOutputTokens(target("gpt-5.2")));
+        assertEquals(100_000, adapter.maxOutputTokens(target("o4-mini")));
+        assertEquals(32_768, adapter.maxOutputTokens(target("gpt-4.1")));
+        assertEquals(16_384, adapter.maxOutputTokens(target("gpt-4o")));
+        assertEquals(4_096, adapter.maxOutputTokens(target("custom-deployment")));
+    }
+
+    @Test
     void complete_degradesRejectedSchemaToJsonObjectThenPromptOnly() throws Exception {
         when(azureOpenAiClient.complete(any(URI.class), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
                 .thenThrow(new AiProviderRequestRejectedException("Azure OpenAI", 400))
@@ -356,6 +365,12 @@ class AzureOpenAiAdapterTest {
                 outputMode,
                 64,
                 0.25);
+    }
+
+    private static AiProviderTarget target(String modelId) {
+        return new AiProviderTarget(
+                "azure_openai", null, modelId, "https://connex.openai.azure.com",
+                "2025-01-01-preview", "contacts-prod", null, false);
     }
 
     private static AiInputImage image() {

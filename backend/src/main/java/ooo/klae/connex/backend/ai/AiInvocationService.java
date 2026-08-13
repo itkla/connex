@@ -81,7 +81,8 @@ public class AiInvocationService {
     private static final String PARSE_OUTCOME_PARSED = "parsed";
     private static final Set<String> TRUNCATION_STOP_REASONS = Set.of("length", "max_tokens");
     private static final int MAX_REASONING_CHARS = 16_000;
-    private static final String TAGGED_REASONING_INSTRUCTION = """
+    /** Server-controlled instruction appended for providers that expose tagged reasoning. */
+    public static final String TAGGED_REASONING_INSTRUCTION = """
             Before the final response, reason inside exactly one <thinking>...</thinking> block. \
             After the closing tag, emit only the requested final response shape. Never put answer \
             text inside the thinking block and never put thinking outside it.""";
@@ -115,6 +116,7 @@ public class AiInvocationService {
                 adapter.structuredOutputCapability(resolved.target()),
                 adapter.reasoningCapability(resolved.target()),
                 adapter.contextWindowTokens(resolved.target()),
+                adapter.maxOutputTokens(resolved.target()),
                 adapter.toolCallingCapability(resolved.target()),
                 adapter.nativeToolReasoningCapability(resolved.target()));
     }
@@ -672,13 +674,16 @@ public class AiInvocationService {
             int workspaceId,
             int orgId,
             String correlationId,
+            ResolvedAiProvider resolved,
             AiInvocation invocation,
-            boolean structured) {
+            boolean structured,
+            boolean outputTokensClamped) {
         try {
             return aiMediaAdmissionService.acquire(orgId, invocation.images());
         } catch (TooManyRequestsException exception) {
-            emitAudit(workspaceId, orgId, null, invocation, correlationId, "blocked",
-                    null, null, null, null, "media_admission", structured, null);
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "media_admission", structured, null,
+                    outputTokensClamped);
             throw exception;
         }
     }
@@ -724,44 +729,61 @@ public class AiInvocationService {
                         ? adapter.reasoningCapability(resolved.target())
                         : adapter.nativeToolReasoningCapability(resolved.target())
                 : AiReasoningMode.NONE;
+        int providerMaxOutputTokens = adapter.maxOutputTokens(resolved.target());
+        if (providerMaxOutputTokens < 1) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "provider_capability", structured, null);
+            throw new AiProviderException("AI provider reported an invalid output token limit");
+        }
+        boolean invocationOutputTokensClamped = invocation.maxTokens() > providerMaxOutputTokens;
+        boolean outputTokensClamped = invocation.outputTokensClamped()
+                || invocationOutputTokensClamped;
+        AiInvocation effectiveInvocation = invocationOutputTokensClamped
+                ? withMaxTokens(invocation, providerMaxOutputTokens)
+                : invocation;
 
         String serializedPrompt;
         try {
             serializedPrompt = serializeProviderInput(
-                    invocation.prompt(), responseSchema, reasoningMode, nativeTools);
+                    effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
         } catch (AiProviderException exception) {
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                    null, null, null, null, "serialization", structured, null);
+            emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
+                    null, null, null, null, "serialization", structured, null,
+                    outputTokensClamped);
             throw exception;
         }
 
         if (serializedPrompt.getBytes(StandardCharsets.UTF_8).length > providerInputByteCeiling(
-                adapter.contextWindowTokens(resolved.target()), invocation.maxTokens())) {
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                    null, null, null, null, "context_window", structured, null);
+                adapter.contextWindowTokens(resolved.target()), effectiveInvocation.maxTokens())) {
+            emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
+                    null, null, null, null, "context_window", structured, null,
+                    outputTokensClamped);
             throw new AiProviderException("AI prompt exceeds the configured model context window");
         }
 
         try {
-            OutboundLeakScan.assertNoLeak(serializedPrompt, invocation.context(), objectMapper);
+            OutboundLeakScan.assertNoLeak(serializedPrompt, effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                    null, null, null, null, "leak", structured, null);
+            emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
+                    null, null, null, null, "leak", structured, null, exception,
+                    outputTokensClamped);
             throw exception;
         }
 
         AiOrganizationBudgetCoordinator.Lease budgetLease;
         try {
-            budgetLease = budgetCoordinator.reserve(orgId, invocation, serializedPrompt);
+            budgetLease = budgetCoordinator.reserve(orgId, effectiveInvocation, serializedPrompt);
         } catch (AiBudgetExhaustedException exception) {
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                    null, null, null, null, "budget_exhausted", structured, null);
+            emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
+                    null, null, null, null, "budget_exhausted", structured, null,
+                    outputTokensClamped);
             throw exception;
         }
 
         try {
-            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
-                    null, null, null, null, null, structured, null);
+            emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "attempt",
+                    null, null, null, null, null, structured, null,
+                    outputTokensClamped);
         } catch (RuntimeException | Error exception) {
             budgetLease.close();
             throw exception;
@@ -769,20 +791,22 @@ public class AiInvocationService {
 
         MediaLeaseGuard mediaLease = MediaLeaseGuard.none();
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
-                workspaceId, orgId, userId, resolved, invocation, correlationId,
+                workspaceId, orgId, userId, resolved, effectiveInvocation, correlationId,
                 structured, invocationCommitment, providerAttemptGuard,
-                serializedPrompt, budgetLease);
+                serializedPrompt, budgetLease, outputTokensClamped);
         try {
-            if (!invocation.images().isEmpty()) {
+            if (!effectiveInvocation.images().isEmpty()) {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
-                        workspaceId, orgId, correlationId, invocation, structured));
+                        workspaceId, orgId, correlationId, resolved, effectiveInvocation, structured,
+                        outputTokensClamped));
             }
             AiCompletionResult result = withConservativeUsage(adapter.complete(request(
-                    resolved, invocation, outputMode, responseSchema, nativeTools,
-                    reasoningMode, attemptTracker)), invocation, serializedPrompt);
+                    resolved, effectiveInvocation, outputMode, responseSchema, nativeTools,
+                    reasoningMode, attemptTracker)), effectiveInvocation, serializedPrompt);
             attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());
             return new RawInvocation(
-                    workspaceId, orgId, resolved, correlationId, structured, result, mediaLease);
+                    workspaceId, orgId, resolved, correlationId, structured, result, mediaLease,
+                    outputTokensClamped);
         } catch (AiProviderAttemptBlockedException exception) {
             mediaLease.close();
             attemptTracker.closeBudget();
@@ -791,9 +815,9 @@ public class AiInvocationService {
             mediaLease.close();
             attemptTracker.closeBudget();
             if (!attemptTracker.failureAudited()) {
-                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
+                emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "failure",
                         null, null, null, null, "provider_exception", structured, null,
-                        null, null, rejection(exception));
+                        null, null, rejection(exception), null, outputTokensClamped);
             }
             throw exception;
         } catch (TooManyRequestsException exception) {
@@ -804,11 +828,20 @@ public class AiInvocationService {
             mediaLease.close();
             attemptTracker.closeBudget();
             if (!attemptTracker.failureAudited()) {
-                emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
-                        null, null, null, null, "invocation_exception", structured, null);
+                emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "failure",
+                        null, null, null, null, "invocation_exception", structured, null,
+                        outputTokensClamped);
             }
             throw exception;
         }
+    }
+
+    private static AiInvocation withMaxTokens(AiInvocation invocation, int maxTokens) {
+        return new AiInvocation(
+                invocation.feature(), invocation.context(), invocation.prompt(), invocation.images(),
+                maxTokens, invocation.temperature(), invocation.reasoningRequested(),
+                invocation.callerDeadline(), invocation.protocol(), invocation.nativeToolsDegradedStatus(),
+                true);
     }
 
     private RuntimeException directAdmissionFailure(
@@ -973,7 +1006,8 @@ public class AiInvocationService {
             String parseOutcome) {
         emitAudit(raw.workspaceId(), raw.orgId(), raw.resolved(), invocation, raw.correlationId(), outcome,
                 inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
-                raw.result().structuredOutputEnforcement(), null);
+                raw.result().structuredOutputEnforcement(), null, null, null,
+                raw.outputTokensClamped());
     }
 
     private void emitAudit(RawInvocation raw, AiInvocation invocation, String outcome, Integer inputTokens,
@@ -981,7 +1015,8 @@ public class AiInvocationService {
             String parseOutcome, MalformedDiagnostic diagnostic) {
         emitAudit(raw.workspaceId(), raw.orgId(), raw.resolved(), invocation, raw.correlationId(), outcome,
                 inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
-                raw.result().structuredOutputEnforcement(), diagnostic);
+                raw.result().structuredOutputEnforcement(), diagnostic, null, null,
+                raw.outputTokensClamped());
     }
 
     private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
@@ -989,7 +1024,16 @@ public class AiInvocationService {
             Integer demaskWarnings, String reason, boolean structured, String parseOutcome) {
         emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
                 inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
-                null, null, null);
+                null, null, null, null);
+    }
+
+    private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
+            String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
+            Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
+            boolean outputTokensClamped) {
+        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                null, null, null, null, outputTokensClamped);
     }
 
     private static AiProviderRequestRejectedException rejection(AiProviderException exception) {
@@ -1002,14 +1046,43 @@ public class AiInvocationService {
             AiStructuredOutputEnforcement enforcement, MalformedDiagnostic diagnostic) {
         emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
                 inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
-                enforcement, diagnostic, null);
+                enforcement, diagnostic, null, null);
+    }
+
+    private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
+            String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
+            Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
+            MaskingLeakException leakDiagnostic) {
+        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                null, null, null, leakDiagnostic);
+    }
+
+    private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
+            String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
+            Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
+            MaskingLeakException leakDiagnostic, boolean outputTokensClamped) {
+        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                null, null, null, leakDiagnostic, outputTokensClamped);
     }
 
     private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
             String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
             Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
             AiStructuredOutputEnforcement enforcement, MalformedDiagnostic diagnostic,
-            AiProviderRequestRejectedException providerRejection) {
+            AiProviderRequestRejectedException providerRejection, MaskingLeakException leakDiagnostic) {
+        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                enforcement, diagnostic, providerRejection, leakDiagnostic, false);
+    }
+
+    private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
+            String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
+            Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
+            AiStructuredOutputEnforcement enforcement, MalformedDiagnostic diagnostic,
+            AiProviderRequestRejectedException providerRejection, MaskingLeakException leakDiagnostic,
+            boolean outputTokensClamped) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("provider", provider(resolved));
         metadata.put("region", region(resolved));
@@ -1030,6 +1103,9 @@ public class AiInvocationService {
         }
         metadata.put("structured", structured);
         metadata.put("reasoningRequested", invocation.reasoningRequested());
+        if (outputTokensClamped) {
+            metadata.put("outputTokensClamped", true);
+        }
         metadata.put(
                 "protocol",
                 invocation.protocol().name().toLowerCase(java.util.Locale.ROOT));
@@ -1059,6 +1135,15 @@ public class AiInvocationService {
         }
         if (reason != null) {
             metadata.put("reason", reason);
+        }
+        if (leakDiagnostic != null
+                && leakDiagnostic.leakedCount() > 0
+                && !leakDiagnostic.leakedKinds().isEmpty()) {
+            metadata.put("leakKinds", leakDiagnostic.leakedKinds().stream()
+                    .map(kind -> kind.name().toLowerCase(java.util.Locale.ROOT))
+                    .sorted()
+                    .toList());
+            metadata.put("leakCount", leakDiagnostic.leakedCount());
         }
         if (diagnostic != null) {
             metadata.put("schemaRule", diagnostic.schemaRule());
@@ -1107,6 +1192,7 @@ public class AiInvocationService {
         private final Runnable initialCommitment;
         private final Runnable providerAttemptGuard;
         private final String serializedPrompt;
+        private final boolean outputTokensClamped;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
         private AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
@@ -1123,7 +1209,8 @@ public class AiInvocationService {
                 Runnable initialCommitment,
                 Runnable providerAttemptGuard,
                 String serializedPrompt,
-                AiOrganizationBudgetCoordinator.Lease budgetLease) {
+                AiOrganizationBudgetCoordinator.Lease budgetLease,
+                boolean outputTokensClamped) {
             this.workspaceId = workspaceId;
             this.orgId = orgId;
             this.userId = userId;
@@ -1136,6 +1223,7 @@ public class AiInvocationService {
             this.serializedPrompt = Objects.requireNonNull(
                     serializedPrompt, "serializedPrompt");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
+            this.outputTokensClamped = outputTokensClamped;
         }
 
         @Override
@@ -1185,7 +1273,8 @@ public class AiInvocationService {
                 if (fallbackAttempt) {
                     reserveFallbackBudget();
                     emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "attempt",
-                            null, null, null, null, null, structured, null);
+                            null, null, null, null, null, structured, null,
+                            outputTokensClamped);
                 }
                 return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                     requireCurrentProviderSnapshot();
@@ -1198,7 +1287,8 @@ public class AiInvocationService {
                 closeBudget();
                 failureAudited = true;
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                        null, null, null, null, "restriction_epoch", structured, null);
+                        null, null, null, null, "restriction_epoch", structured, null,
+                        outputTokensClamped);
                 throw new AiProviderAttemptBlockedException(
                         AiProviderAttemptBlockedException.Reason.RESTRICTION_EPOCH);
             } catch (AiBudgetExhaustedException exception) {
@@ -1207,7 +1297,8 @@ public class AiInvocationService {
                 closeBudget();
                 failureAudited = true;
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                        null, null, null, null, "gate", structured, null);
+                        null, null, null, null, "gate", structured, null,
+                        outputTokensClamped);
                 throw exception;
             } catch (RuntimeException exception) {
                 closeBudget();
@@ -1219,7 +1310,9 @@ public class AiInvocationService {
                         null, null, null, null, reason, structured, null, null, null,
                         exception instanceof AiProviderException providerException
                                 ? rejection(providerException)
-                                : null);
+                                : null,
+                        null,
+                        outputTokensClamped);
                 if (callerDeadlineReached()) {
                     throw new AiProviderCallerDeadlineExceededException();
                 }
@@ -1254,7 +1347,8 @@ public class AiInvocationService {
             } catch (AiBudgetExhaustedException exception) {
                 failureAudited = true;
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                        null, null, null, null, "budget_exhausted", structured, null);
+                        null, null, null, null, "budget_exhausted", structured, null,
+                        outputTokensClamped);
                 throw exception;
             }
         }
@@ -1282,7 +1376,8 @@ public class AiInvocationService {
                     ? "organization_quota"
                     : "invocation_capacity";
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
-                    null, null, null, null, reason, structured, null);
+                    null, null, null, null, reason, structured, null,
+                    outputTokensClamped);
         }
 
         private boolean failureAudited() {
@@ -1313,7 +1408,8 @@ public class AiInvocationService {
             String correlationId,
             boolean structured,
             AiCompletionResult result,
-            MediaLeaseGuard mediaLease) implements AutoCloseable {
+            MediaLeaseGuard mediaLease,
+            boolean outputTokensClamped) implements AutoCloseable {
 
         @Override
         public void close() {

@@ -118,7 +118,8 @@ class AiChatMemoryServiceTest {
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        200_000));
+                        200_000,
+                        50_000));
         when(invocationService.serializedPromptBytes(
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
                 eq(AiReasoningMode.TAGGED)))
@@ -251,6 +252,7 @@ class AiChatMemoryServiceTest {
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
                         32_768,
+                        8_192,
                         AiToolCallingMode.NATIVE_FUNCTIONS,
                         AiReasoningMode.NATIVE));
         when(invocationService.serializedPromptBytes(
@@ -340,7 +342,8 @@ class AiChatMemoryServiceTest {
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        200_000));
+                        200_000,
+                        50_000));
         when(invocationService.serializedPromptBytes(
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
                 eq(AiReasoningMode.TAGGED)))
@@ -425,7 +428,8 @@ class AiChatMemoryServiceTest {
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768));
+                        32_768,
+                        8_192));
         when(invocationService.serializedPromptBytes(
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
                 eq(AiReasoningMode.TAGGED)))

@@ -38,7 +38,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class AiReportNarrativeService {
-    static final int MAX_TOKENS = 4096;
+    static final int MAX_TOKENS = 8192;
     static final double TEMPERATURE = 0.1;
 
     private static final String NOT_CONFIGURED = "not_configured";

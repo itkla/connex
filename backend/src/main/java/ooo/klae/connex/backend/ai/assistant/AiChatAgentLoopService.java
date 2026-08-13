@@ -195,7 +195,8 @@ public class AiChatAgentLoopService {
                             nativeTools
                                     ? AiInvocationProtocol.NATIVE_TOOLS
                                     : AiInvocationProtocol.JSON_REACT,
-                            nativeToolsDegradedStatus);
+                            nativeToolsDegradedStatus,
+                            memory.budget().outputTokensClamped());
                     AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
                             maskingContext.tokenBindings().stream()
                                     .map(Map.Entry::getKey)

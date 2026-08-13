@@ -72,6 +72,18 @@ public class BedrockAnthropicAdapter implements AiProvider {
                 : 4_096;
     }
 
+    /**
+     * Resolves Bedrock's documented Claude output ceiling for the configured family.
+     * @see <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-3-haiku.html">Claude 3 Haiku limits</a>
+     * @see <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-3-5-haiku.html">Claude 3.5 Haiku limits</a>
+     * @see <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4.html">Claude Sonnet 4 limits</a>
+     * @see <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-4-6.html">Claude Opus 4.6 limits</a>
+     */
+    @Override
+    public int maxOutputTokens(AiProviderTarget target) {
+        return anthropicMaxOutputTokens(target == null ? null : target.modelId());
+    }
+
     @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
@@ -195,6 +207,37 @@ public class BedrockAnthropicAdapter implements AiProvider {
                 || normalized.contains("claude-haiku-4-5")
                 || normalized.contains("claude-mythos")
                 || normalized.contains("claude-fable");
+    }
+
+    private static int anthropicMaxOutputTokens(String modelId) {
+        if (modelId == null) {
+            return 4_096;
+        }
+        String normalized = modelId.toLowerCase(Locale.ROOT);
+        if (normalized.contains("claude-mythos")
+                || normalized.contains("claude-fable")
+                || normalized.contains("claude-sonnet-5")
+                || normalized.contains("claude-opus-5")
+                || normalized.contains("claude-haiku-5")
+                || normalized.contains("claude-opus-4-6")
+                || normalized.contains("claude-opus-4-7")
+                || normalized.contains("claude-opus-4-8")
+                || normalized.contains("claude-sonnet-4-6")) {
+            return 131_072;
+        }
+        if (normalized.contains("claude-3-7")
+                || normalized.contains("claude-sonnet-4")
+                || normalized.contains("claude-haiku-4")
+                || normalized.contains("claude-opus-4-5")) {
+            return 65_536;
+        }
+        if (normalized.contains("claude-opus-4")) {
+            return 32_768;
+        }
+        if (normalized.contains("claude-3-5")) {
+            return 8_192;
+        }
+        return 4_096;
     }
 
     private static void addNativeReasoning(

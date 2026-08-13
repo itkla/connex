@@ -39,6 +39,8 @@ public class VertexAdapter implements AiProvider {
     private static final Pattern VERTEX_PROJECT_ID = Pattern.compile("^[a-z][a-z0-9-]{4,28}[a-z0-9]$");
     private static final Pattern VERTEX_REGION = Pattern.compile("^[a-z]+-[a-z]+[0-9]{1,2}$");
     private static final Pattern VERTEX_MODEL_ID = Pattern.compile("^[a-z0-9._@\\-]{1,128}$");
+    private static final Pattern GEMINI_TEXT_MODEL = Pattern.compile(
+            "^gemini-\\d+(?:\\.\\d+)?-(?:flash|pro)(?:[-.@].*)?$");
 
     private final VertexClient vertexClient;
     private final GoogleAccessTokenClient googleAccessTokenClient;
@@ -93,6 +95,32 @@ public class VertexAdapter implements AiProvider {
                 || normalized.contains("claude-fable")
                 ? 200_000
                 : 4_096;
+    }
+
+    /**
+     * Resolves documented Vertex output ceilings for Gemini and Claude publisher models.
+     * @see <a href="https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-pro">Gemini 2.5 Pro limits</a>
+     * @see <a href="https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-flash">Gemini 3 Flash limits</a>
+     * @see <a href="https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/sonnet-4">Claude Sonnet 4 limits</a>
+     * @see <a href="https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/opus-4">Claude Opus 4 limits</a>
+     */
+    @Override
+    public int maxOutputTokens(AiProviderTarget target) {
+        if (target == null || target.modelId() == null) {
+            return 4_096;
+        }
+        String normalized = target.modelId().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.startsWith("gemini-2.5-flash-image")
+                || normalized.startsWith("gemini-3-pro-image")) {
+            return 32_768;
+        }
+        if (isSupportedGeminiTextModel(normalized)) {
+            return normalized.startsWith("gemini-1.5-")
+                    || normalized.startsWith("gemini-2.0-")
+                    ? 8_192
+                    : 65_536;
+        }
+        return anthropicMaxOutputTokens(normalized);
     }
 
     @Override
@@ -427,25 +455,50 @@ public class VertexAdapter implements AiProvider {
         return !normalized.startsWith("gemini-2.5-flash-image")
                 && (normalized.startsWith("gemini-2.5-pro")
                 || normalized.startsWith("gemini-2.5-flash")
-                || normalized.startsWith("gemini-3-pro")
-                || normalized.startsWith("gemini-3-flash")
+                || isVersionedGeminiThreeTextModel(normalized)
                 || normalized.startsWith("gemini-2.0-flash-thinking"));
     }
 
     private static boolean isSupportedGeminiTextModel(String modelId) {
-        return modelId.startsWith("gemini-1.5-pro")
-                || modelId.startsWith("gemini-1.5-flash")
-                || modelId.startsWith("gemini-2.0-flash")
-                || modelId.startsWith("gemini-2.0-flash-lite")
-                || modelId.startsWith("gemini-2.5-pro")
-                || modelId.startsWith("gemini-2.5-flash")
-                || modelId.startsWith("gemini-3-pro")
-                || modelId.startsWith("gemini-3-flash");
+        return GEMINI_TEXT_MODEL.matcher(modelId).matches();
+    }
+
+    private static boolean isVersionedGeminiThreeTextModel(String modelId) {
+        return isSupportedGeminiTextModel(modelId)
+                && (modelId.startsWith("gemini-3-")
+                || modelId.startsWith("gemini-3."));
     }
 
     private static boolean isGeminiImageModel(String modelId) {
         return modelId.startsWith("gemini-2.5-flash-image")
                 || modelId.startsWith("gemini-3-pro-image");
+    }
+
+    private static int anthropicMaxOutputTokens(String normalizedModelId) {
+        if (normalizedModelId.contains("claude-mythos")
+                || normalizedModelId.contains("claude-fable")
+                || normalizedModelId.contains("claude-sonnet-5")
+                || normalizedModelId.contains("claude-opus-5")
+                || normalizedModelId.contains("claude-haiku-5")
+                || normalizedModelId.contains("claude-opus-4-6")
+                || normalizedModelId.contains("claude-opus-4-7")
+                || normalizedModelId.contains("claude-opus-4-8")
+                || normalizedModelId.contains("claude-sonnet-4-6")) {
+            return 131_072;
+        }
+        if (normalizedModelId.contains("claude-3-7")
+                || normalizedModelId.contains("claude-sonnet-4")
+                || normalizedModelId.contains("claude-haiku-4")
+                || normalizedModelId.contains("claude-opus-4-5")) {
+            return 65_536;
+        }
+        if (normalizedModelId.contains("claude-opus-4")) {
+            return 32_768;
+        }
+        if (normalizedModelId.contains("claude-3-5")) {
+            return 8_192;
+        }
+        return 4_096;
     }
 
     private static void addClaudeNativeReasoning(

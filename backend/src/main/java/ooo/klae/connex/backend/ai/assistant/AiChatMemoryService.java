@@ -36,7 +36,7 @@ public class AiChatMemoryService {
     private static final int MAX_VERBATIM_MESSAGES = 12;
     private static final int COMPACTION_THRESHOLD_PERCENT = 80;
     private static final int VERBATIM_BUDGET_PERCENT = 60;
-    private static final int SUMMARY_MAX_OUTPUT_TOKENS = 2_048;
+    private static final int SUMMARY_MAX_OUTPUT_TOKENS = 4_096;
     private static final double SUMMARY_TEMPERATURE = 0.1;
     private static final String OVERSIZED_MESSAGE_OMISSION =
             "Historical message omitted because it exceeded the compaction input budget.";

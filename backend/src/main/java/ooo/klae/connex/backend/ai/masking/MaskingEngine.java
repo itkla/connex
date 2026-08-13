@@ -72,6 +72,31 @@ public final class MaskingEngine {
     }
 
     /**
+     * Checks whether a tenant identifier would collide with immutable server-controlled prompt
+     * text under the same normalized substring matching used by the outbound leak scan.
+     * @param trustedStaticText server-controlled prompt text
+     * @param rawIdentifier tenant identifier considered for binding
+     * @return true when binding the identifier would make immutable prompt text trip the leak scan
+     */
+    public static boolean trustedStaticTextContainsIdentifier(
+            String trustedStaticText, String rawIdentifier) {
+        Objects.requireNonNull(trustedStaticText, "trustedStaticText");
+        if (rawIdentifier == null || rawIdentifier.isBlank()) {
+            throw new IllegalArgumentException("Cannot inspect a blank identifier");
+        }
+        String normalizedIdentifier = WHITESPACE.matcher(
+                Normalizer.normalize(
+                        rawIdentifier.replace("{{", "").replace("}}", "").trim(),
+                        Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT)).replaceAll(" ");
+        String normalizedTrustedText = WHITESPACE.matcher(
+                Normalizer.normalize(
+                        normalizeSeparators(trustedStaticText),
+                        Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT)).replaceAll(" ");
+        return normalizedIdentifier.length() >= 4
+                && normalizedTrustedText.contains(normalizedIdentifier);
+    }
+
+    /**
      * Masks untrusted model output while retaining only placeholders already issued in the current
      * request. This is used when masked output is returned to a provider for schema repair.
      * @param text untrusted, already-masked model output

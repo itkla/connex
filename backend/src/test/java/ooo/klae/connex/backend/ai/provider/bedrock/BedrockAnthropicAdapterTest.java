@@ -100,6 +100,25 @@ class BedrockAnthropicAdapterTest {
     }
 
     @Test
+    void outputCapacityUsesDocumentedClaudeFamilyLimits() {
+        assertEquals(4_096, adapter.maxOutputTokens(new AiProviderTarget(
+                "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+                null, null, null, null, false)));
+        assertEquals(8_192, adapter.maxOutputTokens(new AiProviderTarget(
+                "bedrock", "us-east-1", "anthropic.claude-3-5-haiku-20241022-v1:0",
+                null, null, null, null, false)));
+        assertEquals(65_536, adapter.maxOutputTokens(new AiProviderTarget(
+                "bedrock", "us-east-1", "anthropic.claude-sonnet-4-20250514-v1:0",
+                null, null, null, null, false)));
+        assertEquals(131_072, adapter.maxOutputTokens(new AiProviderTarget(
+                "bedrock", "us-east-1", "anthropic.claude-opus-4-6-v1",
+                null, null, null, null, false)));
+        assertEquals(4_096, adapter.maxOutputTokens(new AiProviderTarget(
+                "bedrock", "us-east-1", "third-party.unknown-model",
+                null, null, null, null, false)));
+    }
+
+    @Test
     void complete_omitsBlankSystemPrompt() throws Exception {
         when(bedrockClient.invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
                 any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))

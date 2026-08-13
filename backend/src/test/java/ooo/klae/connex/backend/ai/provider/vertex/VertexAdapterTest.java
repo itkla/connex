@@ -74,6 +74,10 @@ class VertexAdapterTest {
                 adapter.reasoningCapability(target("gemini-2.5-flash-image")));
         assertEquals(AiReasoningMode.NATIVE,
                 adapter.reasoningCapability(target("gemini-3-pro-image")));
+        assertEquals(AiReasoningMode.NATIVE,
+                adapter.reasoningCapability(target("gemini-3.6-flash-preview")));
+        assertEquals(AiReasoningMode.TAGGED,
+                adapter.reasoningCapability(target("gemini-3.6-ultra")));
     }
 
     @Test
@@ -81,9 +85,23 @@ class VertexAdapterTest {
         assertEquals(128_000, adapter.contextWindowTokens(target("gemini-2.5-flash")));
         assertEquals(32_768, adapter.contextWindowTokens(target("gemini-2.5-flash-image")));
         assertEquals(65_536, adapter.contextWindowTokens(target("gemini-3-pro-image")));
+        assertEquals(128_000, adapter.contextWindowTokens(target("gemini-3.6-flash")));
+        assertEquals(128_000, adapter.contextWindowTokens(target("gemini-3.1-pro-preview")));
         assertEquals(4_096, adapter.contextWindowTokens(target("gemini-unknown")));
+        assertEquals(4_096, adapter.contextWindowTokens(target("gemini-3.6-ultra")));
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
                 adapter.structuredOutputCapability(target("gemini-3-pro-image")));
+    }
+
+    @Test
+    void outputCapacityUsesDocumentedPublisherFamilyLimits() {
+        assertEquals(8_192, adapter.maxOutputTokens(target("gemini-1.5-pro")));
+        assertEquals(65_536, adapter.maxOutputTokens(target("gemini-3.6-flash")));
+        assertEquals(65_536, adapter.maxOutputTokens(target("gemini-3.1-pro-preview")));
+        assertEquals(32_768, adapter.maxOutputTokens(target("gemini-3-pro-image")));
+        assertEquals(4_096, adapter.maxOutputTokens(target("gemini-3.6-ultra")));
+        assertEquals(4_096, adapter.maxOutputTokens(target("claude-3-haiku@20240307")));
+        assertEquals(65_536, adapter.maxOutputTokens(target("claude-sonnet-4@20250514")));
     }
 
     @Test

@@ -35,8 +35,11 @@ import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
+import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
+import ooo.klae.connex.backend.ai.provider.vertex.VertexAdapter;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
 import ooo.klae.connex.backend.dto.AiProviderConfigDto;
 import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
@@ -64,6 +67,8 @@ class AiProviderConfigServiceTest {
     @Mock private AiEndpointAddressValidator aiEndpointAddressValidator;
     @Mock private AuditService auditService;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private AiProviderRouter aiProviderRouter;
+    @Mock private AiProvider aiProvider;
 
     private AiProviderConfig stored;
     private AiProviderConfigService service;
@@ -72,7 +77,7 @@ class AiProviderConfigServiceTest {
     void setUp() {
         service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, organizationMapper, userMapper,
                 workspaceMapper, orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
-                sessionSecurityService,
+                sessionSecurityService, aiProviderRouter,
                 new ObjectMapper());
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
@@ -82,6 +87,9 @@ class AiProviderConfigServiceTest {
         lenient().when(aiProviderConfigMapper.findByOrgForUpdate(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
         lenient().when(aiEndpointAddressValidator.isFetchable(anyString(), anyBoolean())).thenReturn(true);
+        lenient().when(aiProviderRouter.adapterFor(anyString())).thenReturn(aiProvider);
+        lenient().when(aiProvider.contextWindowTokens(any())).thenReturn(32_768);
+        lenient().when(aiProvider.maxOutputTokens(any())).thenReturn(32_768);
         lenient().doAnswer(invocation -> {
             stored = copy(invocation.getArgument(0));
             stored.setUpdatedAt(LocalDateTime.now());
@@ -655,6 +663,33 @@ class AiProviderConfigServiceTest {
         verify(userMapper, never()).lockByIdForShare(anyInt());
         verify(organizationMapper, never()).lockByIdForShare(anyInt());
         verify(aiProviderSecretCipher, never()).decryptCredential(anyInt(), anyString());
+    }
+
+    @Test
+    void generationProfileClampsFeatureCapToProviderOutputCapacity() {
+        stored = readyAzureConfig();
+        when(aiProvider.maxOutputTokens(any())).thenReturn(4_096);
+
+        assertTrue(service.generationProfileForOrg(ORG_ID, 4_095, 0.2).isPresent());
+        assertEquals(4_096,
+                service.generationProfileForOrg(ORG_ID, 4_096, 0.2).orElseThrow().maxTokens());
+        assertEquals(4_096,
+                service.generationProfileForOrg(ORG_ID, 8_192, 0.2).orElseThrow().maxTokens());
+    }
+
+    @Test
+    void versionedGeminiThreeProfileRemainsReadyForRaisedFeatureCap() {
+        stored = readyVertexConfig();
+        stored.setModelId("gemini-3.6-flash-preview");
+        VertexAdapter vertexAdapter = new VertexAdapter(
+                null, null, new ObjectMapper(), new AiProperties());
+        when(aiProviderRouter.adapterFor("vertex")).thenReturn(vertexAdapter);
+
+        AiGenerationProfile profile = service.generationProfileForOrg(
+                ORG_ID, 8_192, 0.2).orElseThrow();
+
+        assertEquals("gemini-3.6-flash-preview", profile.modelId());
+        assertEquals(8_192, profile.maxTokens());
     }
 
     @Test

@@ -1,8 +1,11 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import java.text.Normalizer;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import tools.jackson.databind.JsonNode;
@@ -33,12 +36,18 @@ public final class OutboundLeakScan {
         Objects.requireNonNull(objectMapper, "objectMapper");
         String rawPayload = normalizeForScan(serializedOutboundPayload);
         String decodedPayload = decodedJsonText(serializedOutboundPayload, objectMapper);
-        for (String identifier : ctx.identifierDictionary()) {
-            String normalizedIdentifier = normalizeForScan(identifier);
+        Set<String> leakedTokens = new LinkedHashSet<>();
+        Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
+        for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
+            String normalizedIdentifier = normalizeForScan(entry.rawValue());
             if (normalizedIdentifier.length() >= MIN_IDENTIFIER_LENGTH
                     && (rawPayload.contains(normalizedIdentifier) || decodedPayload.contains(normalizedIdentifier))) {
-                throw new MaskingLeakException("Outbound AI payload contains an unmasked identifier");
+                leakedTokens.add(entry.token());
+                leakedKinds.add(entry.kind());
             }
+        }
+        if (!leakedTokens.isEmpty()) {
+            throw new MaskingLeakException(leakedKinds, leakedTokens.size());
         }
     }
 

@@ -28,7 +28,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 @Service
 @RequiredArgsConstructor
 public class AiChatAttachmentContextService {
-    private static final int MAX_IMAGE_DESCRIPTION_TOKENS = 1200;
+    private static final int MAX_IMAGE_DESCRIPTION_TOKENS = 4096;
     private static final int MAX_IMAGE_DESCRIPTION_CHARS = 16_000;
     private static final double IMAGE_TEMPERATURE = 0;
     private static final String IMAGE_SYSTEM_PROMPT =

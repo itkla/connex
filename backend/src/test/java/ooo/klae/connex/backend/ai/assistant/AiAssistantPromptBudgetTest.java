@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,7 +19,8 @@ class AiAssistantPromptBudgetTest {
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.PROMPT_ONLY,
                         AiReasoningMode.TAGGED,
-                        32_768),
+                        32_768,
+                        8_192),
                 16_384,
                 8_192);
 
@@ -48,7 +50,8 @@ class AiAssistantPromptBudgetTest {
                         new AiProviderCapabilities(
                                 AiStructuredOutputEnforcement.PROMPT_ONLY,
                                 AiReasoningMode.TAGGED,
-                                4_096),
+                                4_096,
+                                1_024),
                         1_024));
     }
 
@@ -58,15 +61,32 @@ class AiAssistantPromptBudgetTest {
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.PROMPT_ONLY,
                         AiReasoningMode.TAGGED,
-                        32_768),
-                16_384,
+                        32_768,
+                        8_192),
+                8_192,
                 30_000);
 
         assertTrue(budget.maxOutputTokens() < 8_192);
+        assertFalse(budget.outputTokensClamped());
         assertTrue(budget.historyBytes() >= 4_096);
         assertTrue(budget.toolResultBytes() >= 2_048);
         assertTrue(budget.pageContextBytes() >= 256);
         assertTrue(budget.attachmentContextBytes() >= 256);
+    }
+
+    @Test
+    void providerOutputCapacityClampsAConfiguredAssistantBudget() {
+        AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.PROMPT_ONLY,
+                        AiReasoningMode.TAGGED,
+                        200_000,
+                        4_096),
+                8_192,
+                8_192);
+
+        assertEquals(4_096, budget.maxOutputTokens());
+        assertTrue(budget.outputTokensClamped());
     }
 
     @Test

@@ -105,6 +105,8 @@ public class AuditService {
             "recitation", "blocklist", "prohibited_content", "spii", "malformed_function_call",
             "language", "other");
     private static final Set<String> AI_MEDIA_TYPES = Set.of("image/jpeg");
+    private static final Set<String> AI_ENTITY_KINDS = Set.of(
+            "person", "company", "deal", "email", "phone");
     private static final Set<String> AI_MODEL_MARKERS = Set.of(
             "anthropic", "claude", "gemini", "gemma", "gpt", "model", "o1", "o3", "o4", "llama",
             "mistral", "mixtral", "deepseek", "qwen", "command", "cohere", "nova", "titan");
@@ -664,6 +666,7 @@ public class AuditService {
         copyNumber(source, projected, "mediaBytes");
         copyKnownStringList(source, projected, "mediaTypes", AI_MEDIA_TYPES);
         copyBoolean(source, projected, "structured");
+        copyBoolean(source, projected, "outputTokensClamped");
         copyKnownString(source, projected, "protocol", AI_PROTOCOLS);
         copyBoolean(source, projected, "nativeToolsDegraded");
         copyNumber(source, projected, "nativeToolsDegradedStatus");
@@ -679,6 +682,8 @@ public class AuditService {
         copyKnownString(source, projected, "reason", AI_REASONS);
         copyNumber(source, projected, "providerStatus");
         copyBoundedText(source, projected, "providerDetail", AI_PROVIDER_DETAIL_MAX_LENGTH);
+        copyKnownStringList(source, projected, "leakKinds", AI_ENTITY_KINDS);
+        copyNumber(source, projected, "leakCount");
         return projected;
     }
 

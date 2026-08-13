@@ -25,6 +25,8 @@ import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiImageInputSupport;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
+import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
 import ooo.klae.connex.backend.dto.AiProviderConfigDto;
@@ -99,6 +101,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     private final AiEndpointAddressValidator aiEndpointAddressValidator;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
+    private final AiProviderRouter aiProviderRouter;
     private final ObjectMapper objectMapper;
 
     /**
@@ -205,9 +208,13 @@ public class AiProviderConfigService implements AiProviderReadiness {
     public Optional<AiGenerationProfile> generationProfileForOrg(
             int orgId, int maxTokens, double temperature) {
         AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
-        return isReady(config)
-                ? Optional.of(generationProfile(config, maxTokens, temperature))
-                : Optional.empty();
+        if (!isReady(config)) {
+            return Optional.empty();
+        }
+        Integer effectiveMaxTokens = effectiveMaxOutputTokens(config, maxTokens);
+        return effectiveMaxTokens == null
+                ? Optional.empty()
+                : Optional.of(generationProfile(config, effectiveMaxTokens, temperature));
     }
 
     /**
@@ -234,6 +241,22 @@ public class AiProviderConfigService implements AiProviderReadiness {
                 config.getProvider(), config.getRegion(), config.getModelId(), config.getEndpoint(),
                 config.getDeployment(), config.getApiVersion(), config.getProjectId(),
                 maxTokens, temperature);
+    }
+
+    private Integer effectiveMaxOutputTokens(AiProviderConfig config, int maxTokens) {
+        AiProviderTarget target = new AiProviderTarget(
+                config.getProvider(), config.getRegion(), config.getModelId(), config.getEndpoint(),
+                config.getApiVersion(), config.getDeployment(), config.getProjectId(),
+                effectiveAllowInternalEndpoint(config));
+        try {
+            int providerMaxOutputTokens = aiProviderRouter.adapterFor(config.getProvider())
+                    .maxOutputTokens(target);
+            return providerMaxOutputTokens < 1
+                    ? null
+                    : Math.min(maxTokens, providerMaxOutputTokens);
+        } catch (AiProviderException exception) {
+            return null;
+        }
     }
 
     /**

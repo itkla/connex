@@ -33,7 +33,7 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 @Service
 @RequiredArgsConstructor
 public class BusinessCardAiExtractionService {
-    private static final int MAX_TOKENS = 512;
+    private static final int MAX_TOKENS = 4096;
     private static final double TEMPERATURE = 0;
     private static final Pattern EMAIL = Pattern.compile(
             "(?i)^[a-z0-9._%+\\-]{1,64}@[a-z0-9](?:[a-z0-9.\\-]{0,251}[a-z0-9])?\\.[a-z]{2,63}$");

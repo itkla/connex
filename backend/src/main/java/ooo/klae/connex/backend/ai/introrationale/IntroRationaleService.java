@@ -37,7 +37,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class IntroRationaleService {
-    static final int MAX_TOKENS = 512;
+    static final int MAX_TOKENS = 4096;
     static final int MAX_RATIONALE_CHARS = 400;
     static final double TEMPERATURE = 0.2;
     static final int RESOLVE_LIMIT = 50;

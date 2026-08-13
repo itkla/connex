@@ -270,11 +270,13 @@ class AuditServiceTest {
                 {"provider":"vertex","region":"secret region value","model":"claude-sonnet-4@20250514",
                 "feature":"assistant.chat","outcome":"blocked","correlationId":"123e4567-e89b-42d3-a456-426614174000",
                 "structured":true,"protocol":"native_tools",
+                "outputTokensClamped":true,
                 "nativeToolsDegraded":true,"nativeToolsDegradedStatus":404,
                 "structuredEnforcement":"json_schema","inputTokens":80,
                 "schemaRule":"native_tool_call","outputLength":317,"objectExtracted":true,
                 "providerStatus":400,
                 "providerDetail":"Invalid JSON payload received. Unknown name \\u0007tool_call_id",
+                "leakKinds":["company","person"],"leakCount":2,
                 "prompt":"private CRM content","response":"private model output"}
                 """);
         entry.setContext("{\"error\":\"ProviderException\",\"detail\":\"secret token value\"}");
@@ -289,6 +291,7 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains(AiFeature.ASSISTANT_CHAT.wireKey()));
         assertTrue(result.getChanges().contains("json_schema"));
         assertTrue(result.getChanges().contains("native_tools"));
+        assertTrue(result.getChanges().contains("outputTokensClamped"));
         assertTrue(result.getChanges().contains("native_tool_call"));
         assertTrue(result.getChanges().contains("nativeToolsDegraded"));
         assertTrue(result.getChanges().contains("404"));
@@ -297,11 +300,35 @@ class AuditServiceTest {
         assertTrue(result.getChanges().contains("providerStatus"));
         assertTrue(result.getChanges().contains("Invalid JSON payload received. Unknown name  tool_call_id"));
         assertFalse(result.getChanges().contains("\\u0007"));
+        assertTrue(result.getChanges().contains("leakKinds"));
+        assertTrue(result.getChanges().contains("company"));
+        assertTrue(result.getChanges().contains("person"));
+        assertTrue(result.getChanges().contains("leakCount"));
         assertFalse(result.getChanges().contains("prompt"));
         assertFalse(result.getChanges().contains("response"));
         assertFalse(result.getChanges().contains("secret region value"));
         assertEquals("{\"error\":\"ProviderException\"}", result.getContext());
         assertTrue(result.isContentRedacted());
+    }
+
+    @Test
+    void recentDropsUnknownLeakKindsAndInvalidLeakCounts() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("ai.llm.call");
+        entry.setEntityType("ai_call");
+        entry.setOutcome("blocked");
+        entry.setChanges("""
+                {"provider":"vertex","feature":"report.narrative","outcome":"blocked",
+                "reason":"leak","leakKinds":["company","raw-secret-token"],"leakCount":-1}
+                """);
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertTrue(result.getChanges().contains("\"reason\":\"leak\""));
+        assertFalse(result.getChanges().contains("leakKinds"));
+        assertFalse(result.getChanges().contains("leakCount"));
+        assertFalse(result.getChanges().contains("raw-secret-token"));
     }
 
     @Test
