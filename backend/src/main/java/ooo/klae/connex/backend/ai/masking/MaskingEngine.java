@@ -64,7 +64,9 @@ public final class MaskingEngine {
         }
         String normalizedText = Normalizer.normalize(text, Normalizer.Form.NFKC);
         String sanitizedText = stripInjectedTokenDelimiters(normalizeSeparators(normalizedText));
-        SpecialCareTextScreen.ScreenVerdict verdict = SpecialCareTextScreen.screen(sanitizedText);
+        String specialCareScreeningText = WHITESPACE.matcher(sanitizedText).replaceAll(" ");
+        SpecialCareTextScreen.ScreenVerdict verdict =
+                SpecialCareTextScreen.screen(specialCareScreeningText);
         if (verdict.excluded()) {
             return OMITTED_BY_POLICY;
         }
