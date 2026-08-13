@@ -999,8 +999,6 @@ class AiChatAgentLoopServiceTest {
                         long replayBytes = request.exchanges().stream()
                                 .mapToLong(exchange -> budget.utf8Bytes(
                                                 exchange.call().arguments())
-                                        + budget.utf8Bytes(
-                                                exchange.call().thoughtSignature())
                                         + budget.utf8Bytes(exchange.maskedResult()))
                                 .sum();
                         assertTrue(replayBytes <= budget.toolResultBytes());

@@ -17,6 +17,9 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
@@ -416,7 +419,6 @@ class AiAssistantPromptAssemblerTest {
                 replay.exchanges().getLast().call().thoughtSignature());
         assertTrue(replay.exchanges().stream()
                 .mapToLong(exchange -> budget.utf8Bytes(exchange.call().arguments())
-                        + budget.utf8Bytes(exchange.call().thoughtSignature())
                         + budget.utf8Bytes(exchange.maskedResult()))
                 .sum() <= budget.toolResultBytes());
         assertEquals(1, replay.audit().evictedToolExchanges());
@@ -424,26 +426,41 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void nativeReplayAdmissionRejectsAnOversizedRetainedThoughtSignature() {
-        ToolTurn prospective = new ToolTurn(
-                1,
-                "search_records",
-                new AiAssistantToolResult(Map.of("count", 1), List.of()));
-        AiToolCall call = new AiToolCall(
-                "call_1",
-                prospective.tool(),
-                "{}",
-                "S".repeat(2_100));
-        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
-                64, 4_096, 256, 256, 2_048, 8_000);
+    void nativeReplayExcludesThoughtSignaturesFromTheToolResultAllocation() {
+        ToolTurn first = nativeBudgetTurn(1, "A");
+        ToolTurn second = nativeBudgetTurn(2, "B");
+        ToolTurn prospective = nativeBudgetTurn(3, "C");
+        String firstSignature = "first-/+=" + "S".repeat(1_191);
+        String secondSignature = "second-日本語-" + "T".repeat(1_182);
+        Map<Integer, AiToolCall> calls = Map.of(
+                first.seq(), nativeBudgetCall(first, "A", firstSignature),
+                second.seq(), nativeBudgetCall(second, "B", secondSignature),
+                prospective.seq(), nativeBudgetCall(
+                        prospective, "C", "prospective-" + "U".repeat(1_188)));
+        AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.NATIVE,
+                        32_768,
+                        4_096),
+                4_096);
 
-        assertThrows(AiAssistantLoopException.class, () ->
+        AiAssistantPromptAssembler.ToolBudgetAudit admission =
                 assembler.requireAdditionalNativeExchangeCapacity(
-                        List.of(),
+                        List.of(first, second),
                         prospective,
-                        Map.of(prospective.seq(), call),
+                        calls,
                         new MaskingContext(),
-                        budget));
+                        budget);
+        AiAssistantPromptAssembler.NativeReplay replay = assembler.nativeReplay(
+                List.of(first, second), calls, new MaskingContext(), budget, null);
+
+        assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, admission);
+        assertEquals(firstSignature,
+                replay.exchanges().getFirst().call().thoughtSignature());
+        assertEquals(secondSignature,
+                replay.exchanges().getLast().call().thoughtSignature());
+        assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, replay.audit());
     }
 
     @Test
@@ -946,5 +963,24 @@ class AiAssistantPromptAssemblerTest {
                     "call_" + turn.seq(), turn.tool(), "{}"));
         }
         return Map.copyOf(calls);
+    }
+
+    private static ToolTurn nativeBudgetTurn(int sequence, String marker) {
+        return new ToolTurn(
+                sequence,
+                "search_records",
+                new AiAssistantToolResult(
+                        Map.of("result", marker.repeat(300)), List.of()));
+    }
+
+    private static AiToolCall nativeBudgetCall(
+            ToolTurn turn,
+            String marker,
+            String thoughtSignature) {
+        return new AiToolCall(
+                "call_" + turn.seq(),
+                turn.tool(),
+                "{\"query\":\"" + marker.repeat(60) + "\"}",
+                thoughtSignature);
     }
 }

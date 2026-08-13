@@ -496,8 +496,7 @@ public class AiAssistantPromptAssembler {
                     callArguments,
                     thoughtSignature,
                     isTruncatedExecutedReplay(toolTurns.get(index).result())));
-            exactBytes += replayBytes(
-                    result, callArguments, thoughtSignature, budget);
+            exactBytes += replayBytes(result, callArguments, budget);
         }
         if (exactBytes <= availableBytes) {
             return new BoundedToolResults(
@@ -534,8 +533,7 @@ public class AiAssistantPromptAssembler {
                         ? reduced.get(index)
                         : exact.get(index);
                 long exchangeBytes = replayBytes(
-                        exchange.result(), exchange.arguments(),
-                        exchange.thoughtSignature(), budget);
+                        exchange.result(), exchange.arguments(), budget);
                 if (exchangeBytes > remainingBytes) {
                     priorResultsFit = false;
                     break;
@@ -548,11 +546,7 @@ public class AiAssistantPromptAssembler {
                 int latestArgumentsBytes = latest.arguments() == null
                         ? 0
                         : budget.utf8Bytes(latest.arguments());
-                int latestThoughtSignatureBytes = latest.thoughtSignature() == null
-                        ? 0
-                        : budget.utf8Bytes(latest.thoughtSignature());
-                int latestResultBytes = remainingBytes
-                        - latestArgumentsBytes - latestThoughtSignatureBytes;
+                int latestResultBytes = remainingBytes - latestArgumentsBytes;
                 if (latestResultBytes >= 0
                         && budget.fits(latest.result(), latestResultBytes)) {
                     exchanges.add(latest);
@@ -704,11 +698,9 @@ public class AiAssistantPromptAssembler {
     private static long replayBytes(
             String result,
             String arguments,
-            String thoughtSignature,
             AiAssistantPromptBudget budget) {
         return (long) budget.utf8Bytes(result)
-                + (arguments == null ? 0 : budget.utf8Bytes(arguments))
-                + (thoughtSignature == null ? 0 : budget.utf8Bytes(thoughtSignature));
+                + (arguments == null ? 0 : budget.utf8Bytes(arguments));
     }
 
     private static int oldestEvictable(
@@ -721,12 +713,10 @@ public class AiAssistantPromptAssembler {
                     && replayBytes(
                             reduced.get(index).result(),
                             reduced.get(index).arguments(),
-                            reduced.get(index).thoughtSignature(),
                             budget)
                     < replayBytes(
                             exact.get(index).result(),
                             exact.get(index).arguments(),
-                            exact.get(index).thoughtSignature(),
                             budget)) {
                 return index;
             }
@@ -776,7 +766,6 @@ public class AiAssistantPromptAssembler {
             replayBytes += replayBytes(
                     toolResultContent(toolTurns.get(index), context),
                     orderedCalls.get(index).arguments(),
-                    orderedCalls.get(index).thoughtSignature(),
                     budget);
         }
         return replayBytes <= budget.toolResultBytes();
