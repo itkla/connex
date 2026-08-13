@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ArchiveBoxIcon,
     ArrowRightStartOnRectangleIcon,
@@ -35,8 +35,18 @@ import ErrorState from '@/app/components/ErrorState';
 import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
-import type { AskConnexAttachment, AskConnexFileAttachment, AskConnexTurnState } from '@/app/lib/askConnex';
+import AskConnexToolCard, {
+    type AskConnexToolCardLabels,
+} from '@/app/components/ask-connex/AskConnexToolCard';
+import type {
+    AskConnexAttachment,
+    AskConnexFileAttachment,
+    AskConnexToolAction,
+    AskConnexToolCardState,
+    AskConnexTurnState,
+} from '@/app/lib/askConnex';
 import {
+    anchorAskConnexToolCards,
     askConnexCitationHref,
     askConnexCitations,
     askConnexTranscript,
@@ -191,6 +201,7 @@ type AskConnexDrawerLabels = {
     turnWorking: string;
     uploadProgress: (progress: number) => string;
     uploadRemoving: string;
+    toolCard: AskConnexToolCardLabels;
 };
 
 type AskConnexDrawerProps = {
@@ -219,6 +230,8 @@ type AskConnexDrawerProps = {
     contentTooLong: boolean;
     working: boolean;
     turn: AskConnexTurnState;
+    toolCalls: AskConnexToolCardState[];
+    actionableToolCallIds: ReadonlySet<number>;
     unavailable: UnavailableState;
     starterPrompts: string[];
     labels: AskConnexDrawerLabels;
@@ -240,6 +253,7 @@ type AskConnexDrawerProps = {
     onAttachFiles: (files: File[]) => void;
     onRemoveFileAttachment: (attachment: AskConnexFileAttachment) => void;
     onSend: (content?: string) => void;
+    onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 };
 
 type ConversationSurfaceProps = Omit<
@@ -372,16 +386,22 @@ function TranscriptMessage({
     firstInGroup,
     lastInGroup,
     suggestions,
+    toolCalls,
+    actionableToolCallIds,
     labels,
     onSend,
+    onToolAction,
 }: {
     message: AiChatMessage;
     fresh: boolean;
     firstInGroup: boolean;
     lastInGroup: boolean;
     suggestions: string[];
+    toolCalls: AskConnexToolCardState[];
+    actionableToolCallIds: ReadonlySet<number>;
     labels: AskConnexDrawerLabels;
     onSend: (content?: string) => void;
+    onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
     const format = useFormatter();
     const reduceMotion = useReducedMotion() ?? false;
@@ -423,6 +443,15 @@ function TranscriptMessage({
                 </motion.div>
                 {!user ? <MessageCitations citations={message.citations} labels={labels} /> : null}
                 {!user ? (
+                    <ToolCallCards
+                        cards={toolCalls}
+                        labels={labels.toolCard}
+                        actionsDisabled={false}
+                        actionableToolCallIds={actionableToolCallIds}
+                        onAction={onToolAction}
+                    />
+                ) : null}
+                {!user ? (
                     <MessageSuggestions
                         suggestions={suggestions}
                         label={labels.suggestedFollowUps}
@@ -436,6 +465,35 @@ function TranscriptMessage({
                 ) : null}
             </MessageContent>
         </Message>
+    );
+}
+
+function ToolCallCards({
+    cards,
+    labels,
+    actionsDisabled,
+    actionableToolCallIds,
+    onAction,
+}: {
+    cards: AskConnexToolCardState[];
+    labels: AskConnexToolCardLabels;
+    actionsDisabled: boolean;
+    actionableToolCallIds: ReadonlySet<number>;
+    onAction: (toolCallId: number, action: AskConnexToolAction) => void;
+}) {
+    if (cards.length === 0) return null;
+    return (
+        <div className="space-y-2">
+            {cards.map((card) => (
+                <AskConnexToolCard
+                    key={card.id}
+                    card={card}
+                    labels={labels}
+                    actionsDisabled={actionsDisabled || !actionableToolCallIds.has(card.id)}
+                    onAction={onAction}
+                />
+            ))}
+        </div>
     );
 }
 
@@ -732,6 +790,8 @@ function ConversationSurface({
     contentTooLong,
     working,
     turn,
+    toolCalls,
+    actionableToolCallIds,
     unavailable,
     starterPrompts,
     labels,
@@ -749,6 +809,7 @@ function ConversationSurface({
     onAttachFiles,
     onRemoveFileAttachment,
     onSend,
+    onToolAction,
     open,
 }: ConversationSurfaceProps) {
     const transcript = useMemo(
@@ -756,7 +817,18 @@ function ConversationSurface({
         [activeSession?.historySummarized, messages],
     );
     const visibleMessages = transcript.messages;
-    const groups = useMemo(() => groupAskConnexMessages(visibleMessages), [visibleMessages]);
+    const toolCardAnchors = useMemo(
+        () => anchorAskConnexToolCards(toolCalls, visibleMessages),
+        [toolCalls, visibleMessages],
+    );
+    const toolCardInsertionIds = useMemo(
+        () => new Set(toolCardAnchors.afterMessageId.keys()),
+        [toolCardAnchors],
+    );
+    const groups = useMemo(
+        () => groupAskConnexMessages(visibleMessages, toolCardInsertionIds),
+        [toolCardInsertionIds, visibleMessages],
+    );
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [recordPickerRequest, setRecordPickerRequest] = useState(0);
     const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
@@ -840,7 +912,7 @@ function ConversationSurface({
                                     <HistorySummaryMarker label={labels.historySummarized} />
                                 </MessageScrollerItem>
                             ) : null}
-                            {loadState === 'ready' && visibleMessages.length === 0 ? (
+                            {loadState === 'ready' && visibleMessages.length === 0 && toolCalls.length === 0 ? (
                                 <MessageScrollerItem messageId="empty">
                                     <EmptyState
                                         icon={SparklesIcon}
@@ -869,34 +941,72 @@ function ConversationSurface({
                                     />
                                 </MessageScrollerItem>
                             ) : null}
+                            {loadState === 'ready' && toolCardAnchors.beforeMessages.length > 0 ? (
+                                <MessageScrollerItem
+                                    messageId="tool-calls-before-transcript"
+                                    className="px-4 pt-5 last:pb-5"
+                                >
+                                    <div className="pl-10">
+                                        <ToolCallCards
+                                            cards={toolCardAnchors.beforeMessages}
+                                            labels={labels.toolCard}
+                                            actionsDisabled={activeSession === null}
+                                            actionableToolCallIds={actionableToolCallIds}
+                                            onAction={onToolAction}
+                                        />
+                                    </div>
+                                </MessageScrollerItem>
+                            ) : null}
                             {loadState === 'ready' && visibleMessages.length > 0 ? (
                                 <>
                                     {groups.map((group) => {
                                         const first = group.messages[0];
                                         const last = group.messages.at(-1);
                                         if (!first || !last) return null;
+                                        const anchoredCards = toolCardAnchors.afterMessageId.get(last.id) ?? [];
+                                        const groupKey = `${first.sessionId}:${first.seq}:${last.seq}`;
                                         return (
-                                            <MessageScrollerItem
-                                                key={`${first.sessionId}:${first.seq}:${last.seq}`}
-                                                messageId={`${first.sessionId}:${first.seq}:${last.seq}`}
-                                                scrollAnchor={group.authorKind === 'user'}
-                                                className="px-4 pt-5 last:pb-5"
-                                            >
-                                                <MessageGroup>
-                                                    {group.messages.map((message, index) => (
-                                                        <TranscriptMessage
-                                                            key={message.id}
-                                                            message={message}
-                                                            fresh={freshMessageIds.has(message.id)}
-                                                            firstInGroup={index === 0}
-                                                            lastInGroup={index === group.messages.length - 1}
-                                                            suggestions={message.id === latestMessageId ? suggestions : []}
-                                                            labels={labels}
-                                                            onSend={onSend}
-                                                        />
-                                                    ))}
-                                                </MessageGroup>
-                                            </MessageScrollerItem>
+                                            <Fragment key={groupKey}>
+                                                <MessageScrollerItem
+                                                    messageId={groupKey}
+                                                    scrollAnchor={group.authorKind === 'user'}
+                                                    className="px-4 pt-5 last:pb-5"
+                                                >
+                                                    <MessageGroup>
+                                                        {group.messages.map((message, index) => (
+                                                            <TranscriptMessage
+                                                                key={message.id}
+                                                                message={message}
+                                                                fresh={freshMessageIds.has(message.id)}
+                                                                firstInGroup={index === 0}
+                                                                lastInGroup={index === group.messages.length - 1}
+                                                                suggestions={message.id === latestMessageId ? suggestions : []}
+                                                                toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
+                                                                actionableToolCallIds={actionableToolCallIds}
+                                                                labels={labels}
+                                                                onSend={onSend}
+                                                                onToolAction={onToolAction}
+                                                            />
+                                                        ))}
+                                                    </MessageGroup>
+                                                </MessageScrollerItem>
+                                                {anchoredCards.length > 0 ? (
+                                                    <MessageScrollerItem
+                                                        messageId={`tool-message:${last.id}`}
+                                                        className="px-4 pt-5 last:pb-5"
+                                                    >
+                                                        <div className="pl-10">
+                                                            <ToolCallCards
+                                                                cards={anchoredCards}
+                                                                labels={labels.toolCard}
+                                                                actionsDisabled={activeSession === null}
+                                                                actionableToolCallIds={actionableToolCallIds}
+                                                                onAction={onToolAction}
+                                                            />
+                                                        </div>
+                                                    </MessageScrollerItem>
+                                                ) : null}
+                                            </Fragment>
                                         );
                                     })}
                                 </>
@@ -1134,6 +1244,8 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         contentTooLong: props.contentTooLong,
         working: props.working,
         turn: props.turn,
+        toolCalls: props.toolCalls,
+        actionableToolCallIds: props.actionableToolCallIds,
         unavailable: props.unavailable,
         starterPrompts: props.starterPrompts,
         labels: props.labels,
@@ -1154,6 +1266,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onAttachFiles: props.onAttachFiles,
         onRemoveFileAttachment: props.onRemoveFileAttachment,
         onSend: props.onSend,
+        onToolAction: props.onToolAction,
     };
 
     const desktopPanel = !isMobile && desktopRoot ? createPortal(

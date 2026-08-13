@@ -5065,6 +5065,67 @@ export function getAiChatTurn(
     );
 }
 
+export function getAiAssistantToolCalls(
+    sessionId: number,
+    params: { pendingOnly?: boolean } = {},
+    init: RequestInit = {},
+) {
+    const query = new URLSearchParams();
+    if (params.pendingOnly != null) query.set('pendingOnly', String(params.pendingOnly));
+    const suffix = query.size > 0 ? `?${query}` : '';
+    return getJson<Types.AiAssistantToolCall[]>(
+        `/api/ai/assistant/sessions/${sessionId}/tool-calls${suffix}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function getAiAssistantToolCall(
+    sessionId: number,
+    toolCallId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.AiAssistantToolCall>(
+        `/api/ai/assistant/sessions/${sessionId}/tool-calls/${toolCallId}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function approveAiAssistantToolCall(
+    sessionId: number,
+    toolCallId: number,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAssistantToolCallMutation>(
+        `/api/ai/assistant/sessions/${sessionId}/tool-calls/${toolCallId}/approve`,
+        {},
+        init,
+    );
+}
+
+export function rejectAiAssistantToolCall(
+    sessionId: number,
+    toolCallId: number,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAssistantToolCallMutation>(
+        `/api/ai/assistant/sessions/${sessionId}/tool-calls/${toolCallId}/reject`,
+        {},
+        init,
+    );
+}
+
+export function undoAiAssistantToolCall(
+    sessionId: number,
+    toolCallId: number,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAssistantToolCallMutation>(
+        `/api/ai/assistant/sessions/${sessionId}/tool-calls/${toolCallId}/undo`,
+        {},
+        init,
+    );
+}
+
 export function getAiGenerationStatus<T>(handle: string, init: RequestInit = {}) {
     return getJson<Types.AiGenerationStatus<T>>(
         `/api/ai/generations/${encodeURIComponent(handle)}`,

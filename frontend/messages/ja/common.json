@@ -383,6 +383,72 @@
     "budgetExhausted": "組織の日次AIトークン予算が上限に達しました。",
     "toolResultBudgetExhausted": "関係データの取得中に、このターンのコンテキスト容量が上限に達しました。対象レコードや期間を絞って、もう一度お試しください。",
     "turnTimedOut": "完了前にこのターンがタイムアウトしました。",
+    "toolCards": {
+      "outcome": "結果",
+      "recordLink": "{target}を開く",
+      "restrictedTarget": "アクセスできないレコード",
+      "states": {
+        "pending": "承認待ち",
+        "pendingDetail": "まだ何も実行されていません。承認前に操作内容を確認してください。",
+        "executed": "完了",
+        "executedDetail": "この操作はすでに完了しています。",
+        "rejected": "却下済み",
+        "rejectedDetail": "この提案は却下されました。変更は行われていません。",
+        "undone": "取り消し済み",
+        "undoneDetail": "アシスタントが作成したレコードを削除しました。",
+        "failed": "失敗",
+        "failedDetail": "この操作は完了しませんでした。",
+        "expired": "取り消し期限切れ",
+        "expiredDetail": "操作は完了しましたが、取り消し可能な期間は終了しました。"
+      },
+      "change": {
+        "beforeApproval": "承認前",
+        "noChangeYet": "変更なし",
+        "ifApproved": "承認した場合"
+      },
+      "actions": {
+        "approve": "承認",
+        "approveAria": "{target}への提案された操作を承認",
+        "approving": "承認中…",
+        "reject": "却下",
+        "rejectAria": "{target}への提案された操作を却下",
+        "rejecting": "却下中…",
+        "undo": "取り消す",
+        "undoAria": "{target}へのアシスタント操作を取り消す",
+        "undoing": "取り消し中…"
+      },
+      "failures": {
+        "proposalChanged": "提案の表示後に対象が変更されました。この提案を却下して、新しい提案を依頼してください。",
+        "proposalPermissionLost": "この提案を承認する権限がなくなりました。",
+        "proposalUnavailable": "この提案は利用できなくなりました。権限または対象レコードが変更された可能性があります。",
+        "undoConflict": "アシスタントによる作成後にレコードが変更されたため、安全に取り消せません。",
+        "actionFailed": "操作を完了できませんでした。もう一度お試しください。"
+      },
+      "summaries": {
+        "createActivity": "アクティビティを作成",
+        "createTask": "タスクを作成",
+        "createNote": "メモを作成",
+        "addTag": "既存のタグを追加",
+        "changeDealStage": "取引ステージを変更",
+        "changeDealStageTo": "取引ステージを「{value}」に変更",
+        "assignOwner": "担当者を割り当て",
+        "assignOwnerTo": "担当者を「{value}」に変更",
+        "removeOwner": "現在の担当者を解除",
+        "runWriteTool": "書き込み操作を実行",
+        "requestRejected": "リクエストを却下しました",
+        "requestFailed": "リクエストに失敗しました",
+        "createdRecordRemoved": "作成したレコードを削除しました",
+        "activityCreated": "アクティビティを作成しました",
+        "taskCreated": "タスクを作成しました",
+        "noteCreated": "メモを作成しました",
+        "tagAdded": "タグを追加しました",
+        "tagAlreadyPresent": "タグはすでに追加されています",
+        "dealStageChanged": "取引ステージを変更しました",
+        "ownerRemoved": "担当者を解除しました",
+        "ownerAssigned": "担当者を割り当てました",
+        "requestCompleted": "リクエストが完了しました"
+      }
+    },
     "upload": {
       "progress": "アップロード中 {progress}%",
       "removing": "削除中…",
@@ -435,7 +501,8 @@
       "participantRemoved": "参加者を削除しました",
       "requestFailed": "Ask Connexのリクエストに失敗しました",
       "turnFailed": "Ask Connexはターンを完了できませんでした",
-      "turnTimedOut": "Ask Connexがタイムアウトしました"
+      "turnTimedOut": "Ask Connexがタイムアウトしました",
+      "toolActionRefreshFailed": "操作は完了しましたが、最新の状態を読み込めませんでした"
     },
     "citations": "参照元",
     "citationKindPerson": "連絡先",
