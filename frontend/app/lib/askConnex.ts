@@ -205,10 +205,11 @@ export type AskConnexToolCardsEvent =
     | { type: 'actionSettled'; toolCall: AiAssistantToolCall }
     | { type: 'reset' };
 
-/** Tool cards partitioned by their transcript message or unresolved turn anchor. */
+/** Tool cards partitioned by their transcript message or nearest visible turn position. */
 export type AskConnexToolCardAnchors = {
     byMessageId: ReadonlyMap<number, AskConnexToolCardState[]>;
-    byTurnId: ReadonlyMap<number, AskConnexToolCardState[]>;
+    afterMessageId: ReadonlyMap<number, AskConnexToolCardState[]>;
+    beforeMessages: AskConnexToolCardState[];
 };
 
 /** Initial assistant tool-card collection for an unloaded or empty session. */
@@ -240,6 +241,27 @@ function sameToolCallProjection(
         && current.updatedAt === incoming.updatedAt
         && current.undoAvailable === incoming.undoAvailable
         && current.undoExpiresAt === incoming.undoExpiresAt;
+}
+
+function compareToolCalls(
+    left: AiAssistantToolCall,
+    right: AiAssistantToolCall,
+): number {
+    if (left.turnId !== right.turnId) return left.turnId - right.turnId;
+    const createdAt = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+    if (Number.isFinite(createdAt) && createdAt !== 0) return createdAt;
+    return left.id - right.id;
+}
+
+/** Merges overlapping tool-call reads into stable turn chronology with the newest projection kept. */
+export function mergeAskConnexToolCalls(
+    ...collections: readonly (readonly AiAssistantToolCall[])[]
+): AiAssistantToolCall[] {
+    const byId = new Map<number, AiAssistantToolCall>();
+    for (const collection of collections) {
+        for (const toolCall of collection) byId.set(toolCall.id, toolCall);
+    }
+    return [...byId.values()].toSorted(compareToolCalls);
 }
 
 /** Reduces canonical tool-call refreshes and in-flight actions without re-arming terminal cards. */
@@ -302,11 +324,14 @@ export function askConnexToolCardAffordances(
     card: AskConnexToolCardState,
     now: number,
 ): AskConnexToolAction[] {
-    if (card.tier === 'confirm'
-        && card.status === 'proposed'
-        && (card.failure === null || card.failure === 'proposalChanged')) {
-        if (card.failure === 'proposalChanged') return ['reject'];
-        return ['reject', 'approve'];
+    if (card.tier === 'confirm' && card.status === 'proposed') {
+        if (card.failure === 'proposalChanged' || card.failure === 'proposalPermissionLost') {
+            return ['reject'];
+        }
+        if (card.failure === null || card.failure === 'actionFailed') {
+            return ['reject', 'approve'];
+        }
+        return [];
     }
     if (card.tier !== 'auto'
         || card.status !== 'executed'
@@ -390,23 +415,82 @@ export function askConnexToolOutcomeSummary(
     return labels.requestCompleted;
 }
 
-/** Anchors each card to its visible assistant message, falling back to its durable turn id. */
+function toolCardRequesterMessage(
+    card: AskConnexToolCardState,
+    messages: readonly AiChatMessage[],
+): AiChatMessage | null {
+    if (card.messageId !== null) {
+        const assistantMessage = messages.find((message) => message.id === card.messageId);
+        if (!assistantMessage) return null;
+        let requester: AiChatMessage | null = null;
+        for (const message of messages) {
+            if (message.authorKind !== 'user' || message.seq >= assistantMessage.seq) continue;
+            if (requester === null || message.seq > requester.seq) requester = message;
+        }
+        return requester;
+    }
+    const toolCreatedAt = Date.parse(card.createdAt);
+    if (!Number.isFinite(toolCreatedAt)) return null;
+    let requester: AiChatMessage | null = null;
+    for (const message of messages) {
+        if (message.authorKind !== 'user') continue;
+        const messageCreatedAt = Date.parse(message.createdAt);
+        if (!Number.isFinite(messageCreatedAt) || messageCreatedAt > toolCreatedAt) continue;
+        if (requester === null || message.seq > requester.seq) requester = message;
+    }
+    return requester;
+}
+
+/** Returns tool calls whose visible originating turn belongs to the current viewer. */
+export function actionableAskConnexToolCallIds(
+    cards: readonly AskConnexToolCardState[],
+    messages: readonly AiChatMessage[],
+    currentUserId: number | null,
+): ReadonlySet<number> {
+    if (currentUserId === null) return new Set();
+    const actionable = new Set<number>();
+    for (const card of cards) {
+        const requester = toolCardRequesterMessage(card, messages);
+        if (requester?.authorUserId === currentUserId) actionable.add(card.id);
+    }
+    return actionable;
+}
+
+/** Anchors cards to visible assistant messages or their originating user-message position. */
 export function anchorAskConnexToolCards(
     cards: readonly AskConnexToolCardState[],
     messages: readonly AiChatMessage[],
 ): AskConnexToolCardAnchors {
     const visibleMessageIds = new Set(messages.map((message) => message.id));
     const byMessageId = new Map<number, AskConnexToolCardState[]>();
-    const byTurnId = new Map<number, AskConnexToolCardState[]>();
+    const afterMessageId = new Map<number, AskConnexToolCardState[]>();
+    const beforeMessages: AskConnexToolCardState[] = [];
     for (const card of cards) {
         if (card.messageId !== null) {
             if (!visibleMessageIds.has(card.messageId)) continue;
             byMessageId.set(card.messageId, [...(byMessageId.get(card.messageId) ?? []), card]);
             continue;
         }
-        byTurnId.set(card.turnId, [...(byTurnId.get(card.turnId) ?? []), card]);
+        const requester = toolCardRequesterMessage(card, messages);
+        if (requester === null) {
+            beforeMessages.push(card);
+            continue;
+        }
+        afterMessageId.set(
+            requester.id,
+            [...(afterMessageId.get(requester.id) ?? []), card],
+        );
     }
-    return { byMessageId, byTurnId };
+    const orderedAfterMessageId = new Map<number, AskConnexToolCardState[]>();
+    for (const message of messages.toSorted((left, right) => left.seq - right.seq)) {
+        const anchored = afterMessageId.get(message.id);
+        if (anchored) orderedAfterMessageId.set(message.id, anchored.toSorted(compareToolCalls));
+    }
+    return {
+        byMessageId,
+        afterMessageId: orderedAfterMessageId,
+        beforeMessages: beforeMessages.toSorted(compareToolCalls),
+    };
 }
 
 /** Builds the active-session key using the established user/workspace preference scheme. */
@@ -644,12 +728,18 @@ export function latestAskConnexSuggestions(
     return [...unique];
 }
 
-/** Groups consecutive messages by sender without changing transcript order. */
-export function groupAskConnexMessages(messages: readonly AiChatMessage[]): AskConnexMessageGroup[] {
+/** Groups consecutive messages by sender without crossing a required transcript insertion point. */
+export function groupAskConnexMessages(
+    messages: readonly AiChatMessage[],
+    breakAfterMessageIds?: ReadonlySet<number>,
+): AskConnexMessageGroup[] {
     const groups: AskConnexMessageGroup[] = [];
     for (const message of messages) {
         const current = groups.at(-1);
-        if (current?.authorKind === message.authorKind && current.authorUserId === message.authorUserId) {
+        const previous = current?.messages.at(-1);
+        if (current?.authorKind === message.authorKind
+            && current.authorUserId === message.authorUserId
+            && (previous === undefined || !breakAfterMessageIds?.has(previous.id))) {
             current.messages.push(message);
         } else {
             groups.push({

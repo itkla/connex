@@ -5065,9 +5065,16 @@ export function getAiChatTurn(
     );
 }
 
-export function getAiAssistantToolCalls(sessionId: number, init: RequestInit = {}) {
+export function getAiAssistantToolCalls(
+    sessionId: number,
+    params: { pendingOnly?: boolean } = {},
+    init: RequestInit = {},
+) {
+    const query = new URLSearchParams();
+    if (params.pendingOnly != null) query.set('pendingOnly', String(params.pendingOnly));
+    const suffix = query.size > 0 ? `?${query}` : '';
     return getJson<Types.AiAssistantToolCall[]>(
-        `/api/ai/assistant/sessions/${sessionId}/tool-calls`,
+        `/api/ai/assistant/sessions/${sessionId}/tool-calls${suffix}`,
         { cache: 'no-store', ...init },
     );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ArchiveBoxIcon,
     ArrowRightStartOnRectangleIcon,
@@ -231,6 +231,7 @@ type AskConnexDrawerProps = {
     working: boolean;
     turn: AskConnexTurnState;
     toolCalls: AskConnexToolCardState[];
+    actionableToolCallIds: ReadonlySet<number>;
     unavailable: UnavailableState;
     starterPrompts: string[];
     labels: AskConnexDrawerLabels;
@@ -386,6 +387,7 @@ function TranscriptMessage({
     lastInGroup,
     suggestions,
     toolCalls,
+    actionableToolCallIds,
     labels,
     onSend,
     onToolAction,
@@ -396,6 +398,7 @@ function TranscriptMessage({
     lastInGroup: boolean;
     suggestions: string[];
     toolCalls: AskConnexToolCardState[];
+    actionableToolCallIds: ReadonlySet<number>;
     labels: AskConnexDrawerLabels;
     onSend: (content?: string) => void;
     onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
@@ -444,6 +447,7 @@ function TranscriptMessage({
                         cards={toolCalls}
                         labels={labels.toolCard}
                         actionsDisabled={false}
+                        actionableToolCallIds={actionableToolCallIds}
                         onAction={onToolAction}
                     />
                 ) : null}
@@ -468,11 +472,13 @@ function ToolCallCards({
     cards,
     labels,
     actionsDisabled,
+    actionableToolCallIds,
     onAction,
 }: {
     cards: AskConnexToolCardState[];
     labels: AskConnexToolCardLabels;
     actionsDisabled: boolean;
+    actionableToolCallIds: ReadonlySet<number>;
     onAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
     if (cards.length === 0) return null;
@@ -483,7 +489,7 @@ function ToolCallCards({
                     key={card.id}
                     card={card}
                     labels={labels}
-                    actionsDisabled={actionsDisabled}
+                    actionsDisabled={actionsDisabled || !actionableToolCallIds.has(card.id)}
                     onAction={onAction}
                 />
             ))}
@@ -785,6 +791,7 @@ function ConversationSurface({
     working,
     turn,
     toolCalls,
+    actionableToolCallIds,
     unavailable,
     starterPrompts,
     labels,
@@ -810,10 +817,17 @@ function ConversationSurface({
         [activeSession?.historySummarized, messages],
     );
     const visibleMessages = transcript.messages;
-    const groups = useMemo(() => groupAskConnexMessages(visibleMessages), [visibleMessages]);
     const toolCardAnchors = useMemo(
         () => anchorAskConnexToolCards(toolCalls, visibleMessages),
         [toolCalls, visibleMessages],
+    );
+    const toolCardInsertionIds = useMemo(
+        () => new Set(toolCardAnchors.afterMessageId.keys()),
+        [toolCardAnchors],
+    );
+    const groups = useMemo(
+        () => groupAskConnexMessages(visibleMessages, toolCardInsertionIds),
+        [toolCardInsertionIds, visibleMessages],
     );
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [recordPickerRequest, setRecordPickerRequest] = useState(0);
@@ -927,56 +941,76 @@ function ConversationSurface({
                                     />
                                 </MessageScrollerItem>
                             ) : null}
+                            {loadState === 'ready' && toolCardAnchors.beforeMessages.length > 0 ? (
+                                <MessageScrollerItem
+                                    messageId="tool-calls-before-transcript"
+                                    className="px-4 pt-5 last:pb-5"
+                                >
+                                    <div className="pl-10">
+                                        <ToolCallCards
+                                            cards={toolCardAnchors.beforeMessages}
+                                            labels={labels.toolCard}
+                                            actionsDisabled={activeSession === null}
+                                            actionableToolCallIds={actionableToolCallIds}
+                                            onAction={onToolAction}
+                                        />
+                                    </div>
+                                </MessageScrollerItem>
+                            ) : null}
                             {loadState === 'ready' && visibleMessages.length > 0 ? (
                                 <>
                                     {groups.map((group) => {
                                         const first = group.messages[0];
                                         const last = group.messages.at(-1);
                                         if (!first || !last) return null;
+                                        const anchoredCards = toolCardAnchors.afterMessageId.get(last.id) ?? [];
+                                        const groupKey = `${first.sessionId}:${first.seq}:${last.seq}`;
                                         return (
-                                            <MessageScrollerItem
-                                                key={`${first.sessionId}:${first.seq}:${last.seq}`}
-                                                messageId={`${first.sessionId}:${first.seq}:${last.seq}`}
-                                                scrollAnchor={group.authorKind === 'user'}
-                                                className="px-4 pt-5 last:pb-5"
-                                            >
-                                                <MessageGroup>
-                                                    {group.messages.map((message, index) => (
-                                                        <TranscriptMessage
-                                                            key={message.id}
-                                                            message={message}
-                                                            fresh={freshMessageIds.has(message.id)}
-                                                            firstInGroup={index === 0}
-                                                            lastInGroup={index === group.messages.length - 1}
-                                                            suggestions={message.id === latestMessageId ? suggestions : []}
-                                                            toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
-                                                            labels={labels}
-                                                            onSend={onSend}
-                                                            onToolAction={onToolAction}
-                                                        />
-                                                    ))}
-                                                </MessageGroup>
-                                            </MessageScrollerItem>
+                                            <Fragment key={groupKey}>
+                                                <MessageScrollerItem
+                                                    messageId={groupKey}
+                                                    scrollAnchor={group.authorKind === 'user'}
+                                                    className="px-4 pt-5 last:pb-5"
+                                                >
+                                                    <MessageGroup>
+                                                        {group.messages.map((message, index) => (
+                                                            <TranscriptMessage
+                                                                key={message.id}
+                                                                message={message}
+                                                                fresh={freshMessageIds.has(message.id)}
+                                                                firstInGroup={index === 0}
+                                                                lastInGroup={index === group.messages.length - 1}
+                                                                suggestions={message.id === latestMessageId ? suggestions : []}
+                                                                toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
+                                                                actionableToolCallIds={actionableToolCallIds}
+                                                                labels={labels}
+                                                                onSend={onSend}
+                                                                onToolAction={onToolAction}
+                                                            />
+                                                        ))}
+                                                    </MessageGroup>
+                                                </MessageScrollerItem>
+                                                {anchoredCards.length > 0 ? (
+                                                    <MessageScrollerItem
+                                                        messageId={`tool-message:${last.id}`}
+                                                        className="px-4 pt-5 last:pb-5"
+                                                    >
+                                                        <div className="pl-10">
+                                                            <ToolCallCards
+                                                                cards={anchoredCards}
+                                                                labels={labels.toolCard}
+                                                                actionsDisabled={activeSession === null}
+                                                                actionableToolCallIds={actionableToolCallIds}
+                                                                onAction={onToolAction}
+                                                            />
+                                                        </div>
+                                                    </MessageScrollerItem>
+                                                ) : null}
+                                            </Fragment>
                                         );
                                     })}
                                 </>
                             ) : null}
-                            {[...toolCardAnchors.byTurnId.entries()].map(([turnId, cards]) => (
-                                <MessageScrollerItem
-                                    key={`tool-turn:${turnId}`}
-                                    messageId={`tool-turn:${turnId}`}
-                                    className="px-4 pt-5 last:pb-5"
-                                >
-                                    <div className="pl-10">
-                                        <ToolCallCards
-                                            cards={cards}
-                                            labels={labels.toolCard}
-                                            actionsDisabled={loadState !== 'ready' || activeSession === null}
-                                            onAction={onToolAction}
-                                        />
-                                    </div>
-                                </MessageScrollerItem>
-                            ))}
                             {turn.phase !== 'idle' ? (
                                 <MessageScrollerItem messageId={`turn:${turn.turnId ?? turn.phase}`}>
                                     <TurnActivity turn={turn} labels={labels} />
@@ -1211,6 +1245,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         working: props.working,
         turn: props.turn,
         toolCalls: props.toolCalls,
+        actionableToolCallIds: props.actionableToolCallIds,
         unavailable: props.unavailable,
         starterPrompts: props.starterPrompts,
         labels: props.labels,

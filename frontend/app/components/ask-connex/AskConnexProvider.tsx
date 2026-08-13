@@ -12,6 +12,7 @@ import {
     type ReactNode,
 } from 'react';
 import { useTranslations } from 'next-intl';
+import { useRouter } from 'next/navigation';
 
 import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
 import { useActions } from '@/app/hooks/useActions';
@@ -53,12 +54,14 @@ import {
     EMPTY_ASK_CONNEX_TOOL_CARDS,
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
+    actionableAskConnexToolCallIds,
     activeRecordAskConnexContext,
     askConnexMessageContent,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
     hasPendingAskConnexFileOperation,
     loadAskConnexLatestMessages,
+    mergeAskConnexToolCalls,
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
@@ -91,6 +94,7 @@ import type {
 type OpenSource = 'standard' | 'keyboard';
 
 const ASK_CONNEX_MESSAGE_PAGE_SIZE = 50;
+const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
 
 type AskConnexContextValue = {
     open: boolean;
@@ -189,6 +193,7 @@ export function useAskConnex(): AskConnexContextValue {
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
     const t = useTranslations('AskConnex');
     const tDisclosure = useTranslations('Assistant.disclosure');
+    const router = useRouter();
     const { context } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
@@ -261,6 +266,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     ).length;
     const contextOverflow = contextResult.pageContext.length + fileContextCount > 10;
     const toolActionPending = toolCalls.some((toolCall) => toolCall.pendingAction !== null);
+    const actionableToolCallIds = useMemo(
+        () => actionableAskConnexToolCallIds(toolCalls, messages, userId),
+        [messages, toolCalls, userId],
+    );
     const working = submitting
         || turn.phase === 'accepted'
         || turn.phase === 'running'
@@ -329,14 +338,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         animateNew: boolean,
     ): Promise<AiChatSession | null> => {
         const refreshVersion = ++transcriptRefreshVersionRef.current;
-        const [firstDetail, attachments, refreshedToolCalls] = await Promise.all([
+        const [firstDetail, attachments, historicalToolCalls, pendingToolCalls] = await Promise.all([
             getAiChatSession(
                 sessionId,
                 { page: 1, size: ASK_CONNEX_MESSAGE_PAGE_SIZE },
                 { signal },
             ),
             getAiChatAttachments(sessionId, { signal }),
-            getAiAssistantToolCalls(sessionId, { signal }),
+            getAiAssistantToolCalls(sessionId, {}, { signal }),
+            getAiAssistantToolCalls(sessionId, { pendingOnly: true }, { signal }),
         ]);
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
         const nextMessages = await loadAskConnexLatestMessages(
@@ -362,7 +372,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
                 .map((message) => message.id))
             : new Set());
-        dispatchToolCalls({ type: 'replace', toolCalls: refreshedToolCalls });
+        dispatchToolCalls({
+            type: 'replace',
+            toolCalls: mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls),
+        });
         setFileAttachments(attachments.map(readyFileAttachment));
         setActiveSession(firstDetail.session);
         activeSessionRef.current = firstDetail.session;
@@ -965,7 +978,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const session = activeSessionRef.current;
         const signal = identityControllerRef.current?.signal;
         const card = toolCalls.find((toolCall) => toolCall.id === toolCallId);
-        if (!session || !signal || signal.aborted || !card || toolActionsRef.current.has(toolCallId)) {
+        if (!session
+            || !signal
+            || signal.aborted
+            || !card
+            || !actionableToolCallIds.has(toolCallId)
+            || toolActionsRef.current.has(toolCallId)) {
             return;
         }
         const operationEpoch = sessionEpochRef.current;
@@ -981,6 +999,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 || operationEpoch !== sessionEpochRef.current
                 || activeSessionRef.current?.id !== session.id) return;
             dispatchToolCalls({ type: 'actionApplied', toolCallId, action, mutation });
+            if ((action === 'approve' && mutation.status === 'executed')
+                || (action === 'undo' && mutation.status === 'undone')) {
+                router.refresh();
+            }
             try {
                 const refreshed = await getAiAssistantToolCall(session.id, toolCallId, { signal });
                 if (signal.aborted
@@ -1017,7 +1039,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         } finally {
             toolActionsRef.current.delete(toolCallId);
         }
-    }, [t, toolCalls]);
+    }, [actionableToolCallIds, router, t, toolCalls]);
 
     const send = useCallback(async (contentOverride?: string) => {
         const requestContent = contentOverride ?? composer;
@@ -1327,6 +1349,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
                 toolCalls={scoped ? toolCalls : EMPTY_ASK_CONNEX_TOOL_CARDS}
+                actionableToolCallIds={scoped
+                    ? actionableToolCallIds
+                    : EMPTY_ASK_CONNEX_TOOL_CALL_IDS}
                 unavailable={unavailable}
                 starterPrompts={starterPrompts}
                 labels={labels}

@@ -4,6 +4,7 @@ import {
     EMPTY_ASK_CONNEX_TOOL_CARDS,
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
+    actionableAskConnexToolCallIds,
     anchorAskConnexToolCards,
     askConnexCitationHref,
     askConnexCitations,
@@ -23,6 +24,7 @@ import {
     latestAskConnexSuggestions,
     loadAskConnexLatestMessages,
     mergeAskConnexContext,
+    mergeAskConnexToolCalls,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
     reduceAskConnexToolCards,
@@ -331,6 +333,81 @@ describe('Ask Connex tool-call cards', () => {
         )).toEqual(['reject']);
     });
 
+    it('restores applicable controls after recoverable action failures', () => {
+        const proposed: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            tier: 'confirm',
+            status: 'proposed',
+            undoAvailable: false,
+            undoExpiresAt: null,
+        };
+        const [loadedProposal] = reduceAskConnexToolCards(EMPTY_ASK_CONNEX_TOOL_CARDS, {
+            type: 'replace',
+            toolCalls: [proposed],
+        });
+        const [loadedUndo] = reduceAskConnexToolCards(EMPTY_ASK_CONNEX_TOOL_CARDS, {
+            type: 'replace',
+            toolCalls: [TOOL_CALL],
+        });
+        if (!loadedProposal || !loadedUndo) throw new Error('Expected loaded tool cards');
+        const failedProposal = reduceAskConnexToolCards(
+            reduceAskConnexToolCards([loadedProposal], {
+                type: 'actionStarted',
+                toolCallId: proposed.id,
+                action: 'approve',
+            }),
+            {
+                type: 'actionFailed',
+                toolCallId: proposed.id,
+                action: 'approve',
+                failure: 'actionFailed',
+            },
+        );
+        const permissionLost = reduceAskConnexToolCards(
+            reduceAskConnexToolCards([loadedProposal], {
+                type: 'actionStarted',
+                toolCallId: proposed.id,
+                action: 'approve',
+            }),
+            {
+                type: 'actionFailed',
+                toolCallId: proposed.id,
+                action: 'approve',
+                failure: 'proposalPermissionLost',
+            },
+        );
+        const failedUndo = reduceAskConnexToolCards(
+            reduceAskConnexToolCards([loadedUndo], {
+                type: 'actionStarted',
+                toolCallId: TOOL_CALL.id,
+                action: 'undo',
+            }),
+            {
+                type: 'actionFailed',
+                toolCallId: TOOL_CALL.id,
+                action: 'undo',
+                failure: 'actionFailed',
+            },
+        );
+        const refreshedProposal = reduceAskConnexToolCards(failedProposal, {
+            type: 'replace',
+            toolCalls: [proposed],
+        });
+        const failedProposalCard = refreshedProposal[0];
+        const permissionLostCard = permissionLost[0];
+        const failedUndoCard = failedUndo[0];
+        if (!failedProposalCard || !permissionLostCard || !failedUndoCard) {
+            throw new Error('Expected failed tool cards');
+        }
+        const now = Date.parse('2026-08-12T12:05:00Z');
+
+        expect(failedProposalCard).toMatchObject({ pendingAction: null, failure: 'actionFailed' });
+        expect(askConnexToolCardAffordances(failedProposalCard, now))
+            .toEqual(['reject', 'approve']);
+        expect(askConnexToolCardAffordances(permissionLostCard, now)).toEqual(['reject']);
+        expect(askConnexToolCardAffordances(failedUndoCard, now)).toEqual(['undo']);
+    });
+
     it('settles successful actions into canonical terminal state', () => {
         const proposed: AiAssistantToolCall = {
             ...TOOL_CALL,
@@ -390,25 +467,136 @@ describe('Ask Connex tool-call cards', () => {
         )).toEqual([]);
     });
 
-    it('anchors resolved cards by message and unresolved cards by turn', () => {
+    it('keeps message-less terminal cards at their originating transcript position', () => {
         const cards = reduceAskConnexToolCards(EMPTY_ASK_CONNEX_TOOL_CARDS, {
             type: 'replace',
-            toolCalls: [TOOL_CALL, { ...TOOL_CALL, id: 32, messageId: null, turnId: 10 }],
+            toolCalls: [
+                TOOL_CALL,
+                {
+                    ...TOOL_CALL,
+                    id: 32,
+                    messageId: null,
+                    turnId: 10,
+                    createdAt: '2026-08-12T12:00:30Z',
+                },
+            ],
         });
-        const messages = [{
-            id: 22,
-            sessionId: 4,
-            seq: 2,
-            authorKind: 'assistant',
-            authorUserId: null,
-            authorDisplayName: null,
-            content: 'Done',
-            createdAt: '2026-08-12T12:00:02Z',
-        }];
+        const messages = [
+            {
+                id: 20,
+                sessionId: 4,
+                seq: 1,
+                authorKind: 'user',
+                authorUserId: 7,
+                authorDisplayName: 'Kenji',
+                content: 'First request',
+                createdAt: '2026-08-12T12:00:00Z',
+            },
+            {
+                id: 21,
+                sessionId: 4,
+                seq: 2,
+                authorKind: 'user',
+                authorUserId: 7,
+                authorDisplayName: 'Kenji',
+                content: 'Later request',
+                createdAt: '2026-08-12T12:01:00Z',
+            },
+            {
+                id: 22,
+                sessionId: 4,
+                seq: 3,
+                authorKind: 'assistant',
+                authorUserId: null,
+                authorDisplayName: null,
+                content: 'Done',
+                createdAt: '2026-08-12T12:01:30Z',
+            },
+        ];
         const anchors = anchorAskConnexToolCards(cards, messages);
+        const groups = groupAskConnexMessages(
+            messages,
+            new Set(anchors.afterMessageId.keys()),
+        );
 
         expect(anchors.byMessageId.get(22)?.map((card) => card.id)).toEqual([31]);
-        expect(anchors.byTurnId.get(10)?.map((card) => card.id)).toEqual([32]);
+        expect([...anchors.afterMessageId.keys()]).toEqual([20]);
+        expect(anchors.afterMessageId.get(20)?.map((card) => card.id)).toEqual([32]);
+        expect(anchors.beforeMessages).toEqual([]);
+        expect(groups.map((group) => group.messages.map((message) => message.id)))
+            .toEqual([[20], [21], [22]]);
+    });
+
+    it('enables controls only for the visible turn requester', () => {
+        const cards = reduceAskConnexToolCards(EMPTY_ASK_CONNEX_TOOL_CARDS, {
+            type: 'replace',
+            toolCalls: [
+                TOOL_CALL,
+                {
+                    ...TOOL_CALL,
+                    id: 32,
+                    messageId: null,
+                    turnId: 10,
+                    createdAt: '2026-08-12T12:02:00Z',
+                },
+            ],
+        });
+        const messages = [
+            {
+                id: 21,
+                sessionId: 4,
+                seq: 1,
+                authorKind: 'user',
+                authorUserId: 7,
+                authorDisplayName: 'Kenji',
+                content: 'First request',
+                createdAt: '2026-08-12T11:59:00Z',
+            },
+            {
+                id: 22,
+                sessionId: 4,
+                seq: 2,
+                authorKind: 'assistant',
+                authorUserId: null,
+                authorDisplayName: null,
+                content: 'Done',
+                createdAt: '2026-08-12T12:00:02Z',
+            },
+            {
+                id: 23,
+                sessionId: 4,
+                seq: 3,
+                authorKind: 'user',
+                authorUserId: 8,
+                authorDisplayName: 'Mina',
+                content: 'Second request',
+                createdAt: '2026-08-12T12:01:00Z',
+            },
+        ];
+
+        expect([...actionableAskConnexToolCallIds(cards, messages, 7)]).toEqual([31]);
+        expect([...actionableAskConnexToolCallIds(cards, messages, 8)]).toEqual([32]);
+        expect([...actionableAskConnexToolCallIds(cards, messages, null)]).toEqual([]);
+    });
+
+    it('merges pending calls past the bounded history without duplicate cards', () => {
+        const updated = {
+            ...TOOL_CALL,
+            status: 'rejected' as const,
+            updatedAt: '2026-08-12T12:02:00Z',
+        };
+        const pending = {
+            ...TOOL_CALL,
+            id: 131,
+            turnId: 109,
+            tier: 'confirm' as const,
+            status: 'proposed' as const,
+        };
+
+        const merged = mergeAskConnexToolCalls([TOOL_CALL], [updated, pending]);
+
+        expect(merged.map((card) => card.id)).toEqual([31, 131]);
+        expect(merged[0]?.status).toBe('rejected');
     });
 
     it('omits a historical message card when its transcript message is outside the loaded window', () => {
@@ -420,7 +608,8 @@ describe('Ask Connex tool-call cards', () => {
         const anchors = anchorAskConnexToolCards(cards, []);
 
         expect(anchors.byMessageId.size).toBe(0);
-        expect(anchors.byTurnId.size).toBe(0);
+        expect(anchors.afterMessageId.size).toBe(0);
+        expect(anchors.beforeMessages).toEqual([]);
     });
 
     it('localizes known dynamic requests and terminal outcomes', () => {
