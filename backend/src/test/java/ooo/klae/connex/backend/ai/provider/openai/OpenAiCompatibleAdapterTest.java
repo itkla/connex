@@ -81,7 +81,7 @@ class OpenAiCompatibleAdapterTest {
                 adapter.nativeToolReasoningCapability(null));
         assertEquals(AiToolCallingMode.NATIVE_FUNCTIONS,
                 adapter.toolCallingCapability(null));
-        assertEquals(32_768, adapter.contextWindowTokens(null));
+        assertEquals(4_096, adapter.contextWindowTokens(null));
         assertEquals(128_000, adapter.contextWindowTokens(
                 target("https://api.example.test/v1", false, "gemma-4-31b-it")));
         assertEquals(128_000, adapter.contextWindowTokens(
@@ -101,6 +101,38 @@ class OpenAiCompatibleAdapterTest {
     }
 
     @Test
+    void recognizedVendorFamiliesUseDocumentedTokenLimits() {
+        assertTokenLimits("google/gemini-3.6-flash", 1_048_576, 65_536);
+        assertTokenLimits("gemini-2.5-pro-preview-06-05", 1_048_576, 65_536);
+        assertTokenLimits("openai/gpt-4o-2024-11-20", 128_000, 16_384);
+        assertTokenLimits("gpt-4.1-mini", 1_047_576, 32_768);
+        assertTokenLimits("gpt-5.2", 400_000, 128_000);
+        assertTokenLimits("gpt-5-chat-latest", 128_000, 16_384);
+        assertTokenLimits("gpt-5.2-chat-latest", 128_000, 16_384);
+        assertTokenLimits("gpt-5.4", 1_050_000, 128_000);
+        assertTokenLimits("gpt-5.4-mini-2026-03-17", 400_000, 128_000);
+        assertTokenLimits("gpt-5.6-terra", 1_050_000, 128_000);
+        assertTokenLimits("anthropic/claude-3-5-sonnet-20241022", 200_000, 8_192);
+        assertTokenLimits("claude-sonnet-4-6", 1_000_000, 65_536);
+        assertTokenLimits("claude-opus-5", 1_000_000, 131_072);
+    }
+
+    @Test
+    void openWeightAndUnknownFamiliesRetainConservativeFallback() {
+        for (String modelId : List.of(
+                "llama3.3:70b",
+                "mistral-large-latest",
+                "qwen3-235b",
+                "deepseek-v3.1",
+                "gpt-4o-audio-preview",
+                "gpt-4.1-custom",
+                "gpt-5-custom",
+                "unknown-modern-model")) {
+            assertTokenLimits(modelId, 4_096, 4_096);
+        }
+    }
+
+    @Test
     void nonGemmaModelRetainsUsableCapabilitiesAndCompletesAStructuredTurn()
             throws Exception {
         when(openAiCompatibleClient.complete(
@@ -112,7 +144,7 @@ class OpenAiCompatibleAdapterTest {
 
         AiCompletionResult result = adapter.complete(schemaRequest());
 
-        assertEquals(32_768, adapter.contextWindowTokens(llama));
+        assertEquals(4_096, adapter.contextWindowTokens(llama));
         assertEquals("Done", result.text());
         assertEquals(
                 AiStructuredOutputEnforcement.JSON_SCHEMA,
@@ -694,6 +726,16 @@ class OpenAiCompatibleAdapterTest {
         return new AiProviderTarget(
                 "openai_compatible", null, modelId, endpoint,
                 null, null, null, allowInternalEndpoint);
+    }
+
+    private void assertTokenLimits(
+            String modelId,
+            int expectedContextWindowTokens,
+            int expectedMaxOutputTokens) {
+        AiProviderTarget target = target(
+                "https://api.example.test/v1", false, modelId);
+        assertEquals(expectedContextWindowTokens, adapter.contextWindowTokens(target));
+        assertEquals(expectedMaxOutputTokens, adapter.maxOutputTokens(target));
     }
 
     private AiCompletionRequest schemaRequest() throws Exception {
