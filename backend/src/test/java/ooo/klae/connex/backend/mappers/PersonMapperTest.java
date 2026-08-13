@@ -591,4 +591,22 @@ class PersonMapperTest extends AbstractMapperTest {
     private MemberScope allTeamScope() {
         return MemberScope.allTeam();
     }
+
+    /**
+     * The mention lookup selects only id and name, so it must map through a result shape that
+     * never touches the rich PersonResult associations; a matching row previously failed with
+     * "Column 'company_id' not found" and turned any message naming a real person into a 500.
+     */
+    @Test
+    void findMentionedRecordsMapsMatchingRowsWithoutAssociationColumns() {
+        Person person = newPerson(newCompany());
+        java.util.List<Person> matches = personMapper.findMentionedRecords(
+            workspace.getId(), "Tell me about " + person.getName() + " please", 21);
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+            matches.stream().anyMatch(match -> match.getId() == person.getId()));
+        org.junit.jupiter.api.Assertions.assertTrue(
+            personMapper.findMentionedRecords(
+                workspace.getId(), "No record names appear here", 21).isEmpty());
+    }
 }

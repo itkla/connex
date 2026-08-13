@@ -652,7 +652,7 @@
     LIMIT 10
   </select>
 
-  <select id="findMentionedRecords" resultMap="PersonResult">
+  <select id="findMentionedRecords" resultType="Person">
     SELECT p.id, p.name
     FROM person p
     WHERE <include refid="visible"/>
