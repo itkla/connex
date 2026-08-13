@@ -1297,7 +1297,7 @@ class AiChatAgentLoopServiceTest {
     }
 
     @Test
-    void streamedMalformedAttemptWithPublishedTextNeverStartsARepairAttempt() {
+    void streamedMalformedAttemptResetsBeforeRepairStreamsFromOffsetZero() {
         AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
@@ -1320,32 +1320,49 @@ class AiChatAgentLoopServiceTest {
         when(persistenceService.appendPartialBatch(
                 eq(streamedTurn), eq(0), any()))
                 .thenAnswer(invocation -> ((String) invocation.getArgument(2)).length());
+        when(persistenceService.resolve(
+                eq(streamedTurn), any(), any(), anyInt(), anyInt())).thenReturn(true);
         AiStructuredRepair repair = AiStructuredRepair.from(
                 "exclusive_step", "{\"tool\":null,\"final\":null}");
         AiStructuredRepairAttempt<AiAssistantStep> malformed = new AiStructuredRepairAttempt<>(
                 new AiStructuredOutcome.Malformed<>("malformed_output", 2, 3, "stop"),
                 Optional.of(repair));
+        AtomicInteger attempts = new AtomicInteger();
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class)))
                 .thenAnswer(invocation -> {
                     AiInvocation providerInvocation = invocation.getArgument(0);
+                    if (attempts.getAndIncrement() == 0) {
+                        providerInvocation.streamObserver().onContentDelta(
+                                "{\"tool\":null,\"final\":{\"text\":\"" + "x".repeat(300));
+                        return malformed;
+                    }
                     providerInvocation.streamObserver().onContentDelta(
-                            "{\"tool\":null,\"final\":{\"text\":\"" + "x".repeat(300));
-                    return malformed;
+                            "{\"tool\":null,\"final\":{\"text\":\"Repaired answer\","
+                                    + "\"citations\":[],\"suggestions\":[],\"title\":null}}");
+                    return parsed(new AiAssistantStep(
+                            null,
+                            new AiAssistantStep.FinalAnswer("Repaired answer", List.of())));
                 });
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(streamedTurn);
 
-        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        assertEquals("schema_repair_failed", result.reason());
-        verify(invocationService).completeStructuredRepairable(
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(invocationService, times(2)).completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
-        verify(persistenceService).appendPartialBatch(
-                eq(streamedTurn), eq(0), eq("x".repeat(300)));
+        verify(persistenceService).resetPartialContent(streamedTurn, 300);
+        ArgumentCaptor<Integer> offsets = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService, times(2)).appendPartialBatch(
+                eq(streamedTurn), offsets.capture(), batches.capture());
+        assertEquals(List.of(0, 0), offsets.getAllValues());
+        assertEquals(List.of("x".repeat(300), "Repaired answer"), batches.getAllValues());
+        verify(persistenceService).resolve(
+                eq(streamedTurn), eq("Repaired answer"), any(), eq(5), eq(8));
     }
 
     @Test

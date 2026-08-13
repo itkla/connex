@@ -481,6 +481,28 @@ public class AiChatTurnPersistenceService {
         return nextOffset;
     }
 
+    /** Clears a malformed streamed projection and invalidates clients for durable re-hydration. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public void resetPartialContent(AiChatQueuedTurn turn, int expectedOffset) {
+        if (!turn.streamed() || expectedOffset < 0 || expectedOffset > 16_000) {
+            throw new IllegalArgumentException("A valid streamed assistant offset is required");
+        }
+        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        if (CANCELLED.equals(stored.getStatus())) {
+            throw new AiAssistantLoopException(CANCELLED, CANCELLED);
+        }
+        if (!RUNNING.equals(stored.getStatus())
+                || stored.getPartialContentUtf16Offset() != expectedOffset
+                || chatMapper.resetTurnPartialContent(
+                        turn.workspaceId(), turn.sessionId(), turn.turnId(), expectedOffset) != 1) {
+            throw new ConflictException("Assistant stream state changed");
+        }
+        realtimeDispatcher.sessionAfterCommit(
+                turn.workspaceId(), turn.sessionId(), new AiChatStepFrameDto(
+                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                        0, "state", null, RUNNING, null));
+    }
+
     /** Cancels one active turn for its requester or session owner. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void cancel(int sessionId, int turnId) {

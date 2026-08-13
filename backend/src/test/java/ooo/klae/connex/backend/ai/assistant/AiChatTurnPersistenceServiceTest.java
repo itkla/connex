@@ -165,6 +165,26 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
+    void resetPartialContentClearsTheExactOffsetAndPublishesStateInvalidation() {
+        AiChatQueuedTurn streamed = new AiChatQueuedTurn(
+                7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
+                AiPrivacyMode.UNMASKED, true);
+        storedTurn.setStreamed(true);
+        storedTurn.setPartialContentUtf16Offset(3);
+        when(chatMapper.resetTurnPartialContent(7, 13, 17, 3)).thenReturn(1);
+
+        service.resetPartialContent(streamed, 3);
+
+        verify(realtimeDispatcher).sessionAfterCommit(
+                org.mockito.ArgumentMatchers.eq(7),
+                org.mockito.ArgumentMatchers.eq(13),
+                argThat(frame -> frame.seq() == 0
+                        && "state".equals(frame.kind())
+                        && "running".equals(frame.status())
+                        && frame.text() == null));
+    }
+
+    @Test
     void ownerCanCancelActiveTurnAndTerminalTurnConflicts() {
         when(chatMapper.cancelTurn(TURN.workspaceId(), TURN.sessionId(), TURN.turnId()))
                 .thenReturn(1);

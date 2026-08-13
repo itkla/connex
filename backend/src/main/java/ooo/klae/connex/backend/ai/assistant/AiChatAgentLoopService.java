@@ -282,9 +282,7 @@ public class AiChatAgentLoopService {
                         return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                     }
                     if (nativeMalformed) {
-                        if (streamingObserver != null && streamingObserver.hasProjectedText()) {
-                            return AiGenerationTaskResult.failed("malformed_output");
-                        }
+                        resetMalformedStream(streamingProgress, streamingObserver);
                         if (nativeMalformedRetried) {
                             return AiGenerationTaskResult.failed("malformed_output");
                         }
@@ -294,9 +292,7 @@ public class AiChatAgentLoopService {
                     }
                 }
                 if (outcome instanceof AiStructuredOutcome.Malformed<?>) {
-                    if (streamingObserver != null && streamingObserver.hasProjectedText()) {
-                        return AiGenerationTaskResult.failed("schema_repair_failed");
-                    }
+                    resetMalformedStream(streamingProgress, streamingObserver);
                     if (repair != null || attempt.repair().isEmpty()) {
                         return AiGenerationTaskResult.failed("schema_repair_failed");
                     }
@@ -308,6 +304,7 @@ public class AiChatAgentLoopService {
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
                 if (parsed.demaskWarnings() != 0) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
                 repair = null;
@@ -548,14 +545,26 @@ public class AiChatAgentLoopService {
                 if (finalAnswer == null || finalAnswer.text() == null
                         || finalAnswer.text().isBlank()
                         || finalAnswer.text().length() > MAX_FINAL_CHARS) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
-                String persistedText = streamingObserver == null
-                        ? screenedFinalText(finalAnswer.text())
-                        : streamingObserver.finish(finalAnswer.text());
+                String persistedText;
+                try {
+                    persistedText = streamingObserver == null
+                            ? screenedFinalText(finalAnswer.text())
+                            : streamingObserver.finish(finalAnswer.text());
+                } catch (AiAssistantLoopException exception) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    throw exception;
+                }
                 boolean omitted = MaskingEngine.OMITTED_BY_POLICY.equals(persistedText);
                 List<String> citations = omitted ? List.of() : finalAnswer.citations();
-                resources.requireKnownCitations(citations);
+                try {
+                    resources.requireKnownCitations(citations);
+                } catch (AiAssistantLoopException exception) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    throw exception;
+                }
                 List<String> suggestions = omitted
                         ? List.of()
                         : AiAssistantStepGuard.filterSuggestions(finalAnswer.suggestions());
@@ -815,6 +824,14 @@ public class AiChatAgentLoopService {
                 () -> new IllegalStateException("Native tool call is unavailable"));
         if (nativeCalls.putIfAbsent(stepNumber, call) != null) {
             throw new IllegalStateException("Native tool call step was already recorded");
+        }
+    }
+
+    private static void resetMalformedStream(
+            AiChatStreamingProgress progress,
+            AiChatStreamingProgress.Observer observer) {
+        if (progress != null && observer != null && observer.hasProjectedText()) {
+            progress.reset();
         }
     }
 

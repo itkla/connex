@@ -71,6 +71,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededExcep
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
@@ -211,6 +212,33 @@ class AiInvocationServiceTest {
                 .allMatch(metadata -> Boolean.TRUE.equals(metadata.get("streamed"))));
         verify(aiProvider, never()).complete(any());
         verify(providerTransport).run();
+    }
+
+    @Test
+    void completeStreamingSuppliesExactReasoningModeBeforeProviderContent() {
+        ResolvedAiProvider unmasked = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(unmasked);
+        when(aiProvider.supportsStreaming(unmasked.target())).thenReturn(true);
+        AiProviderStreamObserver observer = org.mockito.Mockito.mock(
+                AiProviderStreamObserver.class);
+        when(aiProvider.completeStreaming(any(AiCompletionRequest.class), same(observer)))
+                .thenAnswer(call -> {
+                    AiCompletionRequest request = call.getArgument(0);
+                    return request.providerAttemptExecutor().executeStream(() ->
+                            new AiCompletionResult("answer", 12, 4, "end_turn"));
+                });
+        AiInvocation base = unmaskedStreamingInvocation();
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(),
+                base.maxTokens(), base.temperature(), true, base.callerDeadline(),
+                base.protocol(), base.nativeToolsDegradedStatus(), base.outputTokensClamped())
+                .withStreamObserver(observer);
+
+        service.complete(invocation);
+
+        InOrder order = inOrder(observer, aiProvider);
+        order.verify(observer).onReasoningMode(AiReasoningMode.TAGGED);
+        order.verify(aiProvider).completeStreaming(any(AiCompletionRequest.class), same(observer));
     }
 
     @Test

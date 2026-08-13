@@ -260,6 +260,12 @@ public interface AiChatMapper {
         @Param("content") String content,
         @Param("nextOffset") int nextOffset);
 
+    int resetTurnPartialContent(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("expectedOffset") int expectedOffset);
+
     int replaceTurnPartialContent(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

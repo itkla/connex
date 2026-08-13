@@ -1,12 +1,20 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import ooo.klae.connex.backend.ai.masking.CompletionNormalizer;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
+
 /** Incrementally decodes only the canonical root terminal-answer text JSON path. */
 final class AiAssistantTextDeltaProjector {
+    private static final List<String> REASONING_OPENINGS = List.of(
+            "<think", "<thinking", "<thought", "<thoughts");
+
     enum Shape {
         JSON_REACT,
         NATIVE_FINAL
@@ -16,12 +24,28 @@ final class AiAssistantTextDeltaProjector {
     private final Consumer<String> consumer;
     private final StringBuilder raw = new StringBuilder();
     private String projected = "";
+    private AiReasoningMode reasoningMode;
     private boolean nonTerminal;
     private boolean closed;
 
     AiAssistantTextDeltaProjector(Shape shape, Consumer<String> consumer) {
+        this(shape, AiReasoningMode.NONE, consumer);
+    }
+
+    AiAssistantTextDeltaProjector(
+            Shape shape,
+            AiReasoningMode reasoningMode,
+            Consumer<String> consumer) {
         this.shape = Objects.requireNonNull(shape, "shape");
+        this.reasoningMode = Objects.requireNonNull(reasoningMode, "reasoningMode");
         this.consumer = Objects.requireNonNull(consumer, "consumer");
+    }
+
+    void setReasoningMode(AiReasoningMode reasoningMode) {
+        if (!raw.isEmpty()) {
+            throw new IllegalStateException("Reasoning mode arrived after assistant content");
+        }
+        this.reasoningMode = Objects.requireNonNull(reasoningMode, "reasoningMode");
     }
 
     void accept(String fragment) {
@@ -48,7 +72,7 @@ final class AiAssistantTextDeltaProjector {
         if (nonTerminal) {
             return;
         }
-        Projection projection = new Scanner(raw, shape).scan();
+        Projection projection = new Scanner(normalizedInput(), shape).scan();
         if (projection.invalid()) {
             nonTerminal = true;
             return;
@@ -71,6 +95,32 @@ final class AiAssistantTextDeltaProjector {
                 && projection.terminalConfirmed()
                 && projection.textClosed()
                 && safeLength == projection.text().length();
+    }
+
+    private CharSequence normalizedInput() {
+        if (reasoningMode != AiReasoningMode.TAGGED) {
+            return raw;
+        }
+        String content = raw.toString();
+        int firstContent = 0;
+        while (firstContent < content.length()
+                && isProtocolWhitespace(content.charAt(firstContent))) {
+            firstContent++;
+        }
+        if (firstContent == content.length()) {
+            return "";
+        }
+        String candidate = content.substring(firstContent).toLowerCase(Locale.ROOT);
+        if (REASONING_OPENINGS.stream().anyMatch(opening -> opening.startsWith(candidate))) {
+            return "";
+        }
+        CompletionNormalizer.CapturedCompletion normalized =
+                CompletionNormalizer.captureReasoning(content, "");
+        return normalized.ambiguous() ? "" : normalized.answer();
+    }
+
+    private static boolean isProtocolWhitespace(char value) {
+        return Character.isWhitespace(value) || Character.isSpaceChar(value);
     }
 
     private static AiAssistantLoopException malformedOutput() {

@@ -9,6 +9,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
+
 class AiAssistantTextDeltaProjectorTest {
     @Test
     void jsonReactEmitsOnlyDecodedTerminalTextWithUtf16Offsets() {
@@ -123,6 +125,53 @@ class AiAssistantTextDeltaProjectorTest {
         projector.accept("{\"wrapper\":{\"text\":\"leak\"},\"text\":\"answer\"}");
 
         assertFalse(projector.hasProjectedText());
+        assertThrows(AiAssistantLoopException.class, projector::finish);
+    }
+
+    @Test
+    void taggedReasoningSplitAcrossOpeningAndClosingChunksIsNeverProjected() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.JSON_REACT,
+                AiReasoningMode.TAGGED,
+                deltas::add);
+
+        projector.accept("\n<thi");
+        projector.accept("nking>private plan</think");
+        projector.accept("ing>\n{\"tool\":null,\"final\":{\"text\":\"Safe");
+        projector.accept(" answer\",\"citations\":[],\"suggestions\":[],\"title\":null}}");
+
+        assertEquals("Safe answer", projector.finish());
+        assertEquals("Safe answer", String.join("", deltas));
+    }
+
+    @Test
+    void taggedModeWithoutReasoningStreamsOrdinaryContent() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.NATIVE_FINAL,
+                AiReasoningMode.TAGGED,
+                deltas::add);
+
+        projector.accept("{\"text\":\"Ordinary answer\",\"citations\":[],");
+        projector.accept("\"suggestions\":[],\"title\":null}");
+
+        assertEquals("Ordinary answer", projector.finish());
+        assertEquals("Ordinary answer", String.join("", deltas));
+    }
+
+    @Test
+    void unterminatedTaggedReasoningNeverProjects() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.JSON_REACT,
+                AiReasoningMode.TAGGED,
+                deltas::add);
+
+        projector.accept("<thinking>private plan without a closing tag");
+
+        assertFalse(projector.hasProjectedText());
+        assertEquals(List.of(), deltas);
         assertThrows(AiAssistantLoopException.class, projector::finish);
     }
 }

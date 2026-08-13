@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
@@ -819,11 +820,15 @@ public class AiInvocationService {
             AiCompletionRequest providerRequest = request(
                     resolved, effectiveInvocation, outputMode, responseSchema, nativeTools,
                     reasoningMode, attemptTracker);
-            AiCompletionResult providerResult = streamed
-                    ? adapter.completeStreaming(
-                            providerRequest,
-                            Objects.requireNonNull(effectiveInvocation.streamObserver()))
-                    : adapter.complete(providerRequest);
+            AiCompletionResult providerResult;
+            if (streamed) {
+                AiProviderStreamObserver streamObserver = Objects.requireNonNull(
+                        effectiveInvocation.streamObserver());
+                streamObserver.onReasoningMode(reasoningMode);
+                providerResult = adapter.completeStreaming(providerRequest, streamObserver);
+            } else {
+                providerResult = adapter.complete(providerRequest);
+            }
             AiCompletionResult result = withConservativeUsage(
                     providerResult, effectiveInvocation, serializedPrompt);
             attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());

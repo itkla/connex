@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 
 /** Batches decoded terminal text into durable UTF-16-sequenced realtime frames. */
@@ -73,12 +74,25 @@ final class AiChatStreamingProgress {
         lastCheckNanos = System.nanoTime();
     }
 
+    void reset() {
+        persistenceService.resetPartialContent(turn, durable.length());
+        durable.setLength(0);
+        pending.setLength(0);
+        excluded = false;
+        lastCheckNanos = System.nanoTime();
+    }
+
     final class Observer implements AiProviderStreamObserver {
         private final AiAssistantTextDeltaProjector projector;
         private AiChatCancellationHooks.Registration registration;
 
         private Observer(AiAssistantTextDeltaProjector.Shape shape) {
             projector = new AiAssistantTextDeltaProjector(shape, AiChatStreamingProgress.this::acceptDecoded);
+        }
+
+        @Override
+        public void onReasoningMode(AiReasoningMode reasoningMode) {
+            projector.setReasoningMode(reasoningMode);
         }
 
         @Override

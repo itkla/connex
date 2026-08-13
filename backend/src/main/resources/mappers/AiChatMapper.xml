@@ -637,6 +637,19 @@
       AND cancel_requested_at IS NULL
   </update>
 
+  <update id="resetTurnPartialContent">
+    UPDATE ai_chat_turn
+    SET partial_content = NULL,
+        partial_content_utf16_offset = 0
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status = 'running'
+      AND streamed = TRUE
+      AND partial_content_utf16_offset = #{expectedOffset}
+      AND cancel_requested_at IS NULL
+  </update>
+
   <update id="replaceTurnPartialContent">
     UPDATE ai_chat_turn
     SET partial_content = #{content},
