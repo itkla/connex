@@ -50,6 +50,10 @@ class MaskingEngineTest {
         assertFalse(containsIgnoreCase(maskedNote, "ann.smith+vip@example.com"));
         assertFalse(maskedNote.contains("+81-3-1234-5678"));
         assertEquals("[omitted by policy]", MaskingEngine.maskFreeText("The contact discussed a diagnosis.", ctx));
+        assertEquals("[omitted by policy]",
+                MaskingEngine.maskFreeText("He has a criminal\r\nrecord on file.", ctx));
+        assertEquals("[omitted by policy]",
+                MaskingEngine.maskFreeText("See the medical\t history summary.", ctx));
 
         String serialized = objectMapper.writeValueAsString(Map.of(
                 "tokens", List.of(ann, annSmith, company, japaneseName, email, phone),
