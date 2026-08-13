@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
+import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import tools.jackson.databind.JsonNode;
@@ -130,8 +131,13 @@ class AiAssistantPromptAssemblerTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry());
 
-        String nativeResult = assembler.nativeReplay(
-                turns, new MaskingContext(), budget, null).toolResults().getFirst();
+        AiAssistantPromptAssembler.NativeReplay nativeReplay = assembler.nativeReplay(
+                turns,
+                nativeCalls(turns),
+                new MaskingContext(),
+                budget,
+                null);
+        String nativeResult = nativeReplay.toolResults().getFirst();
         String jsonReactResult = jsonReact.getMessages().getLast().getContent();
 
         assertEquals(jsonReactResult, nativeResult);
@@ -142,6 +148,8 @@ class AiAssistantPromptAssemblerTest {
         assertFalse(nativeResult.contains("ada@example.com"));
         assertTrue(nativeResult.contains("{{P1}}"));
         assertTrue(nativeResult.startsWith("CRM_DATA_BEGIN"));
+        assertEquals("{}", nativeReplay.exchanges().getFirst().call().arguments());
+        assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, nativeReplay.audit());
         assertTrue(assembler.fixedNativePrompt().getSystemPrompt()
                 .contains("List-style tool results are capped"));
     }
@@ -188,6 +196,39 @@ class AiAssistantPromptAssemblerTest {
                 assembler.durableToolResult(result, audit));
         assertEquals(1,
                 durable.path("promptBudget").path("truncatedToolResults").asInt());
+    }
+
+    @Test
+    void arrayFallbackUsesTheEmptiedCandidateWhenLargeScalarsStillDoNotFit()
+            throws Exception {
+        AiAssistantToolResult result = new AiAssistantToolResult(
+                Map.of(
+                        "records", List.of(
+                                Map.of("name", "ARRAY_ITEM_ALPHA"),
+                                Map.of("name", "ARRAY_ITEM_BETA")),
+                        "summary", "LARGE_SCALAR_".repeat(120)),
+                List.of());
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 500, 8_000);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, "search_records", result)),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null);
+
+        String content = prompt.getMessages().getLast().getContent();
+        JsonNode payload = toolPayload(content);
+
+        assertFalse(content.contains("ARRAY_ITEM_ALPHA"));
+        assertFalse(content.contains("ARRAY_ITEM_BETA"));
+        assertTrue(payload.path("data").path("budgetDisclosure").asString()
+                .contains("showing 0 of 2 items"));
+        assertTrue(budget.fits(content, budget.toolResultBytes()));
     }
 
     @Test
@@ -263,7 +304,11 @@ class AiAssistantPromptAssemblerTest {
                 .map(message -> message.getContent())
                 .toList();
         List<String> nativeResults = assembler.nativeReplay(
-                turns, new MaskingContext(), budget, null).toolResults();
+                turns,
+                nativeCalls(turns),
+                new MaskingContext(),
+                budget,
+                null).toolResults();
 
         assertEquals(reactResults, nativeResults);
         assertTrue(reactResults.get(0).contains("evicted to free context"));
@@ -277,6 +322,135 @@ class AiAssistantPromptAssemblerTest {
                 turns, new MaskingContext(), budget);
         assertEquals(1, audit.evictedToolExchanges());
         assertEquals(1, audit.truncatedToolResults());
+    }
+
+    @Test
+    void evictionSkipsCompactResultsAndMeasuresSavingsFromTheLargeExchange() {
+        ToolTurn compact = new ToolTurn(
+                1,
+                "aggregate_metric",
+                new AiAssistantToolResult(Map.of("value", 1), List.of()));
+        ToolTurn large = new ToolTurn(
+                2,
+                "search_records",
+                new AiAssistantToolResult(
+                        Map.of("records", "LARGE_PRIOR_EXCHANGE_".repeat(220)),
+                        List.of()));
+        ToolTurn latest = new ToolTurn(
+                3,
+                "list_tasks",
+                new AiAssistantToolResult(
+                        Map.of("tasks", "LATEST_EXCHANGE"), List.of()));
+        List<ToolTurn> turns = List.of(compact, large, latest);
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 900, 8_000);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                turns,
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null);
+        List<String> results = prompt.getMessages().stream()
+                .map(message -> message.getContent())
+                .toList();
+        AiAssistantPromptAssembler.ToolBudgetAudit audit = assembler.toolBudgetAudit(
+                turns, new MaskingContext(), budget);
+
+        assertTrue(results.get(0).contains("\"value\":1"));
+        assertFalse(results.get(0).contains("evicted to free context"));
+        assertTrue(results.get(1).contains("evicted to free context"));
+        assertFalse(results.get(1).contains("LARGE_PRIOR_EXCHANGE"));
+        assertTrue(results.get(2).contains("LATEST_EXCHANGE"));
+        assertEquals(1, audit.evictedToolExchanges());
+        assertEquals(0, audit.truncatedToolResults());
+    }
+
+    @Test
+    void nativeReplayBudgetsArgumentsAndRetainsCompactResultsDuringEviction() {
+        ToolTurn oldest = new ToolTurn(
+                1,
+                "search_records",
+                new AiAssistantToolResult(Map.of("count", 1), List.of()));
+        ToolTurn retained = new ToolTurn(
+                2,
+                "list_tasks",
+                new AiAssistantToolResult(Map.of("count", 2), List.of()));
+        ToolTurn latest = new ToolTurn(
+                3,
+                "aggregate_metric",
+                new AiAssistantToolResult(Map.of("value", 3), List.of()));
+        List<ToolTurn> turns = List.of(oldest, retained, latest);
+        Map<Integer, AiToolCall> calls = Map.of(
+                1, new AiToolCall(
+                        "call_1", oldest.tool(),
+                        "{\"query\":\"" + "A".repeat(700) + "\"}"),
+                2, new AiToolCall(
+                        "call_2", retained.tool(),
+                        "{\"query\":\"" + "B".repeat(700) + "\"}"),
+                3, new AiToolCall(
+                        "call_3", latest.tool(),
+                        "{\"metric\":\"" + "C".repeat(700) + "\"}"));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_100, 8_000);
+
+        AiAssistantPromptAssembler.NativeReplay replay = assembler.nativeReplay(
+                turns, calls, new MaskingContext(), budget, null);
+
+        assertEquals("{\"evicted\":true}",
+                replay.exchanges().getFirst().call().arguments());
+        assertTrue(replay.exchanges().getFirst().maskedResult().contains("\"count\":1"));
+        assertFalse(replay.exchanges().getFirst().maskedResult()
+                .contains("evicted to free context"));
+        assertEquals(calls.get(3).arguments(),
+                replay.exchanges().getLast().call().arguments());
+        assertTrue(replay.exchanges().stream()
+                .mapToLong(exchange -> budget.utf8Bytes(exchange.call().arguments())
+                        + budget.utf8Bytes(exchange.maskedResult()))
+                .sum() <= budget.toolResultBytes());
+        assertEquals(1, replay.audit().evictedToolExchanges());
+        assertEquals(0, replay.audit().truncatedToolResults());
+    }
+
+    @Test
+    void exactExecutedReplayAppendRetainsEarlierTruncationAudit() {
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 8_000);
+        ToolTurn oversizedReplay = new ToolTurn(
+                1,
+                "create_note",
+                new AiAssistantToolResult(
+                        Map.of(
+                                "toolCallId", 29,
+                                "tool", "create_note",
+                                "tier", "auto",
+                                "status", "executed",
+                                "outcome", Map.of(
+                                        "details", "STORED_DETAILS".repeat(300))),
+                        List.of()));
+        AiAssistantPromptAssembler.ExecutedReplay truncated =
+                assembler.withExecutedReplay(
+                        List.of(), oversizedReplay, new MaskingContext(), budget);
+        ToolTurn exactReplay = new ToolTurn(
+                2,
+                "create_task",
+                new AiAssistantToolResult(
+                        Map.of("toolCallId", 30, "status", "executed"),
+                        List.of()));
+
+        AiAssistantPromptAssembler.ExecutedReplay appended =
+                assembler.withExecutedReplay(
+                        truncated.toolTurns(),
+                        exactReplay,
+                        new MaskingContext(),
+                        budget);
+
+        assertEquals(2, appended.toolTurns().size());
+        assertEquals(1, appended.audit().truncatedToolResults());
+        assertEquals(0, appended.audit().evictedToolExchanges());
     }
 
     @Test
@@ -305,7 +479,8 @@ class AiAssistantPromptAssemblerTest {
                 List.of(),
                 budget);
         String nativeResult = assembler.nativeReplay(
-                turns, context, budget, null).toolResults().getFirst();
+                turns, nativeCalls(turns), context, budget, null)
+                .toolResults().getFirst();
 
         assertFalse(nativeResult.contains("Li"));
         assertTrue(nativeResult.contains("Call {{P1}} tomorrow"));
@@ -731,5 +906,14 @@ class AiAssistantPromptAssemblerTest {
         int firstNewline = content.indexOf('\n');
         int lastNewline = content.lastIndexOf('\n');
         return objectMapper.readTree(content.substring(firstNewline + 1, lastNewline));
+    }
+
+    private static Map<Integer, AiToolCall> nativeCalls(List<ToolTurn> turns) {
+        Map<Integer, AiToolCall> calls = new LinkedHashMap<>();
+        for (ToolTurn turn : turns) {
+            calls.put(turn.seq(), new AiToolCall(
+                    "call_" + turn.seq(), turn.tool(), "{}"));
+        }
+        return Map.copyOf(calls);
     }
 }

@@ -409,7 +409,80 @@ class AiChatAgentLoopServiceTest {
         assertTrue(replayPrompt.contains("\"detailsTruncated\":true"));
         assertTrue(replayPrompt.contains("stored outcome was truncated"));
         assertFalse(replayPrompt.contains("STORED_EXECUTION_DETAILS"));
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("The follow-up note was created."),
+                metadata.capture(), anyInt(), anyInt());
+        assertEquals(1, objectMapper.readTree(metadata.getValue())
+                .path("toolResultBudget")
+                .path("truncatedToolResults")
+                .asInt());
         verify(persistenceService, never()).failTool(eq(TURN), eq(30), any());
+    }
+
+    @Test
+    void nativeExecutedAutoReplayKeepsTruncationAuditThroughTheNextReplay()
+            throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 6_808));
+        JsonNode writeArgs = objectMapper.readTree(
+                "{\"handle\":\"r1\",\"content\":\"Follow up\"}");
+        AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
+                "create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        when(writeToolService.prepare(
+                eq("create_note"), eq(writeArgs), any(), eq(TURN.restrictionEpoch())))
+                .thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 1, write)).thenReturn(
+                new AiAssistantToolProposal(30, "executed", null, false));
+        AiAssistantToolResult storedReceipt = new AiAssistantToolResult(
+                Map.of(
+                        "toolCallId", 30,
+                        "tool", "create_note",
+                        "tier", "auto",
+                        "status", "executed",
+                        "outcome", Map.of(
+                                "recordType", "note",
+                                "details", "STORED_NATIVE_EXECUTION_DETAILS".repeat(200))),
+                List.of());
+        when(writeToolService.executeAuto(eq(TURN), eq(30), any())).thenReturn(
+                new AiAssistantWriteToolService.WriteExecution(
+                        null, storedReceipt, true));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "create_note",
+                        "{\"handle\":\"r1\",\"content\":\"Follow up\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "The follow-up note was created.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(2)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        String maskedResult = requests.getAllValues().getLast()
+                .exchanges().getFirst().maskedResult();
+        assertTrue(maskedResult.contains("\"detailsTruncated\":true"));
+        assertFalse(maskedResult.contains("STORED_NATIVE_EXECUTION_DETAILS"));
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("The follow-up note was created."),
+                metadata.capture(), anyInt(), anyInt());
+        assertEquals(1, objectMapper.readTree(metadata.getValue())
+                .path("toolResultBudget")
+                .path("truncatedToolResults")
+                .asInt());
     }
 
     @Test
@@ -812,6 +885,149 @@ class AiChatAgentLoopServiceTest {
         assertFalse(repairMessage.contains("JSON step"));
         verify(persistenceService).resolve(
                 eq(TURN), eq("Pipeline is healthy."), any(), eq(6), eq(10));
+    }
+
+    @Test
+    void repairedNativeFinalPersistsTheRepairAwareToolBudgetAudit() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 6_808));
+        AiAssistantToolResult largeResult = new AiAssistantToolResult(
+                Map.of(
+                        "records",
+                        java.util.stream.IntStream.range(0, 6)
+                                .mapToObj(index -> Map.of(
+                                        "index", index,
+                                        "summary", "R".repeat(220)))
+                                .toList()),
+                List.of());
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class)))
+                .thenReturn(largeResult);
+        AiStructuredRepair repair = AiStructuredRepair.from(
+                "final_shape", "X".repeat(600));
+        AiStructuredRepairAttempt<AiAssistantStep.FinalAnswer> malformed =
+                new AiStructuredRepairAttempt<>(
+                        new AiStructuredOutcome.Malformed<>(
+                                "malformed_output", 3, 5, "stop"),
+                        Optional.of(repair));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"records\",\"kinds\":[\"person\"]}"))
+                .thenReturn(new AiNativeToolCompletion.Content<>(
+                        malformed, 3, 5, "stop", Optional.empty()))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "The repaired answer is complete.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertFalse(requests.getAllValues().get(1).exchanges().getFirst()
+                .maskedResult().contains("[truncated:"));
+        assertTrue(requests.getAllValues().getLast().exchanges().getFirst()
+                .maskedResult().contains("[truncated: showing"));
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("The repaired answer is complete."),
+                metadata.capture(), anyInt(), anyInt());
+        JsonNode audit = objectMapper.readTree(metadata.getValue())
+                .path("toolResultBudget");
+        assertEquals(1, audit.path("truncatedToolResults").asInt());
+        assertEquals(0, audit.path("evictedToolExchanges").asInt());
+    }
+
+    @Test
+    void nativeAutoWritesEvictPriorLargeArgumentsBeforeTheProviderBoundary()
+            throws Exception {
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 6_808);
+        useNativeMemory(budget);
+        String firstArguments = "{\"handle\":\"r1\",\"content\":\""
+                + "A".repeat(1_200) + "\"}";
+        String secondArguments = "{\"handle\":\"r1\",\"content\":\""
+                + "B".repeat(1_200) + "\"}";
+        AiAssistantPreparedWrite autoWrite = new AiAssistantPreparedWrite(
+                "create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        when(writeToolService.prepare(
+                eq("create_note"), any(JsonNode.class), any(),
+                eq(TURN.restrictionEpoch())))
+                .thenReturn(autoWrite);
+        when(persistenceService.proposeWriteTool(TURN, 1, autoWrite)).thenReturn(
+                new AiAssistantToolProposal(29, "proposed", null, true));
+        when(persistenceService.proposeWriteTool(TURN, 2, autoWrite)).thenReturn(
+                new AiAssistantToolProposal(30, "proposed", null, true));
+        when(writeToolService.executeAuto(eq(TURN), anyInt(), any())).thenAnswer(invocation -> {
+            int toolCallId = invocation.getArgument(1);
+            AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                    Map.of("toolCallId", toolCallId, "status", "executed"),
+                    List.of());
+            Consumer<AiAssistantToolResult> guard = invocation.getArgument(2);
+            guard.accept(toolResult);
+            return new AiAssistantWriteToolService.WriteExecution(
+                    null, toolResult, false);
+        });
+        AtomicInteger providerCalls = new AtomicInteger();
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenAnswer(invocation -> switch (providerCalls.getAndIncrement()) {
+                    case 0 -> nativeTool("call_1", "create_note", firstArguments);
+                    case 1 -> nativeTool("call_2", "create_note", secondArguments);
+                    default -> {
+                        AiNativeToolRequest request = invocation.getArgument(5);
+                        long replayBytes = request.exchanges().stream()
+                                .mapToLong(exchange -> budget.utf8Bytes(
+                                                exchange.call().arguments())
+                                        + budget.utf8Bytes(exchange.maskedResult()))
+                                .sum();
+                        assertTrue(replayBytes <= budget.toolResultBytes());
+                        yield nativeFinal(new AiAssistantStep.FinalAnswer(
+                                "Both notes were created.", List.of()));
+                    }
+                });
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        AiNativeToolRequest finalRequest = requests.getAllValues().getLast();
+        assertEquals("{\"evicted\":true}",
+                finalRequest.exchanges().getFirst().call().arguments());
+        assertTrue(finalRequest.exchanges().getFirst().maskedResult()
+                .contains("\"status\":\"executed\""));
+        assertEquals(secondArguments,
+                finalRequest.exchanges().getLast().call().arguments());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Both notes were created."),
+                metadata.capture(), anyInt(), anyInt());
+        assertEquals(1, objectMapper.readTree(metadata.getValue())
+                .path("toolResultBudget")
+                .path("evictedToolExchanges")
+                .asInt());
     }
 
     @Test

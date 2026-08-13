@@ -19,7 +19,9 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
+import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import tools.jackson.core.JacksonException;
@@ -43,6 +45,9 @@ public class AiAssistantPromptAssembler {
     private static final String BUDGET_EXCEEDED = "budget_exceeded";
     private static final String EVICTED_TOOL_RESULT =
             "[evicted to free context — re-call if needed]";
+    private static final String EVICTED_TOOL_ARGUMENTS = "{\"evicted\":true}";
+    private static final String EXECUTED_REPLAY_DISCLOSURE =
+            "The write executed, but its stored outcome was truncated for the current model budget.";
     private static final String TRUNCATED_BUDGET = "[truncated: budget]";
     private static final AiAssistantPromptBudget UNBOUNDED_BUDGET =
             new AiAssistantPromptBudget(
@@ -79,18 +84,47 @@ public class AiAssistantPromptAssembler {
         }
     }
 
-    /** Masked native tool-role results and optional trailing structured repair request. */
-    public record NativeReplay(List<String> toolResults, String repairMessage) {
+    /** Bounded native exchanges, optional repair request, and exact replay degradation audit. */
+    public record NativeReplay(
+            List<AiToolExchange> exchanges,
+            String repairMessage,
+            ToolBudgetAudit audit) {
         public NativeReplay {
-            toolResults = List.copyOf(toolResults);
+            exchanges = List.copyOf(exchanges);
+            java.util.Objects.requireNonNull(audit, "audit");
+        }
+
+        /** @return masked tool-role results in replay order */
+        public List<String> toolResults() {
+            return exchanges.stream().map(AiToolExchange::maskedResult).toList();
         }
     }
 
+    /** Model-visible executed replay plus its exact degradation audit. */
+    public record ExecutedReplay(
+            List<ToolTurn> toolTurns,
+            ToolBudgetAudit audit) {
+        public ExecutedReplay {
+            toolTurns = List.copyOf(toolTurns);
+            java.util.Objects.requireNonNull(audit, "audit");
+        }
+    }
+
+    private record BoundedToolExchange(
+            String result,
+            String arguments,
+            boolean truncated) {
+    }
+
     private record BoundedToolResults(
-            List<String> contents,
+            List<BoundedToolExchange> exchanges,
             ToolBudgetAudit audit) {
         private BoundedToolResults {
-            contents = List.copyOf(contents);
+            exchanges = List.copyOf(exchanges);
+        }
+
+        private List<String> contents() {
+            return exchanges.stream().map(BoundedToolExchange::result).toList();
         }
     }
 
@@ -223,9 +257,10 @@ public class AiAssistantPromptAssembler {
         return prompt.build();
     }
 
-    /** Builds bounded native tool-role results with the same bytes as the ReAct data blocks. */
+    /** Builds bounded native call/result pairs under the shared tool replay allocation. */
     public NativeReplay nativeReplay(
             List<ToolTurn> toolTurns,
+            Map<Integer, AiToolCall> nativeCalls,
             MaskingContext context,
             AiAssistantPromptBudget budget,
             AiStructuredRepair repair) {
@@ -243,10 +278,19 @@ public class AiAssistantPromptAssembler {
         }
         int remainingToolBytes = budget.toolResultBytes()
                 - (repairContent == null ? 0 : budget.utf8Bytes(repairContent));
-        return new NativeReplay(
-                boundedToolResults(
-                        toolTurns, context, budget, remainingToolBytes).contents(),
-                repairContent);
+        BoundedToolResults bounded = boundedNativeToolResults(
+                toolTurns, nativeCalls, context, budget, remainingToolBytes);
+        List<AiToolCall> orderedCalls = orderedNativeCalls(toolTurns, nativeCalls);
+        List<AiToolExchange> exchanges = new ArrayList<>(toolTurns.size());
+        for (int index = 0; index < toolTurns.size(); index++) {
+            AiToolCall call = orderedCalls.get(index);
+            BoundedToolExchange exchange = bounded.exchanges().get(index);
+            exchanges.add(new AiToolExchange(
+                    new AiToolCall(
+                            call.id(), call.name(), exchange.arguments()),
+                    exchange.result()));
+        }
+        return new NativeReplay(exchanges, repairContent, bounded.audit());
     }
 
     /** @return static executable native function definitions in stable catalog order */
@@ -272,6 +316,26 @@ public class AiAssistantPromptAssembler {
                 budget.toolResultBytes()).audit();
     }
 
+    /** Verifies one prospective native exchange including its replayed call arguments. */
+    public ToolBudgetAudit requireAdditionalNativeExchangeCapacity(
+            List<ToolTurn> toolTurns,
+            ToolTurn prospectiveTurn,
+            Map<Integer, AiToolCall> nativeCalls,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        List<ToolTurn> prospectiveTurns = new ArrayList<>(toolTurns);
+        prospectiveTurns.add(prospectiveTurn);
+        for (ToolTurn turn : prospectiveTurns) {
+            seedIdentifiers(turn.result().identifiers(), context);
+        }
+        return boundedNativeToolResults(
+                prospectiveTurns,
+                nativeCalls,
+                context,
+                budget,
+                budget.toolResultBytes()).audit();
+    }
+
     /** Returns honesty counters for a complete current-turn tool replay. */
     public ToolBudgetAudit toolBudgetAudit(
             List<ToolTurn> toolTurns,
@@ -287,21 +351,62 @@ public class AiAssistantPromptAssembler {
                 budget.toolResultBytes()).audit();
     }
 
+    /** Returns honesty counters for native results and replayed call arguments. */
+    public ToolBudgetAudit nativeToolBudgetAudit(
+            List<ToolTurn> toolTurns,
+            Map<Integer, AiToolCall> nativeCalls,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        for (ToolTurn turn : toolTurns) {
+            seedIdentifiers(turn.result().identifiers(), context);
+        }
+        return boundedNativeToolResults(
+                toolTurns,
+                nativeCalls,
+                context,
+                budget,
+                budget.toolResultBytes()).audit();
+    }
+
     /** Fits an already-executed replay into the current tool-result allocation without rejection. */
-    public List<ToolTurn> withExecutedReplay(
+    public ExecutedReplay withExecutedReplay(
             List<ToolTurn> toolTurns,
             ToolTurn replay,
             MaskingContext context,
             AiAssistantPromptBudget budget) {
         List<ToolTurn> exactReplay = appended(toolTurns, replay);
         if (exactToolResultsFit(exactReplay, context, budget)) {
-            return exactReplay;
+            return new ExecutedReplay(
+                    exactReplay,
+                    toolBudgetAudit(exactReplay, context, budget));
         }
         ToolTurn boundedReplay = new ToolTurn(
                 replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result()));
         List<ToolTurn> boundedWithHistory = appended(toolTurns, boundedReplay);
-        toolBudgetAudit(boundedWithHistory, context, budget);
-        return boundedWithHistory;
+        ToolBudgetAudit audit = toolBudgetAudit(boundedWithHistory, context, budget);
+        return new ExecutedReplay(boundedWithHistory, audit);
+    }
+
+    /** Fits an already-executed native replay while accounting for call arguments. */
+    public ExecutedReplay withExecutedNativeReplay(
+            List<ToolTurn> toolTurns,
+            ToolTurn replay,
+            Map<Integer, AiToolCall> nativeCalls,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        List<ToolTurn> exactReplay = appended(toolTurns, replay);
+        if (exactNativeReplayFits(exactReplay, nativeCalls, context, budget)) {
+            return new ExecutedReplay(
+                    exactReplay,
+                    nativeToolBudgetAudit(
+                            exactReplay, nativeCalls, context, budget));
+        }
+        ToolTurn boundedReplay = new ToolTurn(
+                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result()));
+        List<ToolTurn> boundedWithHistory = appended(toolTurns, boundedReplay);
+        ToolBudgetAudit audit = nativeToolBudgetAudit(
+                boundedWithHistory, nativeCalls, context, budget);
+        return new ExecutedReplay(boundedWithHistory, audit);
     }
 
     /** Returns the fixed assistant system prompt for exact serialized-envelope budgeting. */
@@ -341,70 +446,127 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiAssistantPromptBudget budget,
             int availableBytes) {
+        return boundedToolResults(
+                toolTurns, List.of(), context, budget, availableBytes);
+    }
+
+    private BoundedToolResults boundedNativeToolResults(
+            List<ToolTurn> toolTurns,
+            Map<Integer, AiToolCall> nativeCalls,
+            MaskingContext context,
+            AiAssistantPromptBudget budget,
+            int availableBytes) {
+        List<String> arguments = orderedNativeCalls(toolTurns, nativeCalls).stream()
+                .map(AiToolCall::arguments)
+                .toList();
+        return boundedToolResults(
+                toolTurns, arguments, context, budget, availableBytes);
+    }
+
+    private BoundedToolResults boundedToolResults(
+            List<ToolTurn> toolTurns,
+            List<String> arguments,
+            MaskingContext context,
+            AiAssistantPromptBudget budget,
+            int availableBytes) {
         if (toolTurns.isEmpty()) {
             return new BoundedToolResults(List.of(), ToolBudgetAudit.NONE);
         }
-        List<String> exact = new ArrayList<>(toolTurns.size());
-        int exactRemaining = availableBytes;
-        boolean exactFit = true;
-        for (ToolTurn turn : toolTurns) {
-            String content = toolResultContent(turn, context);
-            exact.add(content);
-            if (!budget.fits(content, exactRemaining)) {
-                exactFit = false;
-            } else if (exactFit) {
-                exactRemaining -= budget.utf8Bytes(content);
-            }
+        boolean nativeReplay = !arguments.isEmpty();
+        if (nativeReplay && arguments.size() != toolTurns.size()) {
+            throw new IllegalStateException("Native tool replay is inconsistent");
         }
-        if (exactFit) {
-            return new BoundedToolResults(exact, ToolBudgetAudit.NONE);
+        List<BoundedToolExchange> exact = new ArrayList<>(toolTurns.size());
+        long exactBytes = 0;
+        for (int index = 0; index < toolTurns.size(); index++) {
+            String result = toolResultContent(toolTurns.get(index), context);
+            String callArguments = nativeReplay ? arguments.get(index) : null;
+            exact.add(new BoundedToolExchange(
+                    result,
+                    callArguments,
+                    isTruncatedExecutedReplay(toolTurns.get(index).result())));
+            exactBytes += replayBytes(result, callArguments, budget);
+        }
+        if (exactBytes <= availableBytes) {
+            return new BoundedToolResults(
+                    exact,
+                    toolBudgetAudit(exact, 0, 0, 0));
         }
 
         int latestIndex = toolTurns.size() - 1;
         boolean[] evicted = new boolean[latestIndex];
+        List<BoundedToolExchange> reduced = new ArrayList<>(latestIndex);
+        for (int index = 0; index < latestIndex; index++) {
+            BoundedToolExchange exactExchange = exact.get(index);
+            String evictedResult = evictedToolResult(toolTurns.get(index), context);
+            String reducedResult = budget.utf8Bytes(evictedResult)
+                            < budget.utf8Bytes(exactExchange.result())
+                    ? evictedResult
+                    : exactExchange.result();
+            String reducedArguments = reducedArguments(
+                    exactExchange.arguments(), budget);
+            reduced.add(new BoundedToolExchange(
+                    reducedResult,
+                    reducedArguments,
+                    exactExchange.truncated()
+                            && reducedResult.equals(exactExchange.result())));
+        }
         int evictedCount = 0;
         while (true) {
-            List<String> contents = new ArrayList<>(toolTurns.size());
+            List<BoundedToolExchange> exchanges = new ArrayList<>(toolTurns.size());
             int remainingBytes = availableBytes;
             boolean priorResultsFit = true;
             for (int index = 0; index < latestIndex; index++) {
-                String content = evicted[index]
-                        ? evictedToolResult(toolTurns.get(index), context)
+                BoundedToolExchange exchange = evicted[index]
+                        ? reduced.get(index)
                         : exact.get(index);
-                if (!budget.fits(content, remainingBytes)) {
+                long exchangeBytes = replayBytes(
+                        exchange.result(), exchange.arguments(), budget);
+                if (exchangeBytes > remainingBytes) {
                     priorResultsFit = false;
                     break;
                 }
-                contents.add(content);
-                remainingBytes -= budget.utf8Bytes(content);
+                exchanges.add(exchange);
+                remainingBytes -= (int) exchangeBytes;
             }
             if (priorResultsFit) {
-                String latest = exact.get(latestIndex);
-                if (budget.fits(latest, remainingBytes)) {
-                    contents.add(latest);
+                BoundedToolExchange latest = exact.get(latestIndex);
+                int latestArgumentsBytes = latest.arguments() == null
+                        ? 0
+                        : budget.utf8Bytes(latest.arguments());
+                int latestResultBytes = remainingBytes - latestArgumentsBytes;
+                if (latestResultBytes >= 0
+                        && budget.fits(latest.result(), latestResultBytes)) {
+                    exchanges.add(latest);
                     return new BoundedToolResults(
-                            contents,
-                            new ToolBudgetAudit(0, evictedCount, 0, 0));
+                            exchanges,
+                            toolBudgetAudit(exchanges, evictedCount, 0, 0));
                 }
-                TruncatedToolResult truncated = truncatedToolResult(
-                        toolTurns.get(latestIndex), context, budget, remainingBytes);
+                TruncatedToolResult truncated = latestResultBytes < 0
+                        ? null
+                        : truncatedToolResult(
+                                toolTurns.get(latestIndex),
+                                context,
+                                budget,
+                                latestResultBytes);
                 if (truncated != null) {
-                    contents.add(truncated.content());
+                    exchanges.add(new BoundedToolExchange(
+                            truncated.content(), latest.arguments(), true));
                     return new BoundedToolResults(
-                            contents,
-                            new ToolBudgetAudit(
-                                    1,
+                            exchanges,
+                            toolBudgetAudit(
+                                    exchanges,
                                     evictedCount,
                                     truncated.shownItems(),
                                     truncated.totalItems()));
                 }
             }
-            int oldestRetained = oldestRetained(evicted);
-            if (oldestRetained < 0) {
+            int oldestEvictable = oldestEvictable(evicted, exact, reduced, budget);
+            if (oldestEvictable < 0) {
                 throw new AiAssistantLoopException(
                         "tool_result_budget_exhausted", "tool_result_budget_exhausted");
             }
-            evicted[oldestRetained] = true;
+            evicted[oldestEvictable] = true;
             evictedCount++;
         }
     }
@@ -448,7 +610,7 @@ public class AiAssistantPromptAssembler {
             }
         }
 
-        String plainText = serialize(masked.path("result"));
+        String plainText = serialize(arrayCandidate.path("result"));
         int low = 0;
         int high = budget.utf8Bytes(plainText);
         TruncatedToolResult best = null;
@@ -509,9 +671,40 @@ public class AiAssistantPromptAssembler {
         return false;
     }
 
-    private static int oldestRetained(boolean[] evicted) {
+    private static String reducedArguments(
+            String exactArguments,
+            AiAssistantPromptBudget budget) {
+        if (exactArguments == null) {
+            return null;
+        }
+        return budget.utf8Bytes(EVICTED_TOOL_ARGUMENTS) < budget.utf8Bytes(exactArguments)
+                ? EVICTED_TOOL_ARGUMENTS
+                : exactArguments;
+    }
+
+    private static long replayBytes(
+            String result,
+            String arguments,
+            AiAssistantPromptBudget budget) {
+        return (long) budget.utf8Bytes(result)
+                + (arguments == null ? 0 : budget.utf8Bytes(arguments));
+    }
+
+    private static int oldestEvictable(
+            boolean[] evicted,
+            List<BoundedToolExchange> exact,
+            List<BoundedToolExchange> reduced,
+            AiAssistantPromptBudget budget) {
         for (int index = 0; index < evicted.length; index++) {
-            if (!evicted[index]) {
+            if (!evicted[index]
+                    && replayBytes(
+                            reduced.get(index).result(),
+                            reduced.get(index).arguments(),
+                            budget)
+                    < replayBytes(
+                            exact.get(index).result(),
+                            exact.get(index).arguments(),
+                            budget)) {
                 return index;
             }
         }
@@ -546,6 +739,39 @@ public class AiAssistantPromptAssembler {
         return true;
     }
 
+    private boolean exactNativeReplayFits(
+            List<ToolTurn> toolTurns,
+            Map<Integer, AiToolCall> nativeCalls,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        for (ToolTurn turn : toolTurns) {
+            seedIdentifiers(turn.result().identifiers(), context);
+        }
+        List<AiToolCall> orderedCalls = orderedNativeCalls(toolTurns, nativeCalls);
+        long replayBytes = 0;
+        for (int index = 0; index < toolTurns.size(); index++) {
+            replayBytes += replayBytes(
+                    toolResultContent(toolTurns.get(index), context),
+                    orderedCalls.get(index).arguments(),
+                    budget);
+        }
+        return replayBytes <= budget.toolResultBytes();
+    }
+
+    private static List<AiToolCall> orderedNativeCalls(
+            List<ToolTurn> toolTurns,
+            Map<Integer, AiToolCall> nativeCalls) {
+        List<AiToolCall> ordered = new ArrayList<>(toolTurns.size());
+        for (ToolTurn turn : toolTurns) {
+            AiToolCall call = nativeCalls.get(turn.seq());
+            if (call == null || !call.name().equals(turn.tool())) {
+                throw new IllegalStateException("Native tool call replay is unavailable");
+            }
+            ordered.add(call);
+        }
+        return List.copyOf(ordered);
+    }
+
     private static Map<String, Object> toolBudgetAuditData(ToolBudgetAudit audit) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("truncatedToolResults", audit.truncatedToolResults());
@@ -553,6 +779,20 @@ public class AiAssistantPromptAssembler {
         data.put("shownItems", audit.shownItems());
         data.put("totalItems", audit.totalItems());
         return Map.copyOf(data);
+    }
+
+    private static ToolBudgetAudit toolBudgetAudit(
+            List<BoundedToolExchange> exchanges,
+            int evictedToolExchanges,
+            int shownItems,
+            int totalItems) {
+        return new ToolBudgetAudit(
+                (int) exchanges.stream()
+                        .filter(BoundedToolExchange::truncated)
+                        .count(),
+                evictedToolExchanges,
+                shownItems,
+                totalItems);
     }
 
     private static AiAssistantToolResult truncatedExecutedReplay(
@@ -567,9 +807,23 @@ public class AiAssistantPromptAssembler {
         outcome.put("detailsTruncated", true);
         outcome.put(
                 "disclosure",
-                "The write executed, but its stored outcome was truncated for the current model budget.");
+                EXECUTED_REPLAY_DISCLOSURE);
         result.put("outcome", Map.copyOf(outcome));
         return new AiAssistantToolResult(result, List.of());
+    }
+
+    private static boolean isTruncatedExecutedReplay(
+            AiAssistantToolResult result) {
+        if (!"executed".equals(result.data().get("status"))) {
+            return false;
+        }
+        Object outcome = result.data().get("outcome");
+        if (!(outcome instanceof Map<?, ?> outcomeData)) {
+            return false;
+        }
+        return "executed".equals(outcomeData.get("status"))
+                && Boolean.TRUE.equals(outcomeData.get("detailsTruncated"))
+                && EXECUTED_REPLAY_DISCLOSURE.equals(outcomeData.get("disclosure"));
     }
 
     private static void copyPresent(
