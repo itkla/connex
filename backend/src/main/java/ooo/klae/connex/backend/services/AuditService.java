@@ -93,6 +93,7 @@ public class AuditService {
     private static final Set<String> AI_PARSE_OUTCOMES = Set.of("parsed", "truncated", "malformed_output");
     private static final Set<String> AI_STRUCTURED_ENFORCEMENTS = Set.of(
             "prompt_only", "json_object", "json_schema");
+    private static final int AI_PROVIDER_DETAIL_MAX_LENGTH = 300;
     private static final Set<String> AI_SCHEMA_RULES = Set.of(
             "json_object_missing", "raw_guard_rejected", "binding_failed",
             "top_level_fields", "exclusive_step", "tool_fields", "tool_name",
@@ -676,6 +677,8 @@ public class AuditService {
         copyNumber(source, projected, "outputLength");
         copyBoolean(source, projected, "objectExtracted");
         copyKnownString(source, projected, "reason", AI_REASONS);
+        copyNumber(source, projected, "providerStatus");
+        copyBoundedText(source, projected, "providerDetail", AI_PROVIDER_DETAIL_MAX_LENGTH);
         return projected;
     }
 
@@ -774,6 +777,24 @@ public class AuditService {
             case "secret_store.diagnostics.read" -> "Secret store diagnostics read";
             default -> "Secret store operation";
         };
+    }
+
+    /**
+     * Copies a free-text metadata value after control-character stripping and a hard length cap.
+     * Reserved for provider-originated diagnostics whose request payloads are masked before
+     * egress; every other string field stays on a value allowlist.
+     */
+    private static void copyBoundedText(
+            Map<?, ?> source, Map<String, Object> target, String key, int maxLength) {
+        Object value = metadataValue(source.get(key));
+        if (value instanceof String string) {
+            String cleaned = string.replaceAll("[\\p{Cntrl}]", " ").strip();
+            if (!cleaned.isEmpty()) {
+                target.put(key, cleaned.length() <= maxLength
+                        ? cleaned
+                        : cleaned.substring(0, maxLength));
+            }
+        }
     }
 
     private static void copyKnownString(

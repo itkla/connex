@@ -147,7 +147,8 @@ public class OpenAiCompatibleClient {
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
             throw new AiProviderRequestRejectedException(
-                    "OpenAI-compatible", response.statusCode());
+                    "OpenAI-compatible", response.statusCode(),
+                    new String(response.body(), StandardCharsets.UTF_8));
         }
         return new String(response.body(), StandardCharsets.UTF_8);
     }

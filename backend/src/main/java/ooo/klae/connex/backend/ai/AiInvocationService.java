@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
+import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
@@ -791,7 +792,8 @@ public class AiInvocationService {
             attemptTracker.closeBudget();
             if (!attemptTracker.failureAudited()) {
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
-                        null, null, null, null, "provider_exception", structured, null);
+                        null, null, null, null, "provider_exception", structured, null,
+                        null, null, rejection(exception));
             }
             throw exception;
         } catch (TooManyRequestsException exception) {
@@ -987,13 +989,27 @@ public class AiInvocationService {
             Integer demaskWarnings, String reason, boolean structured, String parseOutcome) {
         emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
                 inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
-                null, null);
+                null, null, null);
+    }
+
+    private static AiProviderRequestRejectedException rejection(AiProviderException exception) {
+        return exception instanceof AiProviderRequestRejectedException rejected ? rejected : null;
     }
 
     private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
             String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
             Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
             AiStructuredOutputEnforcement enforcement, MalformedDiagnostic diagnostic) {
+        emitAudit(workspaceId, orgId, resolved, invocation, correlationId, outcome,
+                inputTokens, outputTokens, stopReason, demaskWarnings, reason, structured, parseOutcome,
+                enforcement, diagnostic, null);
+    }
+
+    private void emitAudit(int workspaceId, int orgId, ResolvedAiProvider resolved, AiInvocation invocation,
+            String correlationId, String outcome, Integer inputTokens, Integer outputTokens, String stopReason,
+            Integer demaskWarnings, String reason, boolean structured, String parseOutcome,
+            AiStructuredOutputEnforcement enforcement, MalformedDiagnostic diagnostic,
+            AiProviderRequestRejectedException providerRejection) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("provider", provider(resolved));
         metadata.put("region", region(resolved));
@@ -1048,6 +1064,12 @@ public class AiInvocationService {
             metadata.put("schemaRule", diagnostic.schemaRule());
             metadata.put("outputLength", diagnostic.outputLength());
             metadata.put("objectExtracted", diagnostic.objectExtracted());
+        }
+        if (providerRejection != null) {
+            metadata.put("providerStatus", providerRejection.statusCode());
+            if (providerRejection.providerDetail() != null) {
+                metadata.put("providerDetail", providerRejection.providerDetail());
+            }
         }
         if (AUDIT_OUTCOME_ATTEMPT.equals(outcome)) {
             auditService.recordStrictIndependentScoped(AUDIT_ACTION, AUDIT_ENTITY_TYPE, null, workspaceId, orgId,
