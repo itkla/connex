@@ -3,7 +3,11 @@ package ooo.klae.connex.backend.ai.provider;
 import java.util.regex.Pattern;
 
 /** Opaque provider function call whose arguments remain masked until validation succeeds. */
-public record AiToolCall(String id, String name, String arguments) {
+public record AiToolCall(
+        String id,
+        String name,
+        String arguments,
+        String thoughtSignature) {
     private static final Pattern NAME = Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
     private static final int MAX_ID_CHARS = 256;
 
@@ -18,6 +22,11 @@ public record AiToolCall(String id, String name, String arguments) {
         if (arguments == null || arguments.isBlank()) {
             throw new IllegalArgumentException("AI tool call arguments are invalid");
         }
+    }
+
+    /** Creates a provider function call without provider-specific reasoning state. */
+    public AiToolCall(String id, String name, String arguments) {
+        this(id, name, arguments, null);
     }
 
     @Override

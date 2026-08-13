@@ -605,7 +605,8 @@ class AiInvocationServiceTest {
                 "call_1",
                 "search_records",
                 "{\"query\":\"cooling\","
-                        + "\"kinds\":[\"person\"]}");
+                        + "\"kinds\":[\"person\"]}",
+                "opaque-signature /+==");
         AiNativeToolRequest request = new AiNativeToolRequest(
                 promptAssembler.nativeToolDefinitions(),
                 promptAssembler.nativeReplay(
@@ -620,9 +621,20 @@ class AiInvocationServiceTest {
                 stepSchema.finalResponseSchema(),
                 AiReasoningMode.NATIVE,
                 request);
+        AiNativeToolRequest unsignedRequest = new AiNativeToolRequest(
+                request.definitions(),
+                List.of(new AiToolExchange(
+                        new AiToolCall(call.id(), call.name(), call.arguments()),
+                        request.exchanges().getFirst().maskedResult())));
+        int unsignedBytes = service.serializedPromptBytes(
+                prompt,
+                stepSchema.finalResponseSchema(),
+                AiReasoningMode.NATIVE,
+                unsignedRequest);
 
         assertTrue(serializedBytes <= AiProviderCapabilities.conservativeInputByteCeiling(
                 capabilities.contextWindowTokens(), budget.maxOutputTokens()));
+        assertTrue(serializedBytes > unsignedBytes);
         assertTrue(request.exchanges().getFirst().maskedResult()
                 .contains("CRM_DATA_BEGIN"));
     }

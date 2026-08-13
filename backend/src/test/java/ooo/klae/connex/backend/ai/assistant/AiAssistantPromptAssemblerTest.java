@@ -387,13 +387,16 @@ class AiAssistantPromptAssemblerTest {
         Map<Integer, AiToolCall> calls = Map.of(
                 1, new AiToolCall(
                         "call_1", oldest.tool(),
-                        "{\"query\":\"" + "A".repeat(700) + "\"}"),
+                        "{\"query\":\"" + "A".repeat(700) + "\"}",
+                        "oldest-signature /+=="),
                 2, new AiToolCall(
                         "call_2", retained.tool(),
-                        "{\"query\":\"" + "B".repeat(700) + "\"}"),
+                        "{\"query\":\"" + "B".repeat(700) + "\"}",
+                        "retained-signature /+=="),
                 3, new AiToolCall(
                         "call_3", latest.tool(),
-                        "{\"metric\":\"" + "C".repeat(700) + "\"}"));
+                        "{\"metric\":\"" + "C".repeat(700) + "\"}",
+                        "latest-signature /+=="));
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 4_096, 256, 256, 2_100, 8_000);
 
@@ -402,17 +405,45 @@ class AiAssistantPromptAssemblerTest {
 
         assertEquals("{\"evicted\":true}",
                 replay.exchanges().getFirst().call().arguments());
+        assertEquals(calls.get(1).thoughtSignature(),
+                replay.exchanges().getFirst().call().thoughtSignature());
         assertTrue(replay.exchanges().getFirst().maskedResult().contains("\"count\":1"));
         assertFalse(replay.exchanges().getFirst().maskedResult()
                 .contains("evicted to free context"));
         assertEquals(calls.get(3).arguments(),
                 replay.exchanges().getLast().call().arguments());
+        assertEquals(calls.get(3).thoughtSignature(),
+                replay.exchanges().getLast().call().thoughtSignature());
         assertTrue(replay.exchanges().stream()
                 .mapToLong(exchange -> budget.utf8Bytes(exchange.call().arguments())
+                        + budget.utf8Bytes(exchange.call().thoughtSignature())
                         + budget.utf8Bytes(exchange.maskedResult()))
                 .sum() <= budget.toolResultBytes());
         assertEquals(1, replay.audit().evictedToolExchanges());
         assertEquals(0, replay.audit().truncatedToolResults());
+    }
+
+    @Test
+    void nativeReplayAdmissionRejectsAnOversizedRetainedThoughtSignature() {
+        ToolTurn prospective = new ToolTurn(
+                1,
+                "search_records",
+                new AiAssistantToolResult(Map.of("count", 1), List.of()));
+        AiToolCall call = new AiToolCall(
+                "call_1",
+                prospective.tool(),
+                "{}",
+                "S".repeat(2_100));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 2_048, 8_000);
+
+        assertThrows(AiAssistantLoopException.class, () ->
+                assembler.requireAdditionalNativeExchangeCapacity(
+                        List.of(),
+                        prospective,
+                        Map.of(prospective.seq(), call),
+                        new MaskingContext(),
+                        budget));
     }
 
     @Test

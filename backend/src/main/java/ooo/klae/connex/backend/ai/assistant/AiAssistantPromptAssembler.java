@@ -113,6 +113,7 @@ public class AiAssistantPromptAssembler {
     private record BoundedToolExchange(
             String result,
             String arguments,
+            String thoughtSignature,
             boolean truncated) {
     }
 
@@ -287,7 +288,8 @@ public class AiAssistantPromptAssembler {
             BoundedToolExchange exchange = bounded.exchanges().get(index);
             exchanges.add(new AiToolExchange(
                     new AiToolCall(
-                            call.id(), call.name(), exchange.arguments()),
+                            call.id(), call.name(), exchange.arguments(),
+                            call.thoughtSignature()),
                     exchange.result()));
         }
         return new NativeReplay(exchanges, repairContent, bounded.audit());
@@ -447,7 +449,7 @@ public class AiAssistantPromptAssembler {
             AiAssistantPromptBudget budget,
             int availableBytes) {
         return boundedToolResults(
-                toolTurns, List.of(), context, budget, availableBytes);
+                toolTurns, List.of(), List.of(), context, budget, availableBytes);
     }
 
     private BoundedToolResults boundedNativeToolResults(
@@ -456,16 +458,22 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiAssistantPromptBudget budget,
             int availableBytes) {
-        List<String> arguments = orderedNativeCalls(toolTurns, nativeCalls).stream()
+        List<AiToolCall> calls = orderedNativeCalls(toolTurns, nativeCalls);
+        List<String> arguments = calls.stream()
                 .map(AiToolCall::arguments)
                 .toList();
+        List<String> thoughtSignatures = calls.stream()
+                .map(AiToolCall::thoughtSignature)
+                .toList();
         return boundedToolResults(
-                toolTurns, arguments, context, budget, availableBytes);
+                toolTurns, arguments, thoughtSignatures,
+                context, budget, availableBytes);
     }
 
     private BoundedToolResults boundedToolResults(
             List<ToolTurn> toolTurns,
             List<String> arguments,
+            List<String> thoughtSignatures,
             MaskingContext context,
             AiAssistantPromptBudget budget,
             int availableBytes) {
@@ -473,7 +481,8 @@ public class AiAssistantPromptAssembler {
             return new BoundedToolResults(List.of(), ToolBudgetAudit.NONE);
         }
         boolean nativeReplay = !arguments.isEmpty();
-        if (nativeReplay && arguments.size() != toolTurns.size()) {
+        if (nativeReplay && (arguments.size() != toolTurns.size()
+                || thoughtSignatures.size() != toolTurns.size())) {
             throw new IllegalStateException("Native tool replay is inconsistent");
         }
         List<BoundedToolExchange> exact = new ArrayList<>(toolTurns.size());
@@ -481,11 +490,14 @@ public class AiAssistantPromptAssembler {
         for (int index = 0; index < toolTurns.size(); index++) {
             String result = toolResultContent(toolTurns.get(index), context);
             String callArguments = nativeReplay ? arguments.get(index) : null;
+            String thoughtSignature = nativeReplay ? thoughtSignatures.get(index) : null;
             exact.add(new BoundedToolExchange(
                     result,
                     callArguments,
+                    thoughtSignature,
                     isTruncatedExecutedReplay(toolTurns.get(index).result())));
-            exactBytes += replayBytes(result, callArguments, budget);
+            exactBytes += replayBytes(
+                    result, callArguments, thoughtSignature, budget);
         }
         if (exactBytes <= availableBytes) {
             return new BoundedToolResults(
@@ -508,6 +520,7 @@ public class AiAssistantPromptAssembler {
             reduced.add(new BoundedToolExchange(
                     reducedResult,
                     reducedArguments,
+                    exactExchange.thoughtSignature(),
                     exactExchange.truncated()
                             && reducedResult.equals(exactExchange.result())));
         }
@@ -521,7 +534,8 @@ public class AiAssistantPromptAssembler {
                         ? reduced.get(index)
                         : exact.get(index);
                 long exchangeBytes = replayBytes(
-                        exchange.result(), exchange.arguments(), budget);
+                        exchange.result(), exchange.arguments(),
+                        exchange.thoughtSignature(), budget);
                 if (exchangeBytes > remainingBytes) {
                     priorResultsFit = false;
                     break;
@@ -534,7 +548,11 @@ public class AiAssistantPromptAssembler {
                 int latestArgumentsBytes = latest.arguments() == null
                         ? 0
                         : budget.utf8Bytes(latest.arguments());
-                int latestResultBytes = remainingBytes - latestArgumentsBytes;
+                int latestThoughtSignatureBytes = latest.thoughtSignature() == null
+                        ? 0
+                        : budget.utf8Bytes(latest.thoughtSignature());
+                int latestResultBytes = remainingBytes
+                        - latestArgumentsBytes - latestThoughtSignatureBytes;
                 if (latestResultBytes >= 0
                         && budget.fits(latest.result(), latestResultBytes)) {
                     exchanges.add(latest);
@@ -551,7 +569,8 @@ public class AiAssistantPromptAssembler {
                                 latestResultBytes);
                 if (truncated != null) {
                     exchanges.add(new BoundedToolExchange(
-                            truncated.content(), latest.arguments(), true));
+                            truncated.content(), latest.arguments(),
+                            latest.thoughtSignature(), true));
                     return new BoundedToolResults(
                             exchanges,
                             toolBudgetAudit(
@@ -685,9 +704,11 @@ public class AiAssistantPromptAssembler {
     private static long replayBytes(
             String result,
             String arguments,
+            String thoughtSignature,
             AiAssistantPromptBudget budget) {
         return (long) budget.utf8Bytes(result)
-                + (arguments == null ? 0 : budget.utf8Bytes(arguments));
+                + (arguments == null ? 0 : budget.utf8Bytes(arguments))
+                + (thoughtSignature == null ? 0 : budget.utf8Bytes(thoughtSignature));
     }
 
     private static int oldestEvictable(
@@ -700,10 +721,12 @@ public class AiAssistantPromptAssembler {
                     && replayBytes(
                             reduced.get(index).result(),
                             reduced.get(index).arguments(),
+                            reduced.get(index).thoughtSignature(),
                             budget)
                     < replayBytes(
                             exact.get(index).result(),
                             exact.get(index).arguments(),
+                            exact.get(index).thoughtSignature(),
                             budget)) {
                 return index;
             }
@@ -753,6 +776,7 @@ public class AiAssistantPromptAssembler {
             replayBytes += replayBytes(
                     toolResultContent(toolTurns.get(index), context),
                     orderedCalls.get(index).arguments(),
+                    orderedCalls.get(index).thoughtSignature(),
                     budget);
         }
         return replayBytes <= budget.toolResultBytes();

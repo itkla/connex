@@ -962,6 +962,11 @@ public class AiInvocationService {
         call.put("id", exchange.call().id());
         call.put("name", exchange.call().name());
         call.put("arguments", exchange.call().arguments());
+        if (exchange.call().thoughtSignature() != null) {
+            call.put("extra_content", Map.of(
+                    "google", Map.of(
+                            "thought_signature", exchange.call().thoughtSignature())));
+        }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("call", call);
         payload.put("result", exchange.maskedResult());
