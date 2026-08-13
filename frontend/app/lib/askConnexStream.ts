@@ -74,7 +74,10 @@ export function applyAskConnexStreamDelta(
     }
     const applied = appendDelta(state.text, frame);
     if (applied !== null) {
-        return { state: { ...state, text: applied }, hydrate: false };
+        const advanced = state.pending.length === 0
+            ? { ...state, text: applied }
+            : drainPending({ ...state, text: applied });
+        return { state: advanced, hydrate: false };
     }
     const gapped: AskConnexStreamState = {
         ...state,

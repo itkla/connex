@@ -664,6 +664,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
             try {
                 await refreshSessions(controller.signal);
+                if (controller.signal.aborted) return;
                 if (sharePermission === 'granted') {
                     const workspaceMembers = await getActiveWorkspaceMembers({ signal: controller.signal });
                     if (!controller.signal.aborted) {
@@ -676,6 +677,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 selectionLoadStarted = true;
                 await refreshTranscript(storedSessionId, controller.signal, false);
+                if (controller.signal.aborted) return;
                 if (storedTurn?.sessionId === storedSessionId) {
                     dispatchTurn({
                         type: 'accepted',
