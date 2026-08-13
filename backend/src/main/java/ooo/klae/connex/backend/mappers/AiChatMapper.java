@@ -173,6 +173,12 @@ public interface AiChatMapper {
         @Param("limit") int limit,
         @Param("offset") int offset);
 
+    List<AiChatMessage> listAssistantMessagesBySessionAndTurnIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("turnIds") List<Integer> turnIds,
+        @Param("limit") int limit);
+
     List<AiChatMessage> listRecentMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
@@ -265,6 +271,12 @@ public interface AiChatMapper {
     List<AiChatToolCall> listPendingToolCallsBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
+
+    List<AiChatToolCall> listToolCallsBySession(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("pendingOnly") boolean pendingOnly,
+        @Param("limit") int limit);
 
     AiChatToolCall getToolCallBySessionForUpdate(
         @Param("workspaceId") int workspaceId,
