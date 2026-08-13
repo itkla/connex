@@ -41,6 +41,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import jakarta.annotation.PreDestroy;
+import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
@@ -58,6 +59,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 public class OpenAiCompatibleClient {
     private static final int BUFFER_BYTES = 8192;
     private static final int MAX_CONCURRENT_RESOLUTIONS = 2;
+    private static final ObjectMapper DETAIL_MAPPER = new ObjectMapper();
 
     private final RestClient restClient;
     private final int maxResponseBytes;
@@ -148,9 +150,34 @@ public class OpenAiCompatibleClient {
         if (response.statusCode() < 200 || response.statusCode() > 299) {
             throw new AiProviderRequestRejectedException(
                     "OpenAI-compatible", response.statusCode(),
-                    new String(response.body(), StandardCharsets.UTF_8));
+                    rejectionDetail(response.body(), apiKey));
         }
         return new String(response.body(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Extracts the provider's structured {@code error.message} for rejection diagnostics.
+     * Only that single JSON field is retained — a non-JSON body or one without it yields
+     * {@code null} so arbitrary endpoint output never reaches audit metadata — and any
+     * occurrence of the API key is removed defensively before the excerpt leaves this class.
+     */
+    private static String rejectionDetail(byte[] responseBody, String apiKey) {
+        String message;
+        try {
+            message = DETAIL_MAPPER
+                    .readTree(new String(responseBody, StandardCharsets.UTF_8))
+                    .path("error")
+                    .path("message")
+                    .asString(null);
+        } catch (RuntimeException exception) {
+            return null;
+        }
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        return apiKey == null || apiKey.isBlank()
+                ? message
+                : message.replace(apiKey, "[redacted]");
     }
 
     @PreDestroy

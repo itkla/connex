@@ -1216,7 +1216,10 @@ public class AiInvocationService {
                         ? "provider_exception"
                         : "invocation_exception";
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "failure",
-                        null, null, null, null, reason, structured, null);
+                        null, null, null, null, reason, structured, null, null, null,
+                        exception instanceof AiProviderException providerException
+                                ? rejection(providerException)
+                                : null);
                 if (callerDeadlineReached()) {
                     throw new AiProviderCallerDeadlineExceededException();
                 }
