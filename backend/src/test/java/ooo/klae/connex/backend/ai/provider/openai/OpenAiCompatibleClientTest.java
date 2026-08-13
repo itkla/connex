@@ -167,6 +167,47 @@ class OpenAiCompatibleClientTest {
     }
 
     @Test
+    void complete_rejectionRedactsShortPunctuatedApiKeyByExactMatch() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        OpenAiCompatibleClient client = client(builder.build(), 1024);
+        server.expect(requestTo(PUBLIC_ENDPOINT))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":{\"message\":\"Bad key: k-3!x provided\"}}"));
+
+        AiProviderRequestRejectedException exception = assertThrows(
+                AiProviderRequestRejectedException.class,
+                () -> client.complete(
+                        PUBLIC_ENDPOINT, false, credentials("k-3!x"), REQUEST_BODY));
+
+        assertEquals("Bad key: [redacted] provided", exception.providerDetail());
+        server.verify();
+    }
+
+    @Test
+    void complete_rejectionParsesGeminiArrayWrappedErrorEnvelope() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        OpenAiCompatibleClient client = client(builder.build(), 1024);
+        server.expect(requestTo(PUBLIC_ENDPOINT))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("[{\"error\":{\"code\":400,\"message\":"
+                                + "\"Invalid JSON payload received. Unknown name tool_call_id\","
+                                + "\"status\":\"INVALID_ARGUMENT\"}}]"));
+
+        AiProviderRequestRejectedException exception = assertThrows(
+                AiProviderRequestRejectedException.class,
+                () -> client.complete(PUBLIC_ENDPOINT, false, credentials(), REQUEST_BODY));
+
+        assertEquals(400, exception.statusCode());
+        assertEquals("Invalid JSON payload received. Unknown name tool_call_id",
+                exception.providerDetail());
+        server.verify();
+    }
+
+    @Test
     void complete_nonSuccessStatusRaisesStatusOnlySanitizedException() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -432,6 +473,10 @@ class OpenAiCompatibleClientTest {
 
     private static AiCredentials credentials() {
         return AiCredentials.of(Map.of("apiKey", API_KEY));
+    }
+
+    private static AiCredentials credentials(String apiKey) {
+        return AiCredentials.of(Map.of("apiKey", apiKey));
     }
 
     private static AiCredentials emptyCredentials() {

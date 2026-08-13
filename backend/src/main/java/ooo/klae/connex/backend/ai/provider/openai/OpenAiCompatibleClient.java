@@ -62,6 +62,7 @@ public class OpenAiCompatibleClient {
     private static final int MAX_CONCURRENT_RESOLUTIONS = 2;
     private static final ObjectMapper DETAIL_MAPPER = new ObjectMapper();
     private static final Pattern OPAQUE_TOKEN = Pattern.compile("[A-Za-z0-9_-]{24,}");
+    private static final int MIN_REDACTABLE_KEY_LENGTH = 4;
 
     private final RestClient restClient;
     private final int maxResponseBytes;
@@ -150,9 +151,9 @@ public class OpenAiCompatibleClient {
             throw new AiProviderException("OpenAI-compatible invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
+            String rejectionDetail = rejectionDetail(response.body(), apiKey);
             throw new AiProviderRequestRejectedException(
-                    "OpenAI-compatible", response.statusCode(),
-                    rejectionDetail(response.body()));
+                    "OpenAI-compatible", response.statusCode(), rejectionDetail);
         }
         return new String(response.body(), StandardCharsets.UTF_8);
     }
@@ -160,23 +161,28 @@ public class OpenAiCompatibleClient {
     /**
      * Extracts the provider's structured {@code error.message} for rejection diagnostics.
      * Only that single JSON field is retained — a non-JSON body or one without it yields
-     * {@code null} so arbitrary endpoint output never reaches audit metadata — and every
-     * long opaque token (API keys, bearer segments, any echoed credential) is replaced
-     * before the excerpt leaves this class, without this method ever touching a secret.
+     * {@code null} so arbitrary endpoint output never reaches audit metadata. The configured
+     * API key is removed by exact match (when it is long enough to be identifiable), and every
+     * remaining long opaque token (bearer segments, foreign echoed credentials) is replaced
+     * as a second defensive pass. The returned string never contains the key; it is computed
+     * before any exception is constructed.
      */
-    private static String rejectionDetail(byte[] responseBody) {
+    private static String rejectionDetail(byte[] responseBody, String apiKey) {
         String message;
         try {
-            message = DETAIL_MAPPER
-                    .readTree(new String(responseBody, StandardCharsets.UTF_8))
-                    .path("error")
-                    .path("message")
-                    .asString(null);
+            var root = DETAIL_MAPPER.readTree(new String(responseBody, StandardCharsets.UTF_8));
+            if (root.isArray()) {
+                root = root.path(0);
+            }
+            message = root.path("error").path("message").asString(null);
         } catch (RuntimeException exception) {
             return null;
         }
         if (message == null || message.isBlank()) {
             return null;
+        }
+        if (apiKey != null && apiKey.length() >= MIN_REDACTABLE_KEY_LENGTH) {
+            message = message.replace(apiKey, "[redacted]");
         }
         return OPAQUE_TOKEN.matcher(message).replaceAll("[redacted]");
     }
