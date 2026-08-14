@@ -75,7 +75,20 @@ migration-discipline part of #87 §9 / #102).
    `docker compose --profile ocr pull ocr` while keeping the persisted `COMPOSE_PROFILES` value
    empty. Require the backend, frontend, and OCR digest to be locally available before starting the
    target version so every deployment stages the complete signed image set.
-5. **Normalize object-volume ownership when required** — the backend runtime identity is permanently
+5. **Refresh the backup tooling and network discovery** — from the target deployment directory,
+   rerun the shipped installer before Compose recreates the database. It preserves operator-owned
+   settings, migrates a legacy `<project>_default` Docker network value to automatic discovery, and
+   installs the matching shims used by scheduled backups and recovery:
+
+   ```bash
+   sudo ./backup/install.sh
+   ```
+
+   Do not skip this step when backups normally use `exec`: the Docker-backed `mysqlbinlog` recovery
+   shim uses the same network discovery. Automatic discovery follows the configured DB container's
+   actual Compose `db` network, including a project name selected with `-p` or
+   `COMPOSE_PROJECT_NAME`.
+6. **Normalize object-volume ownership when required** — the backend runtime identity is permanently
    `10001:10001`. Before the first upgrade from a preview image that used a dynamic UID/GID, run the
    following idempotent preflight while writers remain stopped:
 
@@ -89,7 +102,7 @@ migration-discipline part of #87 §9 / #102).
    '
    ```
 
-6. **Start the data plane with ingress closed** — leave Caddy stopped. Start the database, default
+7. **Start the data plane with ingress closed** — leave Caddy stopped. Start the database, default
    OCR service, and backend first, and require Compose health before touching the old frontend
    container:
 
@@ -110,7 +123,7 @@ migration-discipline part of #87 §9 / #102).
    docker compose up -d --wait --wait-timeout 300 frontend
    ```
 
-7. **Verify internally before publishing ingress** — use the pinned Caddy image as a one-shot client
+8. **Verify internally before publishing ingress** — use the pinned Caddy image as a one-shot client
    on the private Compose network:
 
    ```bash
@@ -127,7 +140,7 @@ migration-discipline part of #87 §9 / #102).
    deployment uses the explicit low-resource opt-out,
    exact configured image digests, and stable running containers on a second probe. Smoke a private
    media download with an authenticated test session.
-8. **Publish ingress last** — only after every internal check passes, start Caddy and run the external
+9. **Publish ingress last** — only after every internal check passes, start Caddy and run the external
    smoke:
 
    ```bash
@@ -136,7 +149,7 @@ migration-discipline part of #87 §9 / #102).
    ```
 
    Reopen upstream ingress or writers only after that smoke succeeds.
-9. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
+10. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
    containers. Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
    Use that restored Compose bundle when you **restore the complete database, object, and legacy-media

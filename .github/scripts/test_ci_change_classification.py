@@ -71,6 +71,7 @@ class CiChangeClassificationTest(unittest.TestCase):
     def test_backup_change_does_not_boot_the_application(self) -> None:
         categories = self.classify("deploy/backup/backup.sh")
         self.assertTrue(categories["backup"])
+        self.assertTrue(categories["action_pins"])
 
     def test_support_bundle_change_runs_its_own_offline_suite(self) -> None:
         categories = self.classify("deploy/support-bundle/collect.sh")
@@ -84,6 +85,7 @@ class CiChangeClassificationTest(unittest.TestCase):
         categories = self.classify("deploy/docker-compose.yml")
         self.assertTrue(categories["compose"])
         self.assertTrue(categories["profile_boot"])
+        self.assertTrue(categories["action_pins"])
         self.assertFalse(categories["backend"])
 
     def test_caddyfile_change_adds_the_edge_header_regression(self) -> None:
@@ -91,6 +93,18 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["compose"])
         self.assertTrue(categories["profile_boot"])
         self.assertTrue(categories["action_pins"])
+
+    def test_deployment_documentation_runs_security_regressions(self) -> None:
+        categories = self.classify("deploy/backup/README.md")
+        self.assertTrue(categories["action_pins"])
+        self.assertFalse(categories["backup"])
+
+    def test_network_runbooks_run_security_regressions(self) -> None:
+        for path in ("docs/DEPLOYMENT.md", "docs/UPGRADING.md"):
+            with self.subTest(path=path):
+                categories = self.classify(path)
+                self.assertTrue(categories["action_pins"])
+                self.assertFalse(categories["compose"])
 
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")

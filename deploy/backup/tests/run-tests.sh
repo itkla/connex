@@ -43,9 +43,11 @@ strip_main() {
 }
 
 cp "$BACKUP_DIR/connex-backup-lib.sh" "$SANDBOX/connex-backup-lib.sh"
+cp "$BACKUP_DIR/shims/docker-client-lib.sh" "$SANDBOX/docker-client-lib.sh"
 strip_main "$BACKUP_DIR/connex-binlog-archive.sh" "$SANDBOX/archive-lib.sh"
 strip_main "$BACKUP_DIR/connex-backup-prune.sh" "$SANDBOX/prune-lib.sh"
 strip_main "$BACKUP_DIR/connex-restore-pitr.sh" "$SANDBOX/pitr-lib.sh"
+strip_main "$BACKUP_DIR/install.sh" "$SANDBOX/install-lib.sh"
 
 assert_status() {
     local label="$1"
@@ -131,6 +133,122 @@ write_binlog_sidecars() {
         printf 'file_created_epoch\t%s\n' "$created_epoch"
         printf 'last_event_epoch\t%s\n' "$((created_epoch + 600))"
     } > "$metadata"
+}
+
+case_installer_migrates_retired_database_network() {
+    set +e
+    # shellcheck source=deploy/backup/install.sh
+    source "$SANDBOX/install-lib.sh"
+    local config_root="$SANDBOX/install-config"
+    local config_file="$config_root/backup.env"
+    local log="$SANDBOX/install-network.log"
+    local legacy_network
+    mkdir -p "$config_root"
+    CONFIG_ROOT="$config_root"
+
+    for legacy_network in connex_default acme_default; do
+        printf '%s\n' \
+            "CONNEX_BACKUP_DOCKER_NETWORK=$legacy_network" \
+            'CONNEX_BACKUP_DB_CONTAINER=custom-db' \
+            > "$config_file"
+        chmod 0644 "$config_file"
+        : > "$log"
+        install_migrate_database_network > "$log"
+        assert_status "${legacy_network}_migrated" 0 "$?" || return 1
+        assert_contains "${legacy_network}_automatic" 'CONNEX_BACKUP_DOCKER_NETWORK=auto' "$config_file" || return 1
+        assert_absent "${legacy_network}_removed" "CONNEX_BACKUP_DOCKER_NETWORK=$legacy_network" "$config_file" || return 1
+        assert_contains unrelated_setting_preserved 'CONNEX_BACKUP_DB_CONTAINER=custom-db' "$config_file" || return 1
+        assert_contains migration_logged 'Migrated legacy backup Docker network' "$log" || return 1
+        assert_equals migrated_mode 600 "$(stat -c '%a' "$config_file")" || return 1
+    done
+
+    printf '%s\n' 'CONNEX_BACKUP_DOCKER_NETWORK=operator_database' > "$config_file"
+    : > "$log"
+    install_migrate_database_network > "$log"
+    assert_status custom_network_preserved 0 "$?" || return 1
+    assert_contains custom_network 'CONNEX_BACKUP_DOCKER_NETWORK=operator_database' "$config_file" || return 1
+    assert_equals custom_network_silent '' "$(cat "$log")" || return 1
+}
+
+case_docker_client_resolves_and_validates_database_network() {
+    set +e
+    # shellcheck source=deploy/backup/shims/docker-client-lib.sh
+    source "$SANDBOX/docker-client-lib.sh"
+    local fake_docker="$SANDBOX/fake-docker"
+    local docker_log="$SANDBOX/fake-docker.log"
+    local error_log="$SANDBOX/fake-docker-error.log"
+    local status
+    cat > "$fake_docker" <<'EOF'
+#!/bin/bash
+set -eu
+printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1" in
+    inspect)
+        printf 'acme_default\nacme_db\n'
+        ;;
+    network)
+        network="${!#}"
+        if [ "${3:-}" = --format ]; then
+            if [ "${4:-}" = '{{.Name}}' ]; then
+                printf '%s\n' "$network"
+            else
+                case "$network" in
+                    acme_default) printf 'default\n' ;;
+                    acme_db) printf 'db\n' ;;
+                    operator_database) printf 'operator\n' ;;
+                    *) exit 1 ;;
+                esac
+            fi
+        else
+            case "$network" in
+                acme_default|acme_db|operator_database) ;;
+                *) exit 1 ;;
+            esac
+        fi
+        ;;
+    run)
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+EOF
+    chmod 0700 "$fake_docker"
+    mkdir -p "$SANDBOX/backup-root" "$SANDBOX/defaults"
+    : > "$docker_log"
+    SHIM_ENV_LOADED=true
+    CONNEX_BACKUP_ROOT="$SANDBOX/backup-root"
+    CONNEX_BACKUP_DEFAULTS_DIR="$SANDBOX/defaults"
+    CONNEX_BACKUP_DOCKER_IMAGE=mysql:test
+    CONNEX_BACKUP_DOCKER_BIN="$fake_docker"
+    CONNEX_BACKUP_DB_CONTAINER=acme-db-1
+    FAKE_DOCKER_LOG="$docker_log"
+    export FAKE_DOCKER_LOG
+
+    CONNEX_BACKUP_DOCKER_NETWORK=auto
+    shim_run mysql --host=db
+    assert_status automatic_network 0 "$?" || return 1
+    assert_contains automatic_project_network '--network acme_db' "$docker_log" || return 1
+
+    : > "$docker_log"
+    CONNEX_BACKUP_DOCKER_NETWORK=acme_default
+    shim_run mysqlbinlog --version
+    assert_status legacy_runtime_network 0 "$?" || return 1
+    assert_contains legacy_runtime_discovery '--network acme_db' "$docker_log" || return 1
+
+    : > "$error_log"
+    CONNEX_BACKUP_DOCKER_NETWORK=stale_network
+    status=0
+    shim_run mysqlbinlog --version 2> "$error_log" || status=$?
+    assert_status missing_network_fails_closed 64 "$status" || return 1
+    assert_contains missing_network_clear_error 'Configured Connex backup Docker network does not exist: stale_network' "$error_log" || return 1
+
+    : > "$error_log"
+    CONNEX_BACKUP_DOCKER_NETWORK=operator_database
+    status=0
+    shim_run mysql --host=db 2> "$error_log" || status=$?
+    assert_status mismatched_network_fails_closed 64 "$status" || return 1
+    assert_contains mismatch_clear_error 'does not match DB container network acme_db' "$error_log" || return 1
 }
 
 case_schema_selection() {
@@ -779,6 +897,8 @@ run_case() {
     FAILURES=$((FAILURES + 1))
 }
 
+run_case case_installer_migrates_retired_database_network
+run_case case_docker_client_resolves_and_validates_database_network
 run_case case_schema_selection
 run_case case_pitr_filtered_statements
 run_case case_pitr_coverage_gap_guard

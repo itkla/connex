@@ -43,7 +43,12 @@ sudo CONNEX_BACKUP_ENV_FILE=/etc/connex-backup/backup.env \
 
 Air-gapped operators must mirror the configured client-tools image alongside the release images before a disaster. The official MySQL server images do not contain `mysqlbinlog`.
 
-The replay shim runs a throwaway client-tools container with the backup root mounted at the identical absolute path. `CONNEX_BACKUP_DOCKER_CLIENT_MODE=run` retains the same throwaway-container option for `mysql` and `mysqldump`; the default is `exec`. Native clients remain supported through `MYSQL`, `MYSQLDUMP`, and `MYSQLBINLOG`. Docker socket access is root-equivalent; systemd retains `ProtectSystem=strict`, `NoNewPrivileges`, and `PrivateTmp` but intentionally allows `/var/run/docker.sock`.
+The replay shim runs a throwaway client-tools container with the backup root mounted at the identical absolute path. `CONNEX_BACKUP_DOCKER_CLIENT_MODE=run` retains the same throwaway-container option for `mysql` and `mysqldump`; the default is `exec`. With `CONNEX_BACKUP_DOCKER_NETWORK=auto`, every throwaway client discovers the physical network currently attached to `CONNEX_BACKUP_DB_CONTAINER` with Compose's logical `db` label. This follows `-p` and `COMPOSE_PROJECT_NAME` overrides without granting access to the edge, application, or OCR networks. When selecting run mode, set `CONNEX_BACKUP_DB_HOST`, `CONNEX_BACKUP_VERIFY_DB_HOST`, and `CONNEX_BACKUP_RESTORE_DB_HOST` to `db`; the default `localhost` values are for exec mode inside the DB container. An explicit custom network remains supported, but the shim refuses a missing network and refuses a network that differs from the running DB container when the target host is `db`. Native clients remain supported through `MYSQL`, `MYSQLDUMP`, and `MYSQLBINLOG`. Docker socket access is root-equivalent; systemd retains `ProtectSystem=strict`, `NoNewPrivileges`, and `PrivateTmp` but intentionally allows `/var/run/docker.sock`.
+
+Rerunning `install.sh` during an upgrade preserves operator settings but migrates any retired
+`<project>_default` value to `auto`. Any other configured network name is treated as an operator
+override, validated at runtime, and left unchanged. The mandatory upgrade sequence is in
+[`docs/UPGRADING.md`](../../docs/UPGRADING.md).
 
 ## Commands
 

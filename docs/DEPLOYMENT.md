@@ -28,8 +28,26 @@ wildcard framing exceptions are forbidden.
 ```
 browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ───▶ db:3306
                        └─ everything else    ─▶ frontend:3000
-                                                    backend ──▶ ocr:8090 (default profile)
+                                                    │
+                                                    └──────▶ backend:8080 (SSR)
+                                                               │
+                                                               └──────▶ ocr:8090 (default profile)
 ```
+
+Compose enforces those paths with four purpose-scoped bridges. `edge` contains Caddy, frontend,
+and backend; `app` contains only frontend and backend for SSR; the internal, gateway-isolated `db`
+network contains only backend and MySQL; and the internal, gateway-isolated `ocr_internal` network
+contains only backend and OCR. MySQL has no published host port. The multi-homed frontend and
+backend pin `app` as their default egress gateway, so attaching the internal DB and OCR networks
+cannot redirect outbound traffic. Backup tools normally execute inside the DB container; optional
+throwaway client containers discover and join only the running Compose project's physical `db`
+network. Compose one-off backend migration and maintenance commands inherit the backend service's
+networks and therefore retain DB access.
+
+New services must join the minimum network set required for their documented traffic. Do not use
+the implicit `default` network, attach an edge or auxiliary service to `db` or `ocr_internal`, or
+publish an internal service port to the host. A service that needs a new cross-tier path requires a
+topology review and a matching update to the deployment-network regression test.
 
 The default OCR service is reachable only on the private Compose network. Docker Engine 28's isolated
 gateway mode prevents the OCR-only container from reaching the host or external networks. It accepts
@@ -40,9 +58,9 @@ read-only, and the Paddle runtime never downloads models or calls an external OC
 
 ## Prerequisites
 
-- Docker Engine 28 or newer with Docker Compose 2.33.1 or newer. The bundle pins the backend's
-  default gateway to the normal application network while keeping OCR on a host-isolated internal
-  bridge with no gateway address.
+- Docker Engine 28 or newer with Docker Compose 2.33.1 or newer. The bundle pins the frontend and
+  backend default gateways to the application network while keeping MySQL and OCR on separate,
+  host-isolated internal bridges with no gateway addresses.
 - A Linux AMD64 host for the released image set. The OCR image additionally requires AVX on every
   assigned processor.
 - A signed release manifest verified with its exact tag-bound identity, with
@@ -411,9 +429,11 @@ migrator at a time.
    ```
 
 2. Stop ingress and application writers, confirm only MySQL remains, then back up MySQL, the staged
-   legacy directory, and the private object store as one recovery point. Keep the database running
-   for the migration. The complete target image set was pulled before this cutover. Copy the staged
-   tree into the uniquely named Docker volume and set ownership inside Docker's
+   legacy directory, and the private object store as one recovery point. After the recovery copies
+   complete, recreate only the DB container so an upgrade from the former implicit network attaches
+   it to the new internal `db` network; the named `db_data` volume is preserved. Keep that recreated
+   database running for the migration. The complete target image set was pulled before this cutover.
+   Copy the staged tree into the uniquely named Docker volume and set ownership inside Docker's
    user namespace. This works with rootless and user-namespace-remapped daemons without assuming
    that the container UID is also a valid host UID. On SELinux hosts, the temporary source bind uses
    a private relabel; the original staged backup remains the recovery source.
@@ -422,6 +442,7 @@ migrator at a time.
    docker compose stop caddy frontend backend ocr
    test "$(docker compose ps --services --status running)" = "db"
    (cd "$LEGACY_UPLOADS" && sha256sum -c SHA256SUMS)
+   docker compose up -d --wait --no-deps --force-recreate db
    BACKEND_UID=$(docker compose run --rm --no-deps --entrypoint id backend -u)
    BACKEND_GID=$(docker compose run --rm --no-deps --entrypoint id backend -g)
    SOURCE_MOUNT_MODE=ro
