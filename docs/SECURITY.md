@@ -22,6 +22,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 - **Append-only audit log.** `audit_log` (Flyway `V1`, workspace-scoped since `V10`) records `action`, `entity_type`/`entity_id`, `actor_id`, `ip_address`, `user_agent`, hashed `session_id`, `request_id`, field-level `changes`, and `created_at`. Row `UPDATE`/`DELETE` are blocked by DB triggers; writes are insert-only. Surfaced to admins in-app.
 - **Incident response.** Documented breach-response runbook (APPI Art. 26): [APPI_BREACH_RESPONSE_RUNBOOK.md](APPI_BREACH_RESPONSE_RUNBOOK.md), [#223].
 - **Vulnerability remediation.** Findings across application code, dependencies, images, infrastructure, GitHub Actions, and third-party services follow the severity-adjusted deadlines, emergency release path, ownership, and fixed-term exception rules in [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md).
+- **Static analysis.** Pull requests, `main`, merge queues, and weekly scans run fail-closed GitHub CodeQL analysis for backend Java and frontend TypeScript with Critical/High and error-severity PR findings blocked as documented in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md).
 - *In progress:* audit tamper-evidence (hash-chain / external sink) — [#91]; organization-scope re-verification — [#97].
 
 ### 2.2 Human (人的)

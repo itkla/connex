@@ -25,7 +25,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       action_pins: ${{ steps.classify.outputs.action_pins }}
+      backend_sast: ${{ steps.classify.outputs.backend_sast }}
       frontend_audit: ${{ steps.classify.outputs.frontend_audit }}
+      frontend_sast: ${{ steps.classify.outputs.frontend_sast }}
       ocr_audit: ${{ steps.classify.outputs.ocr_audit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -68,6 +70,10 @@ jobs:
         run: python .github/scripts/test_action_pins.py
       - name: Regression-test CI change classification
         run: python .github/scripts/test_ci_change_classification.py
+      - name: Regression-test CodeQL alert gate
+        run: python .github/scripts/test_codeql_alerts.py
+      - name: Regression-test security workflow gates
+        run: python .github/scripts/test_security_workflow.py
       - name: Regression-test release delivery invariants
         run: python .github/scripts/test_release_workflow.py
       - name: Regression-test release artifact verification
@@ -148,6 +154,105 @@ jobs:
           python -m pip_audit --requirement ocr/audit-requirements.lock --disable-pip
           python -m pip_audit --requirement ocr/requirements.lock --disable-pip
 
+  backend-sast:
+    name: Backend SAST (CodeQL)
+    needs: classify
+    if: needs.classify.outputs.backend_sast == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Set up JDK 26
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: gradle
+      - name: Initialize backend CodeQL database
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          queries: security-extended
+          config: |
+            paths:
+              - backend
+      - name: Compile backend for CodeQL extraction
+        working-directory: backend
+        run: >-
+          bash gradlew
+          -Dorg.gradle.jvmargs="-Xmx2g"
+          --no-daemon
+          --max-workers=2
+          compileJava
+          compileTestJava
+      - name: Analyze backend with CodeQL
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+        with:
+          category: /language:java-kotlin
+          wait-for-processing: true
+      - name: Block new Critical, High, or error-severity alerts
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          alerts_file="$RUNNER_TEMP/codeql-backend-alerts.json"
+          gh api --paginate --slurp \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/code-scanning/alerts?tool_name=CodeQL&state=open&pr=$PR_NUMBER&per_page=100" \
+            > "$alerts_file"
+          python3 .github/scripts/check-codeql-alerts.py "$alerts_file"
+
+  frontend-sast:
+    name: Frontend SAST (CodeQL)
+    needs: classify
+    if: needs.classify.outputs.frontend_sast == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Initialize frontend CodeQL database
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths:
+              - frontend
+      - name: Analyze frontend with CodeQL
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+        with:
+          category: /language:javascript-typescript
+          wait-for-processing: true
+      - name: Block new Critical, High, or error-severity alerts
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          alerts_file="$RUNNER_TEMP/codeql-frontend-alerts.json"
+          gh api --paginate --slurp \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/code-scanning/alerts?tool_name=CodeQL&state=open&pr=$PR_NUMBER&per_page=100" \
+            > "$alerts_file"
+          python3 .github/scripts/check-codeql-alerts.py "$alerts_file"
+
   dependency-review:
     name: Dependency review (PR)
     runs-on: ubuntu-latest
@@ -185,6 +290,8 @@ jobs:
       - secret-scan
       - frontend-audit
       - ocr-audit
+      - backend-sast
+      - frontend-sast
       - dependency-review
       - gradle-dependency-graph
     runs-on: ubuntu-latest
@@ -197,6 +304,10 @@ jobs:
           SECRET_SCAN_RESULT: ${{ needs.secret-scan.result }}
           FRONTEND_AUDIT_RESULT: ${{ needs.frontend-audit.result }}
           OCR_AUDIT_RESULT: ${{ needs.ocr-audit.result }}
+          BACKEND_SAST_SELECTED: ${{ needs.classify.outputs.backend_sast }}
+          BACKEND_SAST_RESULT: ${{ needs.backend-sast.result }}
+          FRONTEND_SAST_SELECTED: ${{ needs.classify.outputs.frontend_sast }}
+          FRONTEND_SAST_RESULT: ${{ needs.frontend-sast.result }}
           DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
           GRADLE_GRAPH_RESULT: ${{ needs.gradle-dependency-graph.result }}
         run: |
@@ -207,10 +318,20 @@ jobs:
             "$SECRET_SCAN_RESULT" \
             "$FRONTEND_AUDIT_RESULT" \
             "$OCR_AUDIT_RESULT" \
+            "$BACKEND_SAST_RESULT" \
+            "$FRONTEND_SAST_RESULT" \
             "$DEPENDENCY_REVIEW_RESULT" \
             "$GRADLE_GRAPH_RESULT"; do
             case "$result" in
               success|skipped) ;;
               *) echo "::error::required security dependency concluded: $result"; exit 1 ;;
+            esac
+          done
+          for selected_result in \
+            "$BACKEND_SAST_SELECTED:$BACKEND_SAST_RESULT" \
+            "$FRONTEND_SAST_SELECTED:$FRONTEND_SAST_RESULT"; do
+            case "$selected_result" in
+              true:success|false:skipped) ;;
+              *) echo "::error::CodeQL selection/result mismatch: $selected_result"; exit 1 ;;
             esac
           done

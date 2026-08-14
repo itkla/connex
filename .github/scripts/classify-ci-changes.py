@@ -9,7 +9,9 @@ from pathlib import Path, PurePosixPath
 
 CATEGORIES = (
     "backend",
+    "backend_sast",
     "frontend",
+    "frontend_sast",
     "ocr",
     "migrations",
     "backup",
@@ -135,6 +137,7 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
 
         if path.startswith("backend/"):
             categories["backend"] = True
+            categories["backend_sast"] = True
             categories["cross_stack"] = True
             if is_production_backend_path(path):
                 categories["profile_boot"] = True
@@ -144,6 +147,7 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
 
         if path.startswith("frontend/"):
             categories["frontend"] = True
+            categories["frontend_sast"] = True
             categories["cross_stack"] = True
             if path in FRONTEND_DEPENDENCY_FILES:
                 categories["frontend_audit"] = True

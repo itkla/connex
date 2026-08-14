@@ -23,11 +23,13 @@ class CiChangeClassificationTest(unittest.TestCase):
     def test_runtime_mdx_is_frontend_code_not_documentation(self) -> None:
         categories = self.classify("frontend/app/help/page.mdx")
         self.assertTrue(categories["frontend"])
+        self.assertTrue(categories["frontend_sast"])
         self.assertTrue(categories["cross_stack"])
 
     def test_backend_change_runs_backend_cross_stack_and_profile_boot(self) -> None:
         categories = self.classify("backend/src/main/java/example/Service.java")
         self.assertTrue(categories["backend"])
+        self.assertTrue(categories["backend_sast"])
         self.assertTrue(categories["cross_stack"])
         self.assertTrue(categories["profile_boot"])
         self.assertFalse(categories["frontend"])
@@ -36,6 +38,7 @@ class CiChangeClassificationTest(unittest.TestCase):
     def test_backend_test_change_does_not_boot_deployment_profiles(self) -> None:
         categories = self.classify("backend/src/test/java/example/ServiceTest.java")
         self.assertTrue(categories["backend"])
+        self.assertTrue(categories["backend_sast"])
         self.assertTrue(categories["cross_stack"])
         self.assertFalse(categories["profile_boot"])
 
@@ -44,12 +47,14 @@ class CiChangeClassificationTest(unittest.TestCase):
             "backend/src/main/resources/db/migration/tenant/V131__example.sql"
         )
         self.assertTrue(categories["backend"])
+        self.assertTrue(categories["backend_sast"])
         self.assertTrue(categories["migrations"])
         self.assertTrue(categories["profile_boot"])
 
     def test_frontend_dependency_change_adds_audit(self) -> None:
         categories = self.classify("frontend/package.json", "frontend/app/page.tsx")
         self.assertTrue(categories["frontend"])
+        self.assertTrue(categories["frontend_sast"])
         self.assertTrue(categories["cross_stack"])
         self.assertTrue(categories["frontend_audit"])
         self.assertFalse(categories["backend"])
@@ -59,6 +64,8 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["ocr"])
         self.assertTrue(categories["ocr_audit"])
         self.assertFalse(categories["backend"])
+        self.assertFalse(categories["backend_sast"])
+        self.assertFalse(categories["frontend_sast"])
         self.assertFalse(categories["cross_stack"])
 
     def test_backup_change_does_not_boot_the_application(self) -> None:
