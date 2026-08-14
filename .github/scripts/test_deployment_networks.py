@@ -161,14 +161,7 @@ class DeploymentNetworkTest(unittest.TestCase):
             with self.subTest(model=model_name, service="backend"):
                 self.assertEqual(1, services["backend"]["networks"]["app"]["gw_priority"])
 
-    def test_caddy_address_matches_the_shipped_trusted_proxy(self) -> None:
-        expected_address = "172.30.250.2"
-        for model_name, compose in self.compose_models.items():
-            with self.subTest(model=model_name):
-                self.assertEqual(
-                    expected_address,
-                    compose["services"]["caddy"]["networks"]["edge"]["ipv4_address"],
-                )
+    def test_deploy_profiles_trust_only_the_compose_bridge_range(self) -> None:
         for env_path in DEPLOY_PROFILE_ENV_PATHS:
             values = dict(
                 line.split("=", 1)
@@ -176,8 +169,19 @@ class DeploymentNetworkTest(unittest.TestCase):
                 if line and not line.startswith("#") and "=" in line
             )
             with self.subTest(profile=env_path.name):
-                self.assertEqual(expected_address, values["CONNEX_CADDY_IP"])
-                self.assertEqual(expected_address, values["CONNEX_SECURITY_TRUSTED_PROXIES"])
+                self.assertEqual("172.16.0.0/12", values["CONNEX_SECURITY_TRUSTED_PROXIES"])
+
+    def test_no_service_pins_a_static_address_or_subnet(self) -> None:
+        for model_name, compose in self.compose_models.items():
+            for service_name, service in compose["services"].items():
+                networks = service.get("networks") or {}
+                if isinstance(networks, dict):
+                    for network_name, options in networks.items():
+                        with self.subTest(model=model_name, service=service_name):
+                            self.assertNotIn("ipv4_address", options or {})
+            for network_name, network in (compose.get("networks") or {}).items():
+                with self.subTest(model=model_name, network=network_name):
+                    self.assertFalse((network or {}).get("ipam", {}).get("config"))
 
     def test_caddy_normalizes_only_configured_proxy_chains(self) -> None:
         caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")
