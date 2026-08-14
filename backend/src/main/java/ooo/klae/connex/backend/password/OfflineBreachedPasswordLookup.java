@@ -26,6 +26,8 @@ import org.springframework.stereotype.Component;
 public class OfflineBreachedPasswordLookup implements BreachedPasswordLookup {
     private static final int HASH_CHARACTERS = 40;
     private static final int RECORD_BYTES = 41;
+    static final int VALIDATION_RECORDS_PER_BUFFER = 4096;
+    private static final int VALIDATION_BUFFER_BYTES = RECORD_BYTES * VALIDATION_RECORDS_PER_BUFFER;
 
     private final BreachedPasswordProperties properties;
 
@@ -162,24 +164,45 @@ public class OfflineBreachedPasswordLookup implements BreachedPasswordLookup {
         MessageDigest digest = sha256();
         byte[] previous = null;
         byte[] record = new byte[RECORD_BYTES];
-        for (long position = 0; position < size; position += RECORD_BYTES) {
-            readBytes(channel, position, record);
-            digest.update(record);
-            if (record[HASH_CHARACTERS] != '\n') {
-                throw new IllegalStateException(
-                        "Offline breached-password file must use LF-delimited records");
+        ByteBuffer buffer = ByteBuffer.allocate(VALIDATION_BUFFER_BYTES);
+        for (long position = 0; position < size;) {
+            int bytesToRead = (int) Math.min(buffer.capacity(), size - position);
+            buffer.clear();
+            buffer.limit(bytesToRead);
+            readBuffer(channel, position, buffer);
+            position += bytesToRead;
+            buffer.flip();
+            digest.update(buffer.asReadOnlyBuffer());
+            while (buffer.hasRemaining()) {
+                buffer.get(record);
+                if (record[HASH_CHARACTERS] != '\n') {
+                    throw new IllegalStateException(
+                            "Offline breached-password file must use LF-delimited records");
+                }
+                if (!isUpperHex(record)
+                        || previous != null && compareHashBytes(previous, record) >= 0) {
+                    throw new IllegalStateException(
+                            "Offline breached-password hashes must be uppercase, unique, and sorted");
+                }
+                if (previous == null) {
+                    previous = new byte[HASH_CHARACTERS];
+                }
+                System.arraycopy(record, 0, previous, 0, HASH_CHARACTERS);
             }
-            if (!isUpperHex(record)
-                    || previous != null && compareHashBytes(previous, record) >= 0) {
-                throw new IllegalStateException(
-                        "Offline breached-password hashes must be uppercase, unique, and sorted");
-            }
-            if (previous == null) {
-                previous = new byte[HASH_CHARACTERS];
-            }
-            System.arraycopy(record, 0, previous, 0, HASH_CHARACTERS);
         }
         return HexFormat.of().withUpperCase().formatHex(digest.digest());
+    }
+
+    private static void readBuffer(FileChannel channel, long position, ByteBuffer buffer)
+            throws IOException {
+        int total = 0;
+        while (buffer.hasRemaining()) {
+            int read = channel.read(buffer, position + total);
+            if (read <= 0) {
+                throw unavailable();
+            }
+            total += read;
+        }
     }
 
     private void assertUnchanged(Path path) throws IOException {

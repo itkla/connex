@@ -12,6 +12,7 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Locale;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,6 +48,27 @@ class OfflineBreachedPasswordLookupTest {
     @Test
     void rejectsUnsortedCorpusAtStartup() throws IOException {
         Path file = writeCorpus(SECOND + "\n" + FIRST + "\n");
+        OfflineBreachedPasswordLookup lookup = lookup(file, sha256(file));
+
+        assertThrows(IllegalStateException.class, lookup::validate);
+    }
+
+    @Test
+    void validatesAndSearchesCorpusSpanningMultipleReadBuffers() throws IOException {
+        Path file = writeCorpus(numberedCorpus(
+                OfflineBreachedPasswordLookup.VALIDATION_RECORDS_PER_BUFFER + 1, false));
+        OfflineBreachedPasswordLookup lookup = lookup(file, sha256(file));
+
+        lookup.validate();
+
+        assertTrue(lookup.isBreached(hexHash(
+                OfflineBreachedPasswordLookup.VALIDATION_RECORDS_PER_BUFFER)));
+    }
+
+    @Test
+    void rejectsOrderingViolationAcrossReadBufferBoundary() throws IOException {
+        Path file = writeCorpus(numberedCorpus(
+                OfflineBreachedPasswordLookup.VALIDATION_RECORDS_PER_BUFFER + 1, true));
         OfflineBreachedPasswordLookup lookup = lookup(file, sha256(file));
 
         assertThrows(IllegalStateException.class, lookup::validate);
@@ -107,5 +129,21 @@ class OfflineBreachedPasswordLookupTest {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 unavailable");
         }
+    }
+
+    private static String numberedCorpus(int records, boolean duplicateBoundary) {
+        StringBuilder corpus = new StringBuilder(records * 41);
+        for (int index = 0; index < records; index++) {
+            int value = duplicateBoundary
+                    && index == OfflineBreachedPasswordLookup.VALIDATION_RECORDS_PER_BUFFER
+                ? index - 1
+                : index;
+            corpus.append(hexHash(value)).append('\n');
+        }
+        return corpus.toString();
+    }
+
+    private static String hexHash(int value) {
+        return String.format(Locale.ROOT, "%040X", value);
     }
 }
