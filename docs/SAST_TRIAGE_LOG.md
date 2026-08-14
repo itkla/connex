@@ -219,11 +219,16 @@ constant-length `iv.length` as uncontrolled.
 picker. The full SARIF flow is `e.target.files?.[0]` → `URL.createObjectURL` → `<img src>`.
 
 `<img>` is an image context: it never parses HTML, and SVG loaded through it has scripting disabled.
-The URL is same-origin, generated locally, and not attacker-controlled from another origin. The file
-is additionally gated by `isManagedImageFile`, which requires the declared media type and the magic
-bytes to identify the same supported raster format. The identical pattern in `NewContactDialog`,
-`ProfilePanel`, `QuickEditSheetShell` and `BusinessCardCapture` was not flagged, which is itself
-evidence of query imprecision rather than a real difference in exposure.
+The URL is same-origin, generated locally by the browser, and cannot be set by another origin. The
+file is additionally gated by `isManagedImageFile`, which requires the declared media type and the
+leading magic bytes to identify the same supported raster format (JPEG, PNG or WebP), so an SVG or
+HTML payload does not reach the preview at all.
+
+`NewCompanyDialog` is the only picker flagged because it is the only one whose preview reaches a
+bare `<img src>`: `NewContactDialog` renders through `next/image`, and `ProfilePanel` and
+`QuickEditSheetShell` render through `ProtectedMediaImage`, indirection the query does not follow.
+The difference is where the sink is, not how exposed the flow is — all four carry the same
+locally-generated `blob:` URL.
 
 ### Test-only findings — #2, #3, #6, #7, #8, #9
 
