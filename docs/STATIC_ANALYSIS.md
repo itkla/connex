@@ -103,9 +103,17 @@ a fixed-term exception. The first scan's tracking issues and CodeQL run are the 
 
 ## False positives and suppressions
 
-Suppressions are exceptional. Connex has no repository-wide CodeQL query exclusion at this time,
-and source-level ignore comments are not permitted. Prefer fixing the construct so the query can
-understand it. If evidence proves a false positive:
+Suppressions are exceptional, and source-level ignore comments are not permitted. Prefer fixing the
+construct so the query can understand it. Connex currently has one repository-wide query exclusion:
+`java/potentially-weak-cryptographic-algorithm`, governed by [#1295](https://github.com/itkla/connex/issues/1295).
+It covers the SHA-1 index required by the HIBP k-anonymity Range API, not password storage. CodeQL
+query filters can select the exact query ID but cannot combine it with the source path that produced
+one result; query-path filters identify the query file, while a source `paths-ignore` would suppress
+all CodeQL coverage for that source. The exact rule ID is therefore the narrowest supported scope.
+The adjacent metadata in `.github/codeql/codeql-config.yml` makes the exception expire on
+2027-02-14, with re-review due 2027-01-14 and earlier reassessment on its listed triggers.
+
+If evidence proves another false positive:
 
 1. Create or update the finding's `Security` issue with the CodeQL alert and rule identifiers,
    technical reason, evidence, named remediation owner, Security Owner role as approver, expiry
@@ -116,7 +124,7 @@ understand it. If evidence proves a false positive:
 4. Reopen and reassess the alert at expiry, when the affected code or data flow changes, or when the
    query is materially updated. A renewed dismissal requires a new fixed expiry and review.
 
-If a future `.github/codeql/` configuration adds a query filter, every excluded rule must have
+Every `.github/codeql/` query filter must have
 adjacent YAML comments containing the tracking issue, reason, owner, approval, expiry, and re-review
 date. An open-ended filter is forbidden. The same fixed-term exception and escalation rules apply
 to `won't fix` or `used in tests` dismissals.

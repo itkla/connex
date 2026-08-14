@@ -1,0 +1,11 @@
+query-filters:
+  # Tracking issue: #1295
+  # Reason: HIBP k-anonymity Range API mandates SHA-1; index key only, never password storage.
+  # Owner: Hunter Nakagawa (Founder)
+  # Approver: Security Owner role
+  # Expiry: 2027-02-14
+  # Re-review: 2027-01-14
+  # Additional re-evaluation triggers: HIBP offers a stronger hash mode; the data flow changes;
+  # the query is materially updated.
+  - exclude:
+      id: java/potentially-weak-cryptographic-algorithm

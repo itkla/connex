@@ -183,9 +183,8 @@ jobs:
           languages: java-kotlin
           build-mode: manual
           queries: security-extended
-          config: |
-            paths:
-              - backend
+          config-file: ./.github/codeql/codeql-config.yml
+          source-root: backend
       - name: Compile backend for CodeQL extraction
         working-directory: backend
         run: >-
@@ -246,9 +245,8 @@ jobs:
           languages: javascript-typescript
           build-mode: none
           queries: security-extended
-          config: |
-            paths:
-              - frontend
+          config-file: ./.github/codeql/codeql-config.yml
+          source-root: frontend
       - name: Analyze frontend with CodeQL
         uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
