@@ -52,7 +52,15 @@ import {
     decideDocumentApproval,
     cancelDocumentApproval,
 } from '@/app/lib/api';
-import type { DealDocument, DocumentClientStatus, DocumentStatus, DocumentTemplate, DocumentType } from '@/app/lib/types';
+import type {
+    DealDocument,
+    DocumentApprovalStep,
+    DocumentClientStatus,
+    DocumentStatus,
+    DocumentTemplate,
+    DocumentType,
+} from '@/app/lib/types';
+import DocumentApprovalChain from './DocumentApprovalChain';
 
 type Props = {
     dealId: number;
@@ -106,7 +114,8 @@ export default function DealDocuments({
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
     const [busy, setBusy] = useState(false);
-    const [approvalDialog, setApprovalDialog] = useState<{ doc: DealDocument; action: ApprovalAction } | null>(null);
+    const [approvalDialog, setApprovalDialog] = useState<
+        { doc: DealDocument; action: ApprovalAction; stepId: number | null } | null>(null);
     const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
     const [comment, setComment] = useState('');
 
@@ -168,7 +177,13 @@ export default function DealDocuments({
                     await requestDocumentApproval(dealId, doc.id, trimmed || null);
                     toastSuccess(t('approvalRequested'));
                 } else {
-                    await decideDocumentApproval(dealId, doc.id, action === 'approve' ? 'approved' : 'rejected', trimmed || null);
+                    await decideDocumentApproval(
+                        dealId,
+                        doc.id,
+                        action === 'approve' ? 'approved' : 'rejected',
+                        trimmed || null,
+                        approvalDialog.stepId,
+                    );
                     toastSuccess(action === 'approve' ? t('approvalApproved') : t('approvalRejected'));
                 }
             } finally {
@@ -178,9 +193,9 @@ export default function DealDocuments({
         });
     };
 
-    const openApprovalDialog = (doc: DealDocument, action: ApprovalAction) => {
+    const openApprovalDialog = (doc: DealDocument, action: ApprovalAction, stepId: number | null = null) => {
         setComment('');
-        setApprovalDialog({ doc, action });
+        setApprovalDialog({ doc, action, stepId });
         setApprovalDialogOpen(true);
     };
 
@@ -189,6 +204,30 @@ export default function DealDocuments({
     };
 
     const isRequester = (doc: DealDocument) => doc.latestApproval?.requestedBy === currentUserId;
+
+    /**
+     * The chain step this user may decide right now, mirroring the server's rules so the menu only
+     * offers an action that will succeed. The server re-checks all of it.
+     */
+    const actionableStep = (doc: DealDocument): DocumentApprovalStep | null => {
+        const approval = doc.latestApproval;
+        if (!canApprove || !approval || approval.status !== 'pending' || doc.status !== 'pending_approval') {
+            return null;
+        }
+        if (approval.separationOfDuties !== 'off') {
+            if (approval.requestedBy == null || approval.requestedBy === currentUserId) return null;
+            if (approval.separationOfDuties === 'strict'
+                && (doc.createdBy == null || doc.createdBy === currentUserId)) {
+                return null;
+            }
+        }
+        return approval.steps
+            .filter((step) => step.status === 'active')
+            .filter((step) => step.approvers.some(
+                (approver) => approver.approverKind === 'any_approver' || approver.userId === currentUserId))
+            .filter((step) => !step.decisions.some((decision) => decision.decidedBy === currentUserId))
+            .sort((a, b) => a.stepOrder - b.stepOrder)[0] ?? null;
+    };
 
     const canFinalize = (doc: DealDocument) =>
         (doc.status === 'draft' && !doc.requiresApproval) || doc.status === 'approved';
@@ -262,6 +301,12 @@ export default function DealDocuments({
                                         <div className="text-xs text-muted-foreground">
                                             {t(TYPE_KEY[doc.type])} · {t('version', { version: doc.version })}
                                         </div>
+                                        {doc.status === 'pending_approval' && doc.latestApproval && (
+                                            <DocumentApprovalChain
+                                                approval={doc.latestApproval}
+                                                activeStepId={actionableStep(doc)?.id ?? null}
+                                            />
+                                        )}
                                         {doc.status === 'draft' && doc.latestApproval?.status === 'rejected' && (
                                             <div className="mt-1 text-xs text-destructive">
                                                 {doc.latestApproval.decisionComment
@@ -305,12 +350,16 @@ export default function DealDocuments({
                                                             <CheckCircleIcon className="size-4" />{t('markFinal')}
                                                         </DropdownMenuItem>
                                                     )}
-                                                    {doc.status === 'pending_approval' && canApprove && !isRequester(doc) && (
+                                                    {actionableStep(doc) && (
                                                         <>
-                                                            <DropdownMenuItem onSelect={() => openApprovalDialog(doc, 'approve')}>
+                                                            <DropdownMenuItem
+                                                                onSelect={() => openApprovalDialog(doc, 'approve', actionableStep(doc)?.id ?? null)}
+                                                            >
                                                                 <CheckCircleIcon className="size-4" />{t('approve')}
                                                             </DropdownMenuItem>
-                                                            <DropdownMenuItem onSelect={() => openApprovalDialog(doc, 'reject')}>
+                                                            <DropdownMenuItem
+                                                                onSelect={() => openApprovalDialog(doc, 'reject', actionableStep(doc)?.id ?? null)}
+                                                            >
                                                                 <XCircleIcon className="size-4" />{t('reject')}
                                                             </DropdownMenuItem>
                                                         </>

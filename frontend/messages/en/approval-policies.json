@@ -60,6 +60,27 @@
     "save": "Save policy",
     "created": "Policy created",
     "updated": "Policy updated",
-    "saveFailed": "Couldn't save the policy"
+    "saveFailed": "Couldn't save the policy",
+    "chainTitle": "Approver chain",
+    "chainHint": "Leave the chain empty to require a single approval from anyone who can approve documents.",
+    "modeLabel": "Run steps",
+    "modeSequential": "One at a time",
+    "modeParallel": "All at once",
+    "sodLabel": "Who may not decide",
+    "sodStrict": "Requester and author",
+    "sodRequester": "Requester only",
+    "sodOff": "No restriction",
+    "chainEmptyHint": "No steps: one approval from anyone who can approve documents.",
+    "stepNumber": "Step {number}",
+    "removeStep": "Remove step",
+    "addStep": "Add step",
+    "stepNameLabel": "Step name",
+    "stepNamePlaceholder": "e.g. Sales manager",
+    "stepQuorumLabel": "Approvals",
+    "stepApproversLabel": "Approvers",
+    "approverAny": "Anyone who can approve",
+    "approverNamed": "Specific members",
+    "noEligibleApprovers": "No workspace members are available to name as approvers.",
+    "quorumTooHigh": "This step asks for more approvals than it has approvers."
   }
 }
