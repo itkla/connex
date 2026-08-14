@@ -8,15 +8,15 @@ import { acceptInvite, WorkspaceSelectionUnavailableError } from "@/app/lib/api"
 import { toastError } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 
-/** Accepts the emailed invite represented by the active purpose-bound flow session. */
-export default function AcceptInvite() {
+/** Accepts the emailed invite represented by the exact flow identity shown in its preview. */
+export default function AcceptInvite({ flowId }: { flowId: string }) {
     const t = useTranslations("InviteAccept");
     const [busy, setBusy] = useState(false);
 
     const accept = async () => {
         setBusy(true);
         try {
-            await acceptInvite();
+            await acceptInvite(flowId);
             window.location.replace("/dashboard");
         } catch (err) {
             if (err instanceof WorkspaceSelectionUnavailableError) {

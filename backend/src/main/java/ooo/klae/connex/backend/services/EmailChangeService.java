@@ -93,13 +93,23 @@ public class EmailChangeService {
         return emailChangeTokenMapper.existsRedeemableByHash(OneTimeTokenDigest.sha256(rawToken));
     }
 
-    /** Atomically claims the raw emailed token for its one browser exchange. */
+    /**
+     * Claims the raw token for one browser session, permitting only same-session recovery.
+     * @param rawToken raw fragment bearer
+     * @param exchangeSessionHash one-way owner of the browser exchange
+     * @return persisted source-token digest
+     */
     @Transactional
-    public String exchangeToken(String rawToken) {
+    public String exchangeToken(String rawToken, String exchangeSessionHash) {
         String tokenHash = rawToken == null || rawToken.isBlank()
             ? null
             : OneTimeTokenDigest.sha256(rawToken);
-        if (tokenHash == null || emailChangeTokenMapper.claimExchange(tokenHash) != 1) {
+        if (tokenHash == null || exchangeSessionHash == null || exchangeSessionHash.isBlank()) {
+            throw invalidLink();
+        }
+        int claimed = emailChangeTokenMapper.claimExchange(tokenHash, exchangeSessionHash);
+        if (claimed != 1
+                && !emailChangeTokenMapper.isExchangeOwnedBy(tokenHash, exchangeSessionHash)) {
             throw invalidLink();
         }
         return tokenHash;
@@ -119,7 +129,8 @@ public class EmailChangeService {
      */
     @Transactional
     public void confirmChange(String rawToken) {
-        confirmChangeByHash(exchangeToken(rawToken));
+        String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
+        confirmChangeByHash(exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)));
     }
 
     /** Applies an email change through a purpose-bound flow-session source digest. */
@@ -161,5 +172,9 @@ public class EmailChangeService {
 
     private static BadRequestException invalidLink() {
         return new BadRequestException("This verification link is invalid or has expired");
+    }
+
+    private static String programmaticExchangeOwner(String tokenHash) {
+        return tokenHash == null ? "" : OneTimeTokenDigest.sha256("email-change:" + tokenHash);
     }
 }

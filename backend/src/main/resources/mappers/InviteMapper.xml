@@ -48,10 +48,20 @@
 
   <update id="claimExchangeByHash">
     UPDATE workspace_invite
-    SET exchanged_at = UTC_TIMESTAMP()
-    WHERE token_hash = #{tokenHash} AND exchanged_at IS NULL
+    SET exchanged_at = COALESCE(exchanged_at, UTC_TIMESTAMP()),
+        exchange_session_hash = COALESCE(exchange_session_hash, #{exchangeSessionHash})
+    WHERE token_hash = #{tokenHash}
+      AND (exchanged_at IS NULL OR exchange_session_hash = #{exchangeSessionHash})
       AND status = 'pending' AND expires_at > UTC_TIMESTAMP()
   </update>
+
+  <select id="isExchangeOwnedByHash" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM workspace_invite
+      WHERE token_hash = #{tokenHash} AND exchange_session_hash = #{exchangeSessionHash}
+        AND exchanged_at IS NOT NULL AND status = 'pending' AND expires_at > UTC_TIMESTAMP()
+    )
+  </select>
 
   <select id="isRedeemableByHash" resultType="boolean">
     SELECT EXISTS(

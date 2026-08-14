@@ -5515,10 +5515,10 @@ export function getInvitePreview(init: RequestInit = {}) {
     return getJson<Types.InvitePreview>("/api/invites", { cache: "no-store", ...init });
 }
 
-export function acceptInvite() {
+export function acceptInvite(flowId: string) {
     return withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>("/api/invites/accept", {}),
+            () => postWorkspaceSelectionJson<Types.Workspace>("/api/invites/accept", { flowId }),
             activeWorkspaceFromSelection,
         ),
         "workspace",
@@ -5548,10 +5548,10 @@ export function getInviteLinkPreview(init: RequestInit = {}) {
     return getJson<Types.InviteLinkPreview>("/api/invite-links", { cache: "no-store", ...init });
 }
 
-export function acceptInviteLink() {
+export function acceptInviteLink(flowId: string) {
     return withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>("/api/invite-links/accept", {}),
+            () => postWorkspaceSelectionJson<Types.Workspace>("/api/invite-links/accept", { flowId }),
             activeWorkspaceFromSelection,
         ),
         "workspace",

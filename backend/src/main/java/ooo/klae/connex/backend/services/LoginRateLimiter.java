@@ -10,12 +10,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * In-memory fixed-window throttle for failed login attempts, keyed independently by
- * client IP and by attempted username. Once either bucket exceeds its cap within the
- * window, further attempts are refused until the window elapses — bounding online
- * brute force from a single source (per-IP) and distributed credential stuffing against
- * one account (per-username). Username buckets clear on a successful login. Single-JVM
- * only, matching the in-memory session model.
+ * In-memory fixed-window throttle for authentication abuse, keyed independently by client IP and
+ * attempted username. Login and passkey failures share their established buckets; one-time-link
+ * exchanges use a separate per-IP namespace with the same cap and window so unauthenticated
+ * database amplification cannot consume or reset login failure state. Username buckets clear on a
+ * successful login. Enforcement is per JVM replica.
  */
 @Component
 public class LoginRateLimiter {
@@ -69,6 +68,27 @@ public class LoginRateLimiter {
     }
 
     /**
+     * Consumes one isolated one-time-link exchange allowance for a public client address.
+     * @param ip resolved client IP
+     * @param nowMillis current epoch time in milliseconds
+     * @return true while the exchange bucket remains within the login IP cap
+     */
+    public boolean tryAcquireOneTimeLinkExchange(String ip, long nowMillis) {
+        String key = exchangeIpKey(ip);
+        if (key == null) {
+            return true;
+        }
+        Window window = windows.compute(key, (ignored, existing) -> {
+            if (existing == null || nowMillis - existing.start >= windowMillis) {
+                return new Window(nowMillis, 1);
+            }
+            existing.count++;
+            return existing;
+        });
+        return window.count <= maxPerIp;
+    }
+
+    /**
      * Drops windows whose period has elapsed, bounding memory growth.
      */
     @Scheduled(fixedDelayString = "${connex.login.eviction-delay-ms:600000}")
@@ -103,6 +123,10 @@ public class LoginRateLimiter {
 
     private static String ipKey(String ip) {
         return isThrottleableIp(ip) ? "ip:" + ip : null;
+    }
+
+    private static String exchangeIpKey(String ip) {
+        return isThrottleableIp(ip) ? "link-ip:" + ip : null;
     }
 
     /**

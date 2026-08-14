@@ -105,7 +105,9 @@ public class AuthController {
             @Valid @RequestBody OneTimeLinkExchangeRequest request,
             HttpServletRequest httpRequest,
             HttpServletResponse response) {
-        String tokenHash = passwordResetService.exchangeToken(request.getToken());
+        String exchangeSessionHash = oneTimeLinkFlowService.exchangeBindingHash(httpRequest);
+        String tokenHash = passwordResetService.exchangeToken(
+            request.getToken(), exchangeSessionHash);
         IssuedGrant grant = oneTimeLinkFlowService.issue(
             httpRequest, Purpose.PASSWORD_RESET, tokenHash);
         oneTimeLinkFlowCookie.set(response, Purpose.PASSWORD_RESET, grant.value(), grant.lifetime());
@@ -132,13 +134,11 @@ public class AuthController {
             @CookieValue(name = OneTimeLinkFlowCookie.PASSWORD_RESET, required = false) String grant,
             HttpServletRequest httpRequest,
             HttpServletResponse response) {
-        String tokenHash = oneTimeLinkFlowService.consume(
+        String tokenHash = oneTimeLinkFlowService.require(
             httpRequest, Purpose.PASSWORD_RESET, grant);
-        try {
-            passwordResetService.resetPasswordByHash(tokenHash, request.getNewPassword());
-            return Map.of("message", "Your password has been reset");
-        } finally {
-            oneTimeLinkFlowCookie.clear(response, Purpose.PASSWORD_RESET);
-        }
+        passwordResetService.resetPasswordByHash(tokenHash, request.getNewPassword());
+        oneTimeLinkFlowService.complete(httpRequest, Purpose.PASSWORD_RESET, grant);
+        oneTimeLinkFlowCookie.clear(response, Purpose.PASSWORD_RESET);
+        return Map.of("message", "Your password has been reset");
     }
 }

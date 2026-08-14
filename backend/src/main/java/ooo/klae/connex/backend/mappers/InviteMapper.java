@@ -30,10 +30,13 @@ public interface InviteMapper {
     InvitePreviewDto findPreviewByTokenHashUnclaimed(String tokenHash);
     InvitePreviewDto findPreviewByTokenHash(String tokenHash);
     List<InviteDto> findPendingByWorkspace(int workspaceId);
-    default int claimExchange(String token) {
-        return claimExchangeByHash(digest(token));
+    default int claimExchange(String token, String exchangeSessionHash) {
+        return claimExchangeByHash(digest(token), exchangeSessionHash);
     }
-    int claimExchangeByHash(String tokenHash);
+    int claimExchangeByHash(@Param("tokenHash") String tokenHash,
+        @Param("exchangeSessionHash") String exchangeSessionHash);
+    boolean isExchangeOwnedByHash(@Param("tokenHash") String tokenHash,
+        @Param("exchangeSessionHash") String exchangeSessionHash);
     default boolean isRedeemable(String token) {
         return isRedeemableByHash(digest(token));
     }

@@ -2,6 +2,9 @@
  * Reads the one-time bearer from the URL fragment and removes the entire non-canonical URL before
  * any subsequent network request or navigation can expose it. Fragments never reach the server on
  * initial navigation; the returned value must be sent only to the matching exchange endpoint body.
+ * This cleanup requires hydration: with JavaScript disabled or hydration interrupted, the fragment
+ * can remain in the address bar and local history, but the current link pages expose no third-party
+ * navigation and browsers still exclude fragments from HTTP requests.
  */
 export function takeOneTimeLinkToken(): string | null {
     if (typeof window === "undefined") {

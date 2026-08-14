@@ -12,6 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.UUID;
 
+import tools.jackson.databind.ObjectMapper;
+
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.Cookie;
 
@@ -37,6 +39,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.mappers.InviteMapper;
+import ooo.klae.connex.backend.mappers.InviteLinkMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -52,11 +55,13 @@ class InviteLinkExchangeIntegrationTest {
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private InviteMapper inviteMapper;
+    @Autowired private InviteLinkMapper inviteLinkMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private ObjectMapper objectMapper;
 
     private MockMvc mockMvc;
 
@@ -95,6 +100,9 @@ class InviteLinkExchangeIntegrationTest {
         Cookie flowCookie = flowCookie(exchanged);
         MockHttpSession session = session(exchanged);
 
+        MvcResult recovered = exchange("/api/invites/exchange", rawToken, 303, session);
+        assertEquals(flowCookie.getValue(), flowCookie(recovered).getValue());
+
         MvcResult replay = exchange("/api/invites/exchange", rawToken, 400);
         assertResponseSecretFree(replay, rawToken);
 
@@ -111,20 +119,25 @@ class InviteLinkExchangeIntegrationTest {
         assertResponseSecretFree(wrongPurpose, rawToken);
 
         session = login(recipient, session);
-        mockMvc.perform(get("/api/invites")
+        MvcResult preview = mockMvc.perform(get("/api/invites")
                 .session(session)
                 .cookie(flowCookie)
                 .header("X-Workspace-Id", foreignWorkspace.getId()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.workspaceId").value(invitedWorkspace.getId()))
             .andExpect(jsonPath("$.email").value(recipient.getEmail()))
-            .andExpect(jsonPath("$.valid").value(true));
+            .andExpect(jsonPath("$.valid").value(true))
+            .andReturn();
+        String flowId = objectMapper.readTree(
+            preview.getResponse().getContentAsString()).get("flowId").asText();
 
         mockMvc.perform(post("/api/invites/accept")
                 .session(session)
                 .cookie(flowCookie)
                 .header("X-Workspace-Id", foreignWorkspace.getId())
-                .with(csrf().asHeader()))
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"flowId\":\"" + flowId + "\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(invitedWorkspace.getId()));
         assertTrue(workspaceMapper.isMember(invitedWorkspace.getId(), recipient.getId()));
@@ -133,18 +146,75 @@ class InviteLinkExchangeIntegrationTest {
         MvcResult consumedReplay = mockMvc.perform(post("/api/invites/accept")
                 .session(session)
                 .cookie(flowCookie)
-                .with(csrf().asHeader()))
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"flowId\":\"" + flowId + "\"}"))
             .andExpect(status().isBadRequest())
             .andReturn();
         assertResponseSecretFree(consumedReplay, rawToken);
         assertNoAuditSecret(rawToken);
     }
 
-    private MvcResult exchange(String path, String rawToken, int expectedStatus) throws Exception {
-        return mockMvc.perform(post(path)
+    @Test
+    void staleInviteTabCannotAcceptTheWorkspaceFromALaterTab() throws Exception {
+        Workspace firstWorkspace = newWorkspace("first-tab");
+        Workspace secondWorkspace = newWorkspace("second-tab");
+        User inviter = newUser("two-tab-inviter");
+        User recipient = newUser("two-tab-recipient");
+        String firstToken = token("first-link");
+        String secondToken = token("second-link");
+        inviteLinkMapper.insertHashed(
+            firstWorkspace.getId(), OneTimeTokenDigest.sha256(firstToken), "member", 14, null,
+            inviter.getId());
+        inviteLinkMapper.insertHashed(
+            secondWorkspace.getId(), OneTimeTokenDigest.sha256(secondToken), "admin", 14, null,
+            inviter.getId());
+
+        MockHttpSession session = login(recipient, new MockHttpSession());
+        MvcResult firstExchange = exchange(
+            "/api/invite-links/exchange", firstToken, 303, session);
+        Cookie firstCookie = flowCookie(
+            firstExchange, OneTimeLinkFlowCookie.WORKSPACE_INVITE_LINK);
+        MvcResult firstPreview = mockMvc.perform(get("/api/invite-links")
+                .session(session)
+                .cookie(firstCookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.workspaceId").value(firstWorkspace.getId()))
+            .andReturn();
+        String firstFlowId = objectMapper.readTree(
+            firstPreview.getResponse().getContentAsString()).get("flowId").asText();
+
+        MvcResult secondExchange = exchange(
+            "/api/invite-links/exchange", secondToken, 303, session);
+        Cookie secondCookie = flowCookie(
+            secondExchange, OneTimeLinkFlowCookie.WORKSPACE_INVITE_LINK);
+
+        mockMvc.perform(post("/api/invite-links/accept")
+                .session(session)
+                .cookie(secondCookie)
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"token\":\"" + rawToken + "\"}"))
+                .content("{\"flowId\":\"" + firstFlowId + "\"}"))
+            .andExpect(status().isBadRequest());
+
+        assertFalse(workspaceMapper.isMember(firstWorkspace.getId(), recipient.getId()));
+        assertFalse(workspaceMapper.isMember(secondWorkspace.getId(), recipient.getId()));
+    }
+
+    private MvcResult exchange(String path, String rawToken, int expectedStatus) throws Exception {
+        return exchange(path, rawToken, expectedStatus, null);
+    }
+
+    private MvcResult exchange(
+            String path, String rawToken, int expectedStatus, MockHttpSession session) throws Exception {
+        var request = post(path)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + rawToken + "\"}");
+        if (session != null) {
+            request.session(session);
+        }
+        return mockMvc.perform(request)
             .andExpect(status().is(expectedStatus))
             .andReturn();
     }
@@ -211,14 +281,17 @@ class InviteLinkExchangeIntegrationTest {
     }
 
     private static Cookie flowCookie(MvcResult result) {
-        String name = OneTimeLinkFlowCookie.WORKSPACE_INVITE;
+        return flowCookie(result, OneTimeLinkFlowCookie.WORKSPACE_INVITE);
+    }
+
+    private static Cookie flowCookie(MvcResult result, String name) {
         String header = result.getResponse().getHeaders(HttpHeaders.SET_COOKIE).stream()
             .filter(value -> value.startsWith(name + "="))
             .findFirst()
             .orElseThrow();
         assertTrue(header.contains("HttpOnly"));
         assertTrue(header.contains("SameSite=Strict"));
-        assertTrue(header.contains("Path=/api/invites"));
+        assertTrue(header.contains("Path=/api/invite"));
         assertFalse(header.contains("token="));
         String value = header.substring(name.length() + 1, header.indexOf(';'));
         return new Cookie(name, value);

@@ -15,7 +15,11 @@ public interface RegistrationVerificationTokenMapper {
 
     boolean existsRedeemableByHash(String tokenHash);
 
-    int claimExchange(String tokenHash);
+    int claimExchange(@Param("tokenHash") String tokenHash,
+        @Param("exchangeSessionHash") String exchangeSessionHash);
+
+    boolean isExchangeOwnedBy(@Param("tokenHash") String tokenHash,
+        @Param("exchangeSessionHash") String exchangeSessionHash);
 
     boolean existsExchangedRedeemableByHash(String tokenHash);
 

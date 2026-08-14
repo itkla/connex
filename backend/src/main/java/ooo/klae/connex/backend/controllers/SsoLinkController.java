@@ -54,7 +54,7 @@ public class SsoLinkController {
         String tokenHash = oneTimeLinkFlowService.require(httpRequest, Purpose.SSO_LINK, grant);
         ssoLinkService.confirmByHash(tokenHash, request.getPassword(),
                 clientIpResolver.resolve(httpRequest), httpRequest, httpResponse);
-        oneTimeLinkFlowService.consume(httpRequest, Purpose.SSO_LINK, grant);
+        oneTimeLinkFlowService.complete(httpRequest, Purpose.SSO_LINK, grant);
         oneTimeLinkFlowCookie.clear(httpResponse, Purpose.SSO_LINK);
         return Map.of("message", "You are now signed in");
     }

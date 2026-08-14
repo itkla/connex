@@ -51,7 +51,8 @@ public class EmailChangeController {
             @Valid @RequestBody OneTimeLinkExchangeRequest dto,
             HttpServletRequest request,
             HttpServletResponse response) {
-        String tokenHash = emailChangeService.exchangeToken(dto.getToken());
+        String exchangeSessionHash = oneTimeLinkFlowService.exchangeBindingHash(request);
+        String tokenHash = emailChangeService.exchangeToken(dto.getToken(), exchangeSessionHash);
         IssuedGrant grant = oneTimeLinkFlowService.issue(request, Purpose.EMAIL_CHANGE, tokenHash);
         oneTimeLinkFlowCookie.set(response, Purpose.EMAIL_CHANGE, grant.value(), grant.lifetime());
         response.setStatus(HttpServletResponse.SC_SEE_OTHER);
@@ -71,12 +72,10 @@ public class EmailChangeController {
             @CookieValue(name = OneTimeLinkFlowCookie.EMAIL_CHANGE, required = false) String grant,
             HttpServletRequest request,
             HttpServletResponse response) {
-        String tokenHash = oneTimeLinkFlowService.consume(request, Purpose.EMAIL_CHANGE, grant);
-        try {
-            emailChangeService.confirmChangeByHash(tokenHash);
-            return Map.of("message", "Your email address has been updated");
-        } finally {
-            oneTimeLinkFlowCookie.clear(response, Purpose.EMAIL_CHANGE);
-        }
+        String tokenHash = oneTimeLinkFlowService.require(request, Purpose.EMAIL_CHANGE, grant);
+        emailChangeService.confirmChangeByHash(tokenHash);
+        oneTimeLinkFlowService.complete(request, Purpose.EMAIL_CHANGE, grant);
+        oneTimeLinkFlowCookie.clear(response, Purpose.EMAIL_CHANGE);
+        return Map.of("message", "Your email address has been updated");
     }
 }

@@ -113,7 +113,7 @@ export default function InviteLinkPage() {
                             {t("roleLine", { role: t(roleKey(state.preview.role)) })}
                         </p>
                         <div className="mt-6">
-                            <AcceptInviteLink />
+                            <AcceptInviteLink flowId={state.preview.flowId} />
                         </div>
                     </div>
                 ) : null}

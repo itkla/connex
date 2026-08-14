@@ -84,4 +84,14 @@ class LoginRateLimiterTest {
         assertFalse(limiter.isBlocked(null, null, 1_000L));
         assertFalse(limiter.isBlocked("", "", 1_000L));
     }
+
+    @Test
+    void oneTimeLinkExchangeUsesAnIndependentIpBucket() {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 900);
+        long now = 1_000L;
+
+        assertTrue(limiter.tryAcquireOneTimeLinkExchange("203.0.113.8", now));
+        assertFalse(limiter.tryAcquireOneTimeLinkExchange("203.0.113.8", now));
+        assertFalse(limiter.isBlocked("203.0.113.8", "alice", now));
+    }
 }

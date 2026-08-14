@@ -58,9 +58,11 @@ import ooo.klae.connex.backend.observability.MetricsScrapeTokenFilter;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 /**
  * Spring Security configuration.
@@ -156,6 +158,8 @@ public class SecurityConfig {
             WorkspaceService workspaceService,
             WorkspaceCookie workspaceCookie,
             LogoutAuditHandler logoutAuditHandler,
+            LoginRateLimiter loginRateLimiter,
+            ClientIpResolver clientIpResolver,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.metrics.scrape-token:}") String metricsScrapeToken,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
@@ -167,6 +171,9 @@ public class SecurityConfig {
                 capabilityEntitlement,
                 workspaceRequestResolver,
                 workspaceService),
+            CsrfFilter.class);
+        http.addFilterAfter(
+            new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
             CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
         http.cors(withDefaults());

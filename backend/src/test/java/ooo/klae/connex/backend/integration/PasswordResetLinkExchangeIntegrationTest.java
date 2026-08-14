@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -28,6 +30,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -35,6 +38,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.services.PasswordResetService;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /** Exercises the complete password-reset fragment exchange and token-free redemption contract. */
@@ -50,6 +54,7 @@ class PasswordResetLinkExchangeIntegrationTest {
     @Autowired private UserMapper userMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @MockitoSpyBean private PasswordResetService passwordResetService;
 
     private MockMvc mockMvc;
 
@@ -67,11 +72,20 @@ class PasswordResetLinkExchangeIntegrationTest {
         passwordResetTokenMapper.insert(
             user.getId(), OneTimeTokenDigest.sha256(rawToken), "198.51.100.40", 30);
 
-        MvcResult exchanged = exchange("/api/auth/reset-password/exchange", rawToken, 303);
+        MvcResult csrfBootstrap = mockMvc.perform(get("/api/auth/csrf"))
+            .andExpect(status().isOk())
+            .andReturn();
+        MockHttpSession session = session(csrfBootstrap);
+        MvcResult exchanged = exchange(
+            "/api/auth/reset-password/exchange", rawToken, 303, session);
         assertEquals("/auth/reset-password", exchanged.getResponse().getHeader(HttpHeaders.LOCATION));
         assertResponseSecretFree(exchanged, rawToken);
         Cookie flowCookie = flowCookie(exchanged, OneTimeLinkFlowCookie.PASSWORD_RESET);
-        MockHttpSession session = session(exchanged);
+
+        MvcResult recovered = exchange(
+            "/api/auth/reset-password/exchange", rawToken, 303, session);
+        assertEquals(flowCookie.getValue(),
+            flowCookie(recovered, OneTimeLinkFlowCookie.PASSWORD_RESET).getValue());
 
         mockMvc.perform(get("/api/auth/reset-password/validate")
                 .session(session)
@@ -90,6 +104,26 @@ class PasswordResetLinkExchangeIntegrationTest {
 
         MvcResult wrongPurpose = exchange("/api/invites/exchange", rawToken, 400);
         assertResponseSecretFree(wrongPurpose, rawToken);
+
+        String tokenHash = OneTimeTokenDigest.sha256(rawToken);
+        doThrow(new IllegalStateException("transient database failure"))
+            .doCallRealMethod()
+            .when(passwordResetService)
+            .resetPasswordByHash(eq(tokenHash), eq(NEW_PASSWORD));
+
+        mockMvc.perform(post("/api/auth/reset-password")
+                .session(session)
+                .cookie(flowCookie)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"newPassword\":\"" + NEW_PASSWORD + "\"}"))
+            .andExpect(status().isConflict());
+
+        mockMvc.perform(get("/api/auth/reset-password/validate")
+                .session(session)
+                .cookie(flowCookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.valid").value(true));
 
         mockMvc.perform(post("/api/auth/reset-password")
                 .session(session)
@@ -112,10 +146,19 @@ class PasswordResetLinkExchangeIntegrationTest {
     }
 
     private MvcResult exchange(String path, String rawToken, int expectedStatus) throws Exception {
-        return mockMvc.perform(post(path)
+        return exchange(path, rawToken, expectedStatus, null);
+    }
+
+    private MvcResult exchange(
+            String path, String rawToken, int expectedStatus, MockHttpSession session) throws Exception {
+        var request = post(path)
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"token\":\"" + rawToken + "\"}"))
+                .content("{\"token\":\"" + rawToken + "\"}");
+        if (session != null) {
+            request.session(session);
+        }
+        return mockMvc.perform(request)
             .andExpect(status().is(expectedStatus))
             .andReturn();
     }

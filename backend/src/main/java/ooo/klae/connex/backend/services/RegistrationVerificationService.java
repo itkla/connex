@@ -88,13 +88,22 @@ public class RegistrationVerificationService {
         return tokenMapper.existsRedeemableByHash(OneTimeTokenDigest.sha256(rawToken));
     }
 
-    /** Atomically claims the raw emailed token for its one browser exchange. */
+    /**
+     * Claims the raw token for one browser session, permitting only same-session recovery.
+     * @param rawToken raw fragment bearer
+     * @param exchangeSessionHash one-way owner of the browser exchange
+     * @return persisted source-token digest
+     */
     @Transactional
-    public String exchangeToken(String rawToken) {
+    public String exchangeToken(String rawToken, String exchangeSessionHash) {
         String tokenHash = rawToken == null || rawToken.isBlank()
             ? null
             : OneTimeTokenDigest.sha256(rawToken);
-        if (tokenHash == null || tokenMapper.claimExchange(tokenHash) != 1) {
+        if (tokenHash == null || exchangeSessionHash == null || exchangeSessionHash.isBlank()) {
+            throw invalidLink();
+        }
+        int claimed = tokenMapper.claimExchange(tokenHash, exchangeSessionHash);
+        if (claimed != 1 && !tokenMapper.isExchangeOwnedBy(tokenHash, exchangeSessionHash)) {
             throw invalidLink();
         }
         return tokenHash;
@@ -112,7 +121,8 @@ public class RegistrationVerificationService {
      */
     @Transactional
     public void confirm(String rawToken) {
-        confirmByHash(exchangeToken(rawToken));
+        String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
+        confirmByHash(exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)));
     }
 
     /** Verifies an account through a purpose-bound flow-session source digest. */
@@ -139,5 +149,9 @@ public class RegistrationVerificationService {
 
     private static BadRequestException invalidLink() {
         return new BadRequestException("This verification link is invalid or has expired");
+    }
+
+    private static String programmaticExchangeOwner(String tokenHash) {
+        return tokenHash == null ? "" : OneTimeTokenDigest.sha256("registration:" + tokenHash);
     }
 }

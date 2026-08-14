@@ -156,7 +156,7 @@ export default function InvitePage() {
                             </>
                         ) : (
                             <div className="mt-6">
-                                <AcceptInvite />
+                                <AcceptInvite flowId={state.preview.flowId} />
                             </div>
                         )}
                     </div>

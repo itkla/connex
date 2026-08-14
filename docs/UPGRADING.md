@@ -48,6 +48,19 @@ migration-discipline part of #87 §9 / #102).
 - The control/tenant **plane split** (`db/migration/{control,tenant}`) and version monotonicity are
   additionally enforced by the migration arch tests.
 
+### V170 one-time-link security cutover
+
+`V170__one_time_link_sessions.sql` is intentionally not rolling-deploy compatible. It backfills
+SHA-256 digests for the legacy raw workspace-invite bearers and then drops the raw `token` columns
+and their indexes in the same migration. An older backend process still reading or writing those
+columns will fail after V170 applies.
+
+Treat the release containing V170 as a coordinated restart: close ingress, stop every old backend
+replica, then start the new backend so Flyway can apply V170 with no old binary still serving. Do
+not run old and new backend versions concurrently across this migration. The standard Compose
+runbook below already quiesces all writers and starts one backend with ingress closed; custom
+multi-replica deployments must enforce the same all-replicas-down boundary before migration.
+
 ## On-prem upgrade runbook
 
 1. **Preflight legacy media before any recreate** — if the installed version predates private object

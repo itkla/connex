@@ -137,16 +137,23 @@ public class InviteService {
     }
 
     /**
-     * Atomically claims a raw email-invite bearer for its one browser exchange.
+     * Atomically claims a raw email-invite bearer for one browser session. A same-session retry
+     * remains recoverable until the invite's original expiry; every other session is refused.
      * @param rawToken token carried only in the fragment-to-body bootstrap request
+     * @param exchangeSessionHash one-way owner of the browser exchange
      * @return source-token digest stored in the purpose-bound flow session
      */
     @Transactional
-    public String exchangeToken(String rawToken) {
+    public String exchangeToken(String rawToken, String exchangeSessionHash) {
         String tokenHash = rawToken == null || rawToken.isBlank()
             ? null
             : OneTimeTokenDigest.sha256(rawToken);
-        if (tokenHash == null || inviteMapper.claimExchangeByHash(tokenHash) != 1) {
+        if (tokenHash == null || exchangeSessionHash == null || exchangeSessionHash.isBlank()) {
+            throw invalidLink();
+        }
+        int claimed = inviteMapper.claimExchangeByHash(tokenHash, exchangeSessionHash);
+        if (claimed != 1
+                && !inviteMapper.isExchangeOwnedByHash(tokenHash, exchangeSessionHash)) {
             throw invalidLink();
         }
         return tokenHash;

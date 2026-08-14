@@ -4030,6 +4030,7 @@ export type InviteResult = {
 };
 
 export type InvitePreview = {
+    flowId: string;
     workspaceId: number;
     workspaceName: string;
     email: string;
@@ -4052,6 +4053,7 @@ export type WorkspaceInviteLink = {
 };
 
 export type InviteLinkPreview = {
+    flowId: string;
     workspaceId: number;
     workspaceName: string;
     role: WorkspaceRole;

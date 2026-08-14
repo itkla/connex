@@ -49,7 +49,9 @@ public class RegistrationVerificationController {
             @Valid @RequestBody OneTimeLinkExchangeRequest dto,
             HttpServletRequest request,
             HttpServletResponse response) {
-        String tokenHash = registrationVerificationService.exchangeToken(dto.getToken());
+        String exchangeSessionHash = oneTimeLinkFlowService.exchangeBindingHash(request);
+        String tokenHash = registrationVerificationService.exchangeToken(
+            dto.getToken(), exchangeSessionHash);
         IssuedGrant grant = oneTimeLinkFlowService.issue(
             request, Purpose.REGISTRATION_VERIFICATION, tokenHash);
         oneTimeLinkFlowCookie.set(
@@ -76,13 +78,11 @@ public class RegistrationVerificationController {
                 required = false) String grant,
             HttpServletRequest request,
             HttpServletResponse response) {
-        String tokenHash = oneTimeLinkFlowService.consume(
+        String tokenHash = oneTimeLinkFlowService.require(
             request, Purpose.REGISTRATION_VERIFICATION, grant);
-        try {
-            registrationVerificationService.confirmByHash(tokenHash);
-            return Map.of("message", "Your email address has been verified");
-        } finally {
-            oneTimeLinkFlowCookie.clear(response, Purpose.REGISTRATION_VERIFICATION);
-        }
+        registrationVerificationService.confirmByHash(tokenHash);
+        oneTimeLinkFlowService.complete(request, Purpose.REGISTRATION_VERIFICATION, grant);
+        oneTimeLinkFlowCookie.clear(response, Purpose.REGISTRATION_VERIFICATION);
+        return Map.of("message", "Your email address has been verified");
     }
 }

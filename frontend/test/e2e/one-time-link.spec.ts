@@ -43,6 +43,64 @@ test("password reset removes its fragment bearer before exchange navigation", as
     expect(requestedUrls.every((url) => !url.includes(rawToken))).toBe(true);
 });
 
+test("workspace invite removes its fragment bearer before rendering the preview", async ({ page }) => {
+    const rawToken = "browser_only_workspace_invite_bearer_123456789";
+    const flowId = "a".repeat(64);
+    const requestedUrls: string[] = [];
+    page.on("request", (request) => requestedUrls.push(request.url()));
+
+    await page.route("**/api/auth/csrf", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                token: "csrf-token",
+                headerName: "X-CSRF-TOKEN",
+                parameterName: "_csrf",
+                requestIdentity: null,
+            }),
+        });
+    });
+    await page.route("**/api/invites/exchange", async (route) => {
+        expect(route.request().postDataJSON()).toEqual({ token: rawToken });
+        await route.fulfill({
+            status: 303,
+            headers: {
+                Location: "/invite",
+                "Set-Cookie": "connex_workspace_invite_flow=grant; Path=/api/invites; HttpOnly; SameSite=Strict",
+            },
+        });
+    });
+    await page.route("**/api/auth/me", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ id: 7, email: "recipient@example.com" }),
+        });
+    });
+    await page.route("**/api/invites", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                flowId,
+                workspaceId: 42,
+                workspaceName: "Security Workspace",
+                email: "recipient@example.com",
+                role: "member",
+                invitedByLabel: "Workspace Admin",
+                status: "pending",
+                valid: true,
+            }),
+        });
+    });
+
+    await page.goto(`/invite#token=${rawToken}`);
+    await expect(page).toHaveURL(/\/invite$/);
+    await expect(page.getByRole("heading", { name: "Join Security Workspace" })).toBeVisible();
+    expect(requestedUrls.every((url) => !url.includes(rawToken))).toBe(true);
+});
+
 test("email change remains reachable with a session and removes its fragment bearer", async ({ context, page }) => {
     const rawToken = "browser_only_email_change_bearer_123456789";
     const requestedUrls: string[] = [];

@@ -90,7 +90,11 @@ public class InviteLinkService {
 
     /**
      * Validates a shareable raw bearer and returns its digest for a single-use browser flow grant.
-     * The underlying owner-issued link remains multi-redemption by design.
+     * The underlying owner-issued bearer is an explicit exception to single-use source tokens: it
+     * may establish grants in multiple browser sessions because the product feature is a shareable
+     * invite. Each browser grant is still short-lived and single-use. Source use is bounded by the
+     * link's expiry, owner revocation, optional maximum-use count, domain policy, verified-email
+     * policy, and the exchange admission throttle; final redemption atomically claims one use.
      */
     public String exchangeToken(String rawToken) {
         if (rawToken == null || rawToken.isBlank()) {
