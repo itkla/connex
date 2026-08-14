@@ -48,6 +48,9 @@ public class AiChatAttachmentPolicy {
         InspectedUpload inspected = uploadContentInspector.inspect(
             UploadPurpose.ASSISTANT_CONTEXT, source);
         if (!imageUpload) {
+            if (inspected.contentLength() > MAX_TEXT_BYTES) {
+                throw new RequestBodyTooLargeException(MAX_TEXT_BYTES);
+            }
             decodeText(inspected.content());
         }
         return inspected;

@@ -368,8 +368,13 @@ public class UploadContentInspector implements AutoCloseable {
                 yield InspectedContent.original(metadata, content);
             }
             case CSV -> {
-                inspectCsv(content, deadline);
-                yield InspectedContent.original(metadata, content);
+                byte[] canonical = inspectCsv(content, deadline);
+                yield new InspectedContent(
+                    metadata.fileName(),
+                    metadata.contentType(),
+                    metadata.extension(),
+                    metadata.format(),
+                    canonical);
             }
             case JSON -> {
                 inspectJson(content, deadline);
@@ -1053,27 +1058,46 @@ public class UploadContentInspector implements AutoCloseable {
         }
     }
 
-    private static void inspectCsv(byte[] content, Deadline deadline) {
+    private static byte[] inspectCsv(byte[] content, Deadline deadline) {
         CharBuffer text = decodeUtf8(content, deadline);
+        StringBuilder canonical = new StringBuilder(text.length());
         boolean quoted = false;
         boolean quoteClosed = false;
         boolean fieldStart = true;
-        for (int index = 0; index < text.length(); index++) {
+        boolean formulaPrefix = true;
+        boolean alternativeDelimiterPrefix = false;
+        int first = text.length() > 0 && text.charAt(0) == '\ufeff' ? 1 : 0;
+        rejectSpreadsheetDelimiterDirective(text, first);
+        if (first == 1) {
+            canonical.append('\ufeff');
+        }
+        for (int index = first; index < text.length(); index++) {
             if ((index & 0x3fff) == 0) {
                 deadline.check();
             }
             char value = text.charAt(index);
-            if (value == 0 || value < 0x20 && value != '\t' && value != '\r' && value != '\n') {
+            if (value == '\ufeff'
+                    || value == 0
+                    || value < 0x20 && value != '\t' && value != '\r' && value != '\n') {
                 throw UnsupportedUploadMediaTypeException.unsupported();
             }
             if (quoted) {
                 if (value == '"') {
+                    canonical.append(value);
                     if (index + 1 < text.length() && text.charAt(index + 1) == '"') {
+                        canonical.append('"');
+                        formulaPrefix = false;
                         index++;
                     } else {
                         quoted = false;
                         quoteClosed = true;
                     }
+                } else if (formulaPrefix && !spreadsheetWhitespace(value)) {
+                    neutralizeSpreadsheetFormula(canonical, value);
+                    formulaPrefix = false;
+                    canonical.append(value);
+                } else {
+                    canonical.append(value);
                 }
                 continue;
             }
@@ -1089,22 +1113,62 @@ public class UploadContentInspector implements AutoCloseable {
             } else if (value == ',') {
                 fieldStart = true;
                 quoteClosed = false;
+                formulaPrefix = true;
+                alternativeDelimiterPrefix = false;
             } else if (value == '\r') {
                 if (index + 1 >= text.length() || text.charAt(index + 1) != '\n') {
                     throw UnsupportedUploadMediaTypeException.unsupported();
                 }
                 index++;
+                canonical.append(value).append('\n');
                 fieldStart = true;
                 quoteClosed = false;
+                formulaPrefix = true;
+                alternativeDelimiterPrefix = false;
             } else if (value == '\n') {
                 fieldStart = true;
                 quoteClosed = false;
+                formulaPrefix = true;
+                alternativeDelimiterPrefix = false;
             } else {
+                if ((formulaPrefix || alternativeDelimiterPrefix)
+                        && !spreadsheetWhitespace(value)) {
+                    neutralizeSpreadsheetFormula(canonical, value);
+                    formulaPrefix = false;
+                    alternativeDelimiterPrefix = false;
+                }
+                if (value == ';' || value == '\t') {
+                    alternativeDelimiterPrefix = true;
+                }
                 fieldStart = false;
+            }
+            if (value != '\r') {
+                canonical.append(value);
             }
         }
         if (quoted) {
             throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        return canonical.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static void rejectSpreadsheetDelimiterDirective(CharBuffer text, int first) {
+        if (text.length() - first >= 4
+                && Character.toLowerCase(text.charAt(first)) == 's'
+                && Character.toLowerCase(text.charAt(first + 1)) == 'e'
+                && Character.toLowerCase(text.charAt(first + 2)) == 'p'
+                && text.charAt(first + 3) == '=') {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
+    private static boolean spreadsheetWhitespace(char value) {
+        return Character.isWhitespace(value) || Character.isSpaceChar(value);
+    }
+
+    private static void neutralizeSpreadsheetFormula(StringBuilder canonical, char value) {
+        if (value == '=' || value == '+' || value == '-' || value == '@') {
+            canonical.append('\'');
         }
     }
 

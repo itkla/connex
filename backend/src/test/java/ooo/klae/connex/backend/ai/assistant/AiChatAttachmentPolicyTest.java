@@ -10,6 +10,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import javax.imageio.ImageIO;
 
@@ -96,6 +97,16 @@ class AiChatAttachmentPolicyTest {
 
         assertThrows(RequestBodyTooLargeException.class, () -> policy.prepare(
                 UploadSource.from("notes.txt", "text/plain", content)));
+    }
+
+    @Test
+    void rejectsCsvWhoseNeutralizedArtifactExceedsTheAssistantLimit() {
+        byte[] content = new byte[AiChatAttachmentPolicy.MAX_TEXT_BYTES];
+        Arrays.fill(content, (byte) 'a');
+        content[0] = '=';
+
+        assertThrows(RequestBodyTooLargeException.class, () -> policy.prepare(
+                UploadSource.from("values.csv", "text/csv", content)));
     }
 
     @Test

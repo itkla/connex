@@ -545,6 +545,128 @@ class UploadContentInspectorTest {
     }
 
     @Test
+    void preservesCanonicalImageOutputSizeFailures() throws Exception {
+        byte[] jpeg = image("jpeg", 240, 140);
+        properties.setMaxUploadBytes(jpeg.length);
+
+        assertThrows(RequestBodyTooLargeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("large.jpg", "image/jpeg", jpeg)));
+        assertThrows(RequestBodyTooLargeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ASSISTANT_CONTEXT,
+                UploadSource.from("large.jpg", "image/jpeg", jpeg)));
+    }
+
+    @Test
+    void preservesAssistantImageDimensionFailures() throws Exception {
+        byte[] jpeg = image("jpeg", 4_097, 1);
+
+        assertThrows(BadRequestException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ASSISTANT_CONTEXT,
+                UploadSource.from("wide.jpg", "image/jpeg", jpeg)));
+    }
+
+    @Test
+    void rejectsCsvNeutralizationAboveTheConfiguredCeilingForNewAndLegacyUploads() {
+        byte[] csv = "=1".getBytes(StandardCharsets.UTF_8);
+        properties.setMaxUploadBytes(csv.length);
+
+        assertThrows(RequestBodyTooLargeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("values.csv", "text/csv", csv)));
+        assertThrows(RequestBodyTooLargeException.class,
+            () -> inspector.inspectLegacyAttachment(
+                UploadSource.from("values.csv", "application/octet-stream", csv)));
+    }
+
+    @Test
+    void legacyInspectionInfersRealFormatWithoutTrustingHistoricalMime() throws Exception {
+        byte[] pdf = validPdf();
+        for (String contentType : new String[] {
+                null, "", "malformed", "application/octet-stream"}) {
+            UploadSource source = UploadSource.from("invoice.pdf", contentType, pdf);
+
+            InspectedUpload inspected = inspector.inspectLegacyAttachment(source);
+
+            assertEquals(UploadFormat.PDF, inspected.format());
+            assertEquals("application/pdf", inspected.contentType());
+            assertThrows(UnsupportedUploadMediaTypeException.class,
+                () -> inspector.inspect(UploadPurpose.ATTACHMENT, source));
+        }
+
+        InspectedUpload image = inspector.inspectLegacyAttachment(
+            UploadSource.from("legacy.bin", "application/octet-stream", image("png")));
+        assertEquals(UploadFormat.JPEG, image.format());
+        assertEquals("legacy.jpg", image.fileName());
+        assertEquals("image/jpeg", image.contentType());
+    }
+
+    @ParameterizedTest
+    @MethodSource("dangerousCsvFields")
+    void neutralizesSpreadsheetFormulaFieldsAcrossCsvPurposes(String csv) {
+        byte[] content = csv.getBytes(StandardCharsets.UTF_8);
+
+        for (UploadPurpose purpose : List.of(
+                UploadPurpose.ATTACHMENT,
+                UploadPurpose.ASSISTANT_CONTEXT,
+                UploadPurpose.CSV_IMPORT_SOURCE)) {
+            InspectedUpload inspected = inspector.inspect(
+                purpose,
+                UploadSource.from("contacts.csv", "text/csv", content));
+            assertFalse(java.util.Arrays.equals(content, inspected.content()));
+            assertArrayEquals(
+                inspected.content(),
+                inspector.inspect(
+                    purpose,
+                    UploadSource.from(
+                        "contacts.csv", "text/csv", inspected.content())).content());
+        }
+    }
+
+    @Test
+    void rejectsSpreadsheetDelimiterDirectivesAcrossCsvPurposes() {
+        byte[] content = "sep=;\r\nname;payload\r\nAda;=HYPERLINK(1)"
+            .getBytes(StandardCharsets.UTF_8);
+
+        for (UploadPurpose purpose : List.of(
+                UploadPurpose.ATTACHMENT,
+                UploadPurpose.ASSISTANT_CONTEXT,
+                UploadPurpose.CSV_IMPORT_SOURCE)) {
+            assertThrows(UnsupportedUploadMediaTypeException.class,
+                () -> inspector.inspect(
+                    purpose,
+                    UploadSource.from("contacts.csv", "text/csv", content)));
+        }
+    }
+
+    @Test
+    void neutralizesInternationalPhoneCellsWithoutChangingTheirDigits() {
+        byte[] content = "Name,Phone\r\nAlice,+81-90-1111-2222\r\n"
+            .getBytes(StandardCharsets.UTF_8);
+
+        InspectedUpload inspected = inspector.inspect(
+            UploadPurpose.CSV_IMPORT_SOURCE,
+            UploadSource.from("contacts.csv", "text/csv", content));
+
+        assertEquals(
+            "Name,Phone\r\nAlice,'+81-90-1111-2222\r\n",
+            new String(inspected.content(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void acceptsBomPrefixedCsvWithoutFormulaFields() {
+        byte[] content = "\ufeffname,amount\nAda,42\n".getBytes(StandardCharsets.UTF_8);
+
+        assertEquals(UploadFormat.CSV, inspector.inspect(
+            UploadPurpose.CSV_IMPORT_SOURCE,
+            UploadSource.from("contacts.csv", "text/csv", content)).format());
+    }
+
+    @Test
     void consumesTheUntrustedSourceOnceAndReturnsImmutableBytes() {
         byte[] content = "safe text".getBytes(StandardCharsets.UTF_8);
         AtomicInteger opens = new AtomicInteger();
@@ -630,12 +752,40 @@ class UploadContentInspectorTest {
             Arguments.of(UploadPurpose.ASSISTANT_CONTEXT, "data.json", "application/json", "{".getBytes(StandardCharsets.UTF_8)));
     }
 
+    private static Stream<String> dangerousCsvFields() {
+        return Stream.of(
+            "=2+3",
+            "  +SUM(1,2)",
+            "\t-42",
+            "@command",
+            "\"=HYPERLINK(\"\"https://example.invalid\"\")\"",
+            "\" \t@command\"",
+            "\"\r=HYPERLINK(\"\"https://example.invalid\"\")\"",
+            "\ufeff\"=HYPERLINK(\"\"https://example.invalid\"\")\"",
+            "name;payload\r\nAda;=HYPERLINK(1)",
+            "name\tpayload\r\nAda\t@command");
+    }
+
     private static byte[] image(String format) throws IOException {
         BufferedImage image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB);
         image.setRGB(0, 0, 0x00aa44);
         image.setRGB(1, 0, 0x112233);
         image.setRGB(0, 1, 0x445566);
         image.setRGB(1, 1, 0x778899);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, format, output)) {
+            throw new IOException("Test image writer is unavailable");
+        }
+        return output.toByteArray();
+    }
+
+    private static byte[] image(String format, int width, int height) throws IOException {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                image.setRGB(x, y, (x * 73 << 16) ^ (y * 151 << 8) ^ (x * y));
+            }
+        }
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         if (!ImageIO.write(image, format, output)) {
             throw new IOException("Test image writer is unavailable");
