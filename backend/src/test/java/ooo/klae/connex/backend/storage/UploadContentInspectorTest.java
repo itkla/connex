@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -23,10 +24,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import javax.imageio.ImageIO;
 
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -131,7 +135,6 @@ class UploadContentInspectorTest {
             image("gif"), "<script>alert(1)</script>".getBytes(StandardCharsets.UTF_8));
         byte[] pdfZipPolyglot = concatenate(validPdf(), officePackage(UploadFormat.DOCX));
         byte[] jpegPolyglot = concatenate(image("jpeg"), image("jpeg"));
-        byte[] embeddedZipSignature = validPdf("/Subject (PK\u0003\u0004)", "");
 
         assertThrows(UnsupportedUploadMediaTypeException.class,
             () -> inspector.inspect(UploadPurpose.INLINE_IMAGE,
@@ -142,9 +145,68 @@ class UploadContentInspectorTest {
         assertThrows(UnsupportedUploadMediaTypeException.class,
             () -> inspector.inspect(UploadPurpose.ATTACHMENT,
                 UploadSource.from("polyglot.pdf", "application/pdf", pdfZipPolyglot)));
-        assertThrows(UnsupportedUploadMediaTypeException.class,
-            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
-                UploadSource.from("embedded-archive.pdf", "application/pdf", embeddedZipSignature)));
+    }
+
+    /** Verifies a hyperlink PDF emitted by Headless Chrome 149, including its real URI action. */
+    @Test
+    void acceptsChromiumPdfWithUriHyperlink() throws Exception {
+        byte[] pdf = fixture("chromium-hyperlink.pdf");
+
+        assertTrue(contains(pdf, "/URI".getBytes(StandardCharsets.US_ASCII)));
+        assertEquals(UploadFormat.PDF, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("invoice.pdf", "application/pdf", pdf)).format());
+    }
+
+    @Test
+    void acceptsStaticPdfFormsFileReferencesAndIncrementalUpdates() throws Exception {
+        byte[] ordinaryStructure = validPdf(
+            "/AcroForm << /Fields [] >> /Names << /Dests << /Names [] >> >> "
+                + "/RelatedFile << /Type /Filespec /F (terms.pdf) >>");
+        ByteArrayOutputStream incrementalOutput = new ByteArrayOutputStream();
+        try (PDDocument document = Loader.loadPDF(ordinaryStructure)) {
+            document.getDocumentCatalog().setLanguage("en-US");
+            document.saveIncremental(incrementalOutput);
+        }
+        byte[] incrementalPdf = incrementalOutput.toByteArray();
+
+        assertTrue(contains(incrementalPdf, "/Prev".getBytes(StandardCharsets.US_ASCII)));
+        assertEquals(UploadFormat.PDF, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("form.pdf", "application/pdf", ordinaryStructure)).format());
+        assertEquals(UploadFormat.PDF, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("signed.pdf", "application/pdf", incrementalPdf)).format());
+    }
+
+    /** Verifies ordinary fields and hyperlinks emitted by LibreOffice Writer 25.2.3.2. */
+    @Test
+    void acceptsLibreOfficeDocumentsWithOrdinaryFieldsAndHyperlinks() throws Exception {
+        byte[] docx = fixture("libreoffice-fields-source.docx");
+        byte[] odt = fixture("libreoffice-fields-source.odt");
+        byte[] documentXml = zipEntry(docx, "word/document.xml");
+        byte[] relationships = zipEntry(docx, "word/_rels/document.xml.rels");
+        byte[] simpleFields = officePackage(
+            UploadFormat.DOCX,
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+                + "<w:body><w:fldSimple w:instr=\" TOC \\o &quot;1-3&quot; \"/>"
+                + "<w:fldSimple w:instr=\" PAGE \"/></w:body></w:document>",
+            null);
+
+        assertTrue(contains(documentXml, "w:fldChar".getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(documentXml, "w:instrText".getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(relationships, "TargetMode=\"External\""
+            .getBytes(StandardCharsets.US_ASCII)));
+        assertEquals(UploadFormat.DOCX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("review.docx", docxContentType(), docx)).format());
+        assertEquals(UploadFormat.ODT, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "review.odt", "application/vnd.oasis.opendocument.text", odt)).format());
+        assertEquals(UploadFormat.DOCX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("fields.docx", docxContentType(), simpleFields)).format());
     }
 
     @Test
@@ -207,13 +269,26 @@ class UploadContentInspectorTest {
             "/A << /S /SubmitForm /F (https://example.invalid) >>");
         byte[] encryptedPdf = validPdf("", "/Encrypt 3 0 R");
         byte[] externalPackage = officePackageWithRelationship(
-            "<Relationship Id=\"rId1\" Target=\"https://example.invalid\" TargetMode=\"External\"/>");
+            "<Relationship Id=\"rId1\" Type=\""
+                + "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                + "\" Target=\"https://example.invalid/image.png\" TargetMode=\"External\"/>");
+        byte[] localFileHyperlinkPackage = officePackageWithRelationship(
+            "<Relationship Id=\"rId1\" Type=\""
+                + "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+                + "\" Target=\"file:///tmp/payload\" TargetMode=\"External\"/>");
         byte[] activeOdfReference = officePackage(
             UploadFormat.ODT,
             "<office:document-content xmlns:office=\""
                 + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
                 + "xmlns:xlink=\"http://www.w3.org/1999/xlink\">"
                 + "<office:body xlink:href=\"vnd.sun.star.script:payload\"/>"
+                + "</office:document-content>",
+            null);
+        byte[] activeOdfScript = officePackage(
+            UploadFormat.ODT,
+            "<office:document-content xmlns:office=\""
+                + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\">"
+                + "<office:scripts><office:script>payload</office:script></office:scripts>"
                 + "</office:document-content>",
             null);
 
@@ -232,16 +307,51 @@ class UploadContentInspectorTest {
         assertThrows(UnsupportedUploadMediaTypeException.class,
             () -> inspector.inspect(UploadPurpose.ATTACHMENT,
                 UploadSource.from(
+                    "local-file.docx", docxContentType(), localFileHyperlinkPackage)));
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                UploadSource.from(
                     "active-reference.odt",
                     "application/vnd.oasis.opendocument.text",
                     activeOdfReference)));
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "active-script.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    activeOdfScript)));
+    }
+
+    @Test
+    void rejectsExecutableEmbeddedAndAutoTriggeredPdfContent() {
+        List<String> dangerousCatalogEntries = List.of(
+            "/Action << /S /JavaScript /JS (alert) >>",
+            "/Action << /S /Launch /F (payload.exe) >>",
+            "/Payload << /Type /EmbeddedFile /Length 0 >>",
+            "/Annotation << /Subtype /RichMedia >>",
+            "/Annotation << /Subtype /Movie >>",
+            "/Annotation << /Subtype /Sound >>",
+            "/Annotation << /Subtype /3D >>",
+            "/AcroForm << /Fields [] /XFA [] >>",
+            "/Action << /S /SubmitForm >>",
+            "/Action << /S /ImportData >>",
+            "/OpenAction [3 0 R /Fit]",
+            "/AA << /E << /S /Named /N /NextPage >> >>");
+
+        for (String catalogEntry : dangerousCatalogEntries) {
+            byte[] pdf = validPdf(catalogEntry);
+            assertThrows(UnsupportedUploadMediaTypeException.class,
+                () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                    UploadSource.from("active.pdf", "application/pdf", pdf)),
+                catalogEntry);
+        }
     }
 
     @Test
     void rejectsCorruptPdfCrossReferenceAndPackageEvidenceMisbinding() throws Exception {
         byte[] corruptCrossReference = validPdf();
         int catalogEntry = findAscii(corruptCrossReference, "0000000009 00000 n");
-        corruptCrossReference[catalogEntry + 9] = '8';
+        corruptCrossReference[catalogEntry] = '9';
         byte[] missingPageTree = validPdf();
         int pagesReference = findAscii(missingPageTree, "/Pages 2 0 R");
         missingPageTree[pagesReference + "/Pages ".length()] = '9';
@@ -520,16 +630,42 @@ class UploadContentInspectorTest {
         int catalogOffset = output.size();
         writeAscii(output, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R " + catalogAddition + " >>\nendobj\n");
         int pagesOffset = output.size();
-        writeAscii(output, "2 0 obj\n<< /Type /Pages /Count 0 /Kids [] >>\nendobj\n");
+        writeAscii(output, "2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n");
+        int pageOffset = output.size();
+        writeAscii(output, "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n");
         int xrefOffset = output.size();
-        writeAscii(output, "xref\n0 3\n0000000000 65535 f \n");
+        writeAscii(output, "xref\n0 4\n0000000000 65535 f \n");
         writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", catalogOffset));
         writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", pagesOffset));
-        writeAscii(output, "trailer\n<< /Size 3 /Root 1 0 R " + trailerAddition
+        writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", pageOffset));
+        writeAscii(output, "trailer\n<< /Size 4 /Root 1 0 R " + trailerAddition
             + " >>\nstartxref\n");
         writeAscii(output, Integer.toString(xrefOffset));
         writeAscii(output, "\n%%EOF\n");
         return output.toByteArray();
+    }
+
+    private static byte[] fixture(String name) throws IOException {
+        try (InputStream input = UploadContentInspectorTest.class
+                .getResourceAsStream("/fixtures/" + name)) {
+            if (input == null) {
+                throw new IOException("Missing fixture: " + name);
+            }
+            return input.readAllBytes();
+        }
+    }
+
+    private static byte[] zipEntry(byte[] content, String expectedName) throws IOException {
+        try (ZipInputStream zip = new ZipInputStream(
+                new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (expectedName.equals(entry.getName())) {
+                    return zip.readAllBytes();
+                }
+            }
+        }
+        throw new IOException("Missing ZIP entry: " + expectedName);
     }
 
     private static byte[] officePackage(UploadFormat format) throws IOException {

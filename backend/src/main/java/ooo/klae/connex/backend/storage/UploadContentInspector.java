@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.storage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.CharBuffer;
@@ -14,8 +15,10 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -28,8 +31,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -38,6 +39,15 @@ import javax.xml.XMLConstants;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParserFactory;
 
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.io.MemoryUsageSetting;
+import org.apache.pdfbox.io.RandomAccessReadBuffer;
+import org.apache.pdfbox.pdfparser.PDFParser;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.xml.sax.Attributes;
@@ -79,34 +89,47 @@ public class UploadContentInspector implements AutoCloseable {
     private static final int MAX_XML_DEPTH = 128;
     private static final int MAX_XML_ATTRIBUTES = 256;
     private static final int MAX_IMAGE_METADATA_BYTES = 1024 * 1024;
+    private static final long MAX_PDF_WORK_BYTES = 64L * 1024L * 1024L;
+    private static final int MAX_PDF_GRAPH_NODES = 100_000;
+    private static final int MAX_PDF_GRAPH_DEPTH = 256;
     private static final byte[] PNG_SIGNATURE = {
         (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
     };
-    private static final Set<String> FORBIDDEN_PDF_NAMES = Set.of(
-        "/javascript", "/js", "/openaction", "/aa", "/launch", "/embeddedfile",
-        "/richmedia", "/xfa", "/acroform", "/encrypt", "/xrefstm", "/prev",
-        "/submitform", "/importdata", "/gotor", "/gotoe", "/uri", "/rendition",
-        "/sound", "/movie", "/resetform", "/hide", "/setocgstate", "/named",
-        "/filespec", "/collection", "/3d");
-    private static final Pattern PDF_SIZE = Pattern.compile("/size\\s+(\\d+)");
-    private static final Pattern PDF_ROOT = Pattern.compile("/root\\s+(\\d+)\\s+(\\d+)\\s+r\\b");
-    private static final Pattern PDF_CATALOG = Pattern.compile("/type\\s*/catalog\\b");
-    private static final Pattern PDF_PAGES_REFERENCE =
-        Pattern.compile("/pages\\s+(\\d+)\\s+(\\d+)\\s+r\\b");
-    private static final Pattern PDF_PAGE_TREE = Pattern.compile("/type\\s*/pages\\b");
-    private static final Pattern PDF_ACTION_DICTIONARY =
-        Pattern.compile("/a\\s*<<[^>]{0,4096}/s\\s*/[a-z0-9]+", Pattern.DOTALL);
-    private static final Set<Integer> ZIP_SIGNATURE_SUFFIXES = Set.of(0x0304, 0x0102, 0x0506);
+    private static final Set<String> DANGEROUS_PDF_KEYS = Set.of(
+        "AA", "EmbeddedFiles", "EF", "JavaScript", "JS", "OpenAction", "RichMediaContent",
+        "XFA");
+    private static final Set<String> DANGEROUS_PDF_ACTIONS = Set.of(
+        "ImportData", "JavaScript", "Launch", "Movie", "Rendition", "RichMediaExecute",
+        "Sound", "SubmitForm");
+    private static final Set<String> DANGEROUS_PDF_ANNOTATIONS = Set.of(
+        "3D", "Movie", "RichMedia", "Sound");
     private static final String OOXML_CONTENT_TYPES_NAMESPACE =
         "http://schemas.openxmlformats.org/package/2006/content-types";
     private static final String OOXML_RELATIONSHIPS_NAMESPACE =
         "http://schemas.openxmlformats.org/package/2006/relationships";
+    private static final Set<String> WORDPROCESSING_NAMESPACES = Set.of(
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        "http://purl.oclc.org/ooxml/wordprocessingml/main");
     private static final Set<String> OOXML_OFFICE_DOCUMENT_RELATIONSHIPS = Set.of(
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument",
         "http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument");
+    private static final Set<String> OOXML_HYPERLINK_RELATIONSHIPS = Set.of(
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+        "http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink");
+    private static final String ODF_TEXT_NAMESPACE =
+        "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
     private static final Set<String> ACTIVE_XML_ELEMENTS = Set.of(
-        "script", "scripts", "event-listener", "event-listeners", "fldsimple",
-        "fldchar", "instrtext", "altchunk", "object", "oleobject", "control");
+        "script", "event-listener", "event-listeners", "altchunk", "object",
+        "oleobject", "control");
+    private static final Set<String> SAFE_WORD_FIELD_COMMANDS = Set.of(
+        "ADVANCE", "AUTHOR", "AUTONUM", "AUTONUMLGL", "AUTONUMOUT", "BIBLIOGRAPHY",
+        "CITATION", "COMMENTS", "CREATEDATE", "DATE", "DOCPROPERTY", "DOCVARIABLE", "EDITTIME",
+        "EQ", "FILENAME", "FILESIZE", "FORMCHECKBOX", "FORMDROPDOWN", "FORMTEXT",
+        "INFO", "KEYWORDS", "LASTSAVEDBY", "MERGEFIELD", "NEXT", "NEXTIF", "NUMCHARS",
+        "NUMPAGES", "NUMWORDS", "PAGE", "PAGEREF", "PRINTDATE", "QUOTE", "REF", "REVNUM",
+        "SAVEDATE", "SECTION", "SECTIONPAGES", "SEQ", "SET", "SKIPIF", "STYLEREF",
+        "SUBJECT", "SYMBOL", "TA", "TC", "TEMPLATE", "TIME", "TITLE", "TOA", "TOC", "XE");
+    private static final int MAX_WORD_FIELD_INSTRUCTION_CHARACTERS = 4096;
 
     private final UploadPolicy uploadPolicy;
     private final ImageUploadValidator imageUploadValidator;
@@ -487,6 +510,16 @@ public class UploadContentInspector implements AutoCloseable {
         }
     }
 
+    /**
+     * Strictly parses the PDF object graph and rejects executable or automatically triggered
+     * behavior in the context where PDF defines it. JavaScript and JS entries, Launch actions,
+     * embedded files, RichMedia, Movie, Sound, 3D, XFA, SubmitForm, ImportData, OpenAction, and AA
+     * are refused because they execute, transmit, embed, or trigger without an ordinary link
+     * click. Structural names such as URI, AcroForm, Prev, XRefStm, Names, Named, and FileSpec are
+     * deliberately allowed because they represent ordinary links, static forms, incremental
+     * revisions, hybrid cross-reference data, and file references unless an active action, XFA
+     * form, or embedded payload is attached to them.
+     */
     private static void inspectPdf(byte[] content, Deadline deadline) {
         if (content.length < 32
                 || !asciiEquals(content, 0, "%PDF-1.")
@@ -501,265 +534,85 @@ public class UploadContentInspector implements AutoCloseable {
         if (end < 5 || !asciiEquals(content, end - 5, "%%EOF")) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
-        int eofOffset = end - 5;
-        int startXref = lastIndexOf(
-            content,
-            "startxref".getBytes(StandardCharsets.US_ASCII),
-            eofOffset,
-            Math.max(8, eofOffset - 8192),
-            deadline);
-        if (startXref < 0) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int numberStart = startXref + "startxref".length();
-        while (numberStart < end && isPdfWhitespace(content[numberStart])) {
-            numberStart++;
-        }
-        int numberEnd = numberStart;
-        while (numberEnd < end && content[numberEnd] >= '0' && content[numberEnd] <= '9') {
-            numberEnd++;
-        }
-        if (numberStart == numberEnd) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int trailing = numberEnd;
-        while (trailing < eofOffset && isPdfWhitespace(content[trailing])) {
-            trailing++;
-        }
-        if (trailing != eofOffset || containsZipSignature(content, deadline)) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int xrefOffset = parsePdfInteger(content, numberStart, numberEnd);
-        if (xrefOffset < 8 || xrefOffset >= startXref || !asciiEquals(content, xrefOffset, "xref")) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        PdfCrossReference crossReference = inspectPdfCrossReference(
-            content, xrefOffset, startXref, deadline);
-        String normalized = normalizedPdfNames(content, deadline);
-        for (String forbidden : FORBIDDEN_PDF_NAMES) {
-            if (normalized.contains(forbidden)) {
+        deadline.check();
+        try (RandomAccessReadBuffer source = new RandomAccessReadBuffer(content);
+                PDDocument document = new PDFParser(
+                    source,
+                    "",
+                    null,
+                    null,
+                    MemoryUsageSetting.setupMainMemoryOnly(MAX_PDF_WORK_BYTES).streamCache)
+                    .parse(false)) {
+            deadline.check();
+            if (document.isEncrypted() || document.getNumberOfPages() <= 0) {
                 throw UnsupportedUploadMediaTypeException.unsupported();
             }
-        }
-        if (PDF_ACTION_DICTIONARY.matcher(normalized).find()) {
+            inspectPdfGraph(document.getDocumentCatalog().getCOSObject(), deadline);
+        } catch (UnsupportedUploadMediaTypeException exception) {
+            throw exception;
+        } catch (IOException | RuntimeException exception) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
-        validatePdfObjects(content, xrefOffset, crossReference, deadline);
     }
 
-    private static PdfCrossReference inspectPdfCrossReference(
-            byte[] content,
-            int xrefOffset,
-            int startXref,
-            Deadline deadline) {
-        PdfCursor cursor = new PdfCursor(content, xrefOffset, startXref, deadline);
-        cursor.requireToken("xref");
-        Map<Integer, PdfXrefEntry> entries = new HashMap<>();
-        int trailerOffset = -1;
-        while (cursor.hasRemaining()) {
-            cursor.skipWhitespace();
-            if (cursor.startsWith("trailer")) {
-                trailerOffset = cursor.position();
-                cursor.requireToken("trailer");
-                break;
-            }
-            int firstObject = cursor.readInteger();
-            cursor.requireWhitespace();
-            int count = cursor.readInteger();
-            if (count <= 0 || firstObject < 0 || firstObject + (long) count > 100_000) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            for (int index = 0; index < count; index++) {
-                cursor.requireWhitespace();
-                int objectOffset = cursor.readInteger();
-                cursor.requireWhitespace();
-                int generation = cursor.readInteger();
-                cursor.requireWhitespace();
-                char status = cursor.readAsciiCharacter();
-                if ((status != 'n' && status != 'f')
-                        || entries.putIfAbsent(
-                            firstObject + index,
-                            new PdfXrefEntry(objectOffset, generation, status == 'n')) != null) {
+    private static void inspectPdfGraph(COSBase root, Deadline deadline) {
+        Set<COSBase> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        List<PdfGraphNode> pending = new ArrayList<>();
+        pending.add(new PdfGraphNode(root, 0));
+        while (!pending.isEmpty()) {
+            deadline.check();
+            PdfGraphNode node = pending.removeLast();
+            COSBase value = node.value();
+            if (node.depth() > MAX_PDF_GRAPH_DEPTH
+                    || !visited.add(value)
+                    || visited.size() > MAX_PDF_GRAPH_NODES) {
+                if (node.depth() > MAX_PDF_GRAPH_DEPTH
+                        || visited.size() > MAX_PDF_GRAPH_NODES) {
                     throw UnsupportedUploadMediaTypeException.unsupported();
                 }
+                continue;
             }
-        }
-        if (trailerOffset < 0 || entries.isEmpty()) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int dictionaryStart = indexOf(content, "<<", cursor.position(), startXref, deadline);
-        if (dictionaryStart < 0) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int dictionaryEnd = indexOf(content, ">>", dictionaryStart + 2, startXref, deadline);
-        if (dictionaryEnd < 0) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int afterDictionary = dictionaryEnd + 2;
-        while (afterDictionary < startXref && isPdfWhitespace(content[afterDictionary])) {
-            afterDictionary++;
-        }
-        if (afterDictionary != startXref) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        String trailer = normalizedPdfNames(
-            content, dictionaryStart, afterDictionary, deadline);
-        for (String forbidden : Set.of("/encrypt", "/xrefstm", "/prev")) {
-            if (trailer.contains(forbidden)) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-        }
-        Matcher sizeMatcher = PDF_SIZE.matcher(trailer);
-        Matcher rootMatcher = PDF_ROOT.matcher(trailer);
-        if (!sizeMatcher.find() || !rootMatcher.find()) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int size = parsePositivePdfInteger(sizeMatcher.group(1));
-        int rootObject = parsePositivePdfInteger(rootMatcher.group(1));
-        int rootGeneration = parsePdfInteger(rootMatcher.group(2));
-        if (size <= 0 || size > 100_000 || rootObject >= size) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        PdfXrefEntry zero = entries.get(0);
-        if (zero == null
-                || zero.inUse()
-                || entries.keySet().stream().anyMatch(objectNumber -> objectNumber >= size)) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        PdfXrefEntry root = entries.get(rootObject);
-        if (root == null || !root.inUse() || root.generation() != rootGeneration) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        return new PdfCrossReference(Map.copyOf(entries), rootObject);
-    }
-
-    private static void validatePdfObjects(
-            byte[] content,
-            int xrefOffset,
-            PdfCrossReference crossReference,
-            Deadline deadline) {
-        Set<Integer> offsets = new HashSet<>();
-        List<Map.Entry<Integer, PdfXrefEntry>> inUseEntries = crossReference.entries().entrySet()
-            .stream()
-            .filter(item -> item.getValue().inUse())
-            .sorted(java.util.Comparator.comparingInt(item -> item.getValue().offset()))
-            .toList();
-        for (int index = 0; index < inUseEntries.size(); index++) {
-            deadline.check();
-            Map.Entry<Integer, PdfXrefEntry> item = inUseEntries.get(index);
-            PdfXrefEntry entry = item.getValue();
-            if (entry.offset() < 8
-                    || entry.offset() >= xrefOffset
-                    || !offsets.add(entry.offset())) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            PdfCursor object = new PdfCursor(content, entry.offset(), xrefOffset, deadline);
-            int objectNumber = object.readInteger();
-            object.requireWhitespace();
-            int generation = object.readInteger();
-            object.requireWhitespace();
-            object.requireToken("obj");
-            if (objectNumber != item.getKey() || generation != entry.generation()) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            int objectLimit = index + 1 < inUseEntries.size()
-                ? inUseEntries.get(index + 1).getValue().offset()
-                : xrefOffset;
-            int objectEnd = indexOf(content, "endobj", object.position(), objectLimit, deadline);
-            if (objectEnd < 0
-                    || !onlyPdfWhitespace(content, objectEnd + "endobj".length(), objectLimit)) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-        }
-        PdfXrefEntry root = crossReference.entries().get(crossReference.rootObject());
-        int rootLimit = inUseEntries.stream()
-            .map(Map.Entry::getValue)
-            .filter(entry -> entry.offset() > root.offset())
-            .mapToInt(PdfXrefEntry::offset)
-            .min()
-            .orElse(xrefOffset);
-        int rootEnd = indexOf(content, "endobj", root.offset(), rootLimit, deadline);
-        if (rootEnd < 0) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        String rootObject = normalizedPdfNames(content, root.offset(), rootEnd, deadline);
-        Matcher pagesMatcher = PDF_PAGES_REFERENCE.matcher(rootObject);
-        if (!PDF_CATALOG.matcher(rootObject).find() || !pagesMatcher.find()) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int pagesObject = parsePositivePdfInteger(pagesMatcher.group(1));
-        int pagesGeneration = parsePdfInteger(pagesMatcher.group(2));
-        PdfXrefEntry pages = crossReference.entries().get(pagesObject);
-        if (pages == null || !pages.inUse() || pages.generation() != pagesGeneration) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int pagesLimit = inUseEntries.stream()
-            .map(Map.Entry::getValue)
-            .filter(entry -> entry.offset() > pages.offset())
-            .mapToInt(PdfXrefEntry::offset)
-            .min()
-            .orElse(xrefOffset);
-        int pagesEnd = indexOf(content, "endobj", pages.offset(), pagesLimit, deadline);
-        if (pagesEnd < 0) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        String pagesContent = normalizedPdfNames(content, pages.offset(), pagesEnd, deadline);
-        if (!PDF_PAGE_TREE.matcher(pagesContent).find()) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-    }
-
-    private static boolean onlyPdfWhitespace(byte[] content, int from, int to) {
-        for (int index = from; index < to; index++) {
-            if (!isPdfWhitespace(content[index])) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean containsZipSignature(byte[] content, Deadline deadline) {
-        for (int offset = 0; offset + 4 <= content.length; offset++) {
-            if ((offset & 0x3fff) == 0) {
-                deadline.check();
-            }
-            if (content[offset] == 'P'
-                    && content[offset + 1] == 'K'
-                    && ZIP_SIGNATURE_SUFFIXES.contains(
-                        unsigned(content[offset + 2]) << 8 | unsigned(content[offset + 3]))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static String normalizedPdfNames(byte[] content, Deadline deadline) {
-        return normalizedPdfNames(content, 0, content.length, deadline);
-    }
-
-    private static String normalizedPdfNames(
-            byte[] content,
-            int from,
-            int to,
-            Deadline deadline) {
-        StringBuilder normalized = new StringBuilder(to - from);
-        for (int index = from; index < to; index++) {
-            if ((index & 0x3fff) == 0) {
-                deadline.check();
-            }
-            int value = unsigned(content[index]);
-            if (value == '#' && index + 2 < to) {
-                int high = Character.digit((char) content[index + 1], 16);
-                int low = Character.digit((char) content[index + 2], 16);
-                if (high >= 0 && low >= 0) {
-                    normalized.append(Character.toLowerCase((char) ((high << 4) | low)));
-                    index += 2;
-                    continue;
+            if (value instanceof COSObject object) {
+                COSBase resolved = object.getObject();
+                if (resolved == null) {
+                    throw UnsupportedUploadMediaTypeException.unsupported();
+                }
+                pending.add(new PdfGraphNode(resolved, node.depth() + 1));
+            } else if (value instanceof COSDictionary dictionary) {
+                inspectPdfDictionary(dictionary);
+                for (Map.Entry<COSName, COSBase> entry : dictionary.entrySet()) {
+                    if (entry.getValue() != null) {
+                        pending.add(new PdfGraphNode(entry.getValue(), node.depth() + 1));
+                    }
+                }
+            } else if (value instanceof COSArray array) {
+                for (COSBase item : array) {
+                    if (item != null) {
+                        pending.add(new PdfGraphNode(item, node.depth() + 1));
+                    }
                 }
             }
-            normalized.append(value < 128 ? Character.toLowerCase((char) value) : ' ');
         }
-        return normalized.toString();
+    }
+
+    private static void inspectPdfDictionary(COSDictionary dictionary) {
+        for (COSName key : dictionary.keySet()) {
+            if (DANGEROUS_PDF_KEYS.contains(key.getName())) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+        }
+        COSName type = dictionary.getCOSName(COSName.TYPE);
+        if (COSName.EMBEDDED_FILE.equals(type)) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        COSName action = dictionary.getCOSName(COSName.S);
+        if (action != null && DANGEROUS_PDF_ACTIONS.contains(action.getName())) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        COSName annotation = dictionary.getCOSName(COSName.SUBTYPE);
+        if (annotation != null && DANGEROUS_PDF_ANNOTATIONS.contains(annotation.getName())) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
     }
 
     private void inspectDocumentPackage(
@@ -1395,30 +1248,6 @@ public class UploadContentInspector implements AutoCloseable {
         return base + "." + extension;
     }
 
-    private static int lastIndexOf(
-            byte[] content,
-            byte[] target,
-            int before,
-            int minimum,
-            Deadline deadline) {
-        for (int offset = before - target.length; offset >= minimum; offset--) {
-            if ((offset & 0x3ff) == 0) {
-                deadline.check();
-            }
-            boolean matched = true;
-            for (int index = 0; index < target.length; index++) {
-                if (content[offset + index] != target[index]) {
-                    matched = false;
-                    break;
-                }
-            }
-            if (matched) {
-                return offset;
-            }
-        }
-        return -1;
-    }
-
     private static int indexOf(
             byte[] content,
             String target,
@@ -1436,48 +1265,8 @@ public class UploadContentInspector implements AutoCloseable {
         return -1;
     }
 
-    private static int parsePdfInteger(byte[] content, int from, int to) {
-        long value = 0;
-        if (from >= to) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        for (int index = from; index < to; index++) {
-            byte digit = content[index];
-            if (digit < '0' || digit > '9') {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            value = value * 10 + digit - '0';
-            if (value > Integer.MAX_VALUE) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-        }
-        return (int) value;
-    }
-
-    private static int parsePositivePdfInteger(String value) {
-        int parsed = parsePdfInteger(value);
-        if (parsed <= 0) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        return parsed;
-    }
-
-    private static int parsePdfInteger(String value) {
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException exception) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-    }
-
     private static boolean isPdfWhitespace(byte value) {
         return value == 0 || value == '\t' || value == '\n' || value == '\f' || value == '\r' || value == ' ';
-    }
-
-    private static boolean isPdfDelimiter(byte value) {
-        return value == '(' || value == ')' || value == '<' || value == '>'
-            || value == '[' || value == ']' || value == '{' || value == '}'
-            || value == '/' || value == '%';
     }
 
     /**
@@ -1568,82 +1357,7 @@ public class UploadContentInspector implements AutoCloseable {
 
     private record XmlRoot(String namespaceUri, String localName) {}
 
-    private record PdfCrossReference(
-            Map<Integer, PdfXrefEntry> entries,
-            int rootObject) {}
-
-    private record PdfXrefEntry(int offset, int generation, boolean inUse) {}
-
-    private static final class PdfCursor {
-        private final byte[] content;
-        private final int limit;
-        private final Deadline deadline;
-        private int position;
-
-        private PdfCursor(byte[] content, int position, int limit, Deadline deadline) {
-            this.content = content;
-            this.position = position;
-            this.limit = limit;
-            this.deadline = deadline;
-        }
-
-        private boolean hasRemaining() {
-            return position < limit;
-        }
-
-        private int position() {
-            return position;
-        }
-
-        private boolean startsWith(String value) {
-            deadline.check();
-            return position + value.length() <= limit
-                && asciiEquals(content, position, value);
-        }
-
-        private void requireToken(String value) {
-            if (!startsWith(value)) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            position += value.length();
-            if (position < limit && !isPdfWhitespace(content[position])
-                    && !isPdfDelimiter(content[position])) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-        }
-
-        private void skipWhitespace() {
-            while (position < limit && isPdfWhitespace(content[position])) {
-                position++;
-            }
-            deadline.check();
-        }
-
-        private void requireWhitespace() {
-            if (position >= limit || !isPdfWhitespace(content[position])) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            skipWhitespace();
-        }
-
-        private int readInteger() {
-            deadline.check();
-            int start = position;
-            while (position < limit
-                    && content[position] >= '0'
-                    && content[position] <= '9') {
-                position++;
-            }
-            return parsePdfInteger(content, start, position);
-        }
-
-        private char readAsciiCharacter() {
-            if (position >= limit || unsigned(content[position]) >= 128) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            return (char) content[position++];
-        }
-    }
+    private record PdfGraphNode(COSBase value, int depth) {}
 
     private static final class Deadline {
         private final long expiresAt;
@@ -1669,7 +1383,9 @@ public class UploadContentInspector implements AutoCloseable {
         private final Set<String> officeDocumentTargets = new HashSet<>();
         private final Set<String> relationshipTargets = new HashSet<>();
         private final Set<String> relationshipIds = new HashSet<>();
+        private final List<WordFieldState> wordFields = new ArrayList<>();
         private int depth;
+        private int instructionTextDepth;
         private XmlRoot root;
 
         private SafeXmlHandler(Deadline deadline, String entryName) {
@@ -1699,6 +1415,7 @@ public class UploadContentInspector implements AutoCloseable {
             if (ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
                 throw new SAXException("Active XML content is not allowed");
             }
+            inspectWordFieldStart(uri, normalizedElement, attributes);
             if (formulaElement(uri, normalizedElement)) {
                 throw new SAXException("Spreadsheet formulas are not allowed");
             }
@@ -1730,15 +1447,19 @@ public class UploadContentInspector implements AutoCloseable {
                     }
                 }
                 String normalizedName = name.toLowerCase(Locale.ROOT);
-                if ("instr".equals(normalizedName)
+                if (("instr".equals(normalizedName)
+                            && !(WORDPROCESSING_NAMESPACES.contains(uri)
+                                && "fldsimple".equals(normalizedElement)))
                         || normalizedName.contains("formula")
                         || "refersto".equals(normalizedName)) {
                     throw new SAXException("Active document instruction is not allowed");
                 }
-                if ("TargetMode".equalsIgnoreCase(name) && "External".equalsIgnoreCase(value)) {
-                    throw new SAXException("External package relationship is not allowed");
-                }
                 if ("href".equalsIgnoreCase(name)) {
+                    if (ODF_TEXT_NAMESPACE.equals(uri)
+                            && "a".equals(normalizedElement)
+                            && safeExternalHyperlink(value)) {
+                        continue;
+                    }
                     String referencedTarget = normalizePackageReference(value);
                     if (referencedTarget != null) {
                         relationshipTargets.add(referencedTarget);
@@ -1750,12 +1471,35 @@ public class UploadContentInspector implements AutoCloseable {
         @Override
         public void endElement(String uri, String localName, String qualifiedName) {
             deadline.check();
+            String element = localName.isEmpty() ? qualifiedName : localName;
+            if (WORDPROCESSING_NAMESPACES.contains(uri)
+                    && "instrtext".equals(element.toLowerCase(Locale.ROOT))) {
+                instructionTextDepth = 0;
+            }
             depth--;
         }
 
         @Override
-        public void characters(char[] characters, int start, int length) {
+        public void characters(char[] characters, int start, int length) throws SAXException {
             deadline.check();
+            if (instructionTextDepth > 0) {
+                if (wordFields.isEmpty()) {
+                    throw new SAXException("Word field instruction is malformed");
+                }
+                WordFieldState field = wordFields.getLast();
+                if (field.instruction().length() + length
+                        > MAX_WORD_FIELD_INSTRUCTION_CHARACTERS) {
+                    throw new SAXException("Word field instruction exceeds safe bounds");
+                }
+                field.instruction().append(characters, start, length);
+            }
+        }
+
+        @Override
+        public void endDocument() throws SAXException {
+            if (!wordFields.isEmpty() || instructionTextDepth != 0) {
+                throw new SAXException("Word field instruction is malformed");
+            }
         }
 
         @Override
@@ -1799,8 +1543,17 @@ public class UploadContentInspector implements AutoCloseable {
                     || !relationshipIds.add(id)
                     || relationshipType == null
                     || relationshipType.isBlank()
-                    || target == null
-                    || targetMode != null && !"Internal".equalsIgnoreCase(targetMode.trim())) {
+                    || target == null) {
+                throw new SAXException("Package relationship is invalid");
+            }
+            if (targetMode != null && "External".equalsIgnoreCase(targetMode.trim())) {
+                if (!OOXML_HYPERLINK_RELATIONSHIPS.contains(relationshipType)
+                        || !safeExternalHyperlink(target)) {
+                    throw new SAXException("External package relationship is not allowed");
+                }
+                return;
+            }
+            if (targetMode != null && !"Internal".equalsIgnoreCase(targetMode.trim())) {
                 throw new SAXException("Package relationship is invalid");
             }
             String normalizedTarget = normalizeRelationshipTarget(entryName, target);
@@ -1809,6 +1562,104 @@ public class UploadContentInspector implements AutoCloseable {
                     && OOXML_OFFICE_DOCUMENT_RELATIONSHIPS.contains(relationshipType)
                     && !officeDocumentTargets.add(normalizedTarget)) {
                 throw new SAXException("Package office document relationship is ambiguous");
+            }
+        }
+
+        private void inspectWordFieldStart(
+                String uri,
+                String element,
+                Attributes attributes) throws SAXException {
+            if (!WORDPROCESSING_NAMESPACES.contains(uri)) {
+                return;
+            }
+            if ("fldsimple".equals(element)) {
+                String instruction = attribute(attributes, "instr");
+                if (instruction == null) {
+                    throw new SAXException("Word field instruction is malformed");
+                }
+                validateWordFieldInstruction(instruction);
+                return;
+            }
+            if ("instrtext".equals(element)) {
+                if (wordFields.isEmpty() || instructionTextDepth != 0) {
+                    throw new SAXException("Word field instruction is malformed");
+                }
+                instructionTextDepth = depth;
+                return;
+            }
+            if (!"fldchar".equals(element)) {
+                return;
+            }
+            String fieldCharacterType = attribute(attributes, "fldCharType");
+            if (fieldCharacterType == null) {
+                throw new SAXException("Word field instruction is malformed");
+            }
+            switch (fieldCharacterType.toLowerCase(Locale.ROOT)) {
+                case "begin" -> wordFields.add(new WordFieldState());
+                case "separate" -> validateCurrentWordField();
+                case "end" -> {
+                    validateCurrentWordField();
+                    wordFields.removeLast();
+                }
+                default -> throw new SAXException("Word field instruction is malformed");
+            }
+        }
+
+        private void validateCurrentWordField() throws SAXException {
+            if (wordFields.isEmpty()) {
+                throw new SAXException("Word field instruction is malformed");
+            }
+            WordFieldState field = wordFields.getLast();
+            if (!field.validated()) {
+                validateWordFieldInstruction(field.instruction().toString());
+                field.markValidated();
+            }
+        }
+
+        /**
+         * Allows inert display, numbering, metadata, merge, index, and cross-reference fields used
+         * by ordinary word processors. Commands outside this reviewed set fail closed, including
+         * DDE, INCLUDETEXT, INCLUDEPICTURE, LINK, DATABASE, ASK, FILLIN, MACROBUTTON, and GOTOBUTTON
+         * because those commands can reach external data, prompt automatically, or invoke
+         * application behavior.
+         */
+        private static void validateWordFieldInstruction(String instruction) throws SAXException {
+            String normalized = instruction.strip();
+            int commandEnd = 0;
+            while (commandEnd < normalized.length()
+                    && Character.isLetter(normalized.charAt(commandEnd))) {
+                commandEnd++;
+            }
+            if (commandEnd == 0
+                    || !SAFE_WORD_FIELD_COMMANDS.contains(
+                        normalized.substring(0, commandEnd).toUpperCase(Locale.ROOT))) {
+                throw new SAXException("Active document instruction is not allowed");
+            }
+        }
+
+        /**
+         * Accepts only user-activated web and email hyperlinks. Package references that can cause
+         * automatic fetching, local-file access, or application-specific execution remain blocked.
+         */
+        private static boolean safeExternalHyperlink(String value) {
+            String normalized = value.strip();
+            if (normalized.isEmpty() || normalized.length() > 2048 || normalized.contains("\\")) {
+                return false;
+            }
+            try {
+                URI uri = URI.create(normalized);
+                String scheme = uri.getScheme();
+                if (scheme == null || uri.getUserInfo() != null) {
+                    return false;
+                }
+                return switch (scheme.toLowerCase(Locale.ROOT)) {
+                    case "http", "https" -> uri.getHost() != null && !uri.getHost().isBlank();
+                    case "mailto" -> uri.getSchemeSpecificPart() != null
+                        && !uri.getSchemeSpecificPart().isBlank();
+                    default -> false;
+                };
+            } catch (IllegalArgumentException exception) {
+                return false;
             }
         }
 
@@ -1961,6 +1812,23 @@ public class UploadContentInspector implements AutoCloseable {
                 && (normalizedUri.contains("spreadsheet")
                     || normalizedUri.contains("/excel/")
                     || normalizedUri.contains("/chart"));
+        }
+
+        private static final class WordFieldState {
+            private final StringBuilder instruction = new StringBuilder();
+            private boolean validated;
+
+            private StringBuilder instruction() {
+                return instruction;
+            }
+
+            private boolean validated() {
+                return validated;
+            }
+
+            private void markValidated() {
+                validated = true;
+            }
         }
 
     }
