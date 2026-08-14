@@ -1,10 +1,9 @@
-import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import { describe, expect, it } from "vitest";
 
 import nextConfig from "@/next.config";
-import { config as proxyConfig, proxy } from "@/proxy";
+import { config as proxyConfig } from "@/proxy";
 
 const FRONTEND_CONTENT_SECURITY_POLICY = "frame-ancestors 'none'";
 const ATTACHMENT_CONTENT_SECURITY_POLICY =
@@ -54,14 +53,9 @@ describe("frontend security headers", () => {
     });
 
     it.each([
-        ["an API rewrite", "/api/auth/csrf", "http://localhost:8080/api/auth/csrf"],
-        ["a SAML rewrite", "/saml2/authenticate/example", "http://localhost:8080/saml2/authenticate/example"],
-    ])("protects %s when the backend is unavailable", (_description, path, destination) => {
-        expect(unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig, url: path })).toBe(true);
-
-        const response = proxy(new NextRequest(`http://localhost:3000${path}`));
-
-        expectFrontendSecurityHeaders(new Map(response.headers.entries()));
-        expect(response.headers.get("x-middleware-rewrite")).toBe(destination);
+        ["an API path", "/api/auth/csrf"],
+        ["a SAML path", "/saml2/authenticate/example"],
+    ])("leaves %s to the configured rewrite rather than proxy interception", (_description, path) => {
+        expect(unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig, url: path })).toBe(false);
     });
 });

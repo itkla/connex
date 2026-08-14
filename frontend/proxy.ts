@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import { isProtectedPath } from '@/app/lib/protectedRoutes';
-import { applyFrontendSecurityHeaders } from '@/security-headers';
 
 const SESSION_COOKIE = 'JSESSIONID';
-const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:8080';
 
 const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
     '/auth/register',
@@ -17,13 +15,6 @@ const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
 export function proxy(request: NextRequest) {
     const { pathname, search, searchParams } = request.nextUrl;
     const hasSession = request.cookies.has(SESSION_COOKIE);
-
-    if (pathname === '/api' || pathname.startsWith('/api/') || pathname === '/saml2' || pathname.startsWith('/saml2/')) {
-        const backendUrl = new URL(pathname + search, BACKEND_URL);
-        const response = NextResponse.rewrite(backendUrl);
-        applyFrontendSecurityHeaders(response.headers);
-        return response;
-    }
 
     // Onboarding needs a session but must stay reachable even with a leftover
     // connex_workspace cookie: after involuntary membership removal that cookie
@@ -98,7 +89,5 @@ export const config = {
         '/onboarding',
         '/invite/:path*',
         '/invite-link/:path*',
-        '/api/:path*',
-        '/saml2/:path*',
     ],
 };
