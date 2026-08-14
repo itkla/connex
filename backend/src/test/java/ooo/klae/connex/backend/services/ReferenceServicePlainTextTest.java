@@ -88,6 +88,22 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
+    void toPlainText_scansLongIndentRunsInLinearTime() {
+        String content = "[n]:" + "\t".repeat(50_000) + "x";
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5),
+            () -> assertEquals(content, ReferenceService.toPlainText(content)));
+    }
+
+    @Test
+    void toPlainText_redactsNoteDefinitionsWithTabbedSeparatorsAndDescriptions() {
+        assertEquals("a note", ReferenceService.toPlainText("[n]:\t\tnote:123"));
+        assertEquals("a note", ReferenceService.toPlainText("[n]:  \t note:123\t\ttrailing"));
+        assertEquals("a note", ReferenceService.toPlainText("[n]:\n\t\t note:88 x"));
+        assertEquals("a note", ReferenceService.toPlainText("\t[tab]: note:2"));
+    }
+
+    @Test
     void toPlainText_preservesNoteLikeProseOutsideMarkdownDestinations() {
         String content = "Ship release-note:123 after reviewing note:456 in plain prose";
 

@@ -75,7 +75,7 @@ All four regexes consume request-controlled input. Measured on Java 26 before th
 
 | Alert | Site | Construct | Measured behaviour on hostile input |
 | --- | --- | --- | --- |
-| #14 | `ReferenceService` `NOTE_REFERENCE_DEFINITION` | `(?:\\.\|[^\]\\])+` before `\]` | **`StackOverflowError`** at ~2,000 characters |
+| #14 | `ReferenceService` `NOTE_REFERENCE_DEFINITION` | `[ \t]` runs (flagged); `(?:\\.\|[^\]\\])+` before `\]` (not flagged) | tab runs 0–9 ms; label repetition **`StackOverflowError`** at ~2,000 characters |
 | #13 | `ImportService.slug` | `^_+\|_+$` | 20k chars → 705 ms; 60k → 6.1 s; 120k → 23.0 s |
 | #11 | `CompanyService.legacyWebsiteKey` | `/+$` | 20k chars → 1.06 s; 60k → 9.2 s; 120k → 37.0 s |
 | #12 | `ImportService.validateRequired` | `^[^@\s]+@[^@\s]+\.[^@\s]+$` | Not reproducible — see below |
@@ -83,13 +83,24 @@ All four regexes consume request-controlled input. Measured on Java 26 before th
 Reachability and severity, assessed per
 [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md#risk-adjusted-severity):
 
-- **#14 is the material one.** `markdownNoteTargets` runs over note, task, activity, comment and
-  introduction prose. Any line beginning with `[` followed by roughly 2,000 characters before the
-  closing bracket crashes the scan with a `StackOverflowError` — not merely slow, an unhandled error
-  on an authenticated request path, reachable from ordinary long-bracketed prose without hostile
-  intent. Fixed by making the label repetition possessive. That is language-preserving here: neither
-  alternative can consume a bare `]`, so giving characters back can never let the following `\]`
-  match.
+- **#14 is the material one, but not for the reason CodeQL gives.** The alert text names "many
+  repetitions of `\t`" — the `[ \t]` indent and description runs. Those were measured at 0–9 ms up
+  to 60k characters, so the flagged construct is the theoretical one. The construct CodeQL did
+  **not** flag, the label repetition `(?:\\.|[^\]\\])+` before `\]`, is the one that actually
+  fails: `markdownNoteTargets` runs over note, task, activity, comment and introduction prose, and
+  any line beginning with `[` followed by roughly 2,000 characters before the closing bracket
+  crashes the scan with an unhandled `StackOverflowError` on an authenticated request path,
+  reachable from ordinary long-bracketed prose without hostile intent.
+
+  Both are fixed by making every repetition in the pattern possessive, which is language-preserving
+  here: no label alternative can consume a bare `]`, and no indent run can be followed by a space
+  or tab that the next required token would accept. The trailing description group is also
+  rewritten from `[ \t]+.*` to `[ \t].*`, which is exactly equivalent because `.` already covers
+  further spaces and tabs, and removes the genuine ambiguity CodeQL objected to.
+
+  **This is worth remembering when reading the rest of this log:** on the one finding in the batch
+  that turned out to be a real crash, the query pointed at the wrong construct. Alert text is a
+  starting point for triage, not the finding.
 - **#13 is a real authenticated CPU-exhaustion path.** `ColumnMapping.customFieldLabel` carries no
   `@Size` constraint, so an import mapping can supply an arbitrarily long label, and `slug` is
   reached from `previewPersons`/`previewCompanies`/`previewDeals` through

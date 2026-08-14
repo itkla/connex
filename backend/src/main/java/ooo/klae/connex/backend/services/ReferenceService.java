@@ -85,14 +85,17 @@ public class ReferenceService {
     private static final Pattern NOTE_TOKEN = Pattern.compile(
         "\\[([^\\]]+)\\]\\(note" + REFERENCE_SEPARATOR + "(\\d+)\\)");
     /**
-     * Matches a Markdown link-reference definition pointing at a note. The label repetition is
-     * possessive: neither alternative can consume a bare {@code ]}, so giving characters back can
-     * never let the following {@code \]} match, and forbidding it keeps an untrusted note body from
-     * driving quadratic backtracking.
+     * Matches a Markdown link-reference definition pointing at a note. Every repetition is
+     * possessive so an untrusted note body cannot drive backtracking, and each is unambiguous in
+     * context, so refusing to give characters back does not change what the pattern matches: no
+     * label alternative can consume a bare {@code ]}, and no indent run can be followed by a
+     * space or tab that the next required token would accept. The trailing description is
+     * {@code [ \t].*} rather than {@code [ \t]+.*} because {@code .} already covers further
+     * spaces and tabs.
      */
     private static final Pattern NOTE_REFERENCE_DEFINITION = Pattern.compile(
-        "(?im)^[ \\t]{0,3}\\[(?:\\\\.|[^\\]\\\\])++\\]:[ \\t]*"
-            + "(?:\\r?\\n[ \\t]+)?<?note:(\\d+)>?(?:[ \\t]+.*)?$");
+        "(?im)^[ \\t]{0,3}+\\[(?:\\\\.|[^\\]\\\\])++\\]:[ \\t]*+"
+            + "(?:\\r?\\n[ \\t]++)?<?note:(\\d+)>?(?:[ \\t].*)?$");
 
     /**
      * Reader-scoped prose and structured references after private-note targets are removed.
