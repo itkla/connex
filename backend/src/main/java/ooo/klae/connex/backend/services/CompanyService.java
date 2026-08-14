@@ -434,7 +434,11 @@ public class CompanyService {
         String normalized = website.trim().toLowerCase(Locale.ROOT);
         normalized = normalized.replaceFirst("^https?://", "");
         normalized = normalized.replaceFirst("^www\\.", "");
-        return normalized.replaceAll("/+$", "");
+        int end = normalized.length();
+        while (end > 0 && normalized.charAt(end - 1) == '/') {
+            end--;
+        }
+        return normalized.substring(0, end);
     }
 
     /**

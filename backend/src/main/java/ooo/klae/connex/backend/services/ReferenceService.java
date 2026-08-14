@@ -84,8 +84,14 @@ public class ReferenceService {
             + REFERENCE_SEPARATOR + "(\\d+)\\)");
     private static final Pattern NOTE_TOKEN = Pattern.compile(
         "\\[([^\\]]+)\\]\\(note" + REFERENCE_SEPARATOR + "(\\d+)\\)");
+    /**
+     * Matches a Markdown link-reference definition pointing at a note. The label repetition is
+     * possessive: neither alternative can consume a bare {@code ]}, so giving characters back can
+     * never let the following {@code \]} match, and forbidding it keeps an untrusted note body from
+     * driving quadratic backtracking.
+     */
     private static final Pattern NOTE_REFERENCE_DEFINITION = Pattern.compile(
-        "(?im)^[ \\t]{0,3}\\[(?:\\\\.|[^\\]\\\\])+\\]:[ \\t]*"
+        "(?im)^[ \\t]{0,3}\\[(?:\\\\.|[^\\]\\\\])++\\]:[ \\t]*"
             + "(?:\\r?\\n[ \\t]+)?<?note:(\\d+)>?(?:[ \\t]+.*)?$");
 
     /**

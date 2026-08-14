@@ -64,6 +64,30 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
+    void toPlainText_redactsLongLabelledNoteDefinitionsInLinearTime() {
+        String content = "[" + "a".repeat(50_000) + "]: note:123";
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5),
+            () -> assertEquals("a note", ReferenceService.toPlainText(content)));
+    }
+
+    @Test
+    void toPlainText_preservesLongLabelledNonNoteDefinitionsInLinearTime() {
+        String content = "[" + "a".repeat(50_000) + "]: https://example.com/docs";
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5),
+            () -> assertEquals(content, ReferenceService.toPlainText(content)));
+    }
+
+    @Test
+    void toPlainText_preservesUnterminatedLabelsInLinearTime() {
+        String content = "[" + "a".repeat(50_000);
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5),
+            () -> assertEquals(content, ReferenceService.toPlainText(content)));
+    }
+
+    @Test
     void toPlainText_preservesNoteLikeProseOutsideMarkdownDestinations() {
         String content = "Ship release-note:123 after reviewing note:456 in plain prose";
 
