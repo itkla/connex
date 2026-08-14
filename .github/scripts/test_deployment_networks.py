@@ -15,6 +15,7 @@ DOCKER_CLIENT_LIB_PATH = ROOT / "deploy" / "backup" / "shims" / "docker-client-l
 BACKUP_INSTALL_PATH = ROOT / "deploy" / "backup" / "install.sh"
 DEPLOYMENT_DOC_PATH = ROOT / "docs" / "DEPLOYMENT.md"
 UPGRADING_DOC_PATH = ROOT / "docs" / "UPGRADING.md"
+LOCAL_DEV_COMPOSE_PATH = ROOT / "backend" / "docker-compose.yml"
 DIGEST = "0" * 64
 
 
@@ -32,6 +33,7 @@ def resolve_compose_model(
             "CONNEX_DB_PASSWORD": "network-test",
             "CONNEX_DB_ROOT_PASSWORD": "network-root-test",
             "CONNEX_OCR_SERVICE_TOKEN": "0" * 32,
+            "CONNEX_DB_USERNAME": "network-test-user",
             "COMPOSE_PROFILES": "",
         }
     )
@@ -141,6 +143,24 @@ class DeploymentNetworkTest(unittest.TestCase):
     def test_caddy_host_port_defaults_to_80(self) -> None:
         compose = resolve_compose_model(COMPOSE_PATH, http_port=None)
         self.assertEqual("80", compose["services"]["caddy"]["ports"][0]["published"])
+
+    def test_local_development_publishes_only_on_loopback(self) -> None:
+        model = resolve_compose_model(LOCAL_DEV_COMPOSE_PATH, http_port=None)
+        services = model["services"]
+        published = [
+            (name, port)
+            for name, service in services.items()
+            for port in service.get("ports", [])
+        ]
+        self.assertTrue(published, "the local development stack must publish something")
+        for name, port in published:
+            self.assertEqual(
+                "127.0.0.1",
+                port.get("host_ip"),
+                f"{name} publishes {port.get('published')} beyond loopback; the local"
+                " development database and its admin console must not be reachable"
+                " from the local network",
+            )
 
     def test_backup_run_mode_uses_only_the_database_network(self) -> None:
         expected = "CONNEX_BACKUP_DOCKER_NETWORK=auto"

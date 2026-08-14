@@ -50,7 +50,7 @@ services:
     image: adminer:5.4.2@sha256:983261ecc40a4aaf11e25aeda8ef821f5a43a9f024b3967c81cbcc0e6ce43ba3
     restart: always
     ports:
-      - 9001:8080
+      - 127.0.0.1:9001:8080
 
 networks:
   ocr_internal:
