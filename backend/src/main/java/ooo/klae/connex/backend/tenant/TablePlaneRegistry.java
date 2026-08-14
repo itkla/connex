@@ -45,6 +45,7 @@ public final class TablePlaneRegistry {
         "organization_ai_budget_usage",
         "app_user",
         "appi_incident",
+        "auth_logout_audit_claim",
         "audit_log",
         "audit_log_integrity_checkpoint",
         "audit_log_integrity_head",

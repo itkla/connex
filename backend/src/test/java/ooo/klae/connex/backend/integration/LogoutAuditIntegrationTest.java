@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -15,6 +16,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.Cookie;
@@ -33,6 +39,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.Organization;
@@ -144,13 +151,15 @@ class LogoutAuditIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void auditFailureNeverPreventsSessionDestruction() throws Exception {
         Workspace workspace = newWorkspace("failure");
         User user = newMember(workspace);
         MockHttpSession session = login(user.getUsername());
+        String sessionHash = sha256Hex(session.getId());
         doThrow(new IllegalStateException("audit unavailable"))
             .when(auditService)
-            .recordScoped(eq("auth.logout"), eq("user"), eq(user.getId()),
+            .recordStrictScoped(eq("auth.logout"), eq("user"), eq(user.getId()),
                 eq(workspace.getId()), eq(workspace.getOrgId()), any(), any(), isNull());
 
         mockMvc.perform(post("/api/auth/logout")
@@ -160,6 +169,64 @@ class LogoutAuditIntegrationTest {
 
         assertThrows(IllegalStateException.class, () -> session.getAttribute("SPRING_SECURITY_CONTEXT"));
         assertEquals(0, logoutCount(user.getId()));
+        Integer claims = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM auth_logout_audit_claim WHERE session_hash = ?",
+            Integer.class,
+            sessionHash);
+        assertEquals(0, claims);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentLogoutRequestsForOneSessionWriteExactlyOneEvent() throws Exception {
+        Workspace workspace = newWorkspace("concurrent");
+        User user = newMember(workspace);
+        MockHttpSession authenticatedSession = login(user.getUsername());
+        String rawSessionId = "concurrent-logout-session-" + UUID.randomUUID();
+        MockHttpSession firstSession = new MockHttpSession(
+            context.getServletContext(), rawSessionId);
+        MockHttpSession secondSession = new MockHttpSession(
+            context.getServletContext(), rawSessionId);
+        firstSession.deserializeState(authenticatedSession.serializeState());
+        secondSession.deserializeState(authenticatedSession.serializeState());
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Integer> first = executor.submit(
+                () -> concurrentLogoutStatus(firstSession, workspace.getId(), ready, start));
+            Future<Integer> second = executor.submit(
+                () -> concurrentLogoutStatus(secondSession, workspace.getId(), ready, start));
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+
+            assertEquals(200, first.get(10, TimeUnit.SECONDS));
+            assertEquals(200, second.get(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals(1, logoutCount(user.getId()));
+        Integer claims = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM auth_logout_audit_claim WHERE session_hash = ?",
+            Integer.class,
+            sha256Hex(rawSessionId));
+        assertEquals(1, claims);
+    }
+
+    private int concurrentLogoutStatus(
+            MockHttpSession session,
+            int workspaceId,
+            CountDownLatch ready,
+            CountDownLatch start) throws Exception {
+        ready.countDown();
+        if (!start.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("Concurrent logout start timed out");
+        }
+        return mockMvc.perform(post("/api/auth/logout")
+                .session(session)
+                .header("X-Workspace-Id", workspaceId))
+            .andReturn()
+            .getResponse()
+            .getStatus();
     }
 
     private MockHttpSession login(String username) throws Exception {
