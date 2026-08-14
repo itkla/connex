@@ -67,7 +67,10 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
-    private static final Path OBJECT_ROOT = temporaryRoot();
+    private static final Path OBJECT_ROOT = Path.of(
+        System.getProperty("java.io.tmpdir"), "connex-test-object-storage")
+        .toAbsolutePath()
+        .normalize();
 
     @Autowired private BusinessCardService service;
     @Autowired private PersonService personService;
