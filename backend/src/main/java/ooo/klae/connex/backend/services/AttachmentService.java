@@ -243,13 +243,35 @@ public class AttachmentService {
 
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment upload(String entityType, int entityId, UploadSource source, User uploader) {
+        return upload(entityType, entityId, source, uploader, false);
+    }
+
+    /** Stores a strictly image-only managed attachment for inline record or note rendering. */
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
+    public Attachment uploadInlineImage(
+            String entityType,
+            int entityId,
+            UploadSource source,
+            User uploader) {
+        return upload(entityType, entityId, source, uploader, true);
+    }
+
+    private Attachment upload(
+            String entityType,
+            int entityId,
+            UploadSource source,
+            User uploader,
+            boolean inlineImage) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String normalizedType = normalizeType(entityType);
         requireGenericAttachmentType(normalizedType);
         UserDisplayNameDto targetLabel = requireVisibleUserTarget(
             workspaceId, normalizedType, entityId);
-        Attachment attachment = attachmentWriteOperations.upload(
-            workspaceId, normalizedType, entityId, source, uploader);
+        Attachment attachment = inlineImage
+            ? attachmentWriteOperations.uploadInlineImage(
+                workspaceId, normalizedType, entityId, source, uploader)
+            : attachmentWriteOperations.upload(
+                workspaceId, normalizedType, entityId, source, uploader);
         return attachmentReadService.hydrateKnown(
             workspaceId, attachment, uploader, targetLabel);
     }

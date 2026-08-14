@@ -50,7 +50,9 @@ class BusinessCardImageValidatorTest {
         ObjectStorageProperties storageProperties = new ObjectStorageProperties();
         storageProperties.setMaxConcurrentImageDecodes(1);
         validator = new BusinessCardImageValidator(
-                properties, new ImageDecodeAdmissionService(storageProperties));
+                properties,
+                new ImageDecodeAdmissionService(storageProperties),
+                new ooo.klae.connex.backend.storage.UploadPolicy(storageProperties));
     }
 
     @Test
@@ -71,14 +73,13 @@ class BusinessCardImageValidatorTest {
     }
 
     @Test
-    void acceptsFullyDecodedJpegWithGenericDeclaredType() throws IOException {
+    void rejectsGenericDeclaredTypeAndExtension() throws IOException {
         byte[] content = image("jpg", BufferedImage.TYPE_INT_RGB, 240, 140);
 
-        ValidatedBusinessCardImage validated = validator.validate(
-                new MockMultipartFile("image", "card.bin", "application/octet-stream", content));
-
-        assertEquals("image/jpeg", validated.contentType());
-        assertEquals("jpg", validated.extension());
+        assertThrows(
+            ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException.class,
+            () -> validator.validate(new MockMultipartFile(
+                "image", "card.bin", "application/octet-stream", content)));
     }
 
     @Test

@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.storage.ImageUploadValidator;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedAiImage;
 import ooo.klae.connex.backend.storage.UploadPolicy;
 import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 /** Validates the deliberately narrow text and image boundary for assistant context files. */
@@ -51,7 +52,7 @@ public class AiChatAttachmentPolicy {
 
     /** Validates and canonicalizes one upload before managed-object storage. */
     public UploadSource prepare(UploadSource source) {
-        ValidatedUpload generic = uploadPolicy.validateGeneric(source);
+        ValidatedUpload generic = uploadPolicy.validate(UploadPurpose.ASSISTANT_CONTEXT, source);
         String extension = extension(generic.fileName());
         String contentType = generic.contentType();
         if (IMAGE_TYPES.contains(contentType)

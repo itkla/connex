@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService.Lease;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
  * Fully decodes bounded managed raster uploads and emits metadata-free canonical bytes.
@@ -80,7 +81,7 @@ public class ImageUploadValidator {
     }
 
     private DecodedImage validate(UploadSource source, boolean preserveAlpha, long maxOutputBytes) {
-        uploadPolicy.validateLength(source.contentLength());
+        uploadPolicy.validate(UploadPurpose.PROFILE_IMAGE, source);
         try (Lease lease = decodeAdmission.tryAcquire().orElseThrow(
                 () -> new ServiceUnavailableException("Image validation is busy; retry shortly"))) {
             byte[] bytes = read(source);

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 /** Isolates attachment persistence in a proxied tenant transaction before normal label hydration. */
@@ -56,7 +57,17 @@ public class AttachmentWriteOperations {
     public Attachment upload(
             int workspaceId, String entityType, int entityId, UploadSource source, User uploader) {
         requireTenantTarget(workspaceId, entityType, entityId);
-        return storeAndPersist(workspaceId, entityType, entityId, source, uploader);
+        return storeAndPersist(
+            workspaceId, entityType, entityId, source, uploader, UploadPurpose.ATTACHMENT);
+    }
+
+    /** Stores and persists a managed inline image in one tenant transaction. */
+    @Transactional
+    public Attachment uploadInlineImage(
+            int workspaceId, String entityType, int entityId, UploadSource source, User uploader) {
+        requireTenantTarget(workspaceId, entityType, entityId);
+        return storeAndPersist(
+            workspaceId, entityType, entityId, source, uploader, UploadPurpose.INLINE_IMAGE);
     }
 
     /** Stores a managed assistant attachment after the caller has locked and authorized its session. */
@@ -67,12 +78,22 @@ public class AttachmentWriteOperations {
             throw new ResourceNotFoundException("Attachment target was not found");
         }
         return storeAndPersist(
-                workspaceId, "ai_chat_session", sessionId, source, uploader);
+            workspaceId,
+            "ai_chat_session",
+            sessionId,
+            source,
+            uploader,
+            UploadPurpose.ASSISTANT_CONTEXT);
     }
 
     private Attachment storeAndPersist(
-            int workspaceId, String entityType, int entityId, UploadSource source, User uploader) {
-        StoredBinary stored = managedObjectService.storeAttachment(workspaceId, source);
+            int workspaceId,
+            String entityType,
+            int entityId,
+            UploadSource source,
+            User uploader,
+            UploadPurpose purpose) {
+        StoredBinary stored = managedObjectService.storeAttachment(workspaceId, purpose, source);
         Attachment attachment = new Attachment();
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(entityType);

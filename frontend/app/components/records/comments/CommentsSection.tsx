@@ -19,7 +19,7 @@ import {
     reopenCommentThread,
     replyToCommentThread,
     resolveCommentThread,
-    uploadAttachment,
+    uploadAttachmentImage,
 } from '@/app/lib/api';
 import { normalizeNoteImageSource } from '@/app/components/activity/notes/editor/noteImageSource';
 import type { DraftKeyParts } from '@/app/lib/formDrafts';
@@ -285,7 +285,7 @@ export default function CommentsSection({
     const attachImage = useCallback(
         async (file: File): Promise<string | null> => {
             try {
-                const attachment = await uploadAttachment(targetType, targetId, file);
+                const attachment = await uploadAttachmentImage(targetType, targetId, file);
                 const source = normalizeNoteImageSource(attachment.url);
                 if (!source) {
                     toastError(t('imageUploadFailed'));

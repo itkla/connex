@@ -34,6 +34,9 @@ import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService.Lease;
 import ooo.klae.connex.backend.storage.CappedImageOutputStream;
 import ooo.klae.connex.backend.storage.CappedImageOutputStream.LimitExceededException;
+import ooo.klae.connex.backend.storage.UploadPolicy;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 /**
  * Verifies bounded raster inputs and emits orientation-normalized, metadata-free JPEG content.
@@ -48,12 +51,15 @@ public class BusinessCardImageValidator {
 
     private final BusinessCardProperties properties;
     private final ImageDecodeAdmissionService decodeAdmission;
+    private final UploadPolicy uploadPolicy;
 
     public BusinessCardImageValidator(
             BusinessCardProperties properties,
-            ImageDecodeAdmissionService decodeAdmission) {
+            ImageDecodeAdmissionService decodeAdmission,
+            UploadPolicy uploadPolicy) {
         this.properties = properties;
         this.decodeAdmission = decodeAdmission;
+        this.uploadPolicy = uploadPolicy;
         ImageIO.setUseCache(false);
     }
 
@@ -74,6 +80,7 @@ public class BusinessCardImageValidator {
         if (image == null || image.isEmpty()) {
             throw new UnprocessableBusinessCardException("Business-card image is empty");
         }
+        uploadPolicy.validate(UploadPurpose.BUSINESS_CARD_IMAGE, UploadSource.from(image));
         if (image.getSize() > properties.getMaxImageBytes()) {
             throw new RequestBodyTooLargeException(properties.getMaxImageBytes());
         }

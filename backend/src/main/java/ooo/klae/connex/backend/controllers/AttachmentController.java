@@ -145,6 +145,20 @@ public class AttachmentController {
         ));
     }
 
+    /** Stores and records a private image that will be rendered inline in a record or note. */
+    @PostMapping(value = "/upload-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public AttachmentDto uploadInlineImage(
+            @RequestParam String entityType,
+            @RequestParam int entityId,
+            @RequestPart("file") MultipartFile file) {
+        return AttachmentDto.from(attachmentService.uploadInlineImage(
+            entityType,
+            entityId,
+            UploadSource.from(file),
+            authService.getCurrentUser()
+        ));
+    }
+
     /**
      * DELETE endpoint to remove an attachment record by ID.
      */

@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredMigratedImage;
 import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
  * Validates, copies, verifies, and atomically rewrites one legacy upload reference.
@@ -34,8 +35,8 @@ public class LegacyUploadMigrationTransaction {
     public long validateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
         byte[] content = resolved.content();
-        ValidatedUpload upload = uploadPolicy.validateGeneric(
-            attachmentSource(record, resolved));
+        ValidatedUpload upload = uploadPolicy.validate(
+            UploadPurpose.ATTACHMENT, attachmentSource(record, resolved));
         managedObjectService.validateMigratedAttachmentTarget(
             workspaceId,
             record.getId(),

@@ -3806,6 +3806,14 @@ export function uploadAttachment(entityType: string, entityId: number, file: Fil
     return requestMultipart<Types.Attachment>("/api/attachments/upload", "POST", formData);
 }
 
+export function uploadAttachmentImage(entityType: string, entityId: number, file: File) {
+    const formData = new FormData();
+    formData.append("entityType", entityType);
+    formData.append("entityId", String(entityId));
+    formData.append("file", file);
+    return requestMultipart<Types.Attachment>("/api/attachments/upload-image", "POST", formData);
+}
+
 export function getAttachment(id: number, init: RequestInit = {}) {
     return getJson<Types.Attachment>(`/api/attachments/${id}`, init);
 }

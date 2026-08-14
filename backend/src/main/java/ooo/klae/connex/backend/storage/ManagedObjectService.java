@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
 import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
  * Generates opaque app-relative managed URLs and maps them to private object keys.
@@ -175,11 +176,15 @@ public class ManagedObjectService implements ApplicationRunner {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredBinary storeAttachment(int workspaceId, UploadSource source) {
-        return storeAttachmentInternal(workspaceId, source);
+        return storeAttachment(workspaceId, UploadPurpose.ATTACHMENT, source);
     }
 
-    private StoredBinary storeAttachmentInternal(int workspaceId, UploadSource source) {
-        ValidatedUpload upload = uploadPolicy.validateGeneric(source);
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeAttachment(
+            int workspaceId,
+            UploadPurpose purpose,
+            UploadSource source) {
+        ValidatedUpload upload = uploadPolicy.validate(purpose, source);
         String token = token(upload.extension());
         String key = attachmentKey(workspaceId, token);
         String url = ATTACHMENT_URL_PREFIX + token;
@@ -193,7 +198,23 @@ public class ManagedObjectService implements ApplicationRunner {
             String fileName,
             String contentType,
             byte[] bytes) {
-        return storeAttachmentInternal(workspaceId, UploadSource.from(fileName, contentType, bytes));
+        return storeAttachment(
+            workspaceId,
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(fileName, contentType, bytes));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeAttachment(
+            int workspaceId,
+            UploadPurpose purpose,
+            String fileName,
+            String contentType,
+            byte[] bytes) {
+        return storeAttachment(
+            workspaceId,
+            purpose,
+            UploadSource.from(fileName, contentType, bytes));
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -238,7 +259,7 @@ public class ManagedObjectService implements ApplicationRunner {
             int attachmentId,
             String legacyUrl,
             UploadSource source) {
-        ValidatedUpload upload = uploadPolicy.validateGeneric(source);
+        ValidatedUpload upload = uploadPolicy.validate(UploadPurpose.ATTACHMENT, source);
         String objectToken = migrationToken(
             "attachment", workspaceId, attachmentId, legacyUrl, upload.extension());
         String key = attachmentKey(workspaceId, objectToken);

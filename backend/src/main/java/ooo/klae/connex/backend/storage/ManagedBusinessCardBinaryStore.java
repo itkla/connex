@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.businesscard.BusinessCardBinaryStore;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
  * Business-card storage adapter backed by the managed private object store.
@@ -30,7 +31,7 @@ public class ManagedBusinessCardBinaryStore implements BusinessCardBinaryStore {
             String contentType,
             byte[] content) {
         ManagedObjectService.StoredBinary stored = managedObjectService.storeAttachment(
-            workspaceId, fileName, contentType, content);
+            workspaceId, UploadPurpose.BUSINESS_CARD_IMAGE, fileName, contentType, content);
         return new StoredBusinessCard(stored.url(), stored.size());
     }
 }

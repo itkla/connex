@@ -46,7 +46,7 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { uploadAttachment } from "@/app/lib/api";
+import { uploadAttachmentImage } from "@/app/lib/api";
 import { defaultAltFromFileName, isManagedImageFile, MANAGED_IMAGE_ACCEPT } from "@/app/lib/managed-image";
 import { toastError } from "@/app/lib/toast";
 import { canMoveTopLevelBlock, moveTopLevelBlock } from "./BlockReorder";
@@ -315,7 +315,7 @@ function ImagePopover({
         setUploading(true);
         try {
             const noteId = await ensureNoteId();
-            const attachment = await uploadAttachment("note", noteId, file);
+            const attachment = await uploadAttachmentImage("note", noteId, file);
             const nextSource = normalizeNoteImageSource(attachment.url);
             if (!nextSource) {
                 toastError(labels.imageUploadFailed);

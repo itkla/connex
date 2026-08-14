@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 /** Verifies attachment writes remain tenant-validated and transaction-bounded. */
@@ -104,7 +105,7 @@ class AttachmentWriteOperationsTest {
         uploader.setId(7);
         UploadSource source = UploadSource.from("file.pdf", "application/pdf", new byte[] { 1, 2 });
         when(dealMapper.exists(5, 43)).thenReturn(true);
-        when(managedObjectService.storeAttachment(5, source)).thenReturn(
+        when(managedObjectService.storeAttachment(5, UploadPurpose.ATTACHMENT, source)).thenReturn(
             new StoredBinary("/api/attachments/content/token.pdf", "file.pdf", "application/pdf", 2));
         AtomicReference<Attachment> insertedAttachment = new AtomicReference<>();
         doAnswer(invocation -> {
@@ -149,6 +150,10 @@ class AttachmentWriteOperationsTest {
         assertNotNull(AttachmentWriteOperations.class
             .getMethod(
                 "upload", int.class, String.class, int.class, UploadSource.class, User.class)
+            .getAnnotation(Transactional.class));
+        assertNotNull(AttachmentWriteOperations.class
+            .getMethod(
+                "uploadInlineImage", int.class, String.class, int.class, UploadSource.class, User.class)
             .getAnnotation(Transactional.class));
     }
 
