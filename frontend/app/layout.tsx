@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Instrument_Serif, Noto_Sans_JP } from "next/font/google";
+import { headers } from "next/headers";
+import { connection } from "next/server";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Toaster } from "@/components/ui/sonner";
@@ -39,7 +41,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const locale = await getLocale();
+  await connection();
+  const [locale, requestHeaders] = await Promise.all([getLocale(), headers()]);
+  const nonce = requestHeaders.get("x-nonce") ?? undefined;
 
   return (
     <html
@@ -48,7 +52,7 @@ export default async function RootLayout({
       className={`${inter.variable} ${instrumentSerif.variable} ${notoSansJP.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <ThemeProvider>
+        <ThemeProvider nonce={nonce}>
           <NextIntlClientProvider>
             <TooltipProvider>{children}</TooltipProvider>
           </NextIntlClientProvider>
