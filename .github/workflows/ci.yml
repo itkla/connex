@@ -309,6 +309,8 @@ jobs:
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connex_seed_e2e?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
+          CONNEX_PRIVILEGED_MFA_ENFORCED: 'false'
+          CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR: frontend-e2e-suite
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)

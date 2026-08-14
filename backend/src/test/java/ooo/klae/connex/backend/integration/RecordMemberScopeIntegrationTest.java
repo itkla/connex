@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 /** Full-stack HTTP coverage for company and contact owner member scopes. */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class RecordMemberScopeIntegrationTest {
     private static final String PASSWORD = "Record-Scope-Test-Pw1!";
 

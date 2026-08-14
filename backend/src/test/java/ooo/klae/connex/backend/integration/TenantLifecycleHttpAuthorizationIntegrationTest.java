@@ -50,6 +50,7 @@ import ooo.klae.connex.backend.tenant.TenantExportGrantCookie;
 /** Full-stack organization-role backstop for tenant export and teardown. */
 @SpringBootTest(properties = "connex.tenant-lifecycle.teardown-settle-delay=0s")
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@UnenrolledPrivilegedFixture
 class TenantLifecycleHttpAuthorizationIntegrationTest {
     private static final String PASSWORD = "Tenant-Lifecycle-Pw1!";
 

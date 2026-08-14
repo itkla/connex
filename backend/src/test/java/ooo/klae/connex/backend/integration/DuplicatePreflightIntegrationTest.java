@@ -56,6 +56,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class DuplicatePreflightIntegrationTest {
 
     private static final String PASSWORD = "Duplicate-Preflight-Pw1!";

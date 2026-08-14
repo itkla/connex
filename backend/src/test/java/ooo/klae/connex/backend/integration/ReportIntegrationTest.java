@@ -95,6 +95,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class ReportIntegrationTest {
 
     private static final String PASSWORD = "Report-Test-Pw1!";

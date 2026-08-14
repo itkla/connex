@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class SsoAdminCustomRoleIntegrationTest {
 
     private static final String PASSWORD = "Sso-Role-Pw1!";
