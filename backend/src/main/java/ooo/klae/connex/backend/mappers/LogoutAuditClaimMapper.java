@@ -8,4 +8,7 @@ public interface LogoutAuditClaimMapper {
      * @return one for the first claimant and zero for every duplicate
      */
     int claim(String sessionHash);
+
+    /** Removes claims older than the fixed one-day duplicate-request horizon. */
+    int deleteExpired();
 }

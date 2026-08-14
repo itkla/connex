@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.config;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.logout.LogoutHandler;
 import org.springframework.stereotype.Component;
@@ -7,7 +9,6 @@ import org.springframework.stereotype.Component;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.services.LogoutAuditService;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
@@ -21,13 +22,20 @@ import ooo.klae.connex.backend.util.OneTimeTokenDigest;
  * always destroy the session; a broken audit sink must never keep a user signed in. Anonymous,
  * expired, already-invalidated, and repeated logout requests do not create a misleading event.
  * Server-side bulk session revocation is a distinct security operation and does not pass through
- * this user-initiated handler.
+ * this user-initiated handler. A fixed counter exposes audit-write failures without logging any
+ * session, token, cookie, actor, or request data.
  */
 @Component
-@RequiredArgsConstructor
 public class LogoutAuditHandler implements LogoutHandler {
 
     private final LogoutAuditService logoutAuditService;
+    private final Counter auditFailureCounter;
+
+    public LogoutAuditHandler(
+            LogoutAuditService logoutAuditService, MeterRegistry meterRegistry) {
+        this.logoutAuditService = logoutAuditService;
+        this.auditFailureCounter = meterRegistry.counter("connex.security.logout.audit.failures");
+    }
 
     @Override
     public void logout(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
@@ -39,6 +47,7 @@ public class LogoutAuditHandler implements LogoutHandler {
         try {
             logoutAuditService.record(request, user, OneTimeTokenDigest.sha256(session.getId()));
         } catch (RuntimeException exception) {
+            auditFailureCounter.increment();
             return;
         }
     }

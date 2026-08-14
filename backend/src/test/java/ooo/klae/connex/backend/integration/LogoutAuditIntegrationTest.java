@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -49,6 +50,8 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.LogoutAuditClaimRetentionScheduler;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Exercises the real Spring Security logout chain and audit persistence over authenticated,
@@ -69,6 +72,7 @@ class LogoutAuditIntegrationTest {
     @Autowired private UserMapper userMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private LogoutAuditClaimRetentionScheduler logoutAuditClaimRetentionScheduler;
     @MockitoSpyBean private AuditService auditService;
 
     private MockMvc mockMvc;
@@ -91,6 +95,7 @@ class LogoutAuditIntegrationTest {
 
         mockMvc.perform(post("/api/auth/logout")
                 .session(session)
+                .with(csrf().asHeader())
                 .header("X-Workspace-Id", workspace.getId())
                 .header("User-Agent", USER_AGENT)
                 .cookie(new Cookie("unrelated_secret", COOKIE_SECRET))
@@ -114,7 +119,8 @@ class LogoutAuditIntegrationTest {
         assertFalse(row.persistedText().contains(rawSessionId));
         assertFalse(row.persistedText().contains(COOKIE_SECRET));
 
-        mockMvc.perform(post("/api/auth/logout"))
+        mockMvc.perform(post("/api/auth/logout")
+                .with(csrf().asHeader()))
             .andExpect(status().isOk());
         assertEquals(1, logoutCount(user.getId()));
     }
@@ -123,9 +129,11 @@ class LogoutAuditIntegrationTest {
     void anonymousAndRepeatedLogoutDoNotCreateEvents() throws Exception {
         Integer countBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE action = 'auth.logout'", Integer.class);
-        mockMvc.perform(post("/api/auth/logout"))
+        mockMvc.perform(post("/api/auth/logout")
+                .with(csrf().asHeader()))
             .andExpect(status().isOk());
-        mockMvc.perform(post("/api/auth/logout"))
+        mockMvc.perform(post("/api/auth/logout")
+                .with(csrf().asHeader()))
             .andExpect(status().isOk());
 
         Integer count = jdbcTemplate.queryForObject(
@@ -142,6 +150,7 @@ class LogoutAuditIntegrationTest {
 
         mockMvc.perform(post("/api/auth/logout")
                 .session(session)
+                .with(csrf().asHeader())
                 .header("X-Workspace-Id", foreignWorkspace.getId()))
             .andExpect(status().isOk());
 
@@ -164,6 +173,7 @@ class LogoutAuditIntegrationTest {
 
         mockMvc.perform(post("/api/auth/logout")
                 .session(session)
+                .with(csrf().asHeader())
                 .header("X-Workspace-Id", workspace.getId()))
             .andExpect(status().isOk());
 
@@ -212,6 +222,23 @@ class LogoutAuditIntegrationTest {
         assertEquals(1, claims);
     }
 
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void expiredLogoutClaimsArePurgedAfterTheDuplicateRequestHorizon() {
+        String sessionHash = OneTimeTokenDigest.sha256("expired-" + UUID.randomUUID());
+        jdbcTemplate.update(
+            "INSERT INTO auth_logout_audit_claim (session_hash, claimed_at) VALUES (?, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 25 HOUR))",
+            sessionHash);
+
+        logoutAuditClaimRetentionScheduler.purgeExpired();
+
+        Integer claims = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM auth_logout_audit_claim WHERE session_hash = ?",
+            Integer.class,
+            sessionHash);
+        assertEquals(0, claims);
+    }
+
     private int concurrentLogoutStatus(
             MockHttpSession session,
             int workspaceId,
@@ -223,10 +250,26 @@ class LogoutAuditIntegrationTest {
         }
         return mockMvc.perform(post("/api/auth/logout")
                 .session(session)
+                .with(csrf().asHeader())
                 .header("X-Workspace-Id", workspaceId))
             .andReturn()
             .getResponse()
             .getStatus();
+    }
+
+    @Test
+    void logoutWithoutCsrfIsRefusedAndLeavesTheSessionAuthenticated() throws Exception {
+        Workspace workspace = newWorkspace("csrf");
+        User user = newMember(workspace);
+        MockHttpSession session = login(user.getUsername());
+
+        mockMvc.perform(post("/api/auth/logout")
+                .session(session)
+                .header("X-Workspace-Id", workspace.getId()))
+            .andExpect(status().isForbidden());
+
+        assertNotNull(session.getAttribute("SPRING_SECURITY_CONTEXT"));
+        assertEquals(0, logoutCount(user.getId()));
     }
 
     private MockHttpSession login(String username) throws Exception {

@@ -157,6 +157,7 @@ public class SecurityConfig {
             WorkspaceRequestResolver workspaceRequestResolver,
             WorkspaceService workspaceService,
             WorkspaceCookie workspaceCookie,
+            OneTimeLinkFlowCookie oneTimeLinkFlowCookie,
             LogoutAuditHandler logoutAuditHandler,
             LoginRateLimiter loginRateLimiter,
             ClientIpResolver clientIpResolver,
@@ -184,7 +185,7 @@ public class SecurityConfig {
             http.csrf(csrf -> {
                 csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
                     .ignoringRequestMatchers(
-                        "/api/auth/login", "/api/auth/register", "/api/auth/logout",
+                        "/api/auth/login", "/api/auth/register",
                         "/api/auth/forgot-password",
                         "/api/auth/webauthn/authenticate/**",
                         "/api/delivery/unsubscribe/**",
@@ -248,6 +249,7 @@ public class SecurityConfig {
                 .deleteCookies("JSESSIONID")
                 .logoutSuccessHandler((req, res, auth) -> {
                     workspaceCookie.clear(res);
+                    oneTimeLinkFlowCookie.clearBrowserBinding(res);
                     res.setStatus(200);
                 })
             )

@@ -7,4 +7,9 @@
     INSERT IGNORE INTO auth_logout_audit_claim (session_hash)
     VALUES (#{sessionHash})
   </insert>
+
+  <delete id="deleteExpired">
+    DELETE FROM auth_logout_audit_claim
+    WHERE claimed_at &lt; DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
+  </delete>
 </mapper>

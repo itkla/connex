@@ -352,7 +352,6 @@ function isMutating(method?: string): boolean {
 const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
     "/api/auth/login",
     "/api/auth/register",
-    "/api/auth/logout",
     "/api/auth/forgot-password",
     "/api/auth/webauthn/authenticate",
 ]);
