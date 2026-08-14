@@ -172,6 +172,22 @@ class DeploymentNetworkTest(unittest.TestCase):
             with self.subTest(model=model_name, service="backend"):
                 self.assertEqual(1, services["backend"]["networks"]["app"]["gw_priority"])
 
+    def test_services_and_networks_do_not_pin_addresses(self) -> None:
+        for model_name, compose in self.compose_models.items():
+            for service_name, service in compose["services"].items():
+                for network_name, attachment in service["networks"].items():
+                    if attachment is not None:
+                        with self.subTest(
+                            model=model_name,
+                            service=service_name,
+                            network=network_name,
+                        ):
+                            self.assertNotIn("ipv4_address", attachment)
+                            self.assertNotIn("ipv6_address", attachment)
+            for network_name, network in compose["networks"].items():
+                with self.subTest(model=model_name, network=network_name):
+                    self.assertNotIn("config", network.get("ipam", {}))
+
     def test_only_caddy_publishes_a_host_port(self) -> None:
         for model_name, compose in self.compose_models.items():
             services = compose["services"]
