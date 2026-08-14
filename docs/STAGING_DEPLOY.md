@@ -4,6 +4,9 @@ The internal staging box (`192.168.0.141`) tracks `origin/main` and redeploys au
 This runbook covers how that pipeline works, how to verify what is live, and the operator
 preflight for releases that need maintenance steps. The customer-facing silo/on-prem bundle is
 documented separately in [DEPLOYMENT.md](DEPLOYMENT.md).
+The application deploy does not configure the public edge. Cloudflare onboarding, origin lock-down,
+rules, secret-free event review, and the required independent public retest for
+`preview.connexcrm.jp` are in [EDGE_DEFENCE.md](EDGE_DEFENCE.md).
 
 ## Topology
 

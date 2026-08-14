@@ -45,6 +45,7 @@ def resolve_compose_model(
     *compose_files: Path,
     profiles: tuple[str, ...] = (),
     http_port: str | None = "18080",
+    environment_overrides: dict[str, str] | None = None,
 ) -> dict[str, object]:
     environment = os.environ.copy()
     environment.update(
@@ -56,6 +57,18 @@ def resolve_compose_model(
             "CONNEX_DB_ROOT_PASSWORD": "network-root-test",
             "CONNEX_OCR_SERVICE_TOKEN": "0" * 32,
             "CONNEX_DB_USERNAME": "network-test-user",
+            "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES": "",
+            "CONNEX_SECURITY_TRUSTED_PROXIES": (
+                "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+            ),
+            "CONNEX_API_MAX_BODY_BYTES": "10485760",
+            "CONNEX_IMPORT_MAX_BODY_BYTES": "67108864",
+            "CONNEX_UPLOAD_MAX_BODY_BYTES": "28311552",
+            "CONNEX_BUSINESS_CARD_MAX_BODY_BYTES": "12582912",
+            "CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES": "16384",
+            "CONNEX_WEBAUTHN_MAX_BODY_BYTES": "65536",
+            "CONNEX_WORKFLOW_MAX_BODY_BYTES": "98304",
+            "CONNEX_FORM_MAX_BODY_BYTES": "1048576",
             "COMPOSE_PROFILES": "",
         }
     )
@@ -63,6 +76,8 @@ def resolve_compose_model(
         environment.pop("CONNEX_HTTP_PORT", None)
     else:
         environment["CONNEX_HTTP_PORT"] = http_port
+    if environment_overrides is not None:
+        environment.update(environment_overrides)
     command = ["docker", "compose", "--env-file", os.devnull]
     for profile in profiles:
         command.extend(("--profile", profile))
@@ -171,6 +186,67 @@ class DeploymentNetworkTest(unittest.TestCase):
     def test_caddy_host_port_defaults_to_80(self) -> None:
         compose = resolve_compose_model(COMPOSE_PATH, http_port=None)
         self.assertEqual("80", compose["services"]["caddy"]["ports"][0]["published"])
+
+    def test_forwarded_client_ip_chain_is_trusted_only_between_private_peers(self) -> None:
+        expected_backend_proxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+        for model_name, compose in self.compose_models.items():
+            services = compose["services"]
+            with self.subTest(model=model_name, service="backend"):
+                self.assertEqual(
+                    expected_backend_proxies,
+                    services["backend"]["environment"]["CONNEX_SECURITY_TRUSTED_PROXIES"],
+                )
+            with self.subTest(model=model_name, service="caddy"):
+                self.assertEqual(
+                    "",
+                    services["caddy"]["environment"][
+                        "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES"
+                    ],
+                )
+
+    def test_caddy_request_limits_share_backend_environment_contracts(self) -> None:
+        expected_limits = {
+            "CONNEX_API_MAX_BODY_BYTES": "10485760",
+            "CONNEX_IMPORT_MAX_BODY_BYTES": "67108864",
+            "CONNEX_UPLOAD_MAX_BODY_BYTES": "28311552",
+            "CONNEX_BUSINESS_CARD_MAX_BODY_BYTES": "12582912",
+            "CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES": "16384",
+            "CONNEX_WEBAUTHN_MAX_BODY_BYTES": "65536",
+            "CONNEX_WORKFLOW_MAX_BODY_BYTES": "98304",
+            "CONNEX_FORM_MAX_BODY_BYTES": "1048576",
+        }
+        for model_name, compose in self.compose_models.items():
+            services = compose["services"]
+            caddy_environment = services["caddy"]["environment"]
+            backend_environment = services["backend"]["environment"]
+            with self.subTest(model=model_name):
+                self.assertEqual(
+                    expected_limits,
+                    {
+                        name: caddy_environment[name]
+                        for name in expected_limits
+                    },
+                )
+                self.assertEqual(
+                    {name: backend_environment[name] for name in expected_limits},
+                    {name: caddy_environment[name] for name in expected_limits},
+                )
+        overridden = resolve_compose_model(
+            COMPOSE_PATH,
+            environment_overrides={"CONNEX_API_MAX_BODY_BYTES": "7340032"},
+        )
+        self.assertEqual(
+            "7340032",
+            overridden["services"]["caddy"]["environment"][
+                "CONNEX_API_MAX_BODY_BYTES"
+            ],
+        )
+        self.assertEqual(
+            "7340032",
+            overridden["services"]["backend"]["environment"][
+                "CONNEX_API_MAX_BODY_BYTES"
+            ],
+        )
 
     def test_local_development_publishes_only_on_loopback(self) -> None:
         model = resolve_compose_model(LOCAL_DEV_COMPOSE_PATH, http_port=None)

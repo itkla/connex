@@ -1,5 +1,26 @@
 {
 	admin off
+	servers {
+		# Bound slow-header/body attacks without imposing a response deadline on long-lived WebSockets.
+		timeouts {
+			read_header 10s
+			read_body 5m
+			idle 2m
+		}
+		max_header_size 64KiB
+
+		# Trust public client-IP headers only from Cloudflare or explicitly declared upstream peers.
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32 {$CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES:}
+		trusted_proxies_strict
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+(backend_proxy) {
+	reverse_proxy backend:8080 {
+		header_up X-Forwarded-For {client_ip}
+		header_up -CF-Connecting-IP
+	}
 }
 
 :80 {
@@ -15,16 +36,80 @@
 		?Content-Security-Policy "frame-ancestors 'none'"
 	}
 
-	handle /api/* {
-		reverse_proxy backend:8080
-	}
+	route {
+		@imports path /api/imports /api/imports/*
+		handle @imports {
+			request_body {
+				max_size {$CONNEX_IMPORT_MAX_BODY_BYTES:67108864}
+			}
+			import backend_proxy
+		}
 
-	handle /saml2/* {
-		reverse_proxy backend:8080
-	}
+		@uploads path_regexp upload ^/api/(?:attachments/upload|ai/assistant/sessions/[0-9]+/attachments|users/me/profile-picture|persons/[0-9]+/profile-picture|companies/[0-9]+/logo)$
+		handle @uploads {
+			# The application accepts a 27 MiB multipart envelope around a 25 MiB stored object.
+			request_body {
+				max_size {$CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
+			}
+			import backend_proxy
+		}
 
-	handle {
-		reverse_proxy frontend:3000
+		@business_cards path /api/business-cards /api/business-cards/*
+		handle @business_cards {
+			request_body {
+				max_size {$CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
+			}
+			import backend_proxy
+		}
+
+		@client_errors path /api/client-errors
+		handle @client_errors {
+			request_body {
+				max_size {$CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES:16384}
+			}
+			import backend_proxy
+		}
+
+		@webauthn path /api/auth/webauthn /api/auth/webauthn/*
+		handle @webauthn {
+			request_body {
+				max_size {$CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
+			}
+			import backend_proxy
+		}
+
+		@workflows path /api/workflows /api/workflows/*
+		handle @workflows {
+			request_body {
+				max_size {$CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}
+			}
+			import backend_proxy
+		}
+
+		@saml path /saml2/* /api/login/saml2/sso/*
+		handle @saml {
+			request_body {
+				max_size {$CONNEX_FORM_MAX_BODY_BYTES:1048576}
+			}
+			import backend_proxy
+		}
+
+		handle /api/* {
+			request_body {
+				max_size {$CONNEX_API_MAX_BODY_BYTES:10485760}
+			}
+			import backend_proxy
+		}
+
+		handle {
+			request_body {
+				max_size {$CONNEX_FORM_MAX_BODY_BYTES:1048576}
+			}
+			reverse_proxy frontend:3000 {
+				header_up X-Forwarded-For {client_ip}
+				header_up -CF-Connecting-IP
+			}
+		}
 	}
 
 	# Normal response handlers stop when proxying fails, so apply the same contract in Caddy's error route.
