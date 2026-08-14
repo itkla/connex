@@ -361,12 +361,70 @@ export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
 export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
+const PRIVILEGED_MFA_ENROLLMENT_DESTINATION = "/account/security?mfa=enroll";
+const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
+    "/api/auth/me",
+    "/api/auth/csrf",
+    "/api/auth/webauthn/register/requirements",
+    "/api/auth/webauthn/credentials",
+    "/api/capabilities",
+    "/api/workspaces",
+]);
+const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
+    "/api/auth/logout",
+    "/api/auth/webauthn/register/options",
+    "/api/auth/webauthn/register",
+    "/api/auth/webauthn/recover",
+]);
 const PASSKEY_STEP_UP_PATHS = new Set([
     "/api/auth/webauthn/step-up/options",
     "/api/auth/webauthn/step-up",
 ]);
 let passkeyStepUpPromise: Promise<void> | null = null;
 let passkeyStepUpGeneration = 0;
+let privilegedMfaEnrollmentRequired = false;
+let privilegedMfaEnrollmentCompleted = false;
+const privilegedMfaEnrollmentListeners = new Set<(active: boolean) => void>();
+
+/** Returns whether the browser is on the privileged-account passkey enrolment destination. */
+export function isPrivilegedMfaEnrollmentDestination(): boolean {
+    if (typeof window === "undefined") return false;
+    return window.location.pathname === "/account/security"
+        && new URLSearchParams(window.location.search).get("mfa") === "enroll";
+}
+
+/** Returns whether the browser must suppress requests outside the privileged MFA enrolment flow. */
+export function isPrivilegedMfaEnrollmentConfinementActive(): boolean {
+    return typeof window !== "undefined"
+        && (privilegedMfaEnrollmentRequired
+            || (!privilegedMfaEnrollmentCompleted && isPrivilegedMfaEnrollmentDestination()));
+}
+
+/** Subscribes to browser-local privileged MFA confinement state changes. */
+export function subscribePrivilegedMfaEnrollmentConfinement(
+    listener: (active: boolean) => void,
+): () => void {
+    privilegedMfaEnrollmentListeners.add(listener);
+    return () => privilegedMfaEnrollmentListeners.delete(listener);
+}
+
+/** Releases browser-local confinement after the server accepts passkey enrolment. */
+export function completePrivilegedMfaEnrollment(): void {
+    if (isPrivilegedMfaEnrollmentDestination()) {
+        window.history.replaceState(null, "", "/account/security");
+    }
+    privilegedMfaEnrollmentRequired = false;
+    privilegedMfaEnrollmentCompleted = true;
+    for (const listener of privilegedMfaEnrollmentListeners) listener(false);
+}
+
+function shouldSuppressDuringPrivilegedMfaEnrollment(path: string, method?: string): boolean {
+    if (!isPrivilegedMfaEnrollmentConfinementActive()) return false;
+    const pathname = path.split("?")[0];
+    const normalizedMethod = (method ?? "GET").toUpperCase();
+    return !(normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
+        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname));
+}
 
 function isCsrfRetryExemptMutation(path: string): boolean {
     const pathname = path.split("?")[0];
@@ -379,6 +437,13 @@ async function requestJson<T>(
     init: RequestInit = {},
     workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
 ): Promise<T> {
+    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, init.method)) {
+        throw new ApiError(
+            "A passkey must be enrolled before this privileged account can continue",
+            403,
+            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
+        );
+    }
     const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
@@ -505,6 +570,13 @@ async function requestMultipart<T>(
     body: FormData,
     init: RequestInit = {},
 ): Promise<T> {
+    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, method)) {
+        throw new ApiError(
+            "A passkey must be enrolled before this privileged account can continue",
+            403,
+            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
+        );
+    }
     const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
     const stepUpGeneration = passkeyStepUpGeneration;
@@ -1139,8 +1211,16 @@ async function getApiError(res: Response): Promise<ApiError> {
 
 async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
     const error = await getApiError(res);
-    if (error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE && typeof window !== "undefined") {
-        window.location.assign("/account/security?mfa=enroll");
+    if (error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE
+            && typeof window !== "undefined") {
+        const shouldNavigate = !privilegedMfaEnrollmentRequired
+            && !isPrivilegedMfaEnrollmentDestination();
+        privilegedMfaEnrollmentRequired = true;
+        privilegedMfaEnrollmentCompleted = false;
+        for (const listener of privilegedMfaEnrollmentListeners) listener(true);
+        if (shouldNavigate) {
+            window.location.replace(PRIVILEGED_MFA_ENROLLMENT_DESTINATION);
+        }
     }
     return error;
 }
