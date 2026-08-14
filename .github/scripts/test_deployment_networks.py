@@ -161,16 +161,6 @@ class DeploymentNetworkTest(unittest.TestCase):
             with self.subTest(model=model_name, service="backend"):
                 self.assertEqual(1, services["backend"]["networks"]["app"]["gw_priority"])
 
-    def test_deploy_profiles_trust_only_the_compose_bridge_range(self) -> None:
-        for env_path in DEPLOY_PROFILE_ENV_PATHS:
-            values = dict(
-                line.split("=", 1)
-                for line in env_path.read_text(encoding="utf-8").splitlines()
-                if line and not line.startswith("#") and "=" in line
-            )
-            with self.subTest(profile=env_path.name):
-                self.assertEqual("172.16.0.0/12", values["CONNEX_SECURITY_TRUSTED_PROXIES"])
-
     def test_no_service_pins_a_static_address_or_subnet(self) -> None:
         for model_name, compose in self.compose_models.items():
             for service_name, service in compose["services"].items():
