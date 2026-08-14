@@ -189,8 +189,13 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             case SsoLoginResult.LinkRequired linkRequired -> {
                 authService.prepareUnauthenticatedLinkFlow(request, response);
                 String linkToken = ssoLinkService.createChallenge(linkRequired);
+                String browserBinding = oneTimeLinkFlowCookie.ensureBrowserBinding(request, response);
+                oneTimeLinkFlowService.establishBrowserBinding(request, browserBinding);
                 IssuedGrant grant = oneTimeLinkFlowService.issue(
-                    request, Purpose.SSO_LINK, OneTimeTokenDigest.sha256(linkToken));
+                    request,
+                    browserBinding,
+                    Purpose.SSO_LINK,
+                    OneTimeTokenDigest.sha256(linkToken));
                 oneTimeLinkFlowCookie.set(
                     response, Purpose.SSO_LINK, grant.value(), grant.lifetime());
                 response.sendRedirect(frontendBase + "/sso/link");

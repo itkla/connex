@@ -51,10 +51,16 @@ public class SsoLinkController {
     public Map<String, String> confirm(@Valid @RequestBody SsoLinkConfirmRequest request,
             @CookieValue(name = OneTimeLinkFlowCookie.SSO_LINK, required = false) String grant,
             HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
-        String tokenHash = oneTimeLinkFlowService.require(httpRequest, Purpose.SSO_LINK, grant);
-        ssoLinkService.confirmByHash(tokenHash, request.getPassword(),
-                clientIpResolver.resolve(httpRequest), httpRequest, httpResponse);
-        oneTimeLinkFlowService.complete(httpRequest, Purpose.SSO_LINK, grant);
+        oneTimeLinkFlowService.consume(
+            httpRequest,
+            Purpose.SSO_LINK,
+            grant,
+            tokenHash -> ssoLinkService.confirmByHash(
+                tokenHash,
+                request.getPassword(),
+                clientIpResolver.resolve(httpRequest),
+                httpRequest,
+                httpResponse));
         oneTimeLinkFlowCookie.clear(httpResponse, Purpose.SSO_LINK);
         return Map.of("message", "You are now signed in");
     }

@@ -85,7 +85,10 @@ public class AuthController {
      * state-changing requests, together with an opaque authenticated-session generation.
      */
     @GetMapping("/csrf")
-    public CsrfBootstrapDto csrf(CsrfToken token, HttpServletRequest request) {
+    public CsrfBootstrapDto csrf(
+            CsrfToken token, HttpServletRequest request, HttpServletResponse response) {
+        String browserBinding = oneTimeLinkFlowCookie.ensureBrowserBinding(request, response);
+        oneTimeLinkFlowService.establishBrowserBinding(request, browserBinding);
         return CsrfBootstrapDto.of(token, sessionSecurityService.requestIdentity(request));
     }
 
@@ -105,9 +108,9 @@ public class AuthController {
             @Valid @RequestBody OneTimeLinkExchangeRequest request,
             HttpServletRequest httpRequest,
             HttpServletResponse response) {
-        String exchangeSessionHash = oneTimeLinkFlowService.exchangeBindingHash(httpRequest);
+        String exchangeOwnerHash = oneTimeLinkFlowService.exchangeOwnerHash(httpRequest);
         String tokenHash = passwordResetService.exchangeToken(
-            request.getToken(), exchangeSessionHash);
+            request.getToken(), exchangeOwnerHash);
         IssuedGrant grant = oneTimeLinkFlowService.issue(
             httpRequest, Purpose.PASSWORD_RESET, tokenHash);
         oneTimeLinkFlowCookie.set(response, Purpose.PASSWORD_RESET, grant.value(), grant.lifetime());
@@ -134,10 +137,12 @@ public class AuthController {
             @CookieValue(name = OneTimeLinkFlowCookie.PASSWORD_RESET, required = false) String grant,
             HttpServletRequest httpRequest,
             HttpServletResponse response) {
-        String tokenHash = oneTimeLinkFlowService.require(
-            httpRequest, Purpose.PASSWORD_RESET, grant);
-        passwordResetService.resetPasswordByHash(tokenHash, request.getNewPassword());
-        oneTimeLinkFlowService.complete(httpRequest, Purpose.PASSWORD_RESET, grant);
+        oneTimeLinkFlowService.consume(
+            httpRequest,
+            Purpose.PASSWORD_RESET,
+            grant,
+            tokenHash -> passwordResetService.resetPasswordByHash(
+                tokenHash, request.getNewPassword()));
         oneTimeLinkFlowCookie.clear(response, Purpose.PASSWORD_RESET);
         return Map.of("message", "Your password has been reset");
     }

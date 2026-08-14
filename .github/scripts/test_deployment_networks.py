@@ -9,6 +9,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).parents[2]
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.yml"
 BUILD_COMPOSE_PATH = ROOT / "deploy" / "docker-compose.build.yml"
+CADDYFILE_PATH = ROOT / "deploy" / "Caddyfile"
 BACKUP_ENV_PATH = ROOT / "deploy" / "backup" / "backup.env.example"
 BACKUP_LIB_PATH = ROOT / "deploy" / "backup" / "connex-backup-lib.sh"
 DOCKER_CLIENT_LIB_PATH = ROOT / "deploy" / "backup" / "shims" / "docker-client-lib.sh"
@@ -17,6 +18,11 @@ DEPLOYMENT_DOC_PATH = ROOT / "docs" / "DEPLOYMENT.md"
 UPGRADING_DOC_PATH = ROOT / "docs" / "UPGRADING.md"
 DEPLOY_ENV_PATH = ROOT / "deploy" / ".env"
 LOCAL_DEV_COMPOSE_PATH = ROOT / "backend" / "docker-compose.yml"
+DEPLOY_PROFILE_ENV_PATHS = (
+    ROOT / "deploy" / "eval.env.example",
+    ROOT / "deploy" / "onprem.env.example",
+    ROOT / "deploy" / "silo.env.example",
+)
 DIGEST = "0" * 64
 
 
@@ -154,6 +160,54 @@ class DeploymentNetworkTest(unittest.TestCase):
                 self.assertEqual(1, services["frontend"]["networks"]["app"]["gw_priority"])
             with self.subTest(model=model_name, service="backend"):
                 self.assertEqual(1, services["backend"]["networks"]["app"]["gw_priority"])
+
+    def test_caddy_address_matches_the_shipped_trusted_proxy(self) -> None:
+        expected_address = "172.30.250.2"
+        for model_name, compose in self.compose_models.items():
+            with self.subTest(model=model_name):
+                self.assertEqual(
+                    expected_address,
+                    compose["services"]["caddy"]["networks"]["edge"]["ipv4_address"],
+                )
+        for env_path in DEPLOY_PROFILE_ENV_PATHS:
+            values = dict(
+                line.split("=", 1)
+                for line in env_path.read_text(encoding="utf-8").splitlines()
+                if line and not line.startswith("#") and "=" in line
+            )
+            with self.subTest(profile=env_path.name):
+                self.assertEqual(expected_address, values["CONNEX_CADDY_IP"])
+                self.assertEqual(expected_address, values["CONNEX_SECURITY_TRUSTED_PROXIES"])
+
+    def test_caddy_normalizes_only_configured_proxy_chains(self) -> None:
+        caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")
+        self.assertIn("trusted_proxies static {$CONNEX_CADDY_TRUSTED_PROXIES:", caddyfile)
+        self.assertIn("trusted_proxies_strict", caddyfile)
+        self.assertEqual(3, caddyfile.count("header_up X-Forwarded-For {client_ip}"))
+        for model_name, compose in self.compose_models.items():
+            with self.subTest(model=model_name):
+                self.assertEqual(
+                    "127.0.0.1/32 ::1/128",
+                    compose["services"]["caddy"]["environment"][
+                        "CONNEX_CADDY_TRUSTED_PROXIES"
+                    ],
+                )
+        profile_proxy_values = {
+            "eval.env.example": "127.0.0.1/32 ::1/128",
+            "onprem.env.example": "REPLACE_WITH_EXACT_TLS_PROXY_CIDRS",
+            "silo.env.example": "REPLACE_WITH_EXACT_TLS_PROXY_CIDRS",
+        }
+        for env_path in DEPLOY_PROFILE_ENV_PATHS:
+            values = dict(
+                line.split("=", 1)
+                for line in env_path.read_text(encoding="utf-8").splitlines()
+                if line and not line.startswith("#") and "=" in line
+            )
+            with self.subTest(profile=env_path.name):
+                self.assertEqual(
+                    profile_proxy_values[env_path.name],
+                    values["CONNEX_CADDY_TRUSTED_PROXIES"],
+                )
 
     def test_only_caddy_publishes_a_host_port(self) -> None:
         for model_name, compose in self.compose_models.items():

@@ -137,23 +137,23 @@ public class InviteService {
     }
 
     /**
-     * Atomically claims a raw email-invite bearer for one browser session. A same-session retry
-     * remains recoverable until the invite's original expiry; every other session is refused.
+     * Claims a raw email-invite bearer for one browser and server-session lineage. A retry from
+     * that lineage remains recoverable until invite expiry; every other lineage is refused.
      * @param rawToken token carried only in the fragment-to-body bootstrap request
-     * @param exchangeSessionHash one-way owner of the browser exchange
+     * @param exchangeOwnerHash one-way owner of the browser and server-session exchange
      * @return source-token digest stored in the purpose-bound flow session
      */
     @Transactional
-    public String exchangeToken(String rawToken, String exchangeSessionHash) {
+    public String exchangeToken(String rawToken, String exchangeOwnerHash) {
         String tokenHash = rawToken == null || rawToken.isBlank()
             ? null
             : OneTimeTokenDigest.sha256(rawToken);
-        if (tokenHash == null || exchangeSessionHash == null || exchangeSessionHash.isBlank()) {
+        if (tokenHash == null || exchangeOwnerHash == null || exchangeOwnerHash.isBlank()) {
             throw invalidLink();
         }
-        int claimed = inviteMapper.claimExchangeByHash(tokenHash, exchangeSessionHash);
+        int claimed = inviteMapper.claimExchangeByHash(tokenHash, exchangeOwnerHash);
         if (claimed != 1
-                && !inviteMapper.isExchangeOwnedByHash(tokenHash, exchangeSessionHash)) {
+                && !inviteMapper.isExchangeOwnedByHash(tokenHash, exchangeOwnerHash)) {
             throw invalidLink();
         }
         return tokenHash;
@@ -179,24 +179,35 @@ public class InviteService {
             () -> acceptInviteInWorkspace(token, user));
     }
 
-    /** Redeems an exchanged invite without restoring its raw bearer to an API path or body. */
-    public WorkspaceMembershipDto acceptInviteByHash(String tokenHash, User user) {
+    /**
+     * Redeems an exchanged invite and completes its browser grant in the membership transaction.
+     * @param tokenHash digest of the exchanged source token
+     * @param user authenticated invite recipient
+     * @param flowCompletion grant delete that participates in the membership transaction
+     * @return the accepted workspace membership
+     */
+    public WorkspaceMembershipDto acceptInviteByHash(
+            String tokenHash, User user, Runnable flowCompletion) {
         WorkspaceInvite target = inviteMapper.findByTokenHash(tokenHash);
         if (target == null || !inviteMapper.isExchangedRedeemable(tokenHash)) {
             throw invalidLink();
         }
         return freshMembershipTransaction.execute(
             target.getWorkspaceId(),
-            () -> acceptInviteByHashInWorkspace(tokenHash, user));
+            () -> acceptInviteByHashInWorkspace(tokenHash, user, flowCompletion));
     }
 
-    private WorkspaceMembershipDto acceptInviteByHashInWorkspace(String tokenHash, User user) {
+    private WorkspaceMembershipDto acceptInviteByHashInWorkspace(
+            String tokenHash, User user, Runnable flowCompletion) {
         WorkspaceInvite invite = inviteMapper.findByTokenHash(tokenHash);
         if (invite == null || !"pending".equals(invite.getStatus())
                 || !inviteMapper.isExchangedRedeemable(tokenHash)) {
             throw invalidLink();
         }
-        return acceptResolvedInvite(invite, user, tokenHash, true);
+        WorkspaceMembershipDto membership = acceptResolvedInvite(invite, user, tokenHash, true);
+        workspaceService.rememberActive(user.getId(), membership.getId());
+        flowCompletion.run();
+        return membership;
     }
 
     private WorkspaceMembershipDto acceptInviteInWorkspace(String token, User user) {

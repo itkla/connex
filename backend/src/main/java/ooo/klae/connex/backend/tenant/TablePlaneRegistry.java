@@ -56,6 +56,7 @@ public final class TablePlaneRegistry {
         "notification_preference",
         "notification_recipient_state",
         "object_storage_backend_identity",
+        "one_time_link_flow",
         "org_allowed_domain",
         "org_member",
         "org_placement",

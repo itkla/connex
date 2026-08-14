@@ -5,10 +5,15 @@ import java.time.Duration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.WebUtils;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
 import ooo.klae.connex.backend.tenant.WorkspaceCookieProperties;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /** Writes and clears purpose-specific HttpOnly credentials for token-free browser link flows. */
 @Component
@@ -25,6 +30,33 @@ public class OneTimeLinkFlowCookie {
 
     public OneTimeLinkFlowCookie(WorkspaceCookieProperties properties) {
         this.properties = properties;
+    }
+
+    /**
+     * Ensures the browser has a private binding before a source token can be exchanged.
+     * @return the existing or newly issued raw binding
+     */
+    public String ensureBrowserBinding(
+            HttpServletRequest request, HttpServletResponse response) {
+        Cookie existing = WebUtils.getCookie(
+            request, OneTimeLinkFlowService.BROWSER_BINDING_COOKIE);
+        if (existing != null && existing.getValue() != null
+                && existing.getValue().matches("[A-Za-z0-9_-]{43}")) {
+            return existing.getValue();
+        }
+        String binding = OneTimeTokenDigest.generate();
+        response.addHeader(HttpHeaders.SET_COOKIE, browserBindingBuilder(binding)
+            .build()
+            .toString());
+        return binding;
+    }
+
+    /** Expires the browser binding when the user explicitly logs out. */
+    public void clearBrowserBinding(HttpServletResponse response) {
+        response.addHeader(HttpHeaders.SET_COOKIE, browserBindingBuilder("")
+            .maxAge(Duration.ZERO)
+            .build()
+            .toString());
     }
 
     /** Sets a short-lived flow grant on the narrow API path that consumes it. */
@@ -46,6 +78,18 @@ public class OneTimeLinkFlowCookie {
     private ResponseCookie.ResponseCookieBuilder builder(Purpose purpose, String value) {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name(purpose), value)
             .path(path(purpose))
+            .httpOnly(true)
+            .sameSite("Strict");
+        if (properties.isEffectiveSecure()) {
+            builder.secure(true);
+        }
+        return builder;
+    }
+
+    private ResponseCookie.ResponseCookieBuilder browserBindingBuilder(String value) {
+        ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(
+                OneTimeLinkFlowService.BROWSER_BINDING_COOKIE, value)
+            .path("/api")
             .httpOnly(true)
             .sameSite("Strict");
         if (properties.isEffectiveSecure()) {

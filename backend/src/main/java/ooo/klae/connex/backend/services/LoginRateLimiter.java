@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
 /**
  * In-memory fixed-window throttle for authentication abuse, keyed independently by client IP and
  * attempted username. Login and passkey failures share their established buckets; one-time-link
- * exchanges use a separate per-IP namespace with the same cap and window so unauthenticated
+ * exchanges use a separate per-IP namespace with the same cap and window, plus a higher-capacity
+ * shared-source circuit breaker when the client cannot be attributed safely, so unauthenticated
  * database amplification cannot consume or reset login failure state. Username buckets clear on a
  * successful login. Enforcement is per JVM replica.
  */
@@ -21,15 +22,19 @@ public class LoginRateLimiter {
 
     private final int maxPerIp;
     private final int maxPerUser;
+    private final int maxLinkExchangesPerSharedSource;
     private final long windowMillis;
     private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
 
     public LoginRateLimiter(
             @Value("${connex.login.max-failures-per-ip:50}") int maxPerIp,
             @Value("${connex.login.max-failures-per-user:10}") int maxPerUser,
+            @Value("${connex.login.max-link-exchanges-per-shared-source:5000}")
+                int maxLinkExchangesPerSharedSource,
             @Value("${connex.login.window-seconds:900}") long windowSeconds) {
         this.maxPerIp = maxPerIp;
         this.maxPerUser = maxPerUser;
+        this.maxLinkExchangesPerSharedSource = maxLinkExchangesPerSharedSource;
         this.windowMillis = windowSeconds * 1000L;
     }
 
@@ -68,16 +73,18 @@ public class LoginRateLimiter {
     }
 
     /**
-     * Consumes one isolated one-time-link exchange allowance for a public client address.
+     * Consumes one isolated one-time-link exchange allowance for the resolved network source.
+     * Private proxy and unresolved sources use a separately sized instance circuit breaker, so a
+     * missing trusted-proxy configuration cannot turn the ordinary per-client cap into a trivial
+     * service-wide lockout.
      * @param ip resolved client IP
      * @param nowMillis current epoch time in milliseconds
-     * @return true while the exchange bucket remains within the login IP cap
+     * @return true while the applicable per-client or shared-source bucket remains within its cap
      */
     public boolean tryAcquireOneTimeLinkExchange(String ip, long nowMillis) {
-        String key = exchangeIpKey(ip);
-        if (key == null) {
-            return true;
-        }
+        boolean attributable = isThrottleableIp(ip);
+        String key = attributable ? exchangeIpKey(ip) : "link-shared-source";
+        int limit = attributable ? maxPerIp : maxLinkExchangesPerSharedSource;
         Window window = windows.compute(key, (ignored, existing) -> {
             if (existing == null || nowMillis - existing.start >= windowMillis) {
                 return new Window(nowMillis, 1);
@@ -85,7 +92,7 @@ public class LoginRateLimiter {
             existing.count++;
             return existing;
         });
-        return window.count <= maxPerIp;
+        return window.count <= limit;
     }
 
     /**
@@ -126,7 +133,7 @@ public class LoginRateLimiter {
     }
 
     private static String exchangeIpKey(String ip) {
-        return isThrottleableIp(ip) ? "link-ip:" + ip : null;
+        return "link-ip:" + ip.trim().toLowerCase(Locale.ROOT);
     }
 
     /**

@@ -16,10 +16,10 @@ public interface PasswordResetTokenMapper {
     boolean existsRedeemableByHash(String tokenHash);
 
     int claimExchange(@Param("tokenHash") String tokenHash,
-        @Param("exchangeSessionHash") String exchangeSessionHash);
+        @Param("exchangeOwnerHash") String exchangeOwnerHash);
 
     boolean isExchangeOwnedBy(@Param("tokenHash") String tokenHash,
-        @Param("exchangeSessionHash") String exchangeSessionHash);
+        @Param("exchangeOwnerHash") String exchangeOwnerHash);
 
     boolean existsExchangedRedeemableByHash(String tokenHash);
 

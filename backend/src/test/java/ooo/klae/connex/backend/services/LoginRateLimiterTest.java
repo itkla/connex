@@ -14,7 +14,7 @@ class LoginRateLimiterTest {
 
     @Test
     void blocksAfterPerIpCap() {
-        LoginRateLimiter limiter = new LoginRateLimiter(3, 100, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(3, 100, 5000, 900);
         long now = 1_000L;
 
         for (int i = 0; i < 3; i++) {
@@ -26,7 +26,7 @@ class LoginRateLimiterTest {
 
     @Test
     void blocksAfterPerUsernameCapAcrossIps() {
-        LoginRateLimiter limiter = new LoginRateLimiter(100, 3, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(100, 3, 5000, 900);
         long now = 1_000L;
 
         limiter.recordFailure("1.1.1.1", "victim", now);
@@ -37,7 +37,7 @@ class LoginRateLimiterTest {
 
     @Test
     void successClearsUsernameBucket() {
-        LoginRateLimiter limiter = new LoginRateLimiter(100, 2, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(100, 2, 5000, 900);
         long now = 1_000L;
 
         limiter.recordFailure("1.1.1.1", "alice", now);
@@ -50,7 +50,7 @@ class LoginRateLimiterTest {
 
     @Test
     void resetsAfterWindowElapses() {
-        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 5000, 900);
         long start = 1_000L;
 
         limiter.recordFailure("1.1.1.1", "alice", start);
@@ -60,7 +60,7 @@ class LoginRateLimiterTest {
 
     @Test
     void skipsPerIpThrottleForNonPublicAddress() {
-        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 5000, 900);
         long now = 1_000L;
 
         for (int i = 0; i < 5; i++) {
@@ -78,7 +78,7 @@ class LoginRateLimiterTest {
 
     @Test
     void ignoresUnattributableKeys() {
-        LoginRateLimiter limiter = new LoginRateLimiter(1, 1, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 1, 5000, 900);
         limiter.recordFailure(null, null, 1_000L);
         limiter.recordFailure("", "   ", 1_000L);
         assertFalse(limiter.isBlocked(null, null, 1_000L));
@@ -87,11 +87,21 @@ class LoginRateLimiterTest {
 
     @Test
     void oneTimeLinkExchangeUsesAnIndependentIpBucket() {
-        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 5000, 900);
         long now = 1_000L;
 
         assertTrue(limiter.tryAcquireOneTimeLinkExchange("203.0.113.8", now));
         assertFalse(limiter.tryAcquireOneTimeLinkExchange("203.0.113.8", now));
         assertFalse(limiter.isBlocked("203.0.113.8", "alice", now));
+    }
+
+    @Test
+    void oneTimeLinkExchangeUsesASeparateSharedSourceCircuitBreaker() {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 2, 900);
+        long now = 1_000L;
+
+        assertTrue(limiter.tryAcquireOneTimeLinkExchange("10.0.0.5", now));
+        assertTrue(limiter.tryAcquireOneTimeLinkExchange(null, now));
+        assertFalse(limiter.tryAcquireOneTimeLinkExchange(" ", now));
     }
 }

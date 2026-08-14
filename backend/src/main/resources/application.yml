@@ -140,7 +140,9 @@ connex:
         # from the proxy's own address and per-IP attribution is worthless. (The login
         # per-IP throttle already self-disables when the resolved IP is loopback/private,
         # so a mis-config degrades to per-username throttling rather than a global lockout,
-        # but per-IP protection and accurate audit IPs both require this to be set.)
+        # while link exchanges use a separately sized shared-source circuit breaker. Per-IP
+        # protection and accurate audit IPs both require this to be set. The shipped Compose
+        # profiles trust their pinned Caddy address explicitly.)
         trusted-proxies: ${CONNEX_SECURITY_TRUSTED_PROXIES:}
         session:
             absolute-timeout: ${CONNEX_SESSION_ABSOLUTE_TIMEOUT:12h}
@@ -226,6 +228,7 @@ connex:
         # The per-IP cap only engages for a real public client IP (see trusted-proxies above).
         max-failures-per-ip: ${CONNEX_LOGIN_MAX_FAILURES_PER_IP:50}
         max-failures-per-user: ${CONNEX_LOGIN_MAX_FAILURES_PER_USER:10}
+        max-link-exchanges-per-shared-source: ${CONNEX_LOGIN_MAX_LINK_EXCHANGES_PER_SHARED_SOURCE:5000}
         window-seconds: ${CONNEX_LOGIN_WINDOW_SECONDS:900}
     client-errors:
         max-reports-per-window: ${CONNEX_CLIENT_ERRORS_MAX_REPORTS_PER_WINDOW:20}

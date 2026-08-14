@@ -119,7 +119,7 @@ public class SsoLinkService {
         return tokenHash != null && ssoLinkChallengeMapper.findByTokenHash(tokenHash) != null;
     }
 
-    /** Confirms account ownership through a purpose-bound flow-session source digest. */
+    /** Confirms account ownership through a purpose-bound browser-flow source digest. */
     public User confirmByHash(String tokenHash, String password, String clientIp,
             HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         long now = System.currentTimeMillis();

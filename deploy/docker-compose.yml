@@ -10,13 +10,16 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    environment:
+      CONNEX_CADDY_TRUSTED_PROXIES: ${CONNEX_CADDY_TRUSTED_PROXIES:-127.0.0.1/32 ::1/128}
     depends_on:
       frontend:
         condition: service_healthy
       backend:
         condition: service_healthy
     networks:
-      - edge
+      edge:
+        ipv4_address: ${CONNEX_CADDY_IP:-172.30.250.2}
 
   frontend:
     image: ghcr.io/itkla/connex-frontend@sha256:${CONNEX_FRONTEND_DIGEST:?set CONNEX_FRONTEND_DIGEST to the verified 64-character digest in deploy/.env}
@@ -131,6 +134,9 @@ volumes:
 networks:
   edge:
     driver: bridge
+    ipam:
+      config:
+        - subnet: ${CONNEX_EDGE_SUBNET:-172.30.250.0/24}
   app:
     driver: bridge
   db:

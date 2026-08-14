@@ -16,7 +16,7 @@ class OneTimeLinkExchangeAdmissionFilterTest {
 
     @Test
     void rejectsAnExchangeAfterTheExistingIpBudgetIsExhausted() throws Exception {
-        LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 900);
+        LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 5000, 900);
         ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
         OneTimeLinkExchangeAdmissionFilter filter =
             new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
@@ -28,6 +28,24 @@ class OneTimeLinkExchangeAdmissionFilterTest {
 
         assertEquals(200, firstResponse.getStatus());
         assertEquals(429, secondResponse.getStatus());
+    }
+
+    @Test
+    void sharedProxyFallbackDoesNotUseTheOrdinaryPerClientLimit() throws Exception {
+        LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 2, 900);
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        OneTimeLinkExchangeAdmissionFilter filter =
+            new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
+        when(clientIpResolver.resolve(org.mockito.ArgumentMatchers.any()))
+            .thenReturn("172.20.0.4");
+
+        MockHttpServletResponse firstResponse = invoke(filter, "/api/invites/exchange");
+        MockHttpServletResponse secondResponse = invoke(filter, "/api/invites/exchange");
+        MockHttpServletResponse thirdResponse = invoke(filter, "/api/invites/exchange");
+
+        assertEquals(200, firstResponse.getStatus());
+        assertEquals(200, secondResponse.getStatus());
+        assertEquals(429, thirdResponse.getStatus());
     }
 
     private static MockHttpServletResponse invoke(

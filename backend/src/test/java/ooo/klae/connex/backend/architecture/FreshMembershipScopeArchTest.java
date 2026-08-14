@@ -66,7 +66,7 @@ class FreshMembershipScopeArchTest {
             "invite",
             List.of("int", "CreateInviteRequest"))),
         new EntryPoint("InviteService", "acceptInvite", 2), Set.of(),
-        new EntryPoint("InviteService", "acceptInviteByHash", 2), Set.of(new CallSite(
+        new EntryPoint("InviteService", "acceptInviteByHash", 3), Set.of(new CallSite(
             "ooo.klae.connex.backend.controllers.InviteController",
             "accept",
             List.of("InviteFlowAcceptRequest", "String", "HttpServletRequest", "HttpServletResponse"))),
@@ -75,7 +75,7 @@ class FreshMembershipScopeArchTest {
             "addMember",
             List.of("int", "AddMemberRequest"))),
         new EntryPoint("InviteLinkService", "redeemLink", 2), Set.of(),
-        new EntryPoint("InviteLinkService", "redeemLinkByHash", 2), Set.of(new CallSite(
+        new EntryPoint("InviteLinkService", "redeemLinkByHash", 3), Set.of(new CallSite(
             "ooo.klae.connex.backend.controllers.InviteLinkController",
             "accept",
             List.of("InviteFlowAcceptRequest", "String", "HttpServletRequest", "HttpServletResponse"))),
@@ -109,7 +109,7 @@ class FreshMembershipScopeArchTest {
             new CallSite(
                 "ooo.klae.connex.backend.services.InviteService",
                 "acceptInviteByHash",
-                List.of("String", "User")),
+                List.of("String", "User", "Runnable")),
             new CallSite(
                 "ooo.klae.connex.backend.services.InviteService",
                 "addExistingMember",
@@ -121,7 +121,7 @@ class FreshMembershipScopeArchTest {
             new CallSite(
                 "ooo.klae.connex.backend.services.InviteLinkService",
                 "redeemLinkByHash",
-                List.of("String", "User")),
+                List.of("String", "User", "Runnable")),
             new CallSite(
                 "ooo.klae.connex.backend.services.SsoLoginService",
                 "resolve",

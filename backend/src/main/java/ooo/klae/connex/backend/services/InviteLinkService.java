@@ -133,23 +133,34 @@ public class InviteLinkService {
             () -> redeemLinkInWorkspace(token, user));
     }
 
-    /** Redeems a shareable link without restoring its raw bearer to an API path or body. */
-    public WorkspaceMembershipDto redeemLinkByHash(String tokenHash, User user) {
+    /**
+     * Redeems a shareable link and completes its browser grant in the membership transaction.
+     * @param tokenHash digest of the shareable source bearer
+     * @param user authenticated joining user
+     * @param flowCompletion grant delete that participates in the membership transaction
+     * @return the joined workspace membership
+     */
+    public WorkspaceMembershipDto redeemLinkByHash(
+            String tokenHash, User user, Runnable flowCompletion) {
         WorkspaceInviteLink target = inviteLinkMapper.findByTokenHash(tokenHash);
         if (target == null) {
             throw invalidLink();
         }
         return freshMembershipTransaction.execute(
             target.getWorkspaceId(),
-            () -> redeemLinkByHashInWorkspace(tokenHash, user));
+            () -> redeemLinkByHashInWorkspace(tokenHash, user, flowCompletion));
     }
 
-    private WorkspaceMembershipDto redeemLinkByHashInWorkspace(String tokenHash, User user) {
+    private WorkspaceMembershipDto redeemLinkByHashInWorkspace(
+            String tokenHash, User user, Runnable flowCompletion) {
         WorkspaceInviteLink link = inviteLinkMapper.findByTokenHash(tokenHash);
         if (link == null) {
             throw invalidLink();
         }
-        return redeemResolvedLink(link, user);
+        WorkspaceMembershipDto membership = redeemResolvedLink(link, user);
+        workspaceService.rememberActive(user.getId(), membership.getId());
+        flowCompletion.run();
+        return membership;
     }
 
     private WorkspaceMembershipDto redeemLinkInWorkspace(String token, User user) {

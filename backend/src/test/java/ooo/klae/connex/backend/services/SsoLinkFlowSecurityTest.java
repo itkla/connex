@@ -4,8 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.matches;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -22,10 +26,13 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.Cookie;
 
+import ooo.klae.connex.backend.mappers.OneTimeLinkFlowMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /** Verifies that SSO linking is anonymous and survives only deliberate account-session rotation. */
 @ExtendWith(MockitoExtension.class)
@@ -61,7 +68,10 @@ class SsoLinkFlowSecurityTest {
             UsernamePasswordAuthenticationToken.authenticated("upstream", null, java.util.List.of()));
         SecurityContextHolder.setContext(context);
         doAnswer(invocation -> {
-            new OneTimeLinkFlowService().replaceSessionPreservingFlows(request);
+            new OneTimeLinkFlowService(
+                mock(OneTimeLinkFlowMapper.class),
+                mock(OneTimeLinkFlowClaimService.class))
+                .replaceSessionPreservingFlows(request);
             return null;
         }).when(oneTimeLinkFlowService).replaceSessionPreservingFlows(request);
 
@@ -76,11 +86,25 @@ class SsoLinkFlowSecurityTest {
     }
 
     @Test
-    void accountSessionReplacementPreservesOnlyThePurposeBoundFlow() {
-        OneTimeLinkFlowService service = new OneTimeLinkFlowService();
+    void accountSessionReplacementLeavesTheDurableBrowserFlowAvailable() {
+        OneTimeLinkFlowMapper flowMapper = mock(OneTimeLinkFlowMapper.class);
+        OneTimeLinkFlowService service = new OneTimeLinkFlowService(
+            flowMapper, mock(OneTimeLinkFlowClaimService.class));
         MockHttpServletRequest request = new MockHttpServletRequest();
+        String browserBinding = OneTimeTokenDigest.generate();
+        String sourceHash = OneTimeTokenDigest.sha256("source-token");
+        request.setCookies(new Cookie(
+            OneTimeLinkFlowService.BROWSER_BINDING_COOKIE, browserBinding));
+        service.establishBrowserBinding(request, browserBinding);
         OneTimeLinkFlowService.IssuedGrant grant = service.issue(
-            request, OneTimeLinkFlowService.Purpose.WORKSPACE_INVITE, "source-hash");
+            request, OneTimeLinkFlowService.Purpose.WORKSPACE_INVITE, sourceHash);
+        String grantHash = OneTimeTokenDigest.sha256(grant.value());
+        String exchangeOwnerHash = service.exchangeOwnerHash(request);
+        when(flowMapper.findValidSourceTokenHash(
+            grantHash,
+            exchangeOwnerHash,
+            OneTimeLinkFlowService.Purpose.WORKSPACE_INVITE.name()))
+            .thenReturn(sourceHash);
         String originalSessionId = request.getSession(false).getId();
         request.getSession(false).setAttribute("unrelated", "must-not-transfer");
 
@@ -89,10 +113,34 @@ class SsoLinkFlowSecurityTest {
         assertNotEquals(originalSessionId, request.getSession(false).getId());
         assertNull(request.getSession(false).getAttribute("unrelated"));
         assertEquals(
-            "source-hash",
+            sourceHash,
             service.require(
                 request,
                 OneTimeLinkFlowService.Purpose.WORKSPACE_INVITE,
                 grant.value()));
+    }
+
+    @Test
+    void responseLocalSsoBindingCanIssueAFlowBeforeTheCookieReturns() {
+        OneTimeLinkFlowMapper flowMapper = mock(OneTimeLinkFlowMapper.class);
+        OneTimeLinkFlowService service = new OneTimeLinkFlowService(
+            flowMapper, mock(OneTimeLinkFlowClaimService.class));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String browserBinding = OneTimeTokenDigest.generate();
+        String sourceHash = OneTimeTokenDigest.sha256("sso-source-token");
+
+        service.establishBrowserBinding(request, browserBinding);
+        OneTimeLinkFlowService.IssuedGrant grant = service.issue(
+            request,
+            browserBinding,
+            OneTimeLinkFlowService.Purpose.SSO_LINK,
+            sourceHash);
+
+        verify(flowMapper).upsert(
+            eq(OneTimeTokenDigest.sha256(grant.value())),
+            matches("[0-9a-f]{64}"),
+            eq(OneTimeLinkFlowService.Purpose.SSO_LINK.name()),
+            eq(sourceHash),
+            eq(600L));
     }
 }

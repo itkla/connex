@@ -154,6 +154,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "LogoutAuditClaimMapper",
         MAPPERS + "MailConfigMapper",
         MAPPERS + "MigrationHistoryMapper",
+        MAPPERS + "OneTimeLinkFlowMapper",
         MAPPERS + "OrganizationMapper",
         MAPPERS + "OrgMemberMapper",
         MAPPERS + "OrgPlacementMapper",

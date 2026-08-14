@@ -1,5 +1,10 @@
 {
 	admin off
+	servers {
+		# Trust only the explicitly configured TLS proxy hop and parse appended chains right-to-left.
+		trusted_proxies static {$CONNEX_CADDY_TRUSTED_PROXIES:127.0.0.1/32 ::1/128}
+		trusted_proxies_strict
+	}
 }
 
 :80 {
@@ -16,15 +21,22 @@
 	}
 
 	handle /api/* {
-		reverse_proxy backend:8080
+		reverse_proxy backend:8080 {
+			# Forward one Caddy-validated address so the backend needs to trust only Caddy itself.
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 
 	handle /saml2/* {
-		reverse_proxy backend:8080
+		reverse_proxy backend:8080 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 
 	handle {
-		reverse_proxy frontend:3000
+		reverse_proxy frontend:3000 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 
 	# Normal response handlers stop when proxying fails, so apply the same contract in Caddy's error route.

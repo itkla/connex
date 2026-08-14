@@ -19,16 +19,16 @@
   <update id="claimExchange">
     UPDATE email_change_token
     SET exchanged_at = COALESCE(exchanged_at, UTC_TIMESTAMP()),
-        exchange_session_hash = COALESCE(exchange_session_hash, #{exchangeSessionHash})
+        exchange_owner_hash = COALESCE(exchange_owner_hash, #{exchangeOwnerHash})
     WHERE token_hash = #{tokenHash}
-      AND (exchanged_at IS NULL OR exchange_session_hash = #{exchangeSessionHash})
+      AND (exchanged_at IS NULL OR exchange_owner_hash = #{exchangeOwnerHash})
       AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </update>
 
   <select id="isExchangeOwnedBy" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM email_change_token
-      WHERE token_hash = #{tokenHash} AND exchange_session_hash = #{exchangeSessionHash}
+      WHERE token_hash = #{tokenHash} AND exchange_owner_hash = #{exchangeOwnerHash}
         AND exchanged_at IS NOT NULL AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
     )
   </select>

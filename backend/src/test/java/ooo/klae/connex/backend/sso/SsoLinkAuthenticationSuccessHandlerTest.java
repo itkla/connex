@@ -66,14 +66,17 @@ class SsoLinkAuthenticationSuccessHandlerTest {
             "oidc", "https://issuer.example", "subject", "member@example.com", true, 7, "Member"))
             .thenReturn(linkRequired);
         when(ssoLinkService.createChallenge(linkRequired)).thenReturn("raw-link-token");
+        when(oneTimeLinkFlowCookie.ensureBrowserBinding(request, response))
+            .thenReturn("browser-binding");
         when(oneTimeLinkFlowService.issue(
-            request, Purpose.SSO_LINK,
+            request, "browser-binding", Purpose.SSO_LINK,
             ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256("raw-link-token")))
             .thenReturn(new IssuedGrant("browser-grant", java.time.Duration.ofMinutes(10)));
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(authService).prepareUnauthenticatedLinkFlow(request, response);
+        verify(oneTimeLinkFlowService).establishBrowserBinding(request, "browser-binding");
         verify(oneTimeLinkFlowCookie).set(
             response, Purpose.SSO_LINK, "browser-grant", java.time.Duration.ofMinutes(10));
         assertEquals("https://app.example/sso/link", response.getRedirectedUrl());

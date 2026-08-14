@@ -94,22 +94,22 @@ public class EmailChangeService {
     }
 
     /**
-     * Claims the raw token for one browser session, permitting only same-session recovery.
+     * Claims the raw token for one browser and server-session lineage.
      * @param rawToken raw fragment bearer
-     * @param exchangeSessionHash one-way owner of the browser exchange
+     * @param exchangeOwnerHash one-way owner of the browser and server-session exchange
      * @return persisted source-token digest
      */
     @Transactional
-    public String exchangeToken(String rawToken, String exchangeSessionHash) {
+    public String exchangeToken(String rawToken, String exchangeOwnerHash) {
         String tokenHash = rawToken == null || rawToken.isBlank()
             ? null
             : OneTimeTokenDigest.sha256(rawToken);
-        if (tokenHash == null || exchangeSessionHash == null || exchangeSessionHash.isBlank()) {
+        if (tokenHash == null || exchangeOwnerHash == null || exchangeOwnerHash.isBlank()) {
             throw invalidLink();
         }
-        int claimed = emailChangeTokenMapper.claimExchange(tokenHash, exchangeSessionHash);
+        int claimed = emailChangeTokenMapper.claimExchange(tokenHash, exchangeOwnerHash);
         if (claimed != 1
-                && !emailChangeTokenMapper.isExchangeOwnedBy(tokenHash, exchangeSessionHash)) {
+                && !emailChangeTokenMapper.isExchangeOwnedBy(tokenHash, exchangeOwnerHash)) {
             throw invalidLink();
         }
         return tokenHash;
@@ -133,7 +133,7 @@ public class EmailChangeService {
         confirmChangeByHash(exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)));
     }
 
-    /** Applies an email change through a purpose-bound flow-session source digest. */
+    /** Applies an email change through a purpose-bound browser-flow source digest. */
     @Transactional
     public void confirmChangeByHash(String tokenHash) {
         EmailChangeToken token = tokenHash == null ? null

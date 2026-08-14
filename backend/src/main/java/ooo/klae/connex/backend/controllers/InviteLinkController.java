@@ -24,7 +24,6 @@ import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.IssuedGrant;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
-import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
 /**
@@ -38,7 +37,6 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 public class InviteLinkController {
     private final InviteLinkService inviteLinkService;
     private final AuthService authService;
-    private final WorkspaceService workspaceService;
     private final WorkspaceCookie workspaceCookie;
     private final OneTimeLinkFlowService oneTimeLinkFlowService;
     private final OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
@@ -79,12 +77,14 @@ public class InviteLinkController {
             HttpServletRequest request,
             HttpServletResponse response) {
         User user = authService.getCurrentUser();
-        String tokenHash = oneTimeLinkFlowService.requireBound(
-            request, Purpose.WORKSPACE_INVITE_LINK, grant, dto.getFlowId());
-        WorkspaceMembershipDto membership = inviteLinkService.redeemLinkByHash(tokenHash, user);
-        workspaceService.rememberActive(user.getId(), membership.getId());
+        WorkspaceMembershipDto membership = oneTimeLinkFlowService.consumeBound(
+            request,
+            Purpose.WORKSPACE_INVITE_LINK,
+            grant,
+            dto.getFlowId(),
+            (tokenHash, completion) -> inviteLinkService.redeemLinkByHash(
+                tokenHash, user, completion));
         workspaceCookie.set(response, membership.getId());
-        oneTimeLinkFlowService.complete(request, Purpose.WORKSPACE_INVITE_LINK, grant);
         oneTimeLinkFlowCookie.clear(response, Purpose.WORKSPACE_INVITE_LINK);
         return membership;
     }

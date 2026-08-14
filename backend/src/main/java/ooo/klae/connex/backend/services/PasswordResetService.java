@@ -101,23 +101,23 @@ public class PasswordResetService {
     }
 
     /**
-     * Atomically claims the raw emailed token for one browser session. A retry from that same
-     * session remains valid until the source token expires; every other session is refused.
+     * Claims the raw emailed token for one browser and server-session lineage. A retry from that
+     * lineage remains valid until the source token expires; every other lineage is refused.
      * @param rawToken token carried in the fragment-to-body bootstrap request
-     * @param exchangeSessionHash one-way owner of the browser exchange
+     * @param exchangeOwnerHash one-way owner of the browser and server-session exchange
      * @return persisted source-token digest for the purpose-bound flow session
      */
     @Transactional
-    public String exchangeToken(String rawToken, String exchangeSessionHash) {
+    public String exchangeToken(String rawToken, String exchangeOwnerHash) {
         String tokenHash = rawToken == null || rawToken.isBlank()
             ? null
             : OneTimeTokenDigest.sha256(rawToken);
-        if (tokenHash == null || exchangeSessionHash == null || exchangeSessionHash.isBlank()) {
+        if (tokenHash == null || exchangeOwnerHash == null || exchangeOwnerHash.isBlank()) {
             throw invalidLink();
         }
-        int claimed = passwordResetTokenMapper.claimExchange(tokenHash, exchangeSessionHash);
+        int claimed = passwordResetTokenMapper.claimExchange(tokenHash, exchangeOwnerHash);
         if (claimed != 1
-                && !passwordResetTokenMapper.isExchangeOwnedBy(tokenHash, exchangeSessionHash)) {
+                && !passwordResetTokenMapper.isExchangeOwnedBy(tokenHash, exchangeOwnerHash)) {
             throw invalidLink();
         }
         return tokenHash;
@@ -143,7 +143,7 @@ public class PasswordResetService {
             exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)), newPassword);
     }
 
-    /** Applies a new password through a purpose-bound flow-session source digest. */
+    /** Applies a new password through a purpose-bound browser-flow source digest. */
     @Transactional
     public void resetPasswordByHash(String tokenHash, String newPassword) {
         PasswordResetToken token = tokenHash == null ? null
