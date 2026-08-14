@@ -23,6 +23,8 @@ services:
     restart: unless-stopped
     environment:
       API_URL: http://backend:8080
+      CONNEX_CSP_MODE: ${CONNEX_CSP_MODE:-report-only}
+      CONNEX_CSP_IMAGE_ORIGINS: ${CONNEX_CSP_IMAGE_ORIGINS:-}
     expose:
       - "3000"
     depends_on:
