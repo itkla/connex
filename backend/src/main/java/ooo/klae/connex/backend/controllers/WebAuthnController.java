@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.webauthn.WebAuthnJsonMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
@@ -152,8 +153,8 @@ public class WebAuthnController {
      */
     @PostMapping(value = "/authenticate/options", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> authenticateOptions(HttpServletRequest req, HttpServletResponse res) {
-        String ip = clientIpResolver.resolve(req);
-        if (loginRateLimiter.isBlocked(ip, null, System.currentTimeMillis())) {
+        ResolvedClientIp clientIp = clientIpResolver.resolveWithProvenance(req);
+        if (loginRateLimiter.isBlockedForClient(clientIp, null, System.currentTimeMillis())) {
             throw new TooManyRequestsException("Too many attempts. Please try again later.");
         }
         PublicKeyCredentialRequestOptions options = webAuthnService.createLoginOptions();
@@ -167,9 +168,10 @@ public class WebAuthnController {
     @PostMapping(value = "/authenticate", consumes = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, String> authenticateVerify(@RequestBody String body,
             HttpServletRequest req, HttpServletResponse res) {
-        String ip = clientIpResolver.resolve(req);
+        ResolvedClientIp clientIp = clientIpResolver.resolveWithProvenance(req);
+        String ip = clientIp.address();
         long now = System.currentTimeMillis();
-        if (loginRateLimiter.isBlocked(ip, null, now)) {
+        if (loginRateLimiter.isBlockedForClient(clientIp, null, now)) {
             auditService.recordFailure("auth.login.passkey_throttled", "user", null, ip,
                     "Passkey login attempts throttled", null);
             throw new TooManyRequestsException("Too many attempts. Please try again later.");
@@ -187,7 +189,7 @@ public class WebAuthnController {
         } catch (RequestBodyTooLargeException ex) {
             throw ex;
         } catch (RuntimeException ex) {
-            loginRateLimiter.recordFailure(ip, null, now);
+            loginRateLimiter.recordFailureForClient(clientIp, null, now);
             auditService.recordFailure("auth.login.passkey", "user", null, ip,
                     "Failed passkey login attempt", ex.getMessage());
             throw new BadCredentialsException("Passkey authentication failed");

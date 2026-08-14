@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 import ooo.klae.connex.backend.mappers.SsoLinkChallengeMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 
 @ExtendWith(MockitoExtension.class)
 class SsoLifecycleFenceUnitTest {
@@ -148,7 +149,7 @@ class SsoLifecycleFenceUnitTest {
             () -> linkService.confirm(
                 "token",
                 "password",
-                "203.0.113.7",
+                new ResolvedClientIp("203.0.113.7", false),
                 new MockHttpServletRequest(),
                 new MockHttpServletResponse()));
 
@@ -177,7 +178,7 @@ class SsoLifecycleFenceUnitTest {
             () -> linkService.confirm(
                 "token",
                 "wrong-password",
-                "203.0.113.7",
+                new ResolvedClientIp("172.20.5.10", true),
                 new MockHttpServletRequest(),
                 new MockHttpServletResponse()));
 
@@ -191,13 +192,13 @@ class SsoLifecycleFenceUnitTest {
         order.verify(userMapper).getUserByIdForShare(USER_ID);
         order.verify(lifecycleMapper).lockActiveOrganizationForShare(ORG_ID);
         order.verify(challengeMapper).lockByTokenHash("stored-hash");
-        order.verify(loginRateLimiter).isBlocked(
-            eq("203.0.113.7"),
+        order.verify(loginRateLimiter).isBlockedForClient(
+            eq(new ResolvedClientIp("172.20.5.10", true)),
             eq("linked-user"),
             anyLong());
         order.verify(passwordEncoder).matches("wrong-password", "encoded-password");
-        order.verify(loginRateLimiter).recordFailure(
-            eq("203.0.113.7"),
+        order.verify(loginRateLimiter).recordFailureForClient(
+            eq(new ResolvedClientIp("172.20.5.10", true)),
             eq("linked-user"),
             anyLong());
         verify(challengeMapper, never()).markConsumed(11);

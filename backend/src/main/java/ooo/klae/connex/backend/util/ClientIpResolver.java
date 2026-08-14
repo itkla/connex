@@ -22,6 +22,13 @@ import jakarta.servlet.http.HttpServletRequest;
 @Component
 public class ClientIpResolver {
 
+    /**
+     * @param address the selected client or direct-peer IP
+     * @param forwardedByTrustedProxy whether a trusted sanitizing proxy supplied the address
+     */
+    public record ResolvedClientIp(String address, boolean forwardedByTrustedProxy) {
+    }
+
     private final List<IpAddressMatcher> trustedProxies;
 
     /**
@@ -46,19 +53,29 @@ public class ClientIpResolver {
      * @return the resolved client IP, or {@code null} when unavailable
      */
     public String resolve(HttpServletRequest request) {
+        return resolveWithProvenance(request).address();
+    }
+
+    /**
+     * Resolves the client address together with the provenance needed by per-IP throttles.
+     *
+     * @param request the inbound request
+     * @return the resolved address and whether it came from a trusted sanitizing proxy
+     */
+    public ResolvedClientIp resolveWithProvenance(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr();
         if (trustedProxies.isEmpty() || !isTrusted(remoteAddr)) {
-            return remoteAddr;
+            return new ResolvedClientIp(remoteAddr, false);
         }
         String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded == null || forwarded.isBlank() || forwarded.contains(",")) {
-            return remoteAddr;
+            return new ResolvedClientIp(remoteAddr, false);
         }
         try {
             InetAddress.ofLiteral(forwarded);
-            return forwarded;
+            return new ResolvedClientIp(forwarded, true);
         } catch (IllegalArgumentException ignored) {
-            return remoteAddr;
+            return new ResolvedClientIp(remoteAddr, false);
         }
     }
 

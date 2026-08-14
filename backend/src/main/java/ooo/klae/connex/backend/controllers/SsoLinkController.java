@@ -36,7 +36,7 @@ public class SsoLinkController {
     public Map<String, String> confirm(@Valid @RequestBody SsoLinkConfirmRequest request,
             HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         ssoLinkService.confirm(request.getToken(), request.getPassword(),
-                clientIpResolver.resolve(httpRequest), httpRequest, httpResponse);
+                clientIpResolver.resolveWithProvenance(httpRequest), httpRequest, httpResponse);
         return Map.of("message", "You are now signed in");
     }
 }
