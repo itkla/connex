@@ -20,6 +20,7 @@ import java.util.zip.DeflaterOutputStream;
 
 import javax.imageio.ImageIO;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.exceptions.UnprocessableBusinessCardException;
 import ooo.klae.connex.backend.exceptions.UnsupportedBusinessCardMediaTypeException;
+import ooo.klae.connex.backend.storage.BoundedImageValidationExecutor;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties;
 
@@ -39,6 +41,7 @@ class BusinessCardImageValidatorTest {
 
     private BusinessCardProperties properties;
     private BusinessCardImageValidator validator;
+    private BoundedImageValidationExecutor validationExecutor;
 
     @BeforeEach
     void setUp() {
@@ -49,8 +52,17 @@ class BusinessCardImageValidatorTest {
         properties.setMaxPixels(1_000_000);
         ObjectStorageProperties storageProperties = new ObjectStorageProperties();
         storageProperties.setMaxConcurrentImageDecodes(1);
+        validationExecutor = new BoundedImageValidationExecutor();
         validator = new BusinessCardImageValidator(
-                properties, new ImageDecodeAdmissionService(storageProperties));
+                properties,
+                new ImageDecodeAdmissionService(storageProperties),
+                new ooo.klae.connex.backend.storage.UploadPolicy(storageProperties),
+                validationExecutor);
+    }
+
+    @AfterEach
+    void tearDown() {
+        validationExecutor.close();
     }
 
     @Test
@@ -71,14 +83,13 @@ class BusinessCardImageValidatorTest {
     }
 
     @Test
-    void acceptsFullyDecodedJpegWithGenericDeclaredType() throws IOException {
+    void rejectsGenericDeclaredTypeAndExtension() throws IOException {
         byte[] content = image("jpg", BufferedImage.TYPE_INT_RGB, 240, 140);
 
-        ValidatedBusinessCardImage validated = validator.validate(
-                new MockMultipartFile("image", "card.bin", "application/octet-stream", content));
-
-        assertEquals("image/jpeg", validated.contentType());
-        assertEquals("jpg", validated.extension());
+        assertThrows(
+            ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException.class,
+            () -> validator.validate(new MockMultipartFile(
+                "image", "card.bin", "application/octet-stream", content)));
     }
 
     @Test

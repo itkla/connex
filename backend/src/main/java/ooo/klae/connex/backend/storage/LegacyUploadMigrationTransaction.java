@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.storage;
 
+import java.util.Locale;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -10,7 +12,7 @@ import ooo.klae.connex.backend.mappers.LegacyTenantUploadMigrationMapper;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredMigratedImage;
-import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 
 /**
  * Validates, copies, verifies, and atomically rewrites one legacy upload reference.
@@ -21,7 +23,7 @@ public class LegacyUploadMigrationTransaction {
     private final LegacyTenantUploadMigrationMapper tenantMapper;
     private final LegacyControlUploadMigrationMapper controlMapper;
     private final ManagedObjectService managedObjectService;
-    private final UploadPolicy uploadPolicy;
+    private final UploadContentInspector uploadContentInspector;
     private final ImageUploadValidator imageUploadValidator;
 
     /**
@@ -33,16 +35,15 @@ public class LegacyUploadMigrationTransaction {
      */
     public long validateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
-        byte[] content = resolved.content();
-        ValidatedUpload upload = uploadPolicy.validateGeneric(
+        InspectedUpload upload = uploadContentInspector.inspectLegacyAttachment(
             attachmentSource(record, resolved));
         managedObjectService.validateMigratedAttachmentTarget(
             workspaceId,
             record.getId(),
             record.getUrl(),
             upload.extension(),
-            content);
-        return content.length;
+            upload.content());
+        return upload.contentLength();
     }
 
     /**
@@ -109,13 +110,14 @@ public class LegacyUploadMigrationTransaction {
     @Transactional
     public void migrateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
-        byte[] content = resolved.content();
+        InspectedUpload upload = uploadContentInspector.inspectLegacyAttachment(
+            attachmentSource(record, resolved));
         StoredBinary stored = managedObjectService.storeMigratedAttachment(
             workspaceId,
             record.getId(),
             record.getUrl(),
-            attachmentSource(record, resolved));
-        managedObjectService.verifyAttachment(workspaceId, stored.url(), content);
+            upload);
+        managedObjectService.verifyAttachment(workspaceId, stored.url(), upload.content());
         int updated = tenantMapper.updateAttachment(
             workspaceId,
             record.getId(),
@@ -192,8 +194,23 @@ public class LegacyUploadMigrationTransaction {
     }
 
     private static UploadSource imageSource(ResolvedLegacyUpload resolved) {
+        String fileName = resolved.fileName();
         return UploadSource.from(
-            resolved.fileName(), "application/octet-stream", resolved.content());
+            fileName, legacyImageContentType(fileName), resolved.content());
+    }
+
+    private static String legacyImageContentType(String fileName) {
+        String normalized = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        if (normalized.endsWith(".png")) {
+            return "image/png";
+        }
+        if (normalized.endsWith(".webp")) {
+            return "image/webp";
+        }
+        return "application/octet-stream";
     }
 
     private static int workspaceId(LegacyUploadRecord record) {

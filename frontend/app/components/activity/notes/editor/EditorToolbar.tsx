@@ -46,8 +46,12 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { uploadAttachment } from "@/app/lib/api";
-import { defaultAltFromFileName, isManagedImageFile, MANAGED_IMAGE_ACCEPT } from "@/app/lib/managed-image";
+import { uploadAttachmentImage } from "@/app/lib/api";
+import {
+    defaultAltFromFileName,
+    INLINE_MANAGED_IMAGE_ACCEPT,
+    isInlineManagedImageFile,
+} from "@/app/lib/managed-image";
 import { toastError } from "@/app/lib/toast";
 import { canMoveTopLevelBlock, moveTopLevelBlock } from "./BlockReorder";
 import { normalizeEditorLinkHref } from "./editorLinks";
@@ -308,14 +312,14 @@ function ImagePopover({
             toastError(labels.imageUploadFailed);
             return;
         }
-        if (!(await isManagedImageFile(file))) {
+        if (!(await isInlineManagedImageFile(file))) {
             toastError(labels.imageUnsupportedType);
             return;
         }
         setUploading(true);
         try {
             const noteId = await ensureNoteId();
-            const attachment = await uploadAttachment("note", noteId, file);
+            const attachment = await uploadAttachmentImage("note", noteId, file);
             const nextSource = normalizeNoteImageSource(attachment.url);
             if (!nextSource) {
                 toastError(labels.imageUploadFailed);
@@ -373,7 +377,7 @@ function ImagePopover({
                             <input
                                 ref={fileInputRef}
                                 type="file"
-                                accept={MANAGED_IMAGE_ACCEPT}
+                                accept={INLINE_MANAGED_IMAGE_ACCEPT}
                                 className="hidden"
                                 onChange={(event) => {
                                     const file = event.target.files?.[0];

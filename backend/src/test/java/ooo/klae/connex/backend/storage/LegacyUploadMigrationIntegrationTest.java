@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.storage;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -10,7 +9,6 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -83,7 +81,7 @@ class LegacyUploadMigrationIntegrationTest {
     void migratesAndVerifiesTenantAndControlMediaWhileRetainingSources() throws Exception {
         Files.createDirectories(LEGACY_ROOT.resolve("attachments/person"));
         Files.createDirectories(LEGACY_ROOT.resolve("profile-pictures"));
-        byte[] attachmentBytes = "%PDF-1.4\nlegacy fixture".getBytes(StandardCharsets.UTF_8);
+        byte[] attachmentBytes = png();
         byte[] imageBytes = png();
         Workspace workspace = workspaceMapper.getDefaultWorkspace();
         if (workspace == null) {
@@ -110,6 +108,8 @@ class LegacyUploadMigrationIntegrationTest {
             attachment.getId(), workspace.getId(), attachment.getUrl());
         attachmentRecord.setEntityType(attachment.getEntityType());
         attachmentRecord.setEntityId(attachment.getEntityId());
+        attachmentRecord.setFileName("legacy.png");
+        attachmentRecord.setContentType(null);
         fileReader.validateOwnership(attachmentRecord, "/attachments/");
         ResolvedLegacyUpload resolvedAttachment = fileReader.read(
             attachment.getUrl(), "/attachments/");
@@ -117,13 +117,22 @@ class LegacyUploadMigrationIntegrationTest {
 
         Attachment storedAttachment = attachmentMapper.getById(
             workspace.getId(), attachment.getId());
+        byte[] storedAttachmentBytes;
         try (ManagedContent content = managedObjectService.openAttachment(
                 workspace.getId(), storedAttachment)) {
-            assertArrayEquals(attachmentBytes, content.inputStream().readAllBytes());
+            storedAttachmentBytes = content.inputStream().readAllBytes();
         }
+        assertFalse(java.util.Arrays.equals(attachmentBytes, storedAttachmentBytes));
+        assertEquals("legacy.jpg", storedAttachment.getFileName());
+        assertEquals("image/jpeg", storedAttachment.getContentType());
+        assertEquals(storedAttachmentBytes.length, storedAttachment.getSize());
+        BufferedImage storedAttachmentImage = ImageIO.read(
+            new ByteArrayInputStream(storedAttachmentBytes));
+        assertEquals(8, storedAttachmentImage.getWidth());
+        assertEquals(8, storedAttachmentImage.getHeight());
         WorkspaceObjectStorageQuota after = quotaMapper.findQuota(workspace.getId());
         assertNotNull(after);
-        assertEquals(beforeBytes + attachmentBytes.length, after.usedBytes());
+        assertEquals(beforeBytes + storedAttachmentBytes.length, after.usedBytes());
         assertEquals(beforeObjects + 1, after.objectCount());
 
         LegacyUploadRecord userRecord = record(
@@ -168,9 +177,9 @@ class LegacyUploadMigrationIntegrationTest {
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType("person");
         attachment.setEntityId(1);
-        attachment.setFileName("legacy.pdf");
-        attachment.setUrl("/attachments/person/person-1-1700000000000-legacy.pdf");
-        attachment.setContentType("application/pdf");
+        attachment.setFileName("legacy.png");
+        attachment.setUrl("/attachments/person/person-1-1700000000000-legacy.png");
+        attachment.setContentType(null);
         attachment.setSize(1L);
         attachment.setUploadedBy(user);
         attachmentMapper.insert(attachment);
@@ -181,8 +190,8 @@ class LegacyUploadMigrationIntegrationTest {
         LegacyUploadRecord record = new LegacyUploadRecord();
         record.setId(id);
         record.setWorkspaceId(workspaceId);
-        record.setFileName("legacy.pdf");
-        record.setContentType("application/pdf");
+        record.setFileName("legacy.txt");
+        record.setContentType("text/plain");
         record.setUrl(url);
         return record;
     }

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +30,8 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 class AiChatAttachmentServiceTest {
@@ -108,6 +111,7 @@ class AiChatAttachmentServiceTest {
                 .thenReturn(session);
         UploadSource source = UploadSource.from(
                 "notes.txt", "text/plain", "content".getBytes(StandardCharsets.UTF_8));
+        InspectedUpload prepared = inspected("content".getBytes(StandardCharsets.UTF_8));
         Attachment uploaded = new Attachment();
         uploaded.setId(31);
         uploaded.setWorkspaceId(WORKSPACE_ID);
@@ -116,10 +120,10 @@ class AiChatAttachmentServiceTest {
         uploaded.setFileName("notes.txt");
         uploaded.setContentType("text/plain");
         uploaded.setSize(7L);
-        when(attachmentPolicy.prepare(source)).thenReturn(source);
+        when(attachmentPolicy.prepare(source)).thenReturn(prepared);
         when(authService.getCurrentUser()).thenReturn(actor);
         when(writeOperations.uploadAssistantSession(
-                eq(WORKSPACE_ID), eq(SESSION_ID), eq(source), eq(actor)))
+                eq(WORKSPACE_ID), eq(SESSION_ID), eq(prepared), eq(actor)))
                 .thenReturn(uploaded);
 
         service.upload(SESSION_ID, source);
@@ -146,5 +150,19 @@ class AiChatAttachmentServiceTest {
         session.setVisibility("private");
         session.setStatus("active");
         return session;
+    }
+
+    private static InspectedUpload inspected(byte[] content) {
+        try {
+            return new InspectedUpload(
+                "notes.txt",
+                "text/plain",
+                "txt",
+                UploadFormat.TEXT,
+                content,
+                MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 }

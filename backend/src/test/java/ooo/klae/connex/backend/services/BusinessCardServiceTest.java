@@ -349,7 +349,7 @@ class BusinessCardServiceTest {
             return person;
         });
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(binaryStore.store(5, "business-card.jpg", "image/jpeg", validated.content()))
+        when(binaryStore.store(5, "business-card.jpg", validated))
                 .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                         "/attachments/person/card-31.jpg", validated.content().length));
         User user = new User();
@@ -385,7 +385,7 @@ class BusinessCardServiceTest {
         InOrder persistenceOrder = inOrder(
             binaryStore, companyService, personService, attachmentService);
         persistenceOrder.verify(binaryStore).store(
-            5, "business-card.jpg", "image/jpeg", validated.content());
+            5, "business-card.jpg", validated);
         persistenceOrder.verify(companyService).getCompanyById(17);
         persistenceOrder.verify(personService)
             .createFromBusinessCard(
@@ -415,7 +415,7 @@ class BusinessCardServiceTest {
         when(personService.requireBusinessCardReuseTarget(
             eq(31), any(), eq(REVIEW_TOKEN))).thenReturn(existing);
         when(personService.getPersonById(31)).thenReturn(existing);
-        when(binaryStore.store(5, "business-card.jpg", "image/jpeg", validated.content()))
+        when(binaryStore.store(5, "business-card.jpg", validated))
             .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                 "/api/attachments/content/reused-card", validated.content().length));
         when(attachmentService.createManaged(any())).thenAnswer(invocation -> {
@@ -473,7 +473,7 @@ class BusinessCardServiceTest {
         when(personService.requireBusinessCardReuseTarget(
             eq(31), any(), eq(REVIEW_TOKEN))).thenReturn(existing);
         when(personService.getPersonById(31)).thenReturn(existing);
-        when(binaryStore.store(5, "business-card.jpg", "image/jpeg", validated.content()))
+        when(binaryStore.store(5, "business-card.jpg", validated))
             .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                 "/api/attachments/content/reused-card", validated.content().length));
         when(attachmentService.createManaged(any())).thenReturn(attachment);
@@ -539,7 +539,8 @@ class BusinessCardServiceTest {
         assertEquals(BusinessCardImportDisposition.CREATED, response.disposition());
         verify(personService, never()).createFromBusinessCard(any(), anyString(), any());
         verify(attachmentService, never()).createManaged(any());
-        verify(binaryStore, never()).store(anyInt(), any(), any(), any());
+        verify(binaryStore, never()).store(
+            anyInt(), any(), any(ValidatedBusinessCardImage.class));
     }
 
     @Test
@@ -557,7 +558,8 @@ class BusinessCardServiceTest {
                 new BusinessCardCompanyAction.Create("Analytical Labs"),
                 IDEMPOTENCY_KEY));
 
-        verify(binaryStore, never()).store(anyInt(), any(), any(), any());
+        verify(binaryStore, never()).store(
+            anyInt(), any(), any(ValidatedBusinessCardImage.class));
         verify(personService, never()).requireBusinessCardReuseTarget(
             anyInt(), any(), anyString());
         verify(companyService, never()).createCompanyReviewed(any(), any());
@@ -804,7 +806,8 @@ class BusinessCardServiceTest {
         verify(companyService, never()).getCompanyById(18);
         verify(personService, never()).createFromBusinessCard(
             any(), anyString(), isNull());
-        verify(binaryStore, never()).store(anyInt(), any(), any(), any());
+        verify(binaryStore, never()).store(
+            anyInt(), any(), any(ValidatedBusinessCardImage.class));
     }
 
     @Test
@@ -834,7 +837,7 @@ class BusinessCardServiceTest {
             return person;
         });
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(binaryStore.store(eq(5), any(), any(), any()))
+        when(binaryStore.store(eq(5), any(), any(ValidatedBusinessCardImage.class)))
                 .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                         "/attachments/person/card-31.jpg", validated.content().length));
         when(attachmentService.createManaged(any())).thenThrow(new ServiceUnavailableException("failed"));
@@ -843,7 +846,7 @@ class BusinessCardServiceTest {
                 image, contact, CREATE_PERSON,
                 new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
-        verify(binaryStore).store(eq(5), any(), any(), any());
+        verify(binaryStore).store(eq(5), any(), any(ValidatedBusinessCardImage.class));
     }
 
     @Test
@@ -852,7 +855,7 @@ class BusinessCardServiceTest {
                 "Ada Lovelace", null, null, null, null);
         when(imageValidator.validate(image)).thenReturn(validated);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
-        when(binaryStore.store(eq(5), any(), any(), any()))
+        when(binaryStore.store(eq(5), any(), any(ValidatedBusinessCardImage.class)))
                 .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                         "/attachments/person/card.jpg", validated.content().length - 1));
 
@@ -860,7 +863,7 @@ class BusinessCardServiceTest {
                 image, contact, CREATE_PERSON,
                 new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
-        verify(binaryStore).store(eq(5), any(), any(), any());
+        verify(binaryStore).store(eq(5), any(), any(ValidatedBusinessCardImage.class));
         verify(attachmentService, never()).createManaged(any());
     }
 
@@ -914,7 +917,7 @@ class BusinessCardServiceTest {
         attachment.setId(41);
         when(personService.createFromBusinessCard(
                 any(), anyString(), isNull())).thenReturn(person);
-        when(binaryStore.store(5, "business-card.jpg", "image/jpeg", validated.content()))
+        when(binaryStore.store(5, "business-card.jpg", validated))
                 .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                         "/attachments/person/card-31.jpg", validated.content().length));
         when(attachmentService.createManaged(any())).thenReturn(attachment);
@@ -938,7 +941,7 @@ class BusinessCardServiceTest {
         verify(rateLimiter, times(2)).requireImportAllowed();
         verify(personService).createFromBusinessCard(
             any(), eq("business-card:" + IDEMPOTENCY_KEY), isNull());
-        verify(binaryStore).store(5, "business-card.jpg", "image/jpeg", validated.content());
+        verify(binaryStore).store(5, "business-card.jpg", validated);
     }
 
     @Test
@@ -959,7 +962,8 @@ class BusinessCardServiceTest {
         verify(personService, never()).getPersonById(anyInt());
         verify(personService, never()).createFromBusinessCard(
             any(), anyString(), isNull());
-        verify(binaryStore, never()).store(anyInt(), any(), any(), any());
+        verify(binaryStore, never()).store(
+            anyInt(), any(), any(ValidatedBusinessCardImage.class));
     }
 
     @Test

@@ -32,13 +32,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
-import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
  * Generates opaque app-relative managed URLs and maps them to private object keys.
@@ -54,6 +56,7 @@ public class ManagedObjectService implements ApplicationRunner {
     private final ObjectStorage objectStorage;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
     private final UploadPolicy uploadPolicy;
+    private final UploadContentInspector uploadContentInspector;
     private final ImageUploadValidator imageUploadValidator;
     private final ObjectStorageProperties properties;
     private final WorkspaceObjectStorageQuotaService quotaService;
@@ -73,6 +76,7 @@ public class ManagedObjectService implements ApplicationRunner {
             ObjectStorage objectStorage,
             ObjectDeletionRetryQueue deletionRetryQueue,
             UploadPolicy uploadPolicy,
+            UploadContentInspector uploadContentInspector,
             ImageUploadValidator imageUploadValidator,
             ObjectStorageProperties properties,
             WorkspaceObjectStorageQuotaService quotaService,
@@ -83,6 +87,7 @@ public class ManagedObjectService implements ApplicationRunner {
             objectStorage,
             deletionRetryQueue,
             uploadPolicy,
+            uploadContentInspector,
             imageUploadValidator,
             properties,
             quotaService,
@@ -98,6 +103,7 @@ public class ManagedObjectService implements ApplicationRunner {
             ObjectStorage objectStorage,
             ObjectDeletionRetryQueue deletionRetryQueue,
             UploadPolicy uploadPolicy,
+            UploadContentInspector uploadContentInspector,
             ImageUploadValidator imageUploadValidator,
             ObjectStorageProperties properties,
             WorkspaceObjectStorageQuotaService quotaService,
@@ -110,6 +116,7 @@ public class ManagedObjectService implements ApplicationRunner {
         this.objectStorage = objectStorage;
         this.deletionRetryQueue = deletionRetryQueue;
         this.uploadPolicy = uploadPolicy;
+        this.uploadContentInspector = uploadContentInspector;
         this.imageUploadValidator = imageUploadValidator;
         this.properties = properties;
         this.quotaService = quotaService;
@@ -175,16 +182,69 @@ public class ManagedObjectService implements ApplicationRunner {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredBinary storeAttachment(int workspaceId, UploadSource source) {
-        return storeAttachmentInternal(workspaceId, source);
+        return storeAttachment(workspaceId, UploadPurpose.ATTACHMENT, source);
     }
 
-    private StoredBinary storeAttachmentInternal(int workspaceId, UploadSource source) {
-        ValidatedUpload upload = uploadPolicy.validateGeneric(source);
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeAttachment(
+            int workspaceId,
+            UploadPurpose purpose,
+            UploadSource source) {
+        InspectedUpload upload = uploadContentInspector.inspect(purpose, source);
+        return storeInspectedAttachment(workspaceId, upload);
+    }
+
+    /**
+     * Stores the exact immutable artifact returned by the upload inspector.
+     *
+     * @param workspaceId owning workspace
+     * @param upload authoritative inspected artifact
+     * @return managed attachment metadata derived from the same artifact
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeInspectedAttachment(int workspaceId, InspectedUpload upload) {
+        Objects.requireNonNull(upload, "upload");
+        uploadPolicy.validateLength(upload.contentLength());
+        byte[] content = upload.content();
+        byte[] checksum = upload.sha256();
+        if (!MessageDigest.isEqual(checksum, sha256Digest().digest(content))) {
+            throw new IllegalArgumentException("Inspected upload digest is invalid");
+        }
+        UploadSource inspectedSource = upload.source();
         String token = token(upload.extension());
         String key = attachmentKey(workspaceId, token);
         String url = ATTACHMENT_URL_PREFIX + token;
-        storeTenant(workspaceId, key, source, upload.contentType());
-        return new StoredBinary(url, upload.fileName(), upload.contentType(), source.contentLength());
+        storeTenant(workspaceId, key, inspectedSource, upload.contentType(), checksum);
+        return new StoredBinary(
+            url, upload.fileName(), upload.contentType(), upload.contentLength());
+    }
+
+    /**
+     * Stores a business-card validator artifact byte-identically without generic re-encoding.
+     *
+     * @param workspaceId owning workspace
+     * @param fileName safe display filename
+     * @param image authoritative business-card validator artifact
+     * @return managed attachment metadata derived from the same artifact
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeValidatedBusinessCardImage(
+            int workspaceId,
+            String fileName,
+            ValidatedBusinessCardImage image) {
+        Objects.requireNonNull(image, "image");
+        byte[] content = image.content();
+        UploadSource source = UploadSource.from(fileName, image.contentType(), content);
+        UploadPolicy.ValidatedUpload metadata = uploadPolicy.validate(
+            UploadPurpose.BUSINESS_CARD_IMAGE, source);
+        if (!metadata.extension().equals(image.extension())) {
+            throw new IllegalArgumentException("Validated business-card image metadata is invalid");
+        }
+        String token = token(metadata.extension());
+        String key = attachmentKey(workspaceId, token);
+        String url = ATTACHMENT_URL_PREFIX + token;
+        storeTenant(workspaceId, key, source, metadata.contentType());
+        return new StoredBinary(url, metadata.fileName(), metadata.contentType(), content.length);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -193,7 +253,23 @@ public class ManagedObjectService implements ApplicationRunner {
             String fileName,
             String contentType,
             byte[] bytes) {
-        return storeAttachmentInternal(workspaceId, UploadSource.from(fileName, contentType, bytes));
+        return storeAttachment(
+            workspaceId,
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(fileName, contentType, bytes));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeAttachment(
+            int workspaceId,
+            UploadPurpose purpose,
+            String fileName,
+            String contentType,
+            byte[] bytes) {
+        return storeAttachment(
+            workspaceId,
+            purpose,
+            UploadSource.from(fileName, contentType, bytes));
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -237,15 +313,23 @@ public class ManagedObjectService implements ApplicationRunner {
             int workspaceId,
             int attachmentId,
             String legacyUrl,
-            UploadSource source) {
-        ValidatedUpload upload = uploadPolicy.validateGeneric(source);
+            InspectedUpload upload) {
+        Objects.requireNonNull(upload, "upload");
+        uploadPolicy.validateLength(upload.contentLength());
+        byte[] content = upload.content();
+        byte[] checksum = upload.sha256();
+        if (!MessageDigest.isEqual(checksum, sha256Digest().digest(content))) {
+            throw new IllegalArgumentException("Inspected upload digest is invalid");
+        }
+        UploadSource inspectedSource = upload.source();
         String objectToken = migrationToken(
             "attachment", workspaceId, attachmentId, legacyUrl, upload.extension());
         String key = attachmentKey(workspaceId, objectToken);
         String url = ATTACHMENT_URL_PREFIX + objectToken;
-        storeTenantDeterministic(workspaceId, key, source, upload.contentType());
+        storeTenantDeterministic(
+            workspaceId, key, inspectedSource, upload.contentType(), checksum);
         return new StoredBinary(
-            url, upload.fileName(), upload.contentType(), source.contentLength());
+            url, upload.fileName(), upload.contentType(), upload.contentLength());
     }
 
     StoredMigratedImage storeMigratedPersonImage(
@@ -497,7 +581,15 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     private void storeTenant(int workspaceId, String key, UploadSource source, String contentType) {
-        byte[] checksum = sha256(source);
+        storeTenant(workspaceId, key, source, contentType, sha256(source));
+    }
+
+    private void storeTenant(
+            int workspaceId,
+            String key,
+            UploadSource source,
+            String contentType,
+            byte[] checksum) {
         requireTransactionSynchronization();
         writeAdmissionService.admit(() -> {
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
@@ -528,7 +620,15 @@ public class ManagedObjectService implements ApplicationRunner {
             String key,
             UploadSource source,
             String contentType) {
-        byte[] checksum = sha256(source);
+        storeTenantDeterministic(workspaceId, key, source, contentType, sha256(source));
+    }
+
+    private void storeTenantDeterministic(
+            int workspaceId,
+            String key,
+            UploadSource source,
+            String contentType,
+            byte[] checksum) {
         requireTransactionSynchronization();
         writeAdmissionService.admit(() -> {
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);

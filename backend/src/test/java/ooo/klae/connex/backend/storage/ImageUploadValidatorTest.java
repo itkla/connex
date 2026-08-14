@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.storage;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.imageio.ImageIO;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,16 +40,24 @@ class ImageUploadValidatorTest {
 
     private ObjectStorageProperties properties;
     private ImageUploadValidator validator;
+    private BoundedImageValidationExecutor validationExecutor;
 
     @BeforeEach
     void setUp() {
         properties = new ObjectStorageProperties();
         properties.setMaxUploadBytes(1_000_000);
         properties.setMaxImagePixels(1_000_000);
+        validationExecutor = new BoundedImageValidationExecutor();
         validator = new ImageUploadValidator(
             properties,
             new UploadPolicy(properties),
-            new ImageDecodeAdmissionService(properties));
+            new ImageDecodeAdmissionService(properties),
+            validationExecutor);
+    }
+
+    @AfterEach
+    void tearDown() {
+        validationExecutor.close();
     }
 
     @Test
@@ -86,6 +96,20 @@ class ImageUploadValidatorTest {
         assertFalse(decoded.getColorModel().hasAlpha());
         assertTrue(image.content().length <= 3_500_000);
         assertEquals("image/jpeg", image.toInputImage().contentType());
+    }
+
+    @Test
+    void storedAiValidationPreservesTheCanonicalBytes() throws IOException {
+        byte[] pngBytes = image("png", BufferedImage.TYPE_INT_ARGB, 10, 20);
+        ValidatedAiImage canonical = validator.validateForAi(
+            source("diagram.png", "image/png", pngBytes));
+
+        ValidatedAiImage stored = validator.validateStoredForAi(
+            source("diagram.jpg", "image/jpeg", canonical.content()));
+
+        assertArrayEquals(canonical.content(), stored.content());
+        assertEquals(canonical.width(), stored.width());
+        assertEquals(canonical.height(), stored.height());
     }
 
     @Test
@@ -164,7 +188,8 @@ class ImageUploadValidatorTest {
         validator = new ImageUploadValidator(
             properties,
             new UploadPolicy(properties),
-            new ImageDecodeAdmissionService(properties));
+            new ImageDecodeAdmissionService(properties),
+            validationExecutor);
         CountDownLatch firstOpened = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
         UploadSource blocking = new UploadSource("first.png", "image/png", png.length, () -> {

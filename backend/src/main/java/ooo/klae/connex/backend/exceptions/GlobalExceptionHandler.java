@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.exceptions;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.springframework.context.i18n.LocaleContextHolder;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -253,7 +255,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(UnsupportedUploadMediaTypeException.class)
     public ResponseEntity<String> unsupportedUploadMediaType(UnsupportedUploadMediaTypeException ex) {
-        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(ex.getMessage());
+        String message = "ja".equals(LocaleContextHolder.getLocale().getLanguage())
+            ? "対応しているファイル形式をアップロードしてください"
+            : "Upload a supported file type";
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(message);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

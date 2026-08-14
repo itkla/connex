@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 
 import java.sql.SQLTimeoutException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -23,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -67,6 +69,7 @@ class GlobalExceptionHandlerTest {
     @AfterEach
     void tearDown() {
         tenantContext.clear();
+        LocaleContextHolder.resetLocaleContext();
         MDC.clear();
     }
 
@@ -103,6 +106,21 @@ class GlobalExceptionHandlerTest {
         assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, response.getStatusCode());
         assertTrue(response.getHeaders().isEmpty());
         assertEquals("Unsupported media type", response.getBody());
+    }
+
+    @Test
+    void uploadTypeRejectionIsLocalizedAndDoesNotEchoParserDetail() {
+        UnsupportedUploadMediaTypeException failure =
+            new UnsupportedUploadMediaTypeException("ZIP parser secret at /tmp/private");
+
+        ResponseEntity<String> english = handler.unsupportedUploadMediaType(failure);
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        ResponseEntity<String> japanese = handler.unsupportedUploadMediaType(failure);
+
+        assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, english.getStatusCode());
+        assertEquals("Upload a supported file type", english.getBody());
+        assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, japanese.getStatusCode());
+        assertEquals("対応しているファイル形式をアップロードしてください", japanese.getBody());
     }
 
     @Test

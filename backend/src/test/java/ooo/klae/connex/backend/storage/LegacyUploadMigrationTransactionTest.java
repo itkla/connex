@@ -8,6 +8,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.security.MessageDigest;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,13 +22,15 @@ import ooo.klae.connex.backend.mappers.LegacyTenantUploadMigrationMapper;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredMigratedImage;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 
 @ExtendWith(MockitoExtension.class)
 class LegacyUploadMigrationTransactionTest {
     @Mock private LegacyTenantUploadMigrationMapper tenantMapper;
     @Mock private LegacyControlUploadMigrationMapper controlMapper;
     @Mock private ManagedObjectService managedObjectService;
-    @Mock private UploadPolicy uploadPolicy;
+    @Mock private UploadContentInspector uploadContentInspector;
     @Mock private ImageUploadValidator imageUploadValidator;
 
     private LegacyUploadMigrationTransaction migration;
@@ -37,7 +41,7 @@ class LegacyUploadMigrationTransactionTest {
             tenantMapper,
             controlMapper,
             managedObjectService,
-            uploadPolicy,
+            uploadContentInspector,
             imageUploadValidator);
     }
 
@@ -45,24 +49,29 @@ class LegacyUploadMigrationTransactionTest {
     void migratesAndVerifiesAttachmentBeforeCompareAndSet() {
         LegacyUploadRecord record = record(7, 3, "/attachments/person/old.pdf");
         record.setFileName("report.pdf");
-        record.setContentType("application/pdf");
+        record.setContentType("application/octet-stream");
         ResolvedLegacyUpload resolved = new ResolvedLegacyUpload("old.pdf", new byte[] {1, 2, 3});
+        byte[] canonical = {9, 8, 7, 6};
+        InspectedUpload upload = inspected(
+            "report.pdf", "application/pdf", "pdf", UploadFormat.PDF, canonical);
         StoredBinary stored = new StoredBinary(
             "/api/attachments/content/550e8400-e29b-41d4-a716-446655440000.pdf",
             "report.pdf",
             "application/pdf",
-            3);
+            canonical.length);
+        when(uploadContentInspector.inspectLegacyAttachment(any(UploadSource.class)))
+            .thenReturn(upload);
         when(managedObjectService.storeMigratedAttachment(
-                anyInt(), anyInt(), any(), any(UploadSource.class)))
+                anyInt(), anyInt(), any(), any(InspectedUpload.class)))
             .thenReturn(stored);
         when(tenantMapper.updateAttachment(
-                3, 7, record.getUrl(), stored.url(), stored.fileName(), stored.contentType(), 3))
+                3, 7, record.getUrl(), stored.url(), stored.fileName(), stored.contentType(), canonical.length))
             .thenReturn(1);
 
         migration.migrateAttachment(record, resolved);
 
         verify(managedObjectService).verifyAttachment(
-            eq(3), eq(stored.url()), aryEq(new byte[] {1, 2, 3}));
+            eq(3), eq(stored.url()), aryEq(canonical));
     }
 
     @Test
@@ -127,5 +136,24 @@ class LegacyUploadMigrationTransactionTest {
         record.setWorkspaceId(workspaceId);
         record.setUrl(url);
         return record;
+    }
+
+    private static InspectedUpload inspected(
+            String fileName,
+            String contentType,
+            String extension,
+            UploadFormat format,
+            byte[] content) {
+        try {
+            return new InspectedUpload(
+                fileName,
+                contentType,
+                extension,
+                format,
+                content,
+                MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 }

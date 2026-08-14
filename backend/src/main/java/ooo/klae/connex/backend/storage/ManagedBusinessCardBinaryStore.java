@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.businesscard.BusinessCardBinaryStore;
+import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 
 /**
  * Business-card storage adapter backed by the managed private object store.
@@ -27,10 +28,9 @@ public class ManagedBusinessCardBinaryStore implements BusinessCardBinaryStore {
     public StoredBusinessCard store(
             int workspaceId,
             String fileName,
-            String contentType,
-            byte[] content) {
-        ManagedObjectService.StoredBinary stored = managedObjectService.storeAttachment(
-            workspaceId, fileName, contentType, content);
+            ValidatedBusinessCardImage image) {
+        ManagedObjectService.StoredBinary stored =
+            managedObjectService.storeValidatedBusinessCardImage(workspaceId, fileName, image);
         return new StoredBusinessCard(stored.url(), stored.size());
     }
 }
