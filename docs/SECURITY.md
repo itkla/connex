@@ -3,7 +3,7 @@
 > **Purpose.** One document serving two audiences: the **enterprise security-posture artifact** buyers ask for during procurement, and the **APPI 安全管理措置 (security control measures) disclosure** referenced from our public [Data Disclosure page](../frontend/app/disclosure) (APPI Art. 32). Issue [#104].
 > **Status: living document.** It describes the architecture as it actually stands today and marks in-progress items with their tracking issue. It is deliberately honest about what has **not** landed yet — do not read an in-progress item as a shipped control.
 > **Not legal advice.** Confirm the APPI framing and any customer commitments with counsel and the signed DPA ([APPI_DPA_TEMPLATE.md](APPI_DPA_TEMPLATE.md), [#93]).
-> **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** 2026-07-09
+> **Owner:** Hunter Nakagawa, Founder · **Last reviewed:** 2026-08-13 · **Next review:** 2027-02-13
 
 ---
 
@@ -25,7 +25,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 
 ### 2.2 Human (人的)
 - Staff access on least-privilege; confidentiality obligations. Supervision of employees per APPI Art. 24.
-- *To formalize during onboarding:* documented access-grant/revoke process and periodic access review ({{SECURITY_OWNER}}).
+- *To formalize during onboarding:* documented access-grant/revoke process and periodic access review (Hunter Nakagawa, Founder).
 
 ### 2.3 Physical (物理的)
 - No first-party data centers. Personal data is stored on managed cloud infrastructure (target: AWS `ap-northeast-1`, Japan) inheriting the provider's physical-security controls. Subprocessor list in the DPA.
@@ -57,9 +57,86 @@ Cloud infrastructure (AWS, `ap-northeast-1`) and, only when a customer enables i
 
 Japan (`ap-northeast-1`). Any change is treated as a cross-border transfer and reflected here and in the Data Disclosure page before it takes effect.
 
-## 6. How to reach us / report a vulnerability
+## 6. Security ownership, accountability, and escalation
 
-Security & personal-information contact: {{PRIVACY_CONTACT_EMAIL}}. Please report suspected vulnerabilities or personal-data incidents here; we triage per the breach-response runbook.
+**Named roles.** Hunter Nakagawa, Founder is the Security Owner, Privacy Owner, and Incident Lead. He
+currently holds every accountability below; there is no deputy and no separation of duties for these
+decisions today.
+
+| Area | Accountable owner | Responsibility boundary |
+|---|---|---|
+| Security incidents | Hunter Nakagawa, Founder | Declares and leads incidents, prioritizes containment, owns the authoritative timeline, and approves reportability and notification decisions. Technical responders execute containment and forensics; counsel advises on legal duties. |
+| Vulnerability intake and triage | Hunter Nakagawa, Founder | Owns intake at the designated channel, acknowledges reports, validates and assigns severity, and routes remediation to an owner. |
+| Risk and exception approval | Hunter Nakagawa, Founder | Is the sole approver. Each decision must record its scope, rationale, expiry, compensating controls, and review date; there is no separate approval authority today. |
+| Periodic review | Hunter Nakagawa, Founder | Reviews this ownership record and the linked security runbooks, verifies that the published contact and access-recovery paths work, and records the outcome and next review date. |
+| Customer-facing security communication | Hunter Nakagawa, Founder | Is accountable for the timing, scope, accuracy, and authorization of security notices. Execution by a Customer Liaison remains unassigned and is tracked in [#249]. |
+
+Operational incident execution follows the
+[APPI breach-response runbook](APPI_BREACH_RESPONSE_RUNBOOK.md); access, deployment, and teardown
+mechanics remain in the [internal operations runbook](INTERNAL_OPERATIONS_RUNBOOK.md).
+
+### Single escalation destination
+
+The single designated destination for every security or personal-information escalation is
+**privacy@connexcrm.jp**. Do not use a personal inbox, ordinary support channel, or public issue
+tracker. The targets below are elapsed time from receipt and measure first acknowledgement, not
+resolution.
+
+| Escalation | Required subject prefix | Acknowledgement target |
+|---|---|---|
+| Suspected vulnerability | `[VULNERABILITY]` | Within 24 hours |
+| Active or suspected security/personal-data incident | `[ACTIVE INCIDENT]` | Within 1 hour, 24/7 |
+| Risk-exception request | `[RISK EXCEPTION]` | Within 48 hours |
+
+This document designates the route and targets; it does not prove mailbox delivery, monitoring,
+administrative recovery, or matching publication on the legal pages. That operational evidence and
+publication remain onboarding blockers tracked in [#249].
+
+A risk-exception request must identify the affected control and scope, business reason, proposed
+expiry, accountable implementer, and compensating controls. Only the named Security Owner can approve
+it. A credible active-incident report then follows the one-hour internal escalation and response
+process in the breach-response runbook.
+
+### Review and handover
+
+Review this ownership record at least every 6 months. The next scheduled review is **2027-02-13**.
+Review it sooner after any security or personal-data incident; change to the named owner, role, or
+published address; actual or expected owner unavailability; or material change to company structure,
+legal duties, critical providers, the domain registrar/DNS, credential recovery, or the customer
+notification process.
+
+For a planned departure or role change, name the successor and complete the handover before the
+change takes effect. For an unplanned loss of availability, Connex must appoint a successor within
+24 hours of becoming aware and complete or reconstruct the handover within 24 hours of appointment.
+The handover must transfer and verify:
+
+- company account and credential custody, including recovery contacts and MFA/passkey recovery;
+- encryption, signing, secret-store, audit-integrity, and backup key-material custody and rotation
+  records through the approved secret-management path, never in the handover record itself;
+- administrative access and recovery for hosting, cloud, source control, CI/CD, database, monitoring,
+  email, other critical providers, and the domain registrar/DNS;
+- the Security Owner, Privacy Owner, and Incident Lead designations in this document, the linked
+  runbooks, and operational contact lists; and
+- administration, monitoring, recovery, and a successful receipt test for the published
+  **privacy@connexcrm.jp** address.
+
+Record the transfer, access tests, outgoing-owner revocations, required rotations, and unresolved
+gaps in the security tracker without recording credentials or key material.
+
+### Time-bounded risk acceptance: no deputy
+
+No deputy is designated. This creates a single point of accountability and availability that may
+delay triage, incident decisions, exception approval, or customer communication if Hunter Nakagawa
+is unavailable. Hunter Nakagawa is both risk owner and approver; this absence of independent approval
+is part of the accepted limitation.
+
+The required compensating measures are to keep the role address under company-controlled
+administration and recovery, apply the acknowledgement targets and breach-response runbook, maintain
+account/key/provider/registrar custody records, and use the handover and off-cycle review triggers in
+this section. They reduce ambiguity and preserve recovery paths but do not provide human redundancy.
+The acceptance is dated **2026-08-13** and expires on **2027-02-13** unless formally renewed or closed
+earlier. Naming a deputy and filling the remaining Customer Liaison, Legal/Counsel, and Comms roles,
+together with evidence that the compensating measures operate, remain tracked in [#249].
 
 ---
 
@@ -90,3 +167,4 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#222]: https://github.com/itkla/connex/issues/222
 [#223]: https://github.com/itkla/connex/issues/223
 [#224]: https://github.com/itkla/connex/issues/224
+[#249]: https://github.com/itkla/connex/issues/249

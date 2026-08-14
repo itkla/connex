@@ -3,7 +3,7 @@
 > **Status:** Process deliverable for the APPI compliance pathway ([#224]) — issue [#223]. Connex now has an org-scoped incident register and audit-scope helper; alerting hooks remain future work.
 > **Not legal advice.** The thresholds, deadlines, and entrustee construction below are framework reasoning and must be confirmed with Japanese counsel and, where relevant, each customer's Data Processing Agreement (DPA, [#93]). When this runbook and a signed DPA disagree, **the DPA governs** for that customer.
 >
-> **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** {{DATE}} · Review at least every 6 months and after every incident.
+> **Owner:** Hunter Nakagawa, Founder · **Last reviewed:** 2026-08-13 · **Next review:** 2027-02-13 · Review at least every 6 months and after every incident.
 
 ---
 
@@ -60,13 +60,13 @@ Connex does not usually file with the PPC for customer data — but must move fa
 
 | Role | Who | Responsibility |
 |---|---|---|
-| **Incident Lead** | {{SECURITY_OWNER}} | Owns the incident end-to-end; makes the reportable-situation call with counsel; single source of truth. |
+| **Incident Lead** | Hunter Nakagawa, Founder | Owns the incident end-to-end; makes the reportable-situation call with counsel; single source of truth. |
 | **Technical Responder** | On-call engineer | Contains, scopes affected data, preserves forensics. |
 | **Customer Liaison** | {{CUSTOMER_LIAISON}} | Notifies affected customers; coordinates their PPC/individual notifications per DPA. |
 | **Legal/Counsel** | {{COUNSEL_CONTACT}} | Confirms triggers, deadlines, report wording. |
 | **Comms** | {{COMMS_CONTACT}} | Public statement / inquiry line if individual notice is by substitute measure. |
 
-**Data-protection contact point** (published per Art. 32 — see disclosure page, [#219]): {{PRIVACY_CONTACT_EMAIL}}.
+**Designated data-protection contact point** (for publication per Art. 32 — see disclosure page, [#219]): privacy@connexcrm.jp. Named ownership, acknowledgement targets, and the pending operational-verification caveat are defined in [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -131,16 +131,16 @@ Subject: [Connex Security] Personal-data incident affecting your organization �
 We are notifying you of a personal-data incident affecting data your organization
 handles in Connex, under our Data Processing Agreement.
 
-- What happened: {{brief factual description}}
-- When: detected {{timestamp JST}}; estimated window {{start–end}}
-- Data involved: {{categories; whether special-care PI may be included}}
-- Scope for your organization: {{workspaces / approx. affected individuals}}
-- Status: {{contained / ongoing}}; steps taken: {{containment actions}}
+- What happened: [brief factual description]
+- When: detected [timestamp JST]; estimated window [start–end]
+- Data involved: [categories; whether special-care PI may be included]
+- Scope for your organization: [workspaces / approx. affected individuals]
+- Status: [contained / ongoing]; steps taken: [containment actions]
 - What we need from you / what you may need to do: as the handling operator you may
   have APPI Art. 26 obligations to report to the PPC (速報 within ~3–5 days, 確報 within
   30/60 days) and to notify affected individuals. We can provide the affected-subject
   list and forensic detail to support this.
-- Your contact for this incident: {{INCIDENT_LEAD}} — {{PRIVACY_CONTACT_EMAIL}}
+- Your contact for this incident: Hunter Nakagawa, Founder — privacy@connexcrm.jp
 
 This is a preliminary notice; we will follow up as the investigation progresses.
 ```
