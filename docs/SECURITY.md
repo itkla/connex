@@ -21,6 +21,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 - **Tenant isolation as an enforced invariant.** A fail-closed MyBatis interceptor (`TenantScopeInterceptor`) rejects workspace-scoped queries that run without a resolved tenant context; `TenantResolutionInterceptor` resolves and re-validates org/workspace membership per request. Backed by a CI architecture test (`TenantScopeArchTest`).
 - **Append-only audit log.** `audit_log` (Flyway `V1`, workspace-scoped since `V10`) records `action`, `entity_type`/`entity_id`, `actor_id`, `ip_address`, `user_agent`, hashed `session_id`, `request_id`, field-level `changes`, and `created_at`. Row `UPDATE`/`DELETE` are blocked by DB triggers; writes are insert-only. Surfaced to admins in-app.
 - **Incident response.** Documented breach-response runbook (APPI Art. 26): [APPI_BREACH_RESPONSE_RUNBOOK.md](APPI_BREACH_RESPONSE_RUNBOOK.md), [#223].
+- **Vulnerability remediation.** Findings across application code, dependencies, images, infrastructure, GitHub Actions, and third-party services follow the severity-adjusted deadlines, emergency release path, ownership, and fixed-term exception rules in [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md).
 - *In progress:* audit tamper-evidence (hash-chain / external sink) — [#91]; organization-scope re-verification — [#97].
 
 ### 2.2 Human (人的)
